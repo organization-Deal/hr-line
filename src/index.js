@@ -313,27 +313,27 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.2', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.3', auth: 'google-oauth' });
       }
 
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
-        return startGoogleLogin(request, env);
+        return await startGoogleLogin(request, env);
       }
       if (url.pathname === '/auth/google/callback' && request.method === 'GET') {
-        return finishGoogleLogin(request, env);
+        return await finishGoogleLogin(request, env);
       }
       if (url.pathname === '/auth/logout' && request.method === 'POST') {
-        return logoutSession(request, env);
+        return await logoutSession(request, env);
       }
       if (url.pathname === '/integrations/gmail/start' && request.method === 'GET') {
-        return startGmailConnection(request, env);
+        return await startGmailConnection(request, env);
       }
       if (url.pathname === '/integrations/gmail/callback' && request.method === 'GET') {
-        return finishGmailConnection(request, env);
+        return await finishGmailConnection(request, env);
       }
 
       if (url.pathname === '/webhooks/line' && request.method === 'POST') {
-        return handleLineWebhook(request, env, ctx);
+        return await handleLineWebhook(request, env, ctx);
       }
 
       if (url.pathname.startsWith('/api/')) {
