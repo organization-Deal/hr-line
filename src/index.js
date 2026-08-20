@@ -461,7 +461,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.5.0', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.5.3', auth: 'google-oauth' });
       }
 
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
@@ -1136,17 +1136,17 @@ async function processLineEvent(event, env) {
     if (joinMatch) {
       const linked = await linkLineJoinToken(env.DB, env.LINE_CHANNEL_ACCESS_TOKEN, lineUserId, joinMatch[1]);
       return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[
-        linked.ok ? buildWelcomeFlex(linked.name,linked.company_name) : {type:'text',text:`❌ ${linked.error}`}
+        linked.ok ? buildWelcomeFlex(linked.name,linked.company_name) : buildSimpleNoticeFlex('เชื่อม LINE ไม่สำเร็จ',linked.error,'error')
       ]);
     }
     const linkMatch = text.match(/^LINK\s+(\d{6})$/i);
     if (linkMatch) {
       const linked = await linkLineAccount(env.DB, lineUserId, linkMatch[1]);
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,linked.ok?`✅ เชื่อมบัญชีสำเร็จ\nสวัสดี ${linked.name}\nพิมพ์ “เมนู” เพื่อเริ่มใช้งาน`:`❌ ${linked.error}`);
+      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[linked.ok?buildWelcomeFlex(linked.name,linked.company_name||'บริษัทของคุณ'):buildSimpleNoticeFlex('เชื่อม LINE ไม่สำเร็จ',linked.error,'error')]);
     }
 
     const emp=await employee();
-    if(!emp) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน\nกรุณาเปิด “ลิงก์เชิญเข้าทีม” ที่ HR ส่งให้ แล้วกดเชื่อม LINE จากหน้านั้นได้เลย');
+    if(!emp) return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('ยังไม่ได้เชื่อมบัญชีพนักงาน','เปิดลิงก์เชิญเข้าทีมที่ HR ส่งให้ แล้วกดเชื่อม LINE จากหน้านั้นได้เลย','warning')]);
     const session=await getLineSession(env.DB,lineUserId);
 
     if(session?.action==='leave_reason'){
@@ -1168,7 +1168,7 @@ async function processLineEvent(event, env) {
       try{
         const result=await decideLeaveRequest(env,Number(session.payload?.request_id),'rejected',{actorType:'employee',actorEmployeeId:Number(emp.id),reason:text,clientId:Number(emp.client_id),enforceApprover:true});
         await clearLineSession(env.DB,lineUserId);
-        return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`บันทึกว่าไม่อนุมัติแล้ว\nเหตุผล: ${text}`);
+        return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('บันทึกผลเรียบร้อยแล้ว',`ไม่อนุมัติคำขอ · ${text}`,'success')]);
       }catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
     }
 
@@ -1176,7 +1176,7 @@ async function processLineEvent(event, env) {
       if(session.payload?.required) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'คำขอนี้ต้องมีหลักฐาน กรุณาส่งรูปหรือไฟล์ก่อนนะ');
       await clearLineSession(env.DB,lineUserId);
       await notifyLeaveApprover(env,Number(session.payload?.request_id));
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ส่งคำขอให้ผู้อนุมัติแล้ว ✅');
+      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('ส่งคำขอแล้ว','นากนะส่งคำขอให้ผู้อนุมัติเรียบร้อยแล้ว','success')]);
     }
 
     const lower=text.toLowerCase();
@@ -1186,12 +1186,12 @@ async function processLineEvent(event, env) {
     if(['เช็กอิน','checkin','check-in'].includes(lower)){
       const mustShareLocation=await employeeNeedsLocation(env.DB,emp);
       if(mustShareLocation){ await setLineSession(env.DB,lineUserId,'checkin'); return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'📍 แชร์ Location ปัจจุบันเพื่อเช็กอิน\nนากนะจะตรวจเฉพาะ Work Location ที่บริษัทอนุญาต'); }
-      try{ const result=await checkIn(env.DB,Number(emp.id),null,null,'line'); return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`✅ Check-in สำเร็จ\nเวลา ${formatBangkokTime(result.check_in_at)}${result.late_minutes>0?`\n🟠 สาย ${result.late_minutes} นาที`:'\n🟢 ตรงเวลา'}`);}catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
+      try{ const result=await checkIn(env.DB,Number(emp.id),null,null,'line'); return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildAttendanceResultFlex('checkin',result)]);}catch(e){return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('เช็กอินไม่สำเร็จ',e.message,'error')]);}
     }
     if(['เช็กเอาต์','checkout','check-out'].includes(lower)){
       const mustShareLocation=await employeeNeedsLocation(env.DB,emp);
       if(mustShareLocation){ await setLineSession(env.DB,lineUserId,'checkout'); return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'📍 แชร์ Location ปัจจุบันเพื่อเช็กเอาต์'); }
-      try{const result=await checkOut(env.DB,Number(emp.id),null,null,'line');return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`✅ Check-out สำเร็จ\nเวลา ${formatBangkokTime(result.check_out_at)}`);}catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
+      try{const result=await checkOut(env.DB,Number(emp.id),null,null,'line');return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildAttendanceResultFlex('checkout',result)]);}catch(e){return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('เช็กเอาต์ไม่สำเร็จ',e.message,'error')]);}
     }
     if(lower==='สถานะ'){
       const a=await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(emp.id),dateInBangkok()).first();
@@ -1218,14 +1218,14 @@ async function processLineEvent(event, env) {
   if(event.type==='message' && event.message?.type==='location'){
     const emp=await employee(); if(!emp) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
     const session=await getLineSession(env.DB,lineUserId);
-    if(!session || new Date(session.expires_at).getTime()<=Date.now()) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'คำขอหมดเวลาแล้ว กรุณาพิมพ์ “เช็กอิน” หรือ “เช็กเอาต์” ใหม่');
+    if(!session || new Date(session.expires_at).getTime()<=Date.now()) return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('คำขอหมดเวลาแล้ว','กรุณาเริ่มเช็กอินหรือเช็กเอาต์ใหม่อีกครั้ง','warning')]);
     if(!['checkin','checkout'].includes(session.action)) return;
     try{
       const lat=Number(event.message.latitude),lng=Number(event.message.longitude);
       const result=session.action==='checkin'?await checkIn(env.DB,Number(emp.id),lat,lng,'line'):await checkOut(env.DB,Number(emp.id),lat,lng,'line');
       await clearLineSession(env.DB,lineUserId);
       const label=session.action==='checkin'?'Check-in':'Check-out'; const tm=session.action==='checkin'?result.check_in_at:result.check_out_at;
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`✅ ${label} สำเร็จ\nเวลา ${formatBangkokTime(tm)}${result.location_name?`\n📍 ${result.location_name}`:''}${result.distance_m!=null?` · ${Math.round(result.distance_m)} ม.`:''}${session.action==='checkin'?(result.late_minutes>0?`\n🟠 สาย ${result.late_minutes} นาที`:'\n🟢 ตรงเวลา'):''}`);
+      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildAttendanceResultFlex(session.action,result)]);
     }catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
   }
 
@@ -1236,6 +1236,7 @@ async function processLineEvent(event, env) {
     if(action==='checkin'||action==='checkout'){ await setLineSession(env.DB,lineUserId,action); return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`📍 ส่ง Location ปัจจุบันมาเพื่อ${action==='checkin'?'เช็กอิน':'เช็กเอาต์'}`); }
     if(action==='leave_menu') return sendLeaveTypeMenu(env,event.replyToken,emp);
     if(action==='leave_balance') return sendLeaveBalance(env,event.replyToken,emp);
+    if(action==='status'){ const a=await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(emp.id),dateInBangkok()).first(); return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildEmployeeStatusFlex(emp,a)]); }
     if(action==='leave_type'){
       const policyId=Number(data.get('policy_id')); const policy=await env.DB.prepare('SELECT * FROM leave_policies WHERE id=?1 AND client_id=?2 AND is_active=1').bind(policyId,Number(emp.client_id)).first();
       if(!policy) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ไม่พบประเภทลานี้');
@@ -1255,20 +1256,14 @@ async function processLineEvent(event, env) {
         return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildLeaveDayPartFlex(policyId,startDate,endDate)]);
       }
       await setLineSession(env.DB,lineUserId,'leave_reason',{policy_id:policyId,start_date:startDate,end_date:endDate,day_part:'full'});
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`📝 ระบุเหตุผลการลา
-${formatThaiDateOnly(startDate)} – ${formatThaiDateOnly(endDate)}
-
-พิมพ์เหตุผลส่งมาได้เลย`);
+      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildLeaveReasonPromptFlex(startDate,endDate,'full')]);
     }
     if(action==='leave_daypart'){
       const policyId=Number(data.get('policy_id')); const startDate=data.get('start'); const endDate=data.get('end')||startDate; const dayPart=data.get('part')||'full';
       if(!policyId||!startDate) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ข้อมูลคำขอไม่ครบ กรุณาพิมพ์ “ขอลา” ใหม่');
       await setLineSession(env.DB,lineUserId,'leave_reason',{policy_id:policyId,start_date:startDate,end_date:endDate,day_part:dayPart});
       const partLabel=dayPart==='am'?'ครึ่งวันเช้า':dayPart==='pm'?'ครึ่งวันบ่าย':'เต็มวัน';
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`📝 ระบุเหตุผลการลา
-${formatThaiDateOnly(startDate)} · ${partLabel}
-
-พิมพ์เหตุผลส่งมาได้เลย`);
+      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildLeaveReasonPromptFlex(startDate,endDate,dayPart)]);
     }
     if(action==='leave_attach'){
       const id=Number(data.get('id')); const row=await env.DB.prepare("SELECT * FROM leave_requests WHERE id=?1 AND employee_id=?2 AND status IN ('pending','awaiting_evidence')").bind(id,Number(emp.id)).first(); if(!row) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'คำขอนี้แนบหลักฐานไม่ได้แล้ว');
@@ -1276,12 +1271,12 @@ ${formatThaiDateOnly(startDate)} · ${partLabel}
       return replyEvidencePrompt(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,row);
     }
     if(action==='leave_approve'){
-      try{const result=await decideLeaveRequest(env,Number(data.get('id')),'approved',{actorType:'employee',actorEmployeeId:Number(emp.id),clientId:Number(emp.client_id),enforceApprover:true});return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`✅ อนุมัติคำขอลา #LV-${String(result.id).padStart(4,'0')} แล้ว`);}catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
+      try{const result=await decideLeaveRequest(env,Number(data.get('id')),'approved',{actorType:'employee',actorEmployeeId:Number(emp.id),clientId:Number(emp.client_id),enforceApprover:true});return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('อนุมัติเรียบร้อยแล้ว',`คำขอ #LV-${String(result.id).padStart(4,'0')} ถูกอนุมัติแล้ว`,'success')]);}catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
     }
     if(action==='leave_reject'){
       const id=Number(data.get('id')); const row=await env.DB.prepare("SELECT id FROM leave_requests WHERE id=?1 AND approver_employee_id=?2 AND status='pending'").bind(id,Number(emp.id)).first(); if(!row) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'คำขอนี้ไม่ได้รอคุณอนุมัติแล้ว');
       await setLineSession(env.DB,lineUserId,'leave_reject_reason',{request_id:id});
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'กรุณาพิมพ์เหตุผลที่ไม่อนุมัติ แล้วส่งมาได้เลย');
+      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('ระบุเหตุผลที่ไม่อนุมัติ','พิมพ์เหตุผลส่งเป็นข้อความถัดไป เพื่อแจ้งกลับให้พนักงาน','coral')]);
     }
   }
 }
@@ -1574,8 +1569,8 @@ function canOverrideLeave(role) {
 
 async function linkLineAccount(db, lineUserId, token) {
   const row = await db.prepare(`
-    SELECT t.*, e.first_name, e.nickname, e.client_id
-    FROM line_link_tokens t JOIN employees e ON e.id=t.employee_id
+    SELECT t.*, e.first_name, e.nickname, e.client_id, c.name AS company_name
+    FROM line_link_tokens t JOIN employees e ON e.id=t.employee_id JOIN clients c ON c.id=e.client_id
     WHERE t.token=?1 AND t.used_at IS NULL
   `).bind(token).first();
   if (!row) return { ok: false, error: 'รหัสไม่ถูกต้องหรือถูกใช้แล้ว' };
@@ -1589,7 +1584,7 @@ async function linkLineAccount(db, lineUserId, token) {
     db.prepare('UPDATE line_link_tokens SET used_at=CURRENT_TIMESTAMP WHERE token=?1').bind(token),
   ]);
   await audit(db, Number(row.client_id), 'line', lineUserId, 'employee.line_link', 'employee', String(row.employee_id), null);
-  return { ok: true, name: row.nickname || row.first_name };
+  return { ok: true, name: row.nickname || row.first_name, company_name: row.company_name };
 }
 
 async function setLineSession(db,lineUserId,action,payload={}) {
@@ -1775,32 +1770,235 @@ async function notifyLeaveDecision(env,row){
   await pushLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,row.employee_line_user_id,[buildLeaveDecisionFlex(row,approved)]);
 }
 
-function lineText(text,size='sm',color='#202B2D',weight='regular'){return {type:'text',text:String(text),size,color,weight,wrap:true};}
-function buildWelcomeFlex(name,company){return {type:'flex',altText:`เชื่อม LINE กับ ${company} สำเร็จ`,contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText('นากนะ','sm','#167D7F','bold'),lineText(`ยินดีต้อนรับ ${name} 👋`,'xl','#123C4A','bold'),lineText(`เชื่อมกับ ${company} เรียบร้อยแล้ว`,'sm','#637072'),{type:'button',style:'primary',color:'#167D7F',action:{type:'postback',label:'เปิดเมนูพนักงาน',data:'action=menu'}}]}}};}
-function buildEmployeeMenuFlex(emp){return {type:'flex',altText:'เมนูนากนะ',contents:{type:'bubble',header:{type:'box',layout:'vertical',backgroundColor:'#F8FAF8',contents:[lineText('นากนะ · Employee','sm','#167D7F','bold'),lineText(emp.company_name||'','xs','#637072')]},body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText(`สวัสดี ${emp.nickname||emp.first_name} 👋`,'xl','#123C4A','bold'),lineText('วันนี้จะทำอะไรดี?','sm','#637072'),{type:'box',layout:'vertical',spacing:'sm',contents:[{type:'button',style:'primary',color:'#167D7F',action:{type:'postback',label:'📍 เช็กอิน',data:'action=checkin'}},{type:'button',style:'secondary',action:{type:'postback',label:'🏠 เช็กเอาต์',data:'action=checkout'}},{type:'button',style:'secondary',action:{type:'postback',label:'🏖 ขอลา',data:'action=leave_menu'}},{type:'button',style:'link',action:{type:'postback',label:'ดูสิทธิ์ลา',data:'action=leave_balance'}}]}]}}};}
+const LINE_CI = {
+  bg: '#F8FAF8',
+  card: '#FFFFFF',
+  primary: '#167D7F',
+  primaryDark: '#123C4A',
+  mint: '#8FD6C8',
+  mintSoft: '#EFF8F5',
+  coral: '#FF8A65',
+  coralSoft: '#FFF2EE',
+  text: '#202B2D',
+  muted: '#6B787A',
+  border: '#E4EAE7',
+  success: '#2E9B68',
+  successSoft: '#ECF8F1',
+  warning: '#E6A23C',
+  warningSoft: '#FFF7E8',
+  error: '#D9534F',
+  errorSoft: '#FDECEC',
+  info: '#3B82F6',
+  infoSoft: '#EFF6FF',
+};
+
+function lineText(text,size='sm',color=LINE_CI.text,weight='regular',extra={}){
+  return { type:'text', text:String(text), size, color, weight, wrap:true, scaling:true, ...extra };
+}
+function lineTone(tone='neutral'){
+  const map={
+    success:{bg:LINE_CI.successSoft,fg:LINE_CI.success},
+    warning:{bg:LINE_CI.warningSoft,fg:'#9A6700'},
+    error:{bg:LINE_CI.errorSoft,fg:LINE_CI.error},
+    info:{bg:LINE_CI.infoSoft,fg:LINE_CI.info},
+    coral:{bg:LINE_CI.coralSoft,fg:'#C75B3C'},
+    teal:{bg:LINE_CI.mintSoft,fg:LINE_CI.primary},
+    neutral:{bg:'#F3F6F4',fg:LINE_CI.muted},
+  };
+  return map[tone]||map.neutral;
+}
+function lineChip(text,tone='teal'){
+  const c=lineTone(tone);
+  return {type:'box',layout:'vertical',paddingTop:'4px',paddingBottom:'4px',paddingStart:'9px',paddingEnd:'9px',cornerRadius:'10px',backgroundColor:c.bg,flex:0,contents:[lineText(text,'xxs',c.fg,'bold',{align:'center'})]};
+}
+function lineBrandHeader(eyebrow,title,subtitle=''){
+  const contents=[
+    {type:'box',layout:'horizontal',alignItems:'center',contents:[
+      {type:'box',layout:'vertical',width:'8px',height:'8px',cornerRadius:'4px',backgroundColor:LINE_CI.mint,contents:[]},
+      lineText(eyebrow||'นากนะ','xxs',LINE_CI.primary,'bold',{margin:'sm',flex:1}),
+    ]},
+    lineText(title,'xl',LINE_CI.primaryDark,'bold',{margin:'sm'}),
+  ];
+  if(subtitle) contents.push(lineText(subtitle,'xs',LINE_CI.muted,'regular',{margin:'xs'}));
+  return {type:'box',layout:'vertical',paddingAll:'18px',backgroundColor:LINE_CI.bg,contents};
+}
+function lineInfoCard(contents,tone='neutral'){
+  const c=lineTone(tone);
+  return {type:'box',layout:'vertical',spacing:'sm',paddingAll:'12px',cornerRadius:'14px',backgroundColor:c.bg,borderWidth:'1px',borderColor:tone==='neutral'?LINE_CI.border:c.bg,contents};
+}
+function lineInfoRow(label,value,valueColor=LINE_CI.text){
+  return {type:'box',layout:'horizontal',spacing:'md',alignItems:'flex-start',contents:[
+    lineText(label,'xs',LINE_CI.muted,'regular',{flex:2}),
+    lineText(value,'xs',valueColor,'bold',{flex:3,align:'end'}),
+  ]};
+}
+function linePrimaryButton(label,action){return {type:'button',style:'primary',height:'sm',color:LINE_CI.primary,action};}
+function lineSecondaryButton(label,action,color=LINE_CI.mintSoft){return {type:'button',style:'secondary',height:'sm',color,action};}
+function lineDangerButton(label,action){return {type:'button',style:'secondary',height:'sm',color:LINE_CI.errorSoft,action};}
+function lineBubble({eyebrow='นากนะ',title,subtitle='',body=[],footer=[],status=null,statusTone='teal',size='mega'}){
+  const bodyContents=[];
+  if(status) bodyContents.push({type:'box',layout:'horizontal',contents:[lineChip(status,statusTone)]});
+  bodyContents.push(...body);
+  const bubble={
+    type:'bubble',size,
+    header:lineBrandHeader(eyebrow,title,subtitle),
+    body:{type:'box',layout:'vertical',spacing:'md',paddingAll:'18px',backgroundColor:LINE_CI.card,contents:bodyContents},
+    styles:{header:{backgroundColor:LINE_CI.bg},body:{backgroundColor:LINE_CI.card},footer:{backgroundColor:LINE_CI.card,separator:true}},
+  };
+  if(footer.length) bubble.footer={type:'box',layout:'vertical',spacing:'sm',paddingAll:'14px',contents:footer};
+  return bubble;
+}
+function leavePolicyIcon(policy){
+  const code=String(policy?.code||'').toLowerCase(); const name=String(policy?.name||'');
+  if(code.includes('sick')||name.includes('ป่วย')) return '🤒';
+  if(code.includes('annual')||name.includes('พักร้อน')) return '🏖';
+  if(code.includes('personal')||name.includes('กิจ')) return '👤';
+  if(code.includes('unpaid')||name.includes('ไม่รับ')) return '📄';
+  return '🗓';
+}
+function formatLeaveRange(row){return `${formatThaiDateOnly(row.start_date)}${row.start_date!==row.end_date?` – ${formatThaiDateOnly(row.end_date)}`:''}`;}
+function formatDayPart(part){return part==='am'?'ครึ่งวันเช้า':part==='pm'?'ครึ่งวันบ่าย':'เต็มวัน';}
+
+function buildWelcomeFlex(name,company){
+  return {type:'flex',altText:`ยินดีต้อนรับสู่ ${company}`,contents:lineBubble({
+    eyebrow:'NAKNA · HR TECH',title:`ยินดีต้อนรับ ${name} 👋`,subtitle:'เชื่อม LINE กับบัญชีพนักงานเรียบร้อยแล้ว',status:'พร้อมใช้งาน',statusTone:'success',
+    body:[lineInfoCard([lineInfoRow('บริษัท',company),lineInfoRow('ช่องทาง','LINE · เชื่อมแล้ว',LINE_CI.success)],'teal')],
+    footer:[linePrimaryButton('เปิดเมนูพนักงาน',{type:'postback',label:'เปิดเมนูพนักงาน',data:'action=menu'})]
+  })};
+}
+function buildEmployeeMenuFlex(emp){
+  const name=emp.nickname||emp.first_name;
+  return {type:'flex',altText:'เมนูพนักงาน · นากนะ',contents:lineBubble({
+    eyebrow:'นากนะ · EMPLOYEE',title:`สวัสดี ${name} 👋`,subtitle:emp.company_name||'',
+    body:[
+      lineText('จัดการเรื่องงานประจำวันได้จากตรงนี้','sm',LINE_CI.muted),
+      linePrimaryButton('📍  เช็กอิน',{type:'postback',label:'เช็กอิน',data:'action=checkin'}),
+      lineSecondaryButton('🏠  เช็กเอาต์',{type:'postback',label:'เช็กเอาต์',data:'action=checkout'}),
+      lineSecondaryButton('🏖  ขอลางาน',{type:'postback',label:'ขอลางาน',data:'action=leave_menu'},'#F1F7F5'),
+      lineSecondaryButton('📅  ดูสิทธิ์ลา',{type:'postback',label:'ดูสิทธิ์ลา',data:'action=leave_balance'},'#F7F9F8'),
+    ]
+  })};
+}
 function buildEmployeeStatusFlex(emp,a){
-  const contents=[lineText('สถานะวันนี้','lg','#123C4A','bold'),lineText(emp.nickname||emp.first_name,'sm','#637072'),{type:'separator'},lineText(a?.check_in_at?`เช็กอิน ${formatBangkokTime(a.check_in_at)}`:a?.status==='leave'?'วันนี้ลา':'ยังไม่ได้เช็กอิน','md',a?.check_in_at?'#2E9B68':'#E6A23C','bold')];
-  if(a?.check_out_at) contents.push(lineText(`เช็กเอาต์ ${formatBangkokTime(a.check_out_at)}`,'sm','#637072'));
-  return {type:'flex',altText:'สถานะวันนี้',contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents}}};
+  const hasIn=Boolean(a?.check_in_at), hasOut=Boolean(a?.check_out_at), isLeave=a?.status==='leave';
+  const status=isLeave?'วันนี้ลา':hasIn?(a?.status==='late'?'มาสาย':'มาทำงานแล้ว'):'ยังไม่เช็กอิน';
+  const tone=isLeave?'info':hasIn?(a?.status==='late'?'warning':'success'):'warning';
+  const rows=[];
+  if(isLeave){ rows.push(lineInfoRow('สถานะ','ลางาน',LINE_CI.info)); }
+  else {
+    rows.push(lineInfoRow('เช็กอิน',hasIn?formatBangkokTime(a.check_in_at):'—',hasIn?LINE_CI.success:LINE_CI.muted));
+    rows.push(lineInfoRow('เช็กเอาต์',hasOut?formatBangkokTime(a.check_out_at):'—'));
+    if(Number(a?.late_minutes||0)>0) rows.push(lineInfoRow('มาสาย',`${a.late_minutes} นาที`,LINE_CI.warning));
+  }
+  return {type:'flex',altText:'สถานะวันนี้',contents:lineBubble({eyebrow:'ATTENDANCE',title:'สถานะวันนี้',subtitle:emp.nickname||emp.first_name,status,statusTone:tone,body:[lineInfoCard(rows,tone)]})};
 }
-async function sendLeaveTypeMenu(env,replyToken,emp){await ensureDefaultLeavePolicies(env.DB,Number(emp.client_id));const policies=(await env.DB.prepare('SELECT * FROM leave_policies WHERE client_id=?1 AND is_active=1 ORDER BY sort_order,name').bind(Number(emp.client_id)).all()).results||[];const buttons=policies.slice(0,8).map(p=>({type:'button',style:'secondary',height:'sm',action:{type:'postback',label:p.name,data:`action=leave_type&policy_id=${p.id}`}}));return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,replyToken,[{type:'flex',altText:'เลือกประเภทการลา',contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText('ขอลางาน','xl','#123C4A','bold'),lineText('เลือกประเภทการลา','sm','#637072'),...buttons]}}}]);}
-async function sendLeaveBalance(env,replyToken,emp){const profile=await getEmployeeLeaveProfile(env.DB,Number(emp.id),Number(emp.client_id),new Date().getFullYear());const rows=profile.balances.map(b=>({type:'box',layout:'horizontal',contents:[lineText(b.name,'sm','#202B2D','bold'),lineText(Number(b.is_unlimited)?'ไม่จำกัด':`${Number(b.remaining_days).toFixed(Number(b.remaining_days)%1?1:0)} วัน`,'sm',Number(b.remaining_days)<2?'#D9534F':'#167D7F','bold')]}));return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,replyToken,[{type:'flex',altText:'สิทธิ์ลาคงเหลือ',contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText(`สิทธิ์ลา ${profile.year}`,'xl','#123C4A','bold'),...rows]}}}]);}
-function buildDatePickerFlex(title,action,policyId,start=null){const data=`action=${action}&policy_id=${policyId}${start?`&start=${start}`:''}`;return {type:'flex',altText:title,contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText(title,'lg','#123C4A','bold'),{type:'button',style:'primary',color:'#167D7F',action:{type:'datetimepicker',label:'เลือกวันที่',data,mode:'date'}}]}}};}
+async function sendLeaveTypeMenu(env,replyToken,emp){
+  await ensureDefaultLeavePolicies(env.DB,Number(emp.client_id));
+  const policies=(await env.DB.prepare('SELECT * FROM leave_policies WHERE client_id=?1 AND is_active=1 ORDER BY sort_order,name').bind(Number(emp.client_id)).all()).results||[];
+  const profile=await getEmployeeLeaveProfile(env.DB,Number(emp.id),Number(emp.client_id),new Date().getFullYear());
+  const balanceMap=new Map((profile.balances||[]).map(b=>[Number(b.id),b]));
+  const buttons=policies.slice(0,8).map(p=>{
+    const b=balanceMap.get(Number(p.id));
+    const balance=b?(Number(b.is_unlimited)?'ไม่จำกัด':`${Number(b.remaining_days||0).toFixed(Number(b.remaining_days||0)%1?1:0)} วัน`):'';
+    const suffix=balance?` · ${balance}`:'';
+    return lineSecondaryButton(`${leavePolicyIcon(p)}  ${p.name}${suffix}`,{type:'postback',label:p.name,data:`action=leave_type&policy_id=${p.id}`},LINE_CI.mintSoft);
+  });
+  return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,replyToken,[{type:'flex',altText:'เลือกประเภทการลา',contents:lineBubble({
+    eyebrow:'LEAVE',title:'ขอลางาน',subtitle:'เลือกประเภทการลาที่ต้องการ',body:buttons.length?buttons:[lineInfoCard([lineText('ยังไม่มีประเภทการลาที่เปิดใช้งาน','sm',LINE_CI.muted)],'neutral')]
+  })}]);
+}
+async function sendLeaveBalance(env,replyToken,emp){
+  const profile=await getEmployeeLeaveProfile(env.DB,Number(emp.id),Number(emp.client_id),new Date().getFullYear());
+  const rows=(profile.balances||[]).map(b=>{
+    const remaining=Number(b.is_unlimited)?'ไม่จำกัด':`${Number(b.remaining_days).toFixed(Number(b.remaining_days)%1?1:0)} วัน`;
+    const tone=!Number(b.is_unlimited)&&Number(b.remaining_days)<2?'error':'teal';
+    return lineInfoCard([
+      {type:'box',layout:'horizontal',alignItems:'center',contents:[lineText(`${leavePolicyIcon(b)} ${b.name}`,'sm',LINE_CI.primaryDark,'bold',{flex:1}),lineChip(remaining,tone)]},
+      !Number(b.is_unlimited)?lineText(`ใช้แล้ว ${Number(b.used_days||0).toFixed(1).replace('.0','')} · รออนุมัติ ${Number(b.pending_days||0).toFixed(1).replace('.0','')} วัน`,'xxs',LINE_CI.muted):lineText('สิทธิ์ไม่จำกัดตามนโยบายบริษัท','xxs',LINE_CI.muted)
+    ],'neutral');
+  });
+  return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,replyToken,[{type:'flex',altText:'สิทธิ์ลาคงเหลือ',contents:lineBubble({eyebrow:'LEAVE BALANCE',title:`สิทธิ์ลา ${profile.year}`,subtitle:emp.nickname||emp.first_name,body:rows})}]);
+}
+function buildDatePickerFlex(title,action,policyId,start=null){
+  const data=`action=${action}&policy_id=${policyId}${start?`&start=${start}`:''}`;
+  return {type:'flex',altText:title,contents:lineBubble({eyebrow:'LEAVE · STEP',title,subtitle:'เลือกวันที่จากปฏิทิน',body:[lineInfoCard([lineText(start?`วันเริ่มลา ${formatThaiDateOnly(start)}`:'เลือกวันที่ที่ต้องการเริ่มลา','sm',LINE_CI.text,'bold')],'teal')],footer:[linePrimaryButton('เลือกวันที่',{type:'datetimepicker',label:'เลือกวันที่',data,mode:'date'})]})};
+}
 function buildLeaveDayPartFlex(policyId,startDate,endDate){
-  const make=(label,part,style='secondary')=>{const button={type:'button',style,action:{type:'postback',label,data:`action=leave_daypart&policy_id=${policyId}&start=${startDate}&end=${endDate}&part=${part}`}};if(style==='primary')button.color='#167D7F';return button;};
-  return {type:'flex',altText:'เลือกรูปแบบวันลา',contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText('เลือกรูปแบบวันลา','lg','#123C4A','bold'),lineText(formatThaiDateOnly(startDate),'sm','#637072'),make('เต็มวัน','full','primary'),make('ครึ่งวันเช้า','am'),make('ครึ่งวันบ่าย','pm')]}}};
+  const make=(label,part,primary=false)=>primary?linePrimaryButton(label,{type:'postback',label,data:`action=leave_daypart&policy_id=${policyId}&start=${startDate}&end=${endDate}&part=${part}`}):lineSecondaryButton(label,{type:'postback',label,data:`action=leave_daypart&policy_id=${policyId}&start=${startDate}&end=${endDate}&part=${part}`});
+  return {type:'flex',altText:'เลือกรูปแบบวันลา',contents:lineBubble({eyebrow:'LEAVE · STEP',title:'เลือกรูปแบบวันลา',subtitle:formatThaiDateOnly(startDate),body:[make('เต็มวัน','full',true),make('ครึ่งวันเช้า','am'),make('ครึ่งวันบ่าย','pm')]})};
 }
-function buildLeaveSubmittedFlex(row){const pending=row.status==='pending';return {type:'flex',altText:`ส่งคำขอ${row.leave_type_name||row.leave_type}แล้ว`,contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText('ส่งคำขอเรียบร้อยแล้ว','lg','#123C4A','bold'),lineText(row.leave_type_name||row.leave_type,'sm','#167D7F','bold'),lineText(`${formatThaiDateOnly(row.start_date)}${row.start_date!==row.end_date?` – ${formatThaiDateOnly(row.end_date)}`:''} · ${row.duration_days} วัน`,'sm','#202B2D'),lineText(`สถานะ: ${pending?'รออนุมัติ':'รอหลักฐาน'}`,'sm',pending?'#E6A23C':'#FF8A65','bold'),{type:'button',style:'link',action:{type:'postback',label:'📎 แนบหลักฐาน',data:`action=leave_attach&id=${row.id}`}}]}}};}
+function buildLeaveReasonPromptFlex(startDate,endDate,dayPart='full'){
+  const range=startDate===endDate?`${formatThaiDateOnly(startDate)} · ${formatDayPart(dayPart)}`:`${formatThaiDateOnly(startDate)} – ${formatThaiDateOnly(endDate)}`;
+  return {type:'flex',altText:'ระบุเหตุผลการลา',contents:lineBubble({eyebrow:'LEAVE · STEP',title:'ระบุเหตุผลการลา',subtitle:'พิมพ์เหตุผลส่งเป็นข้อความถัดไป',body:[lineInfoCard([lineInfoRow('วันที่',range),lineText('ตัวอย่าง: มีธุระครอบครัว / มีไข้และไปพบแพทย์','xs',LINE_CI.muted)],'teal')]})};
+}
+function buildLeaveSubmittedFlex(row){
+  const pending=row.status==='pending'; const awaiting=row.status==='awaiting_evidence';
+  const tone=pending?'warning':awaiting?'coral':'success'; const status=pending?'รออนุมัติ':awaiting?'รอหลักฐาน':'ส่งแล้ว';
+  const body=[lineInfoCard([
+    lineInfoRow('ประเภท',row.leave_type_name||row.leave_type,LINE_CI.primaryDark),
+    lineInfoRow('วันที่',formatLeaveRange(row)),
+    lineInfoRow('จำนวน',`${Number(row.duration_days||0).toFixed(Number(row.duration_days||0)%1?1:0)} วัน`),
+    row.reason?{type:'separator',color:LINE_CI.border}:null,
+    row.reason?lineText('เหตุผล','xxs',LINE_CI.muted,'bold'):null,
+    row.reason?lineText(row.reason,'sm',LINE_CI.text):null,
+  ].filter(Boolean),'neutral')];
+  const footer=[];
+  if(awaiting||Number(row.evidence_required)) footer.push(lineSecondaryButton('📎  แนบหลักฐาน',{type:'postback',label:'แนบหลักฐาน',data:`action=leave_attach&id=${row.id}`},LINE_CI.coralSoft));
+  footer.push(lineSecondaryButton('ดูสิทธิ์ลา',{type:'postback',label:'ดูสิทธิ์ลา',data:'action=leave_balance'},LINE_CI.mintSoft));
+  return {type:'flex',altText:`ส่งคำขอ${row.leave_type_name||row.leave_type}แล้ว`,contents:lineBubble({eyebrow:`คำขอ #LV-${String(row.id).padStart(4,'0')}`,title:'ส่งคำขอเรียบร้อยแล้ว',subtitle:'นากนะส่งต่อให้ผู้เกี่ยวข้องแล้ว',status,statusTone:tone,body,footer})};
+}
 function buildLeaveApprovalFlex(row){
   const before=row.balance?.is_unlimited?'ไม่จำกัด':row.balance?`${Number(row.balance.remaining_days||0)+Number(row.duration_days||0)} วัน`:'—';
   const after=row.balance?.is_unlimited?'ไม่จำกัด':row.balance?`${Number(row.balance.remaining_days||0)} วัน`:'—';
-  const body=[lineText(`${row.nickname||row.first_name} ${row.last_name||''}`,'xl','#123C4A','bold'),lineText(row.leave_type_name||row.leave_type,'sm','#167D7F','bold'),lineText(`${formatThaiDateOnly(row.start_date)}${row.start_date!==row.end_date?` – ${formatThaiDateOnly(row.end_date)}`:''} · ${row.duration_days} วัน`,'sm','#202B2D'),{type:'separator'},lineText('เหตุผล','xs','#637072','bold'),lineText(row.reason||'—','sm','#202B2D'),lineText(`สิทธิ์ก่อนลา ${before} → หลังหัก ${after}`,'xs','#637072','bold'),lineText(`หลักฐาน ${Number(row.evidence_count||0)} ไฟล์`,'xs',Number(row.evidence_required)&&!Number(row.evidence_count)?'#D9534F':'#637072','bold')];
-  if(row.evidence_url) body.push({type:'button',style:'link',height:'sm',action:{type:'uri',label:'ดูหลักฐาน',uri:row.evidence_url}});
-  return {type:'flex',altText:`คำขอลาใหม่จาก ${row.nickname||row.first_name}`,contents:{type:'bubble',header:{type:'box',layout:'vertical',backgroundColor:'#F8FAF8',contents:[lineText('คำขอลาใหม่','sm','#167D7F','bold'),lineText(`#LV-${String(row.id).padStart(4,'0')}`,'xs','#637072')]},body:{type:'box',layout:'vertical',spacing:'md',contents:body},footer:{type:'box',layout:'horizontal',spacing:'sm',contents:[{type:'button',style:'primary',color:'#167D7F',action:{type:'postback',label:'อนุมัติ',data:`action=leave_approve&id=${row.id}`}},{type:'button',style:'secondary',action:{type:'postback',label:'ไม่อนุมัติ',data:`action=leave_reject&id=${row.id}`}}]}}};
+  const evidenceCount=Number(row.evidence_count||0);
+  const body=[
+    lineInfoCard([
+      lineInfoRow('พนักงาน',`${row.nickname||row.first_name} ${row.last_name||''}`.trim(),LINE_CI.primaryDark),
+      lineInfoRow('ประเภท',row.leave_type_name||row.leave_type),
+      lineInfoRow('วันที่',formatLeaveRange(row)),
+      lineInfoRow('จำนวน',`${Number(row.duration_days||0).toFixed(Number(row.duration_days||0)%1?1:0)} วัน`),
+    ],'neutral'),
+    lineInfoCard([lineText('เหตุผล','xxs',LINE_CI.muted,'bold'),lineText(row.reason||'—','sm',LINE_CI.text)],'teal'),
+    {type:'box',layout:'horizontal',spacing:'sm',contents:[
+      {type:'box',layout:'vertical',flex:1,paddingAll:'10px',cornerRadius:'12px',backgroundColor:LINE_CI.bg,contents:[lineText('ก่อนลา','xxs',LINE_CI.muted,'bold'),lineText(before,'sm',LINE_CI.primaryDark,'bold',{margin:'xs'})]},
+      {type:'box',layout:'vertical',flex:1,paddingAll:'10px',cornerRadius:'12px',backgroundColor:LINE_CI.mintSoft,contents:[lineText('หลังอนุมัติ','xxs',LINE_CI.muted,'bold'),lineText(after,'sm',LINE_CI.primary,'bold',{margin:'xs'})]},
+    ]},
+    {type:'box',layout:'horizontal',alignItems:'center',contents:[lineText('หลักฐาน','xs',LINE_CI.muted,'bold',{flex:1}),lineChip(`${evidenceCount} ไฟล์`,Number(row.evidence_required)&&!evidenceCount?'error':evidenceCount?'success':'neutral')]}
+  ];
+  if(row.evidence_url) body.push(lineSecondaryButton('ดูหลักฐาน',{type:'uri',label:'ดูหลักฐาน',uri:row.evidence_url},LINE_CI.mintSoft));
+  return {type:'flex',altText:`คำขอลาใหม่จาก ${row.nickname||row.first_name}`,contents:lineBubble({eyebrow:`คำขอ #LV-${String(row.id).padStart(4,'0')}`,title:'มีคำขอลารออนุมัติ',subtitle:`${row.nickname||row.first_name} · ${row.leave_type_name||row.leave_type}`,status:'รอคุณพิจารณา',statusTone:'warning',body,footer:[linePrimaryButton('อนุมัติ',{type:'postback',label:'อนุมัติ',data:`action=leave_approve&id=${row.id}`}),lineDangerButton('ไม่อนุมัติ',{type:'postback',label:'ไม่อนุมัติ',data:`action=leave_reject&id=${row.id}`})]})};
 }
-
-function buildLeaveDecisionFlex(row,approved){return {type:'flex',altText:approved?'คำขอลาได้รับอนุมัติ':'คำขอลาไม่ผ่านการอนุมัติ',contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText(approved?'อนุมัติแล้ว ✅':'ไม่อนุมัติ','xl',approved?'#2E9B68':'#D9534F','bold'),lineText(row.leave_type_name||row.leave_type,'sm','#123C4A','bold'),lineText(`${formatThaiDateOnly(row.start_date)}${row.start_date!==row.end_date?` – ${formatThaiDateOnly(row.end_date)}`:''}`,'sm','#202B2D'),!approved?lineText(`เหตุผล: ${row.decision_reason||'ไม่ระบุ'}`,'sm','#637072'):lineText('ระบบอัปเดต Attendance และสิทธิ์ลาให้แล้ว','sm','#637072')]}}};}
-async function replyEvidencePrompt(accessToken,replyToken,row){const messages=[{type:'text',text:`📎 กรุณาแนบหลักฐานสำหรับ ${row.leave_type_name||row.leave_type}\nส่งเป็นรูปหรือไฟล์ได้เลย`,quickReply:{items:[{type:'action',action:{type:'cameraRoll',label:'เลือกรูป'}},{type:'action',action:{type:'camera',label:'ถ่ายรูป'}}]}}];return replyLineMessages(accessToken,replyToken,messages);}
+function buildLeaveDecisionFlex(row,approved){
+  const body=[lineInfoCard([
+    lineInfoRow('ประเภท',row.leave_type_name||row.leave_type),
+    lineInfoRow('วันที่',formatLeaveRange(row)),
+    lineInfoRow('จำนวน',`${Number(row.duration_days||0).toFixed(Number(row.duration_days||0)%1?1:0)} วัน`),
+  ],'neutral')];
+  if(!approved) body.push(lineInfoCard([lineText('เหตุผลที่ไม่อนุมัติ','xxs',LINE_CI.muted,'bold'),lineText(row.decision_reason||'ไม่ระบุ','sm',LINE_CI.text)],'error'));
+  else body.push(lineText('ระบบอัปเดตสิทธิ์ลาและ Attendance ให้เรียบร้อยแล้ว','xs',LINE_CI.muted));
+  return {type:'flex',altText:approved?'คำขอลาได้รับอนุมัติ':'คำขอลาไม่ผ่านการอนุมัติ',contents:lineBubble({eyebrow:'LEAVE UPDATE',title:approved?'อนุมัติคำขอแล้ว':'คำขอไม่ผ่านการอนุมัติ',subtitle:`#LV-${String(row.id).padStart(4,'0')}`,status:approved?'อนุมัติแล้ว':'ไม่อนุมัติ',statusTone:approved?'success':'error',body,footer:[lineSecondaryButton('กลับเมนู',{type:'postback',label:'กลับเมนู',data:'action=menu'},LINE_CI.mintSoft)]})};
+}
+function buildAttendanceResultFlex(kind,result){
+  const checkin=kind==='checkin'; const late=checkin&&Number(result.late_minutes||0)>0;
+  const tone=late?'warning':'success'; const status=checkin?(late?`สาย ${result.late_minutes} นาที`:'ตรงเวลา'):'บันทึกเวลาแล้ว';
+  const tm=checkin?result.check_in_at:result.check_out_at;
+  const rows=[lineInfoRow('เวลา',formatBangkokTime(tm),LINE_CI.primaryDark)];
+  if(result.location_name) rows.push(lineInfoRow('สถานที่',result.location_name));
+  if(result.distance_m!=null) rows.push(lineInfoRow('ระยะจากจุด',`${Math.round(result.distance_m)} ม.`));
+  return {type:'flex',altText:checkin?'เช็กอินสำเร็จ':'เช็กเอาต์สำเร็จ',contents:lineBubble({eyebrow:'ATTENDANCE',title:checkin?'เช็กอินสำเร็จ':'เช็กเอาต์สำเร็จ',subtitle:'บันทึกเวลาเรียบร้อยแล้ว',status,statusTone:tone,body:[lineInfoCard(rows,tone)],footer:[lineSecondaryButton('ดูสถานะวันนี้',{type:'postback',label:'ดูสถานะวันนี้',data:'action=status'},LINE_CI.mintSoft)]})};
+}
+function buildLocationRequestFlex(action){
+  const checkin=action==='checkin';
+  return {type:'flex',altText:`ส่งตำแหน่งเพื่อ${checkin?'เช็กอิน':'เช็กเอาต์'}`,contents:lineBubble({eyebrow:'ATTENDANCE',title:`${checkin?'เช็กอิน':'เช็กเอาต์'}ด้วยตำแหน่ง`,subtitle:'นากนะจะใช้ตำแหน่งนี้เฉพาะการตรวจ Work Location',status:'รอตำแหน่ง',statusTone:'teal',body:[lineInfoCard([lineText('กด “ส่งตำแหน่งปัจจุบัน” ด้านล่าง แล้ว LINE จะให้คุณเลือกตำแหน่ง','sm',LINE_CI.text)],'teal')]})};
+}
+function buildSimpleNoticeFlex(title,message,tone='teal'){
+  return {type:'flex',altText:title,contents:lineBubble({eyebrow:'นากนะ',title,body:[lineInfoCard([lineText(message,'sm',LINE_CI.text)],tone)],status:tone==='error'?'มีปัญหา':tone==='success'?'เรียบร้อย':null,statusTone:tone})};
+}
+async function replyEvidencePrompt(accessToken,replyToken,row){
+  const message={type:'flex',altText:'แนบหลักฐานการลา',contents:lineBubble({eyebrow:'LEAVE · EVIDENCE',title:'แนบหลักฐานการลา',subtitle:row.leave_type_name||row.leave_type,status:'รอหลักฐาน',statusTone:'coral',body:[lineInfoCard([lineText('ส่งรูปหรือไฟล์ในแชตนี้ได้เลย เช่น ใบรับรองแพทย์หรือเอกสารประกอบ','sm',LINE_CI.text)],'coral')]})};
+  message.quickReply={items:[{type:'action',action:{type:'cameraRoll',label:'เลือกรูป'}},{type:'action',action:{type:'camera',label:'ถ่ายรูป'}}]};
+  return replyLineMessages(accessToken,replyToken,[message]);
+}
 async function replyLineMessages(accessToken,replyToken,messages){const response=await fetch('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`},body:JSON.stringify({replyToken,messages})});if(!response.ok)console.error(JSON.stringify({level:'error',event:'line_reply_messages_failed',status:response.status,body:await response.text()}));}
 async function pushLineMessages(accessToken,to,messages){if(!accessToken||!to)return;const response=await fetch('https://api.line.me/v2/bot/message/push',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`},body:JSON.stringify({to,messages})});if(!response.ok)console.error(JSON.stringify({level:'error',event:'line_push_messages_failed',status:response.status,body:await response.text()}));}
 
@@ -1879,19 +2077,10 @@ function formatThaiShortDate(isoDate) {
 }
 
 async function replyLineWithLocationQuickReply(accessToken, replyToken, text) {
-  const response = await fetch('https://api.line.me/v2/bot/message/reply', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({
-      replyToken,
-      messages: [{
-        type: 'text',
-        text: text.slice(0, 4900),
-        quickReply: { items: [{ type: 'action', action: { type: 'location', label: 'ส่งตำแหน่งปัจจุบัน' } }] },
-      }],
-    }),
-  });
-  if (!response.ok) console.error(JSON.stringify({ level:'error', event:'line_reply_location_failed', status:response.status, body:await response.text() }));
+  const action=String(text||'').includes('เช็กเอาต์')?'checkout':'checkin';
+  const message=buildLocationRequestFlex(action);
+  message.quickReply={items:[{type:'action',action:{type:'location',label:'ส่งตำแหน่งปัจจุบัน'}}]};
+  return replyLineMessages(accessToken,replyToken,[message]);
 }
 
 async function replyLine(accessToken, replyToken, text) {
