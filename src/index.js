@@ -313,10 +313,8 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.1', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.2', auth: 'google-oauth' });
       }
-
-      await ensureDbReady(env.DB);
 
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
         return startGoogleLogin(request, env);
@@ -346,14 +344,21 @@ export default {
 
       return new Response('Not found', { status: 404 });
     } catch (error) {
-      console.error(JSON.stringify({ level: 'error', event: 'unhandled', message: String(error?.message || error) }));
-      return json({ error: 'Internal server error' }, 500);
+      let pathname = 'unknown';
+      try { pathname = new URL(request.url).pathname; } catch {}
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'unhandled',
+        pathname,
+        message: String(error?.message || error),
+        stack: String(error?.stack || '').slice(0, 2000),
+      }));
+      return json({ error: 'Internal server error', request_path: pathname }, 500);
     }
   },
 
   async scheduled(controller, env, ctx) {
     // Cloudflare Cron runs in UTC. 01:00 UTC = 08:00 Asia/Bangkok.
-    await ensureDbReady(env.DB);
     await sendDailyHrBrief(env);
   },
 };
@@ -663,8 +668,6 @@ async function handleLineWebhook(request, env, ctx) {
   if (!env.LINE_CHANNEL_SECRET || !env.LINE_CHANNEL_ACCESS_TOKEN) {
     return json({ error: 'LINE secrets not configured' }, 503);
   }
-
-  await ensureDbReady(env.DB);
 
   const signature = request.headers.get('x-line-signature') || '';
   const rawBody = await request.text();
@@ -1016,9 +1019,6 @@ async function authorizeUser(request, env, { requireCompany = true } = {}) {
 async function startGoogleLogin(request, env) {
   assertGoogleConfig(env);
   const state = randomToken(32);
-  const stateHash = await sha256Hex(state);
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  await env.DB.prepare(`INSERT INTO oauth_states (state_hash, purpose, expires_at) VALUES (?1,'login',?2)`).bind(stateHash, expiresAt).run();
 
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
@@ -1038,11 +1038,6 @@ async function finishGoogleLogin(request, env) {
   const state = url.searchParams.get('state');
   const cookieState = getCookie(request, 'nakna_oauth_state');
   if (!code || !state || !cookieState || !constantTimeEqual(state, cookieState)) return authErrorRedirect(request, env, 'state');
-
-  const stateHash = await sha256Hex(state);
-  const saved = await env.DB.prepare(`SELECT * FROM oauth_states WHERE state_hash=?1 AND purpose='login'`).bind(stateHash).first();
-  if (!saved || new Date(saved.expires_at).getTime() <= Date.now()) return authErrorRedirect(request, env, 'expired');
-  await env.DB.prepare('DELETE FROM oauth_states WHERE state_hash=?1').bind(stateHash).run();
 
   const tokens = await exchangeGoogleCode(code, oauthRedirectUri(request, env, '/auth/google/callback'), env);
   const profile = await fetchGoogleProfile(tokens.access_token);
