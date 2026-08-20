@@ -184,6 +184,72 @@ CREATE INDEX IF NOT EXISTS idx_candidates_activity ON candidates(last_activity_a
 CREATE INDEX IF NOT EXISTS idx_requests_client_status ON employee_requests(client_id, status);
 `;
 
+const INIT_AUTH_SCHEMA_SQL = String.raw`PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  google_sub TEXT NOT NULL UNIQUE,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT,
+  picture_url TEXT,
+  locale TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS company_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  role TEXT NOT NULL DEFAULT 'employee',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(client_id, user_id),
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  selected_client_id INTEGER,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (selected_client_id) REFERENCES clients(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS oauth_states (
+  state_hash TEXT PRIMARY KEY,
+  purpose TEXT NOT NULL,
+  user_id INTEGER,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS gmail_connections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL UNIQUE,
+  google_sub TEXT,
+  email TEXT NOT NULL,
+  encrypted_tokens TEXT NOT NULL,
+  scopes TEXT,
+  access_expires_at TEXT,
+  connected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_company_members_user ON company_members(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_company_members_client ON company_members(client_id, status);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_oauth_states_expiry ON oauth_states(expires_at);
+`;
+
 const INIT_SEED_SQL = String.raw`PRAGMA foreign_keys = ON;
 
 INSERT OR IGNORE INTO clients (
@@ -253,7 +319,25 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'HR LINE OS', version: '0.1.1' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.0', auth: 'google-oauth' });
+      }
+
+      await ensureDbReady(env.DB);
+
+      if (url.pathname === '/auth/google/start' && request.method === 'GET') {
+        return startGoogleLogin(request, env);
+      }
+      if (url.pathname === '/auth/google/callback' && request.method === 'GET') {
+        return finishGoogleLogin(request, env);
+      }
+      if (url.pathname === '/auth/logout' && request.method === 'POST') {
+        return logoutSession(request, env);
+      }
+      if (url.pathname === '/integrations/gmail/start' && request.method === 'GET') {
+        return startGmailConnection(request, env);
+      }
+      if (url.pathname === '/integrations/gmail/callback' && request.method === 'GET') {
+        return finishGmailConnection(request, env);
       }
 
       if (url.pathname === '/webhooks/line' && request.method === 'POST') {
@@ -261,10 +345,9 @@ export default {
       }
 
       if (url.pathname.startsWith('/api/')) {
-        const auth = await authorizeAdmin(request, env);
+        const auth = await authorizeUser(request, env, { requireCompany: !['/api/me','/api/companies','/api/onboarding/claim-company'].includes(url.pathname) });
         if (!auth.ok) return json({ error: auth.error }, auth.status);
-        await ensureDbReady(env.DB);
-        return handleApi(request, env, url);
+        return handleApi(request, env, url, auth);
       }
 
       return new Response('Not found', { status: 404 });
@@ -281,10 +364,58 @@ export default {
   },
 };
 
-async function handleApi(request, env, url) {
+async function handleApi(request, env, url, auth) {
   const method = request.method;
   const path = url.pathname;
-  const clientId = Number(url.searchParams.get('client_id') || 1);
+  const clientId = auth.clientId ? Number(auth.clientId) : null;
+
+  if (path === '/api/me' && method === 'GET') {
+    const memberships = await getMemberships(env.DB, auth.user.id);
+    const claimable = memberships.length ? null : await getClaimableLegacyCompany(env.DB);
+    return json({
+      user: publicUser(auth.user),
+      companies: memberships,
+      active_company_id: auth.clientId || null,
+      claimable_company: claimable,
+    });
+  }
+
+  if (path === '/api/companies' && method === 'POST') {
+    const body = await safeJson(request);
+    const name = String(body.name || '').trim();
+    if (name.length < 2) return json({ error: 'กรุณาใส่ชื่อบริษัท' }, 400);
+    const created = await createCompanyForUser(env.DB, auth, name);
+    return withCookie(json({ ok: true, company: created }, 201), companyCookie(created.id));
+  }
+
+  if (path === '/api/onboarding/claim-company' && method === 'POST') {
+    const body = await safeJson(request);
+    const claimable = await getClaimableLegacyCompany(env.DB);
+    if (!claimable || Number(body.client_id) !== Number(claimable.id)) return json({ error: 'Workspace นี้ไม่สามารถรับช่วงได้แล้ว' }, 409);
+    await env.DB.prepare(`INSERT OR IGNORE INTO company_members (client_id, user_id, role, status) VALUES (?1,?2,'owner','active')`).bind(Number(claimable.id), Number(auth.user.id)).run();
+    await env.DB.prepare('UPDATE auth_sessions SET selected_client_id=?1 WHERE token_hash=?2').bind(Number(claimable.id), auth.sessionHash).run();
+    await audit(env.DB, Number(claimable.id), 'user', String(auth.user.id), 'company.claim', 'client', String(claimable.id), null);
+    return withCookie(json({ ok: true, company: claimable }), companyCookie(claimable.id));
+  }
+
+  if (path === '/api/session/company' && method === 'POST') {
+    const body = await safeJson(request);
+    const nextClientId = Number(body.client_id);
+    const member = await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(Number(auth.user.id), nextClientId).first();
+    if (!member) return json({ error: 'คุณไม่มีสิทธิ์เข้าบริษัทนี้' }, 403);
+    await env.DB.prepare('UPDATE auth_sessions SET selected_client_id=?1, last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=?2').bind(nextClientId, auth.sessionHash).run();
+    return withCookie(json({ ok: true, client_id: nextClientId }), companyCookie(nextClientId));
+  }
+
+  if (path === '/api/integrations/gmail' && method === 'GET') {
+    const row = await env.DB.prepare(`SELECT email, scopes, access_expires_at, connected_at, updated_at FROM gmail_connections WHERE user_id=?1`).bind(Number(auth.user.id)).first();
+    return json({ connected: Boolean(row), account: row || null });
+  }
+
+  if (path === '/api/integrations/gmail' && method === 'DELETE') {
+    await env.DB.prepare('DELETE FROM gmail_connections WHERE user_id=?1').bind(Number(auth.user.id)).run();
+    return json({ ok: true });
+  }
 
   if (path === '/api/dashboard' && method === 'GET') {
     return json(await getDashboard(env.DB, clientId));
@@ -320,7 +451,7 @@ async function handleApi(request, env, url) {
       body.department_id || null, body.position_id || null, body.employment_type || 'full_time'
     ).run();
 
-    await audit(env.DB, clientId, 'admin', 'dashboard', 'employee.create', 'employee', String(result.meta.last_row_id), body);
+    await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.create', 'employee', String(result.meta.last_row_id), body);
     return json({ ok: true, id: result.meta.last_row_id }, 201);
   }
 
@@ -829,20 +960,365 @@ async function verifyLineSignature(rawBody, signature, channelSecret) {
 async function ensureDbReady(db) {
   if (!db) throw new Error('D1 binding DB is not available');
   const ready = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clients'").first();
-  if (ready) return;
-
-  console.log(JSON.stringify({ level: 'info', event: 'database_bootstrap_start' }));
-  await db.exec(INIT_SCHEMA_SQL);
-  await db.exec(INIT_SEED_SQL);
-  console.log(JSON.stringify({ level: 'info', event: 'database_bootstrap_complete' }));
+  if (!ready) {
+    console.log(JSON.stringify({ level: 'info', event: 'database_bootstrap_start' }));
+    await db.exec(INIT_SCHEMA_SQL);
+    await db.exec(INIT_SEED_SQL);
+    console.log(JSON.stringify({ level: 'info', event: 'database_bootstrap_complete' }));
+  }
+  const authReady = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").first();
+  if (!authReady) await db.exec(INIT_AUTH_SCHEMA_SQL);
 }
 
-async function authorizeAdmin(request, env) {
-  if (!env.HR_ADMIN_TOKEN) return { ok: false, status: 500, error: 'HR_ADMIN_TOKEN is not configured' };
-  const header = request.headers.get('authorization') || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-  if (!token || !constantTimeEqual(token, env.HR_ADMIN_TOKEN)) return { ok: false, status: 401, error: 'Unauthorized' };
-  return { ok: true };
+async function authorizeUser(request, env, { requireCompany = true } = {}) {
+  const rawToken = getCookie(request, 'nakna_session');
+  if (!rawToken) return { ok: false, status: 401, error: 'AUTH_REQUIRED' };
+  const sessionHash = await sha256Hex(rawToken);
+  const session = await env.DB.prepare(`
+    SELECT s.token_hash, s.user_id, s.selected_client_id, s.expires_at,
+           u.google_sub, u.email, u.name, u.picture_url, u.locale, u.status
+    FROM auth_sessions s JOIN users u ON u.id=s.user_id
+    WHERE s.token_hash=?1
+  `).bind(sessionHash).first();
+  if (!session || session.status !== 'active' || new Date(session.expires_at).getTime() <= Date.now()) {
+    if (session) await env.DB.prepare('DELETE FROM auth_sessions WHERE token_hash=?1').bind(sessionHash).run();
+    return { ok: false, status: 401, error: 'AUTH_REQUIRED' };
+  }
+
+  let clientId = Number(session.selected_client_id || getCookie(request, 'nakna_company') || 0) || null;
+  let role = null;
+  if (clientId) {
+    const member = await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(Number(session.user_id), clientId).first();
+    if (!member) clientId = null;
+    else role = member.role;
+  }
+  if (!clientId) {
+    const first = await env.DB.prepare(`SELECT client_id, role FROM company_members WHERE user_id=?1 AND status='active' ORDER BY id LIMIT 1`).bind(Number(session.user_id)).first();
+    if (first) {
+      clientId = Number(first.client_id);
+      role = first.role;
+      await env.DB.prepare('UPDATE auth_sessions SET selected_client_id=?1 WHERE token_hash=?2').bind(clientId, sessionHash).run();
+    }
+  }
+  if (requireCompany && !clientId) return { ok: false, status: 409, error: 'COMPANY_REQUIRED' };
+
+  await env.DB.prepare('UPDATE auth_sessions SET last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=?1').bind(sessionHash).run();
+  return {
+    ok: true,
+    sessionHash,
+    clientId,
+    role,
+    user: {
+      id: Number(session.user_id),
+      google_sub: session.google_sub,
+      email: session.email,
+      name: session.name,
+      picture_url: session.picture_url,
+      locale: session.locale,
+    },
+  };
+}
+
+async function startGoogleLogin(request, env) {
+  assertGoogleConfig(env);
+  const state = randomToken(32);
+  const stateHash = await sha256Hex(state);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  await env.DB.prepare(`INSERT INTO oauth_states (state_hash, purpose, expires_at) VALUES (?1,'login',?2)`).bind(stateHash, expiresAt).run();
+
+  const params = new URLSearchParams({
+    client_id: env.GOOGLE_CLIENT_ID,
+    redirect_uri: oauthRedirectUri(request, env, '/auth/google/callback'),
+    response_type: 'code',
+    scope: 'openid email profile',
+    state,
+    prompt: 'select_account',
+  });
+  return redirectResponse(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, [oauthStateCookie('nakna_oauth_state', state, 600)]);
+}
+
+async function finishGoogleLogin(request, env) {
+  assertGoogleConfig(env);
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const cookieState = getCookie(request, 'nakna_oauth_state');
+  if (!code || !state || !cookieState || !constantTimeEqual(state, cookieState)) return authErrorRedirect(request, env, 'state');
+
+  const stateHash = await sha256Hex(state);
+  const saved = await env.DB.prepare(`SELECT * FROM oauth_states WHERE state_hash=?1 AND purpose='login'`).bind(stateHash).first();
+  if (!saved || new Date(saved.expires_at).getTime() <= Date.now()) return authErrorRedirect(request, env, 'expired');
+  await env.DB.prepare('DELETE FROM oauth_states WHERE state_hash=?1').bind(stateHash).run();
+
+  const tokens = await exchangeGoogleCode(code, oauthRedirectUri(request, env, '/auth/google/callback'), env);
+  const profile = await fetchGoogleProfile(tokens.access_token);
+  if (!profile?.sub || !profile?.email || profile.email_verified === false) return authErrorRedirect(request, env, 'profile');
+
+  await env.DB.prepare(`
+    INSERT INTO users (google_sub, email, name, picture_url, locale, status)
+    VALUES (?1,?2,?3,?4,?5,'active')
+    ON CONFLICT(google_sub) DO UPDATE SET
+      email=excluded.email, name=excluded.name, picture_url=excluded.picture_url,
+      locale=excluded.locale, status='active', updated_at=CURRENT_TIMESTAMP
+  `).bind(profile.sub, profile.email.toLowerCase(), profile.name || profile.email, profile.picture || null, profile.locale || null).run();
+  const user = await env.DB.prepare('SELECT * FROM users WHERE google_sub=?1').bind(profile.sub).first();
+  const firstMembership = await env.DB.prepare(`SELECT client_id FROM company_members WHERE user_id=?1 AND status='active' ORDER BY id LIMIT 1`).bind(Number(user.id)).first();
+
+  const sessionToken = randomToken(40);
+  const sessionHash = await sha256Hex(sessionToken);
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  await env.DB.prepare(`INSERT INTO auth_sessions (token_hash, user_id, selected_client_id, expires_at) VALUES (?1,?2,?3,?4)`)
+    .bind(sessionHash, Number(user.id), firstMembership ? Number(firstMembership.client_id) : null, expiresAt).run();
+
+  const cookies = [sessionCookie(sessionToken), clearCookie('nakna_oauth_state')];
+  if (firstMembership) cookies.push(companyCookie(Number(firstMembership.client_id)));
+  return redirectResponse(`${appOrigin(request, env)}/?auth=success`, cookies);
+}
+
+async function logoutSession(request, env) {
+  const rawToken = getCookie(request, 'nakna_session');
+  if (rawToken) await env.DB.prepare('DELETE FROM auth_sessions WHERE token_hash=?1').bind(await sha256Hex(rawToken)).run();
+  const response = json({ ok: true });
+  response.headers.append('Set-Cookie', clearCookie('nakna_session'));
+  response.headers.append('Set-Cookie', clearCookie('nakna_company'));
+  return response;
+}
+
+async function startGmailConnection(request, env) {
+  assertGoogleConfig(env);
+  if (!env.GOOGLE_TOKEN_ENCRYPTION_KEY) return json({ error: 'GOOGLE_TOKEN_ENCRYPTION_KEY is not configured' }, 500);
+  const auth = await authorizeUser(request, env, { requireCompany: false });
+  if (!auth.ok) return redirectResponse(`${appOrigin(request, env)}/?auth=required`);
+
+  const state = randomToken(32);
+  const stateHash = await sha256Hex(state);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  await env.DB.prepare(`INSERT INTO oauth_states (state_hash, purpose, user_id, expires_at) VALUES (?1,'gmail',?2,?3)`)
+    .bind(stateHash, Number(auth.user.id), expiresAt).run();
+
+  const params = new URLSearchParams({
+    client_id: env.GOOGLE_CLIENT_ID,
+    redirect_uri: oauthRedirectUri(request, env, '/integrations/gmail/callback'),
+    response_type: 'code',
+    scope: 'openid email profile https://www.googleapis.com/auth/gmail.readonly',
+    state,
+    access_type: 'offline',
+    include_granted_scopes: 'true',
+    prompt: 'consent',
+    login_hint: auth.user.email,
+  });
+  return redirectResponse(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, [oauthStateCookie('nakna_gmail_state', state, 600)]);
+}
+
+async function finishGmailConnection(request, env) {
+  assertGoogleConfig(env);
+  if (!env.GOOGLE_TOKEN_ENCRYPTION_KEY) return gmailErrorRedirect(request, env, 'config');
+  const auth = await authorizeUser(request, env, { requireCompany: false });
+  if (!auth.ok) return redirectResponse(`${appOrigin(request, env)}/?auth=required`);
+
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const cookieState = getCookie(request, 'nakna_gmail_state');
+  if (!code || !state || !cookieState || !constantTimeEqual(state, cookieState)) return gmailErrorRedirect(request, env, 'state');
+  const stateHash = await sha256Hex(state);
+  const saved = await env.DB.prepare(`SELECT * FROM oauth_states WHERE state_hash=?1 AND purpose='gmail' AND user_id=?2`).bind(stateHash, Number(auth.user.id)).first();
+  if (!saved || new Date(saved.expires_at).getTime() <= Date.now()) return gmailErrorRedirect(request, env, 'expired');
+  await env.DB.prepare('DELETE FROM oauth_states WHERE state_hash=?1').bind(stateHash).run();
+
+  const tokens = await exchangeGoogleCode(code, oauthRedirectUri(request, env, '/integrations/gmail/callback'), env);
+  const profile = await fetchGoogleProfile(tokens.access_token);
+  const current = await env.DB.prepare('SELECT encrypted_tokens FROM gmail_connections WHERE user_id=?1').bind(Number(auth.user.id)).first();
+  let previous = null;
+  if (current?.encrypted_tokens) {
+    try { previous = await decryptJson(current.encrypted_tokens, env.GOOGLE_TOKEN_ENCRYPTION_KEY); } catch {}
+  }
+  const payload = {
+    access_token: tokens.access_token,
+    refresh_token: tokens.refresh_token || previous?.refresh_token || null,
+    token_type: tokens.token_type || 'Bearer',
+  };
+  if (!payload.refresh_token) return gmailErrorRedirect(request, env, 'refresh_token');
+  const encrypted = await encryptJson(payload, env.GOOGLE_TOKEN_ENCRYPTION_KEY);
+  const accessExpiresAt = new Date(Date.now() + Number(tokens.expires_in || 3600) * 1000).toISOString();
+
+  await env.DB.prepare(`
+    INSERT INTO gmail_connections (user_id, google_sub, email, encrypted_tokens, scopes, access_expires_at)
+    VALUES (?1,?2,?3,?4,?5,?6)
+    ON CONFLICT(user_id) DO UPDATE SET google_sub=excluded.google_sub, email=excluded.email,
+      encrypted_tokens=excluded.encrypted_tokens, scopes=excluded.scopes,
+      access_expires_at=excluded.access_expires_at, updated_at=CURRENT_TIMESTAMP
+  `).bind(Number(auth.user.id), profile.sub || null, profile.email || auth.user.email, encrypted, tokens.scope || '', accessExpiresAt).run();
+
+  return redirectResponse(`${appOrigin(request, env)}/?gmail=connected`, [clearCookie('nakna_gmail_state')]);
+}
+
+async function exchangeGoogleCode(code, redirectUri, env) {
+  const body = new URLSearchParams({
+    code,
+    client_id: env.GOOGLE_CLIENT_ID,
+    client_secret: env.GOOGLE_CLIENT_SECRET,
+    redirect_uri: redirectUri,
+    grant_type: 'authorization_code',
+  });
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const data = await response.json();
+  if (!response.ok || !data.access_token) throw new Error(`Google token exchange failed: ${data.error || response.status}`);
+  return data;
+}
+
+async function fetchGoogleProfile(accessToken) {
+  const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`Google userinfo failed: ${response.status}`);
+  return data;
+}
+
+async function getMemberships(db, userId) {
+  const result = await db.prepare(`
+    SELECT c.id, c.name, c.code, m.role
+    FROM company_members m JOIN clients c ON c.id=m.client_id
+    WHERE m.user_id=?1 AND m.status='active'
+    ORDER BY m.id
+  `).bind(Number(userId)).all();
+  return result.results || [];
+}
+
+async function getClaimableLegacyCompany(db) {
+  return db.prepare(`
+    SELECT c.id, c.name, c.code
+    FROM clients c
+    LEFT JOIN company_members m ON m.client_id=c.id AND m.status='active'
+    GROUP BY c.id
+    HAVING COUNT(m.id)=0
+    ORDER BY c.id
+    LIMIT 1
+  `).first();
+}
+
+async function createCompanyForUser(db, auth, name) {
+  let code = companyCode(name);
+  for (let i = 0; i < 5; i++) {
+    const exists = await db.prepare('SELECT id FROM clients WHERE code=?1').bind(code).first();
+    if (!exists) break;
+    code = `${companyCode(name).slice(0, 12)}-${randomToken(3).toUpperCase()}`;
+  }
+  const created = await db.prepare(`INSERT INTO clients (name, code, timezone, work_start, work_end) VALUES (?1,?2,'Asia/Bangkok','09:00','18:00')`).bind(name, code).run();
+  const clientId = Number(created.meta.last_row_id);
+  await db.prepare(`INSERT INTO company_members (client_id, user_id, role, status) VALUES (?1,?2,'owner','active')`).bind(clientId, Number(auth.user.id)).run();
+  await db.prepare('UPDATE auth_sessions SET selected_client_id=?1 WHERE token_hash=?2').bind(clientId, auth.sessionHash).run();
+  await audit(db, clientId, 'user', String(auth.user.id), 'company.create', 'client', String(clientId), { name, code });
+  return { id: clientId, name, code, role: 'owner' };
+}
+
+function publicUser(user) {
+  return { id: user.id, email: user.email, name: user.name, picture_url: user.picture_url, locale: user.locale };
+}
+
+function assertGoogleConfig(env) {
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) throw new Error('Google OAuth is not configured');
+}
+
+function appOrigin(request, env) {
+  return String(env.APP_ORIGIN || new URL(request.url).origin).replace(/\/$/, '');
+}
+
+function oauthRedirectUri(request, env, path) {
+  return `${appOrigin(request, env)}${path}`;
+}
+
+function authErrorRedirect(request, env, code) {
+  return redirectResponse(`${appOrigin(request, env)}/?auth_error=${encodeURIComponent(code)}`);
+}
+
+function gmailErrorRedirect(request, env, code) {
+  return redirectResponse(`${appOrigin(request, env)}/?gmail_error=${encodeURIComponent(code)}`);
+}
+
+function redirectResponse(location, cookies = []) {
+  const headers = new Headers({ location });
+  for (const cookie of cookies) headers.append('Set-Cookie', cookie);
+  return new Response(null, { status: 302, headers });
+}
+
+function getCookie(request, name) {
+  const cookie = request.headers.get('cookie') || '';
+  for (const part of cookie.split(';')) {
+    const [key, ...value] = part.trim().split('=');
+    if (key === name) return decodeURIComponent(value.join('='));
+  }
+  return '';
+}
+
+function sessionCookie(token) {
+  return `nakna_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`;
+}
+
+function companyCookie(clientId) {
+  return `nakna_company=${encodeURIComponent(String(clientId))}; Path=/; Secure; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`;
+}
+
+function oauthStateCookie(name, state, maxAge) {
+  return `${name}=${encodeURIComponent(state)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+}
+
+function clearCookie(name) {
+  return `${name}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+}
+
+function withCookie(response, cookie) {
+  response.headers.append('Set-Cookie', cookie);
+  return response;
+}
+
+function randomToken(byteLength = 32) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return bytesToBase64Url(bytes);
+}
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value)));
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function bytesToBase64Url(bytes) {
+  return bytesToBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function encryptJson(value, secret) {
+  const keyBytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
+  const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(JSON.stringify(value));
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext);
+  return `${bytesToBase64Url(iv)}.${bytesToBase64Url(new Uint8Array(ciphertext))}`;
+}
+
+async function decryptJson(value, secret) {
+  const [ivPart, dataPart] = String(value).split('.');
+  if (!ivPart || !dataPart) throw new Error('Invalid encrypted token');
+  const keyBytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
+  const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64UrlToBytes(ivPart) }, key, base64UrlToBytes(dataPart));
+  return JSON.parse(new TextDecoder().decode(plaintext));
+}
+
+function base64UrlToBytes(value) {
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, char => char.charCodeAt(0));
+}
+
+function companyCode(name) {
+  const ascii = String(name).normalize('NFKD').replace(/[^A-Za-z0-9]+/g, '').toUpperCase().slice(0, 12);
+  return ascii || `NAKNA-${randomToken(4).toUpperCase()}`;
 }
 
 async function getClient(db, id) {
