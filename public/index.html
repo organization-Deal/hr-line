@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#4f46e5" />
+  <title>HR LINE OS</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="login" class="login-overlay">
+    <div class="login-card">
+      <div class="logo-mark">H</div>
+      <h1>HR LINE OS</h1>
+      <p>ศูนย์ควบคุมงาน HR ที่ตามงานแทนคุณ</p>
+      <label>Admin Token</label>
+      <input id="tokenInput" type="password" placeholder="วาง HR_ADMIN_TOKEN" autocomplete="current-password" />
+      <button id="loginBtn" class="primary-btn">เข้าสู่ระบบ</button>
+      <small>Token จะเก็บเฉพาะ session ของ browser นี้</small>
+      <div id="loginError" class="error-text"></div>
+    </div>
+  </div>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="logo-mark small">H</div><div><strong>HR LINE OS</strong><span>People Command Center</span></div></div>
+      <nav>
+        <button class="nav-item active" data-view="dashboard"><span>⌂</span> Dashboard</button>
+        <button class="nav-item" data-view="employees"><span>♙</span> Employees</button>
+        <button class="nav-item" data-view="recruitment"><span>◎</span> Recruitment</button>
+        <button class="nav-item" data-view="attendance"><span>◷</span> Attendance</button>
+        <button class="nav-item" data-view="leave"><span>◇</span> Leave</button>
+        <button class="nav-item" data-view="requests"><span>◫</span> HR Requests</button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="line-pill"><span>LINE</span> Employee First</div>
+        <div class="version-label">V0.1.0 · 20 AUG 2026</div>
+        <button id="logoutBtn" class="ghost-btn">ออกจากระบบ</button>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div><p class="eyebrow">PEOPLE OPERATIONS</p><h2 id="pageTitle">Dashboard</h2></div>
+        <div class="top-actions"><span id="todayText"></span><button id="refreshBtn" class="icon-btn">↻</button></div>
+      </header>
+
+      <section id="view-dashboard" class="view active">
+        <div class="hero">
+          <div><p class="eyebrow light">HR AUTOPILOT</p><h1>วันนี้มีอะไรที่ HR ต้องจัดการ?</h1><p id="heroSub">กำลังโหลด...</p></div>
+          <div class="hero-orb"><span id="attentionTotal">0</span><small>Actions</small></div>
+        </div>
+
+        <div id="summaryGrid" class="summary-grid"></div>
+
+        <div class="grid-2">
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">TODAY'S ATTENTION</p><h3>HR Radar</h3></div><span class="badge purple">Auto</span></div>
+            <div id="attentionList" class="list-stack"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">PEOPLE MOMENTS</p><h3>วันสำคัญของทีม</h3></div><span class="badge">7 days</span></div>
+            <div id="birthdayList" class="list-stack"></div>
+          </article>
+        </div>
+
+        <div class="grid-2">
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">RECRUITMENT</p><h3>Candidate Pipeline</h3></div><button class="text-btn" data-jump="recruitment">เปิด ATS →</button></div>
+            <div id="recruitmentPipeline" class="pipeline"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">UPCOMING</p><h3>Probation & Contract</h3></div></div>
+            <div id="upcomingList" class="list-stack"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-employees" class="view">
+        <div class="section-actions"><div><h3>Employee 360</h3><p>แฟ้มพนักงานและสถานะ LINE</p></div><button id="addEmployeeBtn" class="primary-btn">+ เพิ่มพนักงาน</button></div>
+        <div class="table-card"><table><thead><tr><th>พนักงาน</th><th>แผนก</th><th>ตำแหน่ง</th><th>เริ่มงาน</th><th>LINE</th><th></th></tr></thead><tbody id="employeesBody"></tbody></table></div>
+      </section>
+
+      <section id="view-recruitment" class="view">
+        <div class="section-actions"><div><h3>Recruitment ATS</h3><p>จากผู้สมัคร → สัมภาษณ์ → Offer → Hired</p></div><button id="addCandidateBtn" class="primary-btn">+ เพิ่ม Candidate</button></div>
+        <div id="kanban" class="kanban"></div>
+      </section>
+
+      <section id="view-attendance" class="view">
+        <div class="section-actions"><div><h3>Attendance Today</h3><p>สถานะเช็กอินแบบ Realtime</p></div><span class="badge green">LINE + GPS Ready</span></div>
+        <div class="table-card"><table><thead><tr><th>พนักงาน</th><th>แผนก</th><th>Check-in</th><th>Check-out</th><th>สถานะ</th></tr></thead><tbody id="attendanceBody"></tbody></table></div>
+      </section>
+
+      <section id="view-leave" class="view">
+        <div class="section-actions"><div><h3>Leave Management</h3><p>คำขอลาและการอนุมัติ</p></div></div>
+        <div class="table-card"><table><thead><tr><th>พนักงาน</th><th>ประเภท</th><th>ช่วงวันที่</th><th>เหตุผล</th><th>สถานะ</th><th></th></tr></thead><tbody id="leaveBody"></tbody></table></div>
+      </section>
+
+      <section id="view-requests" class="view">
+        <div class="section-actions"><div><h3>HR Inbox</h3><p>รวม Request จากพนักงานไว้ที่เดียว</p></div></div>
+        <div id="requestsList" class="request-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="modal"><form method="dialog" id="modalForm"><div class="modal-head"><div><p class="eyebrow" id="modalEyebrow">CREATE</p><h3 id="modalTitle">เพิ่มข้อมูล</h3></div><button class="close-btn" value="cancel">×</button></div><div id="modalFields"></div><div class="modal-actions"><button value="cancel" class="ghost-btn">ยกเลิก</button><button type="button" id="modalSave" class="primary-btn">บันทึก</button></div></form></dialog>
+
+  <div id="toast" class="toast"></div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
