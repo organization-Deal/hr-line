@@ -313,7 +313,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.3', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.4', auth: 'google-oauth' });
       }
 
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
@@ -1037,31 +1037,96 @@ async function finishGoogleLogin(request, env) {
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   const cookieState = getCookie(request, 'nakna_oauth_state');
-  if (!code || !state || !cookieState || !constantTimeEqual(state, cookieState)) return authErrorRedirect(request, env, 'state');
 
-  const tokens = await exchangeGoogleCode(code, oauthRedirectUri(request, env, '/auth/google/callback'), env);
-  const profile = await fetchGoogleProfile(tokens.access_token);
-  if (!profile?.sub || !profile?.email || profile.email_verified === false) return authErrorRedirect(request, env, 'profile');
+  if (!code || !state || !cookieState || !constantTimeEqual(state, cookieState)) {
+    console.warn(JSON.stringify({ level: 'warn', event: 'google_oauth_failed', stage: 'state' }));
+    return json({ error: 'GOOGLE_OAUTH_STATE_FAILED', stage: 'state' }, 400);
+  }
 
-  await env.DB.prepare(`
-    INSERT INTO users (google_sub, email, name, picture_url, locale, status)
-    VALUES (?1,?2,?3,?4,?5,'active')
-    ON CONFLICT(google_sub) DO UPDATE SET
-      email=excluded.email, name=excluded.name, picture_url=excluded.picture_url,
-      locale=excluded.locale, status='active', updated_at=CURRENT_TIMESTAMP
-  `).bind(profile.sub, profile.email.toLowerCase(), profile.name || profile.email, profile.picture || null, profile.locale || null).run();
-  const user = await env.DB.prepare('SELECT * FROM users WHERE google_sub=?1').bind(profile.sub).first();
-  const firstMembership = await env.DB.prepare(`SELECT client_id FROM company_members WHERE user_id=?1 AND status='active' ORDER BY id LIMIT 1`).bind(Number(user.id)).first();
+  let tokens;
+  try {
+    tokens = await exchangeGoogleCode(code, oauthRedirectUri(request, env, '/auth/google/callback'), env);
+  } catch (error) {
+    const detail = safeOAuthErrorDetail(error);
+    console.error(JSON.stringify({ level: 'error', event: 'google_oauth_failed', stage: 'token_exchange', detail }));
+    return json({ error: 'GOOGLE_TOKEN_EXCHANGE_FAILED', stage: 'token_exchange', detail }, 500);
+  }
+
+  let profile;
+  try {
+    profile = await fetchGoogleProfile(tokens.access_token);
+  } catch (error) {
+    const detail = safeOAuthErrorDetail(error);
+    console.error(JSON.stringify({ level: 'error', event: 'google_oauth_failed', stage: 'userinfo', detail }));
+    return json({ error: 'GOOGLE_PROFILE_FAILED', stage: 'userinfo', detail }, 500);
+  }
+
+  if (!profile?.sub || !profile?.email || profile.email_verified === false) {
+    console.warn(JSON.stringify({ level: 'warn', event: 'google_oauth_failed', stage: 'profile_validation' }));
+    return json({ error: 'GOOGLE_PROFILE_INVALID', stage: 'profile_validation' }, 400);
+  }
+
+  let user;
+  try {
+    await env.DB.prepare(`
+      INSERT INTO users (google_sub, email, name, picture_url, locale, status)
+      VALUES (?1,?2,?3,?4,?5,'active')
+      ON CONFLICT(google_sub) DO UPDATE SET
+        email=excluded.email, name=excluded.name, picture_url=excluded.picture_url,
+        locale=excluded.locale, status='active', updated_at=CURRENT_TIMESTAMP
+    `).bind(profile.sub, profile.email.toLowerCase(), profile.name || profile.email, profile.picture || null, profile.locale || null).run();
+    user = await env.DB.prepare('SELECT * FROM users WHERE google_sub=?1').bind(profile.sub).first();
+    if (!user?.id) throw new Error('USER_NOT_FOUND_AFTER_UPSERT');
+  } catch (error) {
+    const detail = safeDbErrorDetail(error);
+    console.error(JSON.stringify({ level: 'error', event: 'google_oauth_failed', stage: 'db_user', detail }));
+    return json({ error: 'DB_USER_UPSERT_FAILED', stage: 'db_user', detail }, 500);
+  }
+
+  let firstMembership = null;
+  try {
+    firstMembership = await env.DB.prepare(`SELECT client_id FROM company_members WHERE user_id=?1 AND status='active' ORDER BY id LIMIT 1`).bind(Number(user.id)).first();
+  } catch (error) {
+    const detail = safeDbErrorDetail(error);
+    console.error(JSON.stringify({ level: 'error', event: 'google_oauth_failed', stage: 'db_membership', detail }));
+    return json({ error: 'DB_MEMBERSHIP_LOOKUP_FAILED', stage: 'db_membership', detail }, 500);
+  }
 
   const sessionToken = randomToken(40);
   const sessionHash = await sha256Hex(sessionToken);
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  await env.DB.prepare(`INSERT INTO auth_sessions (token_hash, user_id, selected_client_id, expires_at) VALUES (?1,?2,?3,?4)`)
-    .bind(sessionHash, Number(user.id), firstMembership ? Number(firstMembership.client_id) : null, expiresAt).run();
+  try {
+    await env.DB.prepare(`INSERT INTO auth_sessions (token_hash, user_id, selected_client_id, expires_at) VALUES (?1,?2,?3,?4)`)
+      .bind(sessionHash, Number(user.id), firstMembership ? Number(firstMembership.client_id) : null, expiresAt).run();
+  } catch (error) {
+    const detail = safeDbErrorDetail(error);
+    console.error(JSON.stringify({ level: 'error', event: 'google_oauth_failed', stage: 'db_session', detail }));
+    return json({ error: 'DB_SESSION_CREATE_FAILED', stage: 'db_session', detail }, 500);
+  }
 
   const cookies = [sessionCookie(sessionToken), clearCookie('nakna_oauth_state')];
   if (firstMembership) cookies.push(companyCookie(Number(firstMembership.client_id)));
   return redirectResponse(`${appOrigin(request, env)}/?auth=success`, cookies);
+}
+
+function safeOAuthErrorDetail(error) {
+  const text = String(error?.message || error || 'unknown');
+  const known = ['invalid_client', 'invalid_grant', 'redirect_uri_mismatch', 'access_denied', 'unauthorized_client'];
+  for (const code of known) if (text.includes(code)) return code;
+  if (text.includes('Google token exchange failed')) return 'token_exchange_failed';
+  if (text.includes('Google userinfo failed')) return 'userinfo_failed';
+  return 'oauth_failed';
+}
+
+function safeDbErrorDetail(error) {
+  const text = String(error?.message || error || 'unknown');
+  const table = text.match(/no such table:\s*([A-Za-z0-9_]+)/i);
+  if (table) return `missing_table:${table[1]}`;
+  if (/UNIQUE constraint failed/i.test(text)) return 'unique_constraint';
+  if (/FOREIGN KEY constraint failed/i.test(text)) return 'foreign_key_constraint';
+  if (/D1 binding DB is not available/i.test(text)) return 'db_binding_missing';
+  if (/USER_NOT_FOUND_AFTER_UPSERT/i.test(text)) return 'user_missing_after_upsert';
+  return 'db_operation_failed';
 }
 
 async function logoutSession(request, env) {
