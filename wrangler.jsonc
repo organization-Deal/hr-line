@@ -32,7 +32,8 @@
   ],
   "r2_buckets": [
     {
-      "binding": "EVIDENCE_BUCKET"
+      "binding": "EVIDENCE_BUCKET",
+      "bucket_name": "hr-line-evidence-bucket"
     }
   ],
   "vars": {
