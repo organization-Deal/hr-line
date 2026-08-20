@@ -10,6 +10,8 @@ const state = {
   invites: [],
   lookups: { departments: [], positions: [], locations: [] },
   workLocations: [],
+  leavePolicies: [],
+  activeLeaveProfileEmployeeId: null,
   currentView: 'dashboard',
 };
 
@@ -112,6 +114,12 @@ function bindEvents() {
   $('#inviteEmployeeBtn').onclick = openInviteModal;
   $('#inviteEmployeeBtnInline').onclick = openInviteModal;
   $('#addWorkLocationBtn').onclick = openWorkLocationModal;
+  $('#addLeaveBtn').onclick = openLeaveRequestModal;
+  $('#addLeavePolicyBtn').onclick = () => openLeavePolicyModal();
+  $('#leaveProfileSaveBtn').onclick = saveLeaveProfile;
+  $('#leaveRequestSaveBtn').onclick = saveLeaveRequest;
+  $('#leavePolicySaveBtn').onclick = saveLeavePolicy;
+  $('#leaveProfileYear').onchange = () => state.activeLeaveProfileEmployeeId && openLeaveProfile(state.activeLeaveProfileEmployeeId, true);
   $('#inviteCreateBtn').onclick = createInvite;
   $('#locationSaveBtn').onclick = saveWorkLocation;
   $('#useCurrentLocationBtn').onclick = useCurrentLocation;
@@ -122,7 +130,7 @@ function bindEvents() {
   $('#mobileNavBackdrop').onclick = closeMobileNav;
 
   $$('.future-view .secondary-btn').forEach(button => {
-    button.onclick = () => toast('โมดูลนี้อยู่ใน Roadmap ของนากนะ V0.4', false, 'i');
+    button.onclick = () => toast('โมดูลนี้อยู่ใน Roadmap ของนากนะ V0.5', false, 'i');
   });
 }
 
@@ -266,6 +274,15 @@ function roleLabel(role) {
   return ({ owner: 'Owner', hr_admin: 'HR Admin', hr: 'HR', manager: 'Manager', employee: 'Employee', viewer: 'Viewer' })[role] || role || 'Member';
 }
 
+function activeCompanyRole() {
+  const me = state.me || {};
+  return (me.companies || []).find(company => Number(company.id) === Number(me.active_company_id))?.role || null;
+}
+
+function canHrOverrideLeave() {
+  return ['owner','hr_admin','hr'].includes(String(activeCompanyRole() || ''));
+}
+
 async function disconnectGmail() {
   if (!state.gmail?.connected) return;
   const button = $('#gmailDisconnectBtn');
@@ -309,7 +326,7 @@ async function ensureWorkspaceReady() {
 async function loadAll({ silent = false } = {}) {
   setLoading(true);
   try {
-    const [dashboard, employees, candidates, attendance, leaves, requests, gmail, invites, lookups, workLocations] = await Promise.all([
+    const [dashboard, employees, candidates, attendance, leaves, requests, gmail, invites, lookups, workLocations, leavePolicies] = await Promise.all([
       api('/api/dashboard'),
       api('/api/employees'),
       api('/api/candidates'),
@@ -320,6 +337,7 @@ async function loadAll({ silent = false } = {}) {
       api('/api/invites'),
       api('/api/lookups'),
       api('/api/work-locations'),
+      api('/api/leave-policies'),
     ]);
 
     state.dashboard = dashboard;
@@ -332,6 +350,7 @@ async function loadAll({ silent = false } = {}) {
     state.invites = invites.data || [];
     state.lookups = lookups || { departments: [], positions: [], locations: [] };
     state.workLocations = workLocations.data || [];
+    state.leavePolicies = leavePolicies.data || [];
 
     renderAll();
     renderIdentity();
@@ -368,6 +387,7 @@ function renderAll() {
   renderRequests();
   renderInviteCenter();
   renderWorkLocations();
+  renderLeavePolicies();
 
   $('#todayText').textContent = formatDate(state.dashboard.today);
   $('#sidebarCompany').textContent = state.dashboard.client?.name || 'บริษัทของคุณ';
@@ -455,16 +475,7 @@ function renderDashboard() {
 function renderEmployees(query = '') {
   const normalized = query.trim().toLowerCase();
   const employees = normalized
-    ? state.employees.filter(employee => [
-        employee.nickname,
-        employee.first_name,
-        employee.last_name,
-        employee.employee_code,
-        employee.department_name,
-        employee.position_name,
-        employee.line_display_name,
-        employee.work_location_names,
-      ].some(value => String(value || '').toLowerCase().includes(normalized)))
+    ? state.employees.filter(employee => [employee.nickname,employee.first_name,employee.last_name,employee.employee_code,employee.department_name,employee.position_name,employee.line_display_name,employee.work_location_names].some(value => String(value || '').toLowerCase().includes(normalized)))
     : state.employees;
 
   $('#employeeCountText').textContent = `${employees.length} คน`;
@@ -485,11 +496,11 @@ function renderEmployees(query = '') {
         </td>
         <td data-label="แผนก">${escapeHtml(employee.department_name || '—')}</td>
         <td data-label="Work Location">${employee.work_location_names ? `<span class="location-inline">📍 ${escapeHtml(employee.work_location_names)}</span>` : '<span class="muted">ทุก Location</span>'}</td>
-        <td data-label="เริ่มงาน">${formatDate(employee.start_date)}</td>
+        <td data-label="ผู้อนุมัติลา">${employee.leave_approver_employee_id ? `<div class="approver-inline"><strong>${escapeHtml(employee.leave_approver_nickname || employee.leave_approver_first_name || 'กำหนดแล้ว')}</strong><small>LINE Approval</small></div>` : '<span class="badge badge-warning">ยังไม่กำหนด</span>'}</td>
         <td data-label="LINE">${employee.line_user_id
           ? `<div class="line-connected"><span class="badge badge-success"><span class="status-dot"></span> เชื่อมแล้ว</span><small>${escapeHtml(employee.line_display_name || 'LINE account')}</small></div>`
           : '<span class="badge badge-neutral">ยังไม่เชื่อม</span>'}</td>
-        <td data-label="สถานะ"><span class="badge ${employee.status === 'active' ? 'badge-success' : 'badge-neutral'}">${employee.status === 'active' ? 'ทำงานอยู่' : escapeHtml(employee.status)}</span></td>
+        <td data-label="สิทธิ์ลา"><button class="text-btn" onclick="window.openLeaveProfile(${Number(employee.id)})">จัดการสิทธิ์</button></td>
       </tr>`).join('')
     : `<tr><td colspan="6">${emptyState('ไม่พบพนักงาน', 'ลองค้นหาด้วยชื่อ รหัสพนักงาน แผนก หรือ LINE อีกครั้ง')}</td></tr>`;
 }
@@ -647,11 +658,13 @@ function renderAttendance() {
 
 function renderLeaves() {
   const pending = state.leaves.filter(leave => leave.status === 'pending').length;
+  const evidence = state.leaves.filter(leave => leave.status === 'awaiting_evidence').length;
   const approved = state.leaves.filter(leave => leave.status === 'approved').length;
   const rejected = state.leaves.filter(leave => leave.status === 'rejected').length;
 
   $('#leaveSummary').innerHTML = `
     <span><strong>${pending}</strong> รออนุมัติ</span>
+    <span><strong>${evidence}</strong> รอหลักฐาน</span>
     <span><strong>${approved}</strong> อนุมัติแล้ว</span>
     <span><strong>${rejected}</strong> ไม่อนุมัติ</span>`;
 
@@ -659,23 +672,58 @@ function renderLeaves() {
     ? state.leaves.map(leave => `
       <tr>
         <td data-label="พนักงาน"><div class="person"><div class="avatar">${initial(leave)}</div><div><strong>${escapeHtml(leave.nickname || leave.first_name)} ${escapeHtml(leave.last_name || '')}</strong><small>#LV-${String(leave.id).padStart(4, '0')}</small></div></div></td>
-        <td data-label="ประเภท">${leaveLabels[leave.leave_type] || escapeHtml(leave.leave_type)}</td>
-        <td data-label="ช่วงวันที่">${formatDate(leave.start_date)}${leave.start_date !== leave.end_date ? ` – ${formatDate(leave.end_date)}` : ''}</td>
-        <td data-label="เหตุผล">${escapeHtml(leave.reason || '—')}</td>
+        <td data-label="ประเภท / วัน"><strong class="table-primary">${escapeHtml(leave.leave_type_name || leaveLabels[leave.leave_type] || leave.leave_type)}</strong><small class="table-secondary">${formatDate(leave.start_date)}${leave.start_date !== leave.end_date ? ` – ${formatDate(leave.end_date)}` : ''} · ${formatLeaveDays(leave.duration_days)}</small></td>
+        <td data-label="ผู้อนุมัติ">${leave.approver_employee_id ? `<div class="approver-inline"><strong>${escapeHtml(leave.approver_nickname || leave.approver_first_name || 'ผู้อนุมัติ')}</strong><small>${leave.status === 'pending' ? 'กำลังรอคนนี้' : 'Approval owner'}</small></div>` : '<span class="badge badge-danger">ยังไม่กำหนด</span>'}</td>
+        <td data-label="หลักฐาน"><button class="text-btn ${Number(leave.evidence_count||0) ? '' : 'muted-btn'}" onclick="window.openLeaveDetail(${Number(leave.id)})">${Number(leave.evidence_count||0) ? `📎 ${Number(leave.evidence_count)} ไฟล์` : Number(leave.evidence_required) ? '⚠ ต้องแนบ' : 'ดูรายละเอียด'}</button></td>
         <td data-label="สถานะ">${statusBadge(leave.status)}</td>
-        <td data-label="จัดการ">${leave.status === 'pending' ? `<button class="text-btn" onclick="window.leaveAction(${leave.id},'approve')">อนุมัติ</button> <button class="text-btn danger" onclick="window.leaveAction(${leave.id},'reject')">ไม่อนุมัติ</button>` : '<span class="muted">—</span>'}</td>
+        <td data-label="จัดการ">${leave.status === 'pending' && canHrOverrideLeave() ? `<button class="text-btn" onclick="window.leaveAction(${leave.id},'approve')">HR อนุมัติแทน</button> <button class="text-btn danger" onclick="window.leaveAction(${leave.id},'reject')">HR ไม่อนุมัติ</button>` : leave.status === 'pending' ? '<span class="muted">รอผู้อนุมัติใน LINE</span>' : '<span class="muted">—</span>'}</td>
       </tr>`).join('')
-    : `<tr><td colspan="6">${emptyState('ยังไม่มีคำขอลา', 'คำขอลาจากพนักงานจะแสดงพร้อมสถานะอนุมัติที่นี่')}</td></tr>`;
+    : `<tr><td colspan="6">${emptyState('ยังไม่มีคำขอลา', 'พนักงานกดขอลาผ่าน LINE หรือ HR บันทึกคำขอแทนได้')}</td></tr>`;
+
+  renderLeaveCalendar();
+}
+
+function renderLeaveCalendar() {
+  const root = $('#leaveCalendar');
+  const today = new Date(); today.setHours(12,0,0,0);
+  const days = Array.from({length:14}, (_,i) => { const d=new Date(today); d.setDate(d.getDate()+i); return d; });
+  root.innerHTML = days.map(d => {
+    const key = localDateKey(d);
+    const leaves = state.leaves.filter(item => item.status === 'approved' && key >= item.start_date && key <= item.end_date);
+    return `<div class="leave-day ${leaves.length ? 'has-leave' : ''}">
+      <div class="leave-day-date"><strong>${d.toLocaleDateString('th-TH',{day:'numeric',timeZone:'Asia/Bangkok'})}</strong><span>${d.toLocaleDateString('th-TH',{weekday:'short',month:'short',timeZone:'Asia/Bangkok'})}</span></div>
+      <div class="leave-day-people">${leaves.length ? leaves.slice(0,4).map(item => `<span>${escapeHtml(item.nickname || item.first_name)} · ${escapeHtml(item.leave_type_name || leaveLabels[item.leave_type] || item.leave_type)}</span>`).join('') : '<small>ไม่มีคนลา</small>'}${leaves.length>4?`<small>+${leaves.length-4} คน</small>`:''}</div>
+    </div>`;
+  }).join('');
 }
 
 window.leaveAction = async (id, action) => {
+  const reason = action === 'reject' ? window.prompt('ระบุเหตุผลที่ไม่อนุมัติ') : '';
+  if (action === 'reject' && (!reason || reason.trim().length < 2)) return;
   try {
-    await api(`/api/leaves/${id}/${action}`, { method: 'PATCH', body: '{}' });
+    await api(`/api/leaves/${id}/${action}`, { method: 'PATCH', body: JSON.stringify({ reason }) });
     await loadAll({ silent: true });
-    toast(action === 'approve' ? 'อนุมัติคำขอลาเรียบร้อยแล้ว' : 'บันทึกว่าไม่อนุมัติแล้ว');
-  } catch (error) {
-    toast(error.message, true);
-  }
+    toast(action === 'approve' ? 'อนุมัติคำขอลาเรียบร้อยแล้ว' : 'บันทึกเหตุผลและไม่อนุมัติแล้ว');
+  } catch (error) { toast(error.message, true); }
+};
+
+window.openLeaveDetail = async id => {
+  try {
+    const result = await api(`/api/leaves/${id}`);
+    const row = result.data;
+    $('#modalEyebrow').textContent = `#LV-${String(id).padStart(4,'0')}`;
+    $('#modalTitle').textContent = `${row.leave_type_name || row.leave_type} · ${row.nickname || row.first_name}`;
+    $('#modalSubtitle').textContent = `${formatDate(row.start_date)}${row.start_date!==row.end_date?` – ${formatDate(row.end_date)}`:''} · ${formatLeaveDays(row.duration_days)}`;
+    $('#modalFields').className = 'leave-detail';
+    $('#modalFields').innerHTML = `
+      <div class="detail-block"><span>เหตุผล</span><strong>${escapeHtml(row.reason || '—')}</strong></div>
+      <div class="detail-grid"><div><span>ผู้อนุมัติ</span><strong>${escapeHtml(row.approver_nickname || row.approver_first_name || 'ยังไม่กำหนด')}</strong></div><div><span>สถานะ</span>${statusBadge(row.status)}</div></div>
+      ${row.decision_reason ? `<div class="detail-block"><span>เหตุผลการพิจารณา</span><strong>${escapeHtml(row.decision_reason)}</strong></div>` : ''}
+      <div class="detail-block"><span>หลักฐาน</span><div class="evidence-links">${(result.evidence||[]).length ? result.evidence.map(ev => `<a class="secondary-btn" href="/api/leave-evidence/${ev.id}" target="_blank" rel="noopener">📎 ${escapeHtml(ev.file_name || `หลักฐาน ${ev.id}`)}</a>`).join('') : '<small class="muted">ไม่มีไฟล์แนบ</small>'}</div>${['pending','awaiting_evidence'].includes(row.status)?`<div class="evidence-upload"><input id="leaveEvidenceFile" type="file" accept="image/*,.pdf" /><button type="button" class="secondary-btn" onclick="window.uploadLeaveEvidence(${id})">อัปโหลดหลักฐาน</button></div>`:''}</div>`;
+    $('#modalSave').textContent = 'ปิด';
+    $('#modalSave').onclick = () => $('#modal').close();
+    $('#modal').showModal();
+  } catch(error){ toast(error.message,true); }
 };
 
 function renderRequests() {
@@ -833,6 +881,87 @@ function openModal(eyebrow, title, subtitle, fields, onSave) {
   $('#modal').showModal();
 }
 
+function formatLeaveDays(value) {
+  const n = Number(value || 0);
+  return `${n % 1 ? n.toFixed(1) : n.toFixed(0)} วัน`;
+}
+function localDateKey(date) {
+  const parts = new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date);
+  const get = type => parts.find(p=>p.type===type)?.value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+window.openLeaveProfile = (id) => openLeaveProfile(id);
+async function openLeaveProfile(employeeId, keepOpen = false) {
+  state.activeLeaveProfileEmployeeId = Number(employeeId);
+  const year = Number($('#leaveProfileYear')?.value || new Date().getFullYear());
+  try {
+    const result = await api(`/api/employees/${employeeId}/leave-profile?year=${year}`);
+    const employee = result.employee;
+    $('#leaveProfileTitle').textContent = `สิทธิ์ลา · ${employee.nickname || employee.first_name}`;
+    $('#leaveProfileSubtitle').textContent = `${employee.employee_code} · กำหนดผู้อนุมัติและสิทธิ์รายคน`;
+    const years=[year-1,year,year+1];
+    $('#leaveProfileYear').innerHTML=years.map(y=>`<option value="${y}" ${y===result.year?'selected':''}>${y+543}</option>`).join('');
+    $('#leaveApproverSelect').innerHTML = `<option value="">ยังไม่กำหนด</option>${state.employees.filter(e=>Number(e.id)!==Number(employeeId)).map(e=>`<option value="${e.id}" ${Number(e.id)===Number(employee.leave_approver_employee_id)?'selected':''}>${escapeHtml(e.nickname || e.first_name)}${e.department_name?` · ${escapeHtml(e.department_name)}`:''}${e.line_user_id?' · LINE✓':''}</option>`).join('')}`;
+    $('#leaveEntitlementRows').innerHTML=result.balances.map(b=>`
+      <div class="entitlement-row" data-policy-id="${b.id}">
+        <div class="entitlement-name"><strong>${escapeHtml(b.name)}</strong><small>${Number(b.is_unlimited)?'ไม่จำกัดสิทธิ์':`ใช้แล้ว ${formatLeaveDays(b.used_days)} · รอ ${formatLeaveDays(b.pending_days)}`}</small></div>
+        <div class="entitlement-input"><label>สิทธิ์</label><input data-field="entitlement" type="number" step="0.5" min="0" value="${Number(b.entitlement_days)}" ${Number(b.is_unlimited)?'disabled':''}></div>
+        <div class="entitlement-input"><label>ปรับเพิ่ม/ลด</label><input data-field="adjustment" type="number" step="0.5" value="${Number(b.adjustment_days)}" ${Number(b.is_unlimited)?'disabled':''}></div>
+        <div class="entitlement-balance"><span>คงเหลือ</span><strong>${Number(b.is_unlimited)?'∞':formatLeaveDays(b.remaining_days)}</strong></div>
+      </div>`).join('');
+    if(!keepOpen) $('#leaveProfileModal').showModal();
+  } catch(error){ toast(error.message,true); }
+}
+
+async function saveLeaveProfile() {
+  const employeeId=state.activeLeaveProfileEmployeeId; if(!employeeId) return;
+  const button=$('#leaveProfileSaveBtn'); button.disabled=true;
+  try{
+    const entitlements=$$('#leaveEntitlementRows .entitlement-row').map(row=>({policy_id:Number(row.dataset.policyId),entitlement_days:Number(row.querySelector('[data-field="entitlement"]')?.value||0),adjustment_days:Number(row.querySelector('[data-field="adjustment"]')?.value||0)}));
+    await api(`/api/employees/${employeeId}/leave-profile`,{method:'PUT',body:JSON.stringify({year:Number($('#leaveProfileYear').value),leave_approver_employee_id:$('#leaveApproverSelect').value||null,entitlements})});
+    $('#leaveProfileModal').close(); await loadAll({silent:true}); toast('บันทึกผู้อนุมัติและสิทธิ์ลาแล้ว');
+  }catch(error){toast(error.message,true);}finally{button.disabled=false;}
+}
+
+function openLeaveRequestModal(){
+  $('#leaveEmployeeSelect').innerHTML=state.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}">${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</option>`).join('');
+  $('#leavePolicySelect').innerHTML=state.leavePolicies.filter(p=>Number(p.is_active)).map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+  const today=localDateKey(new Date()); $('#leaveStartDate').value=today; $('#leaveEndDate').value=today; $('#leaveReason').value=''; $('#leaveDayPart').value='full';
+  $('#leaveRequestModal').showModal();
+}
+async function saveLeaveRequest(){
+  const button=$('#leaveRequestSaveBtn'); button.disabled=true;
+  try{
+    await api('/api/leaves',{method:'POST',body:JSON.stringify({employee_id:Number($('#leaveEmployeeSelect').value),policy_id:Number($('#leavePolicySelect').value),start_date:$('#leaveStartDate').value,end_date:$('#leaveEndDate').value,day_part:$('#leaveDayPart').value,reason:$('#leaveReason').value.trim()})});
+    $('#leaveRequestModal').close(); await loadAll({silent:true}); toast('ส่งคำขอลาเข้าระบบแล้ว');
+  }catch(error){toast(error.message,true);}finally{button.disabled=false;}
+}
+
+function renderLeavePolicies(){
+  const root=$('#leavePolicyList'); if(!root) return;
+  root.innerHTML=state.leavePolicies.length?state.leavePolicies.map(p=>`
+    <article class="leave-policy-card ${Number(p.is_active)?'':'inactive'}">
+      <div class="leave-policy-icon">${p.code==='sick'?'＋':p.code==='annual'?'☀':'◷'}</div>
+      <div class="leave-policy-copy"><strong>${escapeHtml(p.name)}</strong><p>${Number(p.is_unlimited)?'ไม่จำกัดวัน':`${Number(p.default_entitlement_days)} วัน/ปี`} · ${Number(p.requires_reason)?'ต้องมีเหตุผล':'ไม่บังคับเหตุผล'}${p.evidence_required_after_days!=null?` · หลักฐานเมื่อ ≥ ${Number(p.evidence_required_after_days)} วัน`:''}</p></div>
+      <span class="badge ${Number(p.is_active)?'badge-success':'badge-neutral'}">${Number(p.is_active)?'ใช้งาน':'ปิด'}</span>
+      <button class="text-btn" onclick="window.editLeavePolicy(${p.id})">แก้ไข</button>
+    </article>`).join(''):emptyState('ยังไม่มี Leave Policy','เพิ่มประเภทลาให้บริษัทก่อนกำหนดสิทธิ์พนักงาน');
+}
+window.editLeavePolicy=id=>openLeavePolicyModal(state.leavePolicies.find(p=>Number(p.id)===Number(id)));
+function openLeavePolicyModal(policy=null){
+  $('#leavePolicyForm').reset(); $('#leavePolicyId').value=policy?.id||''; $('#leavePolicyModalTitle').textContent=policy?'แก้ไขประเภทลา':'เพิ่มประเภทลา';
+  $('#leavePolicyName').value=policy?.name||''; $('#leavePolicyCode').value=policy?.code||''; $('#leavePolicyCode').disabled=Boolean(policy);
+  $('#leavePolicyDays').value=policy?.default_entitlement_days??0; $('#leavePolicyNotice').value=policy?.notice_days??0; $('#leavePolicyEvidence').value=policy?.evidence_required_after_days??'';
+  $('#leavePolicyUnlimited').checked=Boolean(Number(policy?.is_unlimited||0)); $('#leavePolicyReason').checked=policy?Boolean(Number(policy.requires_reason)):true; $('#leavePolicyNegative').checked=Boolean(Number(policy?.allow_negative||0));
+  $('#leavePolicyModal').showModal();
+}
+async function saveLeavePolicy(){
+  const id=$('#leavePolicyId').value; const body={name:$('#leavePolicyName').value.trim(),code:$('#leavePolicyCode').value.trim(),default_entitlement_days:Number($('#leavePolicyDays').value||0),notice_days:Number($('#leavePolicyNotice').value||0),evidence_required_after_days:$('#leavePolicyEvidence').value===''?null:Number($('#leavePolicyEvidence').value),is_unlimited:$('#leavePolicyUnlimited').checked,requires_reason:$('#leavePolicyReason').checked,allow_negative:$('#leavePolicyNegative').checked};
+  if(body.name.length<2)return toast('กรุณาใส่ชื่อประเภทลา',true); const button=$('#leavePolicySaveBtn');button.disabled=true;
+  try{await api(id?`/api/leave-policies/${id}`:'/api/leave-policies',{method:id?'PATCH':'POST',body:JSON.stringify(body)});$('#leavePolicyModal').close();await loadAll({silent:true});toast('บันทึก Leave Policy แล้ว');}catch(error){toast(error.message,true);}finally{button.disabled=false;}
+}
+
 function renderSettings() {
   const gmail = state.gmail || { connected: false };
   const connected = Boolean(gmail.connected);
@@ -881,6 +1010,7 @@ function attentionTone(item) {
 }
 
 function attendanceStatus(item) {
+  if (item.status === 'leave') return `<span class="badge badge-info">🏖 ${escapeHtml(item.leave_name || 'ลา')}</span>`;
   if (!item.check_in_at) return '<span class="badge badge-neutral">ยังไม่เช็กอิน</span>';
   if (item.status === 'late') return `<span class="badge badge-warning"><span class="status-dot"></span> สาย ${Number(item.late_minutes || 0)} นาที</span>`;
   return '<span class="badge badge-success"><span class="status-dot"></span> ตรงเวลา</span>';
@@ -891,6 +1021,7 @@ function statusBadge(status) {
     approved: ['badge-success', 'อนุมัติแล้ว'],
     rejected: ['badge-danger', 'ไม่อนุมัติ'],
     pending: ['badge-warning', 'รออนุมัติ'],
+    awaiting_evidence: ['badge-coral', 'รอหลักฐาน'],
     received: ['badge-info', 'รับเรื่องแล้ว'],
     processing: ['badge-warning', 'กำลังดำเนินการ'],
   };

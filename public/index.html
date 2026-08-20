@@ -126,7 +126,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong>พร้อมเชื่อม LINE</strong><small>Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V0.4.0</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V0.5.0</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -223,7 +223,7 @@
           <div class="search-box"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="employeeSearch" type="search" placeholder="ค้นหาชื่อ รหัสพนักงาน แผนก หรือ LINE" /></div>
           <div class="toolbar-meta"><span id="employeeCountText">0 คน</span></div>
         </div>
-        <div class="table-card"><table><thead><tr><th>พนักงาน</th><th>แผนก</th><th>Work Location</th><th>เริ่มงาน</th><th>LINE</th><th>สถานะ</th></tr></thead><tbody id="employeesBody"></tbody></table></div>
+        <div class="table-card"><table><thead><tr><th>พนักงาน</th><th>แผนก</th><th>Work Location</th><th>ผู้อนุมัติลา</th><th>LINE</th><th>สิทธิ์ลา</th></tr></thead><tbody id="employeesBody"></tbody></table></div>
       </section>
 
       <section id="view-recruitment" class="view">
@@ -246,10 +246,20 @@
 
       <section id="view-leave" class="view">
         <div class="page-intro">
-          <div><p class="kicker">LEAVE</p><h1>การลา</h1><p>ดูคำขอลา อนุมัติ และตรวจสอบรายการที่ยังรอดำเนินการ</p></div>
+          <div><p class="kicker">LEAVE CONTROL</p><h1>การลา</h1><p>สิทธิ์ลา ผู้อนุมัติ เหตุผล หลักฐาน และสถานะของทุกคำขออยู่ในที่เดียว</p></div>
+          <button id="addLeaveBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>บันทึกการลา</button>
         </div>
         <div class="table-summary" id="leaveSummary"></div>
-        <div class="table-card"><table><thead><tr><th>พนักงาน</th><th>ประเภท</th><th>ช่วงวันที่</th><th>เหตุผล</th><th>สถานะ</th><th>จัดการ</th></tr></thead><tbody id="leaveBody"></tbody></table></div>
+        <div class="leave-layout">
+          <article class="panel leave-queue-panel">
+            <div class="panel-head"><div><p class="kicker">APPROVAL QUEUE</p><h3>คำขอลา</h3><p class="panel-subtitle">เห็นทันทีว่าค้างอยู่ที่ใคร หลักฐานครบหรือยัง และเหลือสิทธิ์เท่าไร</p></div></div>
+            <div class="table-card embedded"><table><thead><tr><th>พนักงาน</th><th>ประเภท / วัน</th><th>ผู้อนุมัติ</th><th>หลักฐาน</th><th>สถานะ</th><th>จัดการ</th></tr></thead><tbody id="leaveBody"></tbody></table></div>
+          </article>
+          <article class="panel leave-calendar-panel">
+            <div class="panel-head"><div><p class="kicker">TEAM CALENDAR</p><h3>คนลาช่วงนี้</h3><p class="panel-subtitle">ช่วย Manager เห็นว่าทีมชนวันลากันหรือไม่ก่อนอนุมัติ</p></div><span class="badge badge-soft">14 วัน</span></div>
+            <div id="leaveCalendar" class="leave-calendar"></div>
+          </article>
+        </div>
       </section>
 
       <section id="view-requests" class="view">
@@ -276,6 +286,15 @@
             <article class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h6M9 14h6"/></svg></div><div><strong>ข้อมูลบริษัท</strong><p>ชื่อบริษัท สาขา วันทำงาน และเวลาเริ่มงาน</p></div><span>→</span></article>
             <article class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H8l-3 3V5Z"/></svg></div><div><strong>LINE Integration</strong><p>เชื่อม LINE OA และตั้งข้อความสำหรับพนักงาน</p></div><span>→</span></article>
             <article class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.5 8.2 8 9 4.5-.8 8-4 8-9V7l-8-4Z"/><path d="m9 12 2 2 4-4"/></svg></div><div><strong>สิทธิ์และความปลอดภัย</strong><p>Role, Permission และ Audit Log</p></div><span>→</span></article>
+          </div>
+
+          <div class="leave-policy-section">
+            <div class="page-intro compact">
+              <div><p class="kicker">LEAVE POLICY</p><h2>นโยบายและสิทธิ์การลา</h2><p>กำหนดประเภทลา สิทธิ์เริ่มต้น เหตุผล หลักฐาน และเงื่อนไขล่วงหน้าของบริษัท</p></div>
+              <button id="addLeavePolicyBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มประเภทลา</button>
+            </div>
+            <div id="leavePolicyList" class="leave-policy-list"></div>
+            <p class="settings-hint">ค่าเริ่มต้นเป็น Template สำหรับทดลองระบบ HR สามารถแก้สิทธิ์รายคนได้จากหน้า “พนักงาน” และควรตรวจให้ตรงกับ Policy/กฎหมายที่บริษัทใช้จริงก่อน Production</p>
           </div>
 
           <div class="work-location-section">
@@ -347,6 +366,58 @@
         <div class="field"><label>&nbsp;</label><button type="button" id="useCurrentLocationBtn" class="secondary-btn wide-btn">ใช้ตำแหน่งปัจจุบัน</button></div>
       </div>
       <div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="locationSaveBtn" class="primary-btn">บันทึก Location</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="leaveProfileModal" class="leave-profile-modal">
+    <form method="dialog" id="leaveProfileForm">
+      <div class="modal-head">
+        <div><p class="kicker">LEAVE PROFILE</p><h3 id="leaveProfileTitle">สิทธิ์ลาพนักงาน</h3><p id="leaveProfileSubtitle">กำหนดผู้อนุมัติและสิทธิ์ของแต่ละคน</p></div>
+        <button class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="leave-profile-head">
+        <div class="field"><label>ปีสิทธิ์</label><select id="leaveProfileYear"></select></div>
+        <div class="field"><label>ผู้อนุมัติเรื่องลา</label><select id="leaveApproverSelect"><option value="">ยังไม่กำหนด</option></select></div>
+      </div>
+      <div id="leaveEntitlementRows" class="entitlement-list"></div>
+      <div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="leaveProfileSaveBtn" class="primary-btn">บันทึกสิทธิ์ลา</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="leaveRequestModal">
+    <form method="dialog" id="leaveRequestForm">
+      <div class="modal-head">
+        <div><p class="kicker">LEAVE REQUEST</p><h3>บันทึกการลา</h3><p>HR สามารถสร้างคำขอแทนพนักงานได้ ระบบยังส่งให้ผู้อนุมัติตาม Flow เดิม</p></div>
+        <button class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="modal-fields">
+        <div class="field full"><label>พนักงาน <em>*</em></label><select id="leaveEmployeeSelect"></select></div>
+        <div class="field"><label>ประเภทลา <em>*</em></label><select id="leavePolicySelect"></select></div>
+        <div class="field"><label>รูปแบบ</label><select id="leaveDayPart"><option value="full">เต็มวัน</option><option value="am">ครึ่งวันเช้า</option><option value="pm">ครึ่งวันบ่าย</option></select></div>
+        <div class="field"><label>วันเริ่มลา <em>*</em></label><input id="leaveStartDate" type="date" /></div>
+        <div class="field"><label>วันสุดท้าย <em>*</em></label><input id="leaveEndDate" type="date" /></div>
+        <div class="field full"><label>เหตุผล <em>*</em></label><textarea id="leaveReason" rows="4" placeholder="ระบุเหตุผลการลา"></textarea></div>
+      </div>
+      <div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="leaveRequestSaveBtn" class="primary-btn">ส่งคำขอลา</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="leavePolicyModal">
+    <form method="dialog" id="leavePolicyForm">
+      <div class="modal-head">
+        <div><p class="kicker">LEAVE POLICY</p><h3 id="leavePolicyModalTitle">เพิ่มประเภทลา</h3><p>ตั้งค่า Policy ให้ระบบคำนวณสิทธิ์และขอหลักฐานได้อัตโนมัติ</p></div>
+        <button class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <input id="leavePolicyId" type="hidden" />
+      <div class="modal-fields">
+        <div class="field"><label>ชื่อประเภทลา <em>*</em></label><input id="leavePolicyName" placeholder="เช่น ลาพักร้อน" /></div>
+        <div class="field"><label>Code</label><input id="leavePolicyCode" placeholder="annual" /></div>
+        <div class="field"><label>สิทธิ์เริ่มต้นต่อปี</label><div class="input-suffix"><input id="leavePolicyDays" type="number" min="0" step="0.5" value="0" /><span>วัน</span></div></div>
+        <div class="field"><label>แจ้งล่วงหน้าอย่างน้อย</label><div class="input-suffix"><input id="leavePolicyNotice" type="number" min="0" value="0" /><span>วัน</span></div></div>
+        <div class="field"><label>บังคับหลักฐานเมื่อลา ≥</label><div class="input-suffix"><input id="leavePolicyEvidence" type="number" min="0" step="0.5" placeholder="ไม่บังคับ" /><span>วัน</span></div></div>
+        <div class="field option-stack"><label class="toggle-line"><input id="leavePolicyUnlimited" type="checkbox" /><span>ไม่จำกัดจำนวนวัน</span></label><label class="toggle-line"><input id="leavePolicyReason" type="checkbox" checked /><span>บังคับระบุเหตุผล</span></label><label class="toggle-line"><input id="leavePolicyNegative" type="checkbox" /><span>อนุญาตให้สิทธิ์ติดลบ</span></label></div>
+      </div>
+      <div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="leavePolicySaveBtn" class="primary-btn">บันทึก Policy</button></div>
     </form>
   </dialog>
 
