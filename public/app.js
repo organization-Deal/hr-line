@@ -1,5 +1,6 @@
 const state = {
-  token: sessionStorage.getItem('hr_admin_token') || '',
+  me: null,
+  gmail: null,
   dashboard: null,
   employees: [],
   candidates: [],
@@ -46,9 +47,9 @@ const viewMeta = {
 async function api(path, options = {}) {
   const res = await fetch(path, {
     ...options,
+    credentials: 'same-origin',
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${state.token}`,
       ...(options.headers || {}),
     },
   });
@@ -57,8 +58,12 @@ async function api(path, options = {}) {
   try { data = await res.json(); } catch {}
 
   if (res.status === 401) {
-    logout();
-    throw new Error('Admin Token ไม่ถูกต้อง');
+    showLogin();
+    throw new Error('AUTH_REQUIRED');
+  }
+  if (res.status === 409 && data.error === 'COMPANY_REQUIRED') {
+    await loadSessionOnly();
+    throw new Error('COMPANY_REQUIRED');
   }
   if (!res.ok) throw new Error(data.error || 'โหลดข้อมูลไม่สำเร็จ');
   return data;
@@ -67,25 +72,30 @@ async function api(path, options = {}) {
 async function boot() {
   bindEvents();
   renderLoadingState();
-
-  if (state.token) {
-    try {
-      await loadAll({ silent: true });
-      hideLogin();
-    } catch (error) {
-      showLoginError(error.message);
-    }
-  } else {
-    $('#login').classList.remove('hidden');
-  }
+  const ready = await loadSessionOnly();
+  handleReturnMessage();
+  if (ready) await loadAll({ silent: true });
 }
 
 function bindEvents() {
-  $('#loginBtn').onclick = login;
-  $('#tokenInput').addEventListener('keydown', event => {
-    if (event.key === 'Enter') login();
-  });
+  $('#googleLoginBtn').onclick = () => { window.location.href = '/auth/google/start'; };
   $('#logoutBtn').onclick = logout;
+  $('#onboardingLogoutBtn').onclick = logout;
+  $('#createCompanyBtn').onclick = createCompany;
+  $('#claimCompanyBtn').onclick = claimLegacyCompany;
+  $('#companySwitcher').onclick = event => {
+    event.stopPropagation();
+    const menu = $('#companyMenu');
+    const willOpen = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', !willOpen);
+    $('#companySwitcher').setAttribute('aria-expanded', String(willOpen));
+  };
+  document.addEventListener('click', () => {
+    $('#companyMenu').classList.add('hidden');
+    $('#companySwitcher').setAttribute('aria-expanded', 'false');
+  });
+  $('#gmailConnectBtn').onclick = () => { window.location.href = '/integrations/gmail/start'; };
+  $('#gmailDisconnectBtn').onclick = disconnectGmail;
   $('#refreshBtn').onclick = () => loadAll();
 
   $$('.nav-item').forEach(button => {
@@ -103,54 +113,189 @@ function bindEvents() {
   $('#mobileNavBackdrop').onclick = closeMobileNav;
 
   $$('.future-view .secondary-btn').forEach(button => {
-    button.onclick = () => toast('โมดูลนี้อยู่ใน Roadmap ของนากนะ V0.3', false, 'i');
+    button.onclick = () => toast('โมดูลนี้อยู่ใน Roadmap ของนากนะ V0.4', false, 'i');
   });
 }
 
-async function login() {
-  const token = $('#tokenInput').value.trim();
-  if (!token) return showLoginError('กรุณาใส่ Admin Token');
-
-  state.token = token;
-  sessionStorage.setItem('hr_admin_token', token);
-  $('#loginBtn').disabled = true;
-  $('#loginBtn').textContent = 'กำลังเข้าสู่ระบบ…';
-
+async function loadSessionOnly() {
   try {
-    await loadAll({ silent: true });
+    const res = await fetch('/api/me', { credentials: 'same-origin' });
+    let data = {};
+    try { data = await res.json(); } catch {}
+    if (res.status === 401) {
+      state.me = null;
+      showLogin();
+      return false;
+    }
+    if (!res.ok) throw new Error(data.error || 'โหลดบัญชีไม่สำเร็จ');
+    state.me = data;
     hideLogin();
-    $('#loginError').textContent = '';
-    toast('เข้าสู่ระบบเรียบร้อยแล้ว');
+    renderIdentity();
+    if (!(data.companies || []).length) {
+      showOnboarding();
+      return false;
+    }
+    hideOnboarding();
+    return true;
   } catch (error) {
+    showLogin();
     showLoginError(error.message);
-  } finally {
-    $('#loginBtn').disabled = false;
-    $('#loginBtn').textContent = 'เข้าสู่ระบบ';
+    return false;
   }
 }
 
-function logout() {
-  state.token = '';
-  sessionStorage.removeItem('hr_admin_token');
-  $('#tokenInput').value = '';
+function showLogin() {
   $('#login').classList.remove('hidden');
-  closeMobileNav();
+  $('#onboarding').classList.add('hidden');
+}
+function hideLogin() { $('#login').classList.add('hidden'); }
+function showLoginError(message) { $('#loginError').textContent = message === 'AUTH_REQUIRED' ? '' : message; }
+function closeMobileNav() { document.body.classList.remove('mobile-nav-open'); }
+
+function showOnboarding() {
+  hideLogin();
+  const me = state.me || {};
+  $('#onboarding').classList.remove('hidden');
+  $('#onboardingName').textContent = me.user?.name ? `${me.user.name} 👋` : '👋';
+  const claimable = me.claimable_company;
+  $('#claimCompanyBtn').classList.toggle('hidden', !claimable);
+  if (claimable) $('#claimCompanyName').textContent = `${claimable.name} · Workspace เดิมในระบบ`;
+}
+function hideOnboarding() { $('#onboarding').classList.add('hidden'); }
+
+async function createCompany() {
+  const name = $('#companyNameInput').value.trim();
+  if (name.length < 2) return toast('กรุณาใส่ชื่อบริษัท', true);
+  const button = $('#createCompanyBtn');
+  button.disabled = true;
+  button.textContent = 'กำลังสร้าง Workspace…';
+  try {
+    await api('/api/companies', { method: 'POST', body: JSON.stringify({ name }) });
+    const ready = await loadSessionOnly();
+    if (ready) await loadAll({ silent: true });
+    toast('สร้าง Workspace เรียบร้อยแล้ว');
+  } catch (error) {
+    if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'สร้าง Workspace';
+  }
 }
 
-function hideLogin() { $('#login').classList.add('hidden'); }
-function showLoginError(message) { $('#loginError').textContent = message; }
-function closeMobileNav() { document.body.classList.remove('mobile-nav-open'); }
+async function claimLegacyCompany() {
+  const company = state.me?.claimable_company;
+  if (!company) return;
+  const button = $('#claimCompanyBtn');
+  button.disabled = true;
+  try {
+    await api('/api/onboarding/claim-company', { method: 'POST', body: JSON.stringify({ client_id: company.id }) });
+    const ready = await loadSessionOnly();
+    if (ready) await loadAll({ silent: true });
+    toast(`เชื่อม Workspace ${company.name} เรียบร้อยแล้ว`);
+  } catch (error) {
+    if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function logout() {
+  try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
+  state.me = null;
+  state.gmail = null;
+  window.location.href = '/';
+}
+
+async function switchCompany(clientId) {
+  if (Number(clientId) === Number(state.me?.active_company_id)) return;
+  try {
+    await api('/api/session/company', { method: 'POST', body: JSON.stringify({ client_id: Number(clientId) }) });
+    const ready = await loadSessionOnly();
+    if (ready) await loadAll({ silent: true });
+    toast('เปลี่ยนบริษัทเรียบร้อยแล้ว');
+  } catch (error) {
+    if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) toast(error.message, true);
+  }
+}
+
+function renderIdentity() {
+  const me = state.me;
+  if (!me?.user) return;
+  const user = me.user;
+  const memberships = me.companies || [];
+  const active = memberships.find(company => Number(company.id) === Number(me.active_company_id)) || memberships[0];
+
+  $('#profileName').textContent = user.name || user.email;
+  $('#profileRole').textContent = active ? roleLabel(active.role) : 'ยังไม่มี Workspace';
+  const avatar = $('#profileAvatar');
+  avatar.textContent = (user.name || user.email || 'U').trim().slice(0, 1).toUpperCase();
+  avatar.classList.toggle('has-photo', Boolean(user.picture_url));
+  avatar.style.backgroundImage = user.picture_url ? `url("${String(user.picture_url).replace(/"/g, '%22')}")` : '';
+
+  if (active) {
+    $('#sidebarCompany').textContent = active.name;
+    $('#sidebarRole').textContent = roleLabel(active.role);
+    $('#companyAvatar').textContent = (active.name || 'N').trim().slice(0, 1).toUpperCase();
+  }
+
+  $('#companyMenu').innerHTML = memberships.map(company => `
+    <button class="company-menu-item ${Number(company.id) === Number(me.active_company_id) ? 'active' : ''}" data-company-id="${Number(company.id)}" role="menuitem">
+      <span class="company-menu-avatar">${escapeHtml((company.name || 'N').slice(0,1).toUpperCase())}</span>
+      <span><strong>${escapeHtml(company.name)}</strong><small>${escapeHtml(roleLabel(company.role))}</small></span>
+      ${Number(company.id) === Number(me.active_company_id) ? '<b>✓</b>' : ''}
+    </button>`).join('');
+  $$('[data-company-id]').forEach(button => {
+    button.onclick = event => {
+      event.stopPropagation();
+      $('#companyMenu').classList.add('hidden');
+      switchCompany(button.dataset.companyId);
+    };
+  });
+}
+
+function roleLabel(role) {
+  return ({ owner: 'Owner', hr_admin: 'HR Admin', hr: 'HR', manager: 'Manager', employee: 'Employee', viewer: 'Viewer' })[role] || role || 'Member';
+}
+
+async function disconnectGmail() {
+  if (!state.gmail?.connected) return;
+  const button = $('#gmailDisconnectBtn');
+  button.disabled = true;
+  try {
+    await api('/api/integrations/gmail', { method: 'DELETE' });
+    state.gmail = { connected: false, account: null };
+    renderSettings();
+    toast('ยกเลิกการเชื่อม Gmail แล้ว');
+  } catch (error) {
+    if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function handleReturnMessage() {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get('gmail') === 'connected') toast('เชื่อม Gmail เรียบร้อยแล้ว');
+  if (url.searchParams.get('auth') === 'success') toast('เข้าสู่ระบบด้วย Google เรียบร้อยแล้ว');
+  if (url.searchParams.has('auth_error')) showLoginError('เข้าสู่ระบบ Google ไม่สำเร็จ กรุณาลองใหม่');
+  if (url.searchParams.has('gmail_error')) toast('เชื่อม Gmail ไม่สำเร็จ กรุณาลองใหม่', true);
+  if ([...url.searchParams.keys()].some(key => ['gmail','auth','auth_error','gmail_error'].includes(key))) {
+    url.search = '';
+    history.replaceState({}, '', url.pathname + url.hash);
+  }
+}
 
 async function loadAll({ silent = false } = {}) {
   setLoading(true);
   try {
-    const [dashboard, employees, candidates, attendance, leaves, requests] = await Promise.all([
+    const [dashboard, employees, candidates, attendance, leaves, requests, gmail] = await Promise.all([
       api('/api/dashboard'),
       api('/api/employees'),
       api('/api/candidates'),
       api('/api/attendance/today'),
       api('/api/leaves'),
       api('/api/requests'),
+      api('/api/integrations/gmail'),
     ]);
 
     state.dashboard = dashboard;
@@ -159,8 +304,11 @@ async function loadAll({ silent = false } = {}) {
     state.attendance = attendance.data || [];
     state.leaves = leaves.data || [];
     state.requests = requests.data || [];
+    state.gmail = gmail;
 
     renderAll();
+    renderIdentity();
+    renderSettings();
     if (!silent) toast('อัปเดตข้อมูลล่าสุดแล้ว');
   } finally {
     setLoading(false);
@@ -513,6 +661,19 @@ function openModal(eyebrow, title, subtitle, fields, onSave) {
   };
 
   $('#modal').showModal();
+}
+
+function renderSettings() {
+  const gmail = state.gmail || { connected: false };
+  const connected = Boolean(gmail.connected);
+  const account = gmail.account;
+  $('#gmailConnectionText').textContent = connected
+    ? `${account?.email || 'Gmail'} เชื่อมกับบัญชีของคุณแล้ว`
+    : 'เชื่อม Gmail ของคุณเมื่อต้องการใช้ฟีเจอร์อีเมล';
+  $('#gmailConnectionBadge').className = `badge ${connected ? 'badge-success' : 'badge-neutral'}`;
+  $('#gmailConnectionBadge').textContent = connected ? 'เชื่อมแล้ว' : 'ยังไม่เชื่อม';
+  $('#gmailConnectBtn').classList.toggle('hidden', connected);
+  $('#gmailDisconnectBtn').classList.toggle('hidden', !connected);
 }
 
 function attentionCopy(item) {

@@ -664,3 +664,146 @@ body.mobile-nav-open .mobile-nav-backdrop { display:block; }
 }
 
 @media (max-width:680px){.table-card td[colspan]{display:block!important;text-align:center}.table-card td[colspan]::before{display:none!important}}
+
+/* Nakna SaaS auth — Google-first */
+.hidden { display: none !important; }
+.google-btn {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-button);
+  background: #fff;
+  color: var(--primary-dark);
+  font-weight: 600;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+.google-btn:hover { background: #F8FAF8; border-color: #C9D6D1; }
+.google-btn:active { transform: translateY(1px); }
+.google-mark {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: #fff;
+  color: #4285F4;
+  font: 700 15px/1 var(--font-en);
+}
+.login-divider { display:flex; align-items:center; gap:12px; margin:20px 0 16px; color:var(--text-tertiary); font-size:10.5px; }
+.login-divider::before, .login-divider::after { content:""; height:1px; flex:1; background:var(--border); }
+.login-divider span { white-space:nowrap; }
+.login-points { display:grid; gap:8px; color:var(--text-secondary); font-size:11px; }
+.login-points span { display:flex; align-items:flex-start; gap:7px; }
+.login-points i { width:17px; height:17px; display:grid; place-items:center; flex:0 0 auto; border-radius:50%; background:var(--success-bg); color:var(--success); font:600 10px/1 var(--font-en); font-style:normal; }
+
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(238, 243, 240, .96);
+  backdrop-filter: blur(12px);
+}
+.onboarding-card {
+  width: min(520px, 100%);
+  padding: 36px;
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  background: #fff;
+  box-shadow: var(--shadow-float);
+}
+.onboarding-brand { margin-bottom: 30px; }
+.onboarding-card h2 { margin:8px 0 5px; color:var(--primary-dark); font-size:27px; line-height:1.25; }
+.onboarding-card > .muted { margin:0 0 24px; }
+.onboarding-separator { display:flex; align-items:center; gap:12px; margin:18px 0; color:var(--text-tertiary); font-size:10px; }
+.onboarding-separator::before, .onboarding-separator::after { content:""; height:1px; flex:1; background:var(--border); }
+.claim-company-card {
+  width:100%;
+  display:grid;
+  grid-template-columns:42px minmax(0,1fr) auto;
+  gap:12px;
+  align-items:center;
+  padding:14px;
+  border:1px solid rgba(22,125,127,.2);
+  border-radius:15px;
+  background:var(--primary-soft);
+  color:var(--text);
+  text-align:left;
+}
+.claim-company-card:hover { border-color:rgba(22,125,127,.38); background:#DFF0ED; }
+.claim-icon { width:42px; height:42px; display:grid; place-items:center; border-radius:12px; background:#fff; color:var(--primary); font:600 18px/1 var(--font-en); }
+.claim-company-card strong { display:block; color:var(--primary-dark); font-size:12px; }
+.claim-company-card small { display:block; margin-top:2px; color:var(--text-secondary); font-size:10px; }
+.claim-company-card b { color:var(--primary); font-size:11px; font-weight:600; }
+.onboarding-note { margin:12px 0 8px; color:var(--text-tertiary); font-size:10px; text-align:center; }
+.text-btn { border:0; padding:7px 9px; background:transparent; color:var(--primary); font-size:11px; font-weight:500; }
+.text-btn:hover { text-decoration:underline; }
+.onboarding-card > .text-btn { display:block; margin:2px auto 0; color:var(--text-tertiary); }
+
+.company-switcher-wrap { position:relative; margin:0 3px 18px; }
+.company-switcher-wrap .company-switcher { width:100%; margin:0; color:var(--text); text-align:left; cursor:pointer; }
+.company-switcher:hover { border-color:var(--border-strong); background:#EDF4F1; }
+.company-menu {
+  position:absolute;
+  z-index:80;
+  top:calc(100% + 7px);
+  left:0;
+  right:0;
+  overflow:hidden;
+  padding:6px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:#fff;
+  box-shadow:0 14px 36px rgba(18,60,74,.12);
+}
+.company-menu-item {
+  width:100%;
+  display:grid;
+  grid-template-columns:32px minmax(0,1fr) 18px;
+  gap:9px;
+  align-items:center;
+  border:0;
+  border-radius:10px;
+  padding:8px;
+  background:transparent;
+  color:var(--text);
+  text-align:left;
+}
+.company-menu-item:hover, .company-menu-item.active { background:var(--primary-soft); }
+.company-menu-avatar { width:32px; height:32px; display:grid; place-items:center; border:1px solid var(--border); border-radius:9px; background:#fff; color:var(--primary); font:600 12px/1 var(--font-en); }
+.company-menu-item strong { display:block; overflow:hidden; color:var(--primary-dark); font-size:10.5px; text-overflow:ellipsis; white-space:nowrap; }
+.company-menu-item small { display:block; margin-top:1px; color:var(--text-tertiary); font-size:8.5px; }
+.company-menu-item b { color:var(--primary); font-size:11px; }
+.profile-chip > span.has-photo { background-size:cover; background-position:center; color:transparent; }
+
+.integration-section { margin-top:28px; padding-top:26px; border-top:1px solid var(--border); }
+.page-intro.compact { margin-bottom:14px; }
+.page-intro.compact h2 { margin:5px 0 2px; color:var(--primary-dark); font-size:18px; }
+.integration-card {
+  display:grid;
+  grid-template-columns:46px minmax(0,1fr) auto auto;
+  gap:13px;
+  align-items:center;
+  padding:16px;
+  border:1px solid var(--border);
+  border-radius:16px;
+  background:#fff;
+}
+.integration-logo { width:46px; height:46px; display:grid; place-items:center; border-radius:13px; font:700 17px/1 var(--font-en); }
+.google-mail-logo { background:#F8F9FA; border:1px solid var(--border); color:#EA4335; }
+.integration-copy strong { color:var(--primary-dark); font-size:12px; font-weight:600; }
+.integration-copy p { margin:2px 0 0; color:var(--text-tertiary); font-size:9.5px; }
+.danger-text { color:var(--danger); }
+
+@media (max-width: 720px) {
+  .onboarding-overlay { padding:12px; }
+  .onboarding-card { min-height:calc(100dvh - 24px); display:flex; flex-direction:column; justify-content:center; padding:30px 24px; border-radius:22px; }
+  .integration-card { grid-template-columns:42px minmax(0,1fr) auto; }
+  .integration-card .secondary-btn, .integration-card .text-btn { grid-column:1 / -1; width:100%; }
+}

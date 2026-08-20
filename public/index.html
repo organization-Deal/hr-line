@@ -43,21 +43,49 @@
           <div class="brand-mark">น</div>
           <div class="brand-wordmark"><strong>นากนะ</strong><span>HR Tech สำหรับคนไทย</span></div>
         </div>
-        <p class="kicker">WELCOME BACK</p>
-        <h2>เข้าสู่ระบบ HR</h2>
-        <p class="muted login-description">ใส่ Admin Token ของบริษัทเพื่อเข้าสู่ศูนย์จัดการพนักงาน</p>
-        <div class="field standalone-field">
-          <label for="tokenInput">Admin Token</label>
-          <div class="input-wrap">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2M6 10h12v10H6z"/></svg>
-            <input id="tokenInput" type="password" placeholder="วาง HR_ADMIN_TOKEN" autocomplete="current-password" />
-          </div>
+        <p class="kicker">WELCOME TO NAKNA</p>
+        <h2>เข้าสู่ระบบนากนะ</h2>
+        <p class="muted login-description">ไม่ต้องจำรหัสผ่าน ใช้บัญชี Google ของคุณเพื่อเข้าสู่ Workspace ได้เลย</p>
+        <button id="googleLoginBtn" class="google-btn wide-btn" type="button">
+          <span class="google-mark" aria-hidden="true">G</span>
+          <span>เข้าสู่ระบบด้วย Google</span>
+        </button>
+        <div class="login-divider"><span>สำหรับ HR และผู้ดูแลบริษัท</span></div>
+        <div class="login-points">
+          <span><i>✓</i> Google ใช้สำหรับยืนยันตัวตน</span>
+          <span><i>✓</i> Gmail จะขอสิทธิ์แยกเมื่อคุณเลือกเชื่อม</span>
         </div>
-        <button id="loginBtn" class="primary-btn wide-btn">เข้าสู่ระบบ</button>
-        <p class="security-note"><span>●</span> Token จะเก็บเฉพาะ session ของ browser นี้</p>
+        <p class="security-note"><span>●</span> นากนะไม่เก็บรหัสผ่าน Google ของคุณ</p>
         <div id="loginError" class="error-text" role="alert"></div>
       </section>
     </div>
+  </div>
+
+  <div id="onboarding" class="onboarding-overlay hidden" aria-live="polite">
+    <section class="onboarding-card">
+      <div class="brand-lockup onboarding-brand">
+        <div class="brand-mark">น</div>
+        <div class="brand-wordmark"><strong>นากนะ</strong><span>เริ่มต้น Workspace ของคุณ</span></div>
+      </div>
+      <p class="kicker">FIRST SETUP</p>
+      <h2>ยินดีต้อนรับ <span id="onboardingName">👋</span></h2>
+      <p class="muted">บัญชี Google เชื่อมแล้ว เหลือแค่เลือกว่าคุณจะเริ่มจาก Workspace แบบไหน</p>
+
+      <button id="claimCompanyBtn" class="claim-company-card hidden" type="button">
+        <span class="claim-icon">↗</span>
+        <span><strong>ใช้ Workspace เดิม</strong><small id="claimCompanyName">บริษัทเดิมในระบบ</small></span>
+        <b>รับช่วง</b>
+      </button>
+
+      <div class="onboarding-separator"><span>หรือสร้างใหม่</span></div>
+      <div class="field">
+        <label for="companyNameInput">ชื่อบริษัท</label>
+        <input id="companyNameInput" type="text" placeholder="เช่น Otterwork Co., Ltd." autocomplete="organization" />
+      </div>
+      <button id="createCompanyBtn" class="primary-btn wide-btn" type="button">สร้าง Workspace</button>
+      <p class="onboarding-note">คุณจะเป็น Owner ของ Workspace นี้ และสามารถเชิญ HR / Manager / พนักงานเข้ามาทีหลังได้</p>
+      <button id="onboardingLogoutBtn" class="text-btn" type="button">ออกจากบัญชีนี้</button>
+    </section>
   </div>
 
   <div class="app-shell">
@@ -67,10 +95,13 @@
         <div class="brand-wordmark"><strong>นากนะ</strong><span>HR Tech สำหรับคนไทย</span></div>
       </div>
 
-      <div class="company-switcher">
-        <div class="company-avatar">O</div>
-        <div><strong id="sidebarCompany">Otterwork</strong><span>บริษัทหลัก</span></div>
-        <svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg>
+      <div class="company-switcher-wrap">
+        <button id="companySwitcher" class="company-switcher" type="button" aria-haspopup="menu" aria-expanded="false">
+          <div id="companyAvatar" class="company-avatar">O</div>
+          <div><strong id="sidebarCompany">บริษัทของคุณ</strong><span id="sidebarRole">Workspace</span></div>
+          <svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg>
+        </button>
+        <div id="companyMenu" class="company-menu hidden" role="menu"></div>
       </div>
 
       <nav>
@@ -95,7 +126,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong>พร้อมเชื่อม LINE</strong><small>Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V0.2.0</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V0.3.0</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -109,7 +140,7 @@
         <div class="top-actions">
           <div class="date-chip"><svg viewBox="0 0 24 24"><path d="M6 4v3M18 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12H4V7a1 1 0 0 1 1-1Z"/></svg><span id="todayText">—</span></div>
           <button id="refreshBtn" class="icon-btn" title="อัปเดตข้อมูล" aria-label="อัปเดตข้อมูล"><svg viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.5 9a7 7 0 0 0-12-2L4 11M5.5 15a7 7 0 0 0 12 2l2.5-4"/></svg></button>
-          <button class="profile-chip" aria-label="โปรไฟล์ HR"><span>HR</span><div><strong>HR Admin</strong><small>ผู้ดูแลระบบ</small></div></button>
+          <button class="profile-chip" aria-label="โปรไฟล์ผู้ใช้"><span id="profileAvatar">HR</span><div><strong id="profileName">ผู้ใช้งาน</strong><small id="profileRole">กำลังโหลด...</small></div></button>
         </div>
       </header>
 
@@ -220,13 +251,24 @@
       <section id="view-performance" class="view future-view">
         <div class="module-empty"><div class="module-icon"><svg viewBox="0 0 24 24"><path d="m4 18 5-5 4 3 7-9"/><path d="M15 7h5v5"/></svg></div><span class="badge badge-soft">Next module</span><h1>Performance</h1><p>1:1, Probation Review, เป้าหมาย และ Timeline ผลงานที่ Manager กับ HR ดูร่วมกันได้</p><button class="secondary-btn">ดู Roadmap</button></div>
       </section>
-      <section id="view-settings" class="view future-view">
+      <section id="view-settings" class="view">
         <div class="settings-preview">
           <div class="page-intro"><div><p class="kicker">SYSTEM</p><h1>ตั้งค่า</h1><p>โครงสร้างบริษัท เวลาเข้างาน LINE และสิทธิ์การใช้งาน</p></div></div>
           <div class="settings-grid">
             <article class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h6M9 14h6"/></svg></div><div><strong>ข้อมูลบริษัท</strong><p>ชื่อบริษัท สาขา วันทำงาน และเวลาเริ่มงาน</p></div><span>→</span></article>
             <article class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H8l-3 3V5Z"/></svg></div><div><strong>LINE Integration</strong><p>เชื่อม LINE OA และตั้งข้อความสำหรับพนักงาน</p></div><span>→</span></article>
             <article class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.5 8.2 8 9 4.5-.8 8-4 8-9V7l-8-4Z"/><path d="m9 12 2 2 4-4"/></svg></div><div><strong>สิทธิ์และความปลอดภัย</strong><p>Role, Permission และ Audit Log</p></div><span>→</span></article>
+          </div>
+
+          <div class="integration-section">
+            <div class="page-intro compact"><div><p class="kicker">PERSONAL INTEGRATIONS</p><h2>การเชื่อมต่อของฉัน</h2><p>แต่ละคนเชื่อมบัญชีของตัวเองได้ สิทธิ์ Gmail ไม่ผูกกับการเข้าสู่ระบบ</p></div></div>
+            <article class="integration-card">
+              <div class="integration-logo google-mail-logo">M</div>
+              <div class="integration-copy"><strong>Gmail</strong><p id="gmailConnectionText">ยังไม่ได้เชื่อม Gmail</p></div>
+              <span id="gmailConnectionBadge" class="badge badge-neutral">ยังไม่เชื่อม</span>
+              <button id="gmailConnectBtn" class="secondary-btn" type="button">เชื่อม Gmail</button>
+              <button id="gmailDisconnectBtn" class="text-btn danger-text hidden" type="button">ยกเลิกการเชื่อม</button>
+            </article>
           </div>
         </div>
       </section>
