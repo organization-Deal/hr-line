@@ -1,8 +1,6 @@
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
-const INIT_SCHEMA_SQL = String.raw`PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS clients (
+const INIT_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   code TEXT NOT NULL UNIQUE,
@@ -184,9 +182,7 @@ CREATE INDEX IF NOT EXISTS idx_candidates_activity ON candidates(last_activity_a
 CREATE INDEX IF NOT EXISTS idx_requests_client_status ON employee_requests(client_id, status);
 `;
 
-const INIT_AUTH_SCHEMA_SQL = String.raw`PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS users (
+const INIT_AUTH_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   google_sub TEXT NOT NULL UNIQUE,
   email TEXT NOT NULL UNIQUE,
@@ -250,9 +246,7 @@ CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id, expi
 CREATE INDEX IF NOT EXISTS idx_oauth_states_expiry ON oauth_states(expires_at);
 `;
 
-const INIT_SEED_SQL = String.raw`PRAGMA foreign_keys = ON;
-
-INSERT OR IGNORE INTO clients (
+const INIT_SEED_SQL = String.raw`INSERT OR IGNORE INTO clients (
   id, name, code, timezone, work_start, work_end, late_grace_minutes,
   geofence_name, geofence_radius_m, birthday_reminder_days
 ) VALUES (1, 'DEAL Invest', 'DEAL', 'Asia/Bangkok', '11:00', '20:00', 10, 'DEAL Office', 250, 7);
@@ -319,7 +313,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.0', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.1', auth: 'google-oauth' });
       }
 
       await ensureDbReady(env.DB);
