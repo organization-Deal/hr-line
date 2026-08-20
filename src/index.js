@@ -248,6 +248,88 @@ CREATE INDEX IF NOT EXISTS idx_invites_client_status ON employee_invites(client_
 CREATE INDEX IF NOT EXISTS idx_line_join_expiry ON line_join_tokens(expires_at);
 `;
 
+const V050_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS leave_policies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  default_entitlement_days REAL NOT NULL DEFAULT 0,
+  is_unlimited INTEGER NOT NULL DEFAULT 0,
+  requires_reason INTEGER NOT NULL DEFAULT 1,
+  evidence_required_after_days REAL,
+  notice_days INTEGER NOT NULL DEFAULT 0,
+  allow_negative INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 100,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(client_id, code),
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS employee_leave_entitlements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  employee_id INTEGER NOT NULL,
+  leave_policy_id INTEGER NOT NULL,
+  year INTEGER NOT NULL,
+  entitlement_days REAL NOT NULL DEFAULT 0,
+  adjustment_days REAL NOT NULL DEFAULT 0,
+  note TEXT,
+  updated_by_user_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(employee_id, leave_policy_id, year),
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+  FOREIGN KEY (leave_policy_id) REFERENCES leave_policies(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS leave_approval_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  leave_request_id INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  actor_type TEXT NOT NULL,
+  actor_employee_id INTEGER,
+  actor_user_id INTEGER,
+  reason TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (leave_request_id) REFERENCES leave_requests(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS leave_request_evidence (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  leave_request_id INTEGER NOT NULL,
+  uploaded_by_employee_id INTEGER,
+  r2_key TEXT NOT NULL,
+  file_name TEXT,
+  content_type TEXT,
+  file_size INTEGER,
+  source TEXT NOT NULL DEFAULT 'line',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (leave_request_id) REFERENCES leave_requests(id) ON DELETE CASCADE,
+  FOREIGN KEY (uploaded_by_employee_id) REFERENCES employees(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS leave_evidence_share_tokens (
+  token_hash TEXT PRIMARY KEY,
+  evidence_id INTEGER NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (evidence_id) REFERENCES leave_request_evidence(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_leave_evidence_share_expiry ON leave_evidence_share_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_leave_policy_client ON leave_policies(client_id, is_active, sort_order);
+CREATE INDEX IF NOT EXISTS idx_leave_entitlement_employee_year ON employee_leave_entitlements(employee_id, year);
+CREATE INDEX IF NOT EXISTS idx_leave_events_request ON leave_approval_events(leave_request_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_leave_evidence_request ON leave_request_evidence(leave_request_id, created_at);
+`;
+
 const INIT_AUTH_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   google_sub TEXT NOT NULL UNIQUE,
@@ -379,7 +461,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.4.0', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.5.0', auth: 'google-oauth' });
       }
 
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
@@ -411,6 +493,12 @@ export default {
       if (publicInviteMatch && request.method === 'POST') {
         await ensureCoreSchema(env.DB);
         return await acceptPublicInvite(request, env, publicInviteMatch[1]);
+      }
+
+      const sharedEvidenceMatch = url.pathname.match(/^\/evidence\/([A-Za-z0-9_-]{20,})$/);
+      if (sharedEvidenceMatch && request.method === 'GET') {
+        await ensureV050Ready(env.DB);
+        return await serveSharedEvidence(env, sharedEvidenceMatch[1]);
       }
 
       if (url.pathname === '/webhooks/line' && request.method === 'POST') {
@@ -463,7 +551,8 @@ async function handleApi(request, env, url, auth) {
   if (path === '/api/bootstrap' && method === 'GET') {
     try {
       await ensureCoreSchema(env.DB);
-      return json({ ok: true, core_schema: 'ready' });
+      if (clientId) await ensureDefaultLeavePolicies(env.DB, clientId);
+      return json({ ok: true, core_schema: 'ready', leave_policy: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -476,6 +565,8 @@ async function handleApi(request, env, url, auth) {
     const name = String(body.name || '').trim();
     if (name.length < 2) return json({ error: 'กรุณาใส่ชื่อบริษัท' }, 400);
     const created = await createCompanyForUser(env.DB, auth, name);
+    await ensureCoreSchema(env.DB);
+    await ensureDefaultLeavePolicies(env.DB, Number(created.id));
     return withCookie(json({ ok: true, company: created }, 201), companyCookie(created.id));
   }
 
@@ -516,10 +607,12 @@ async function handleApi(request, env, url, auth) {
   if (path === '/api/employees' && method === 'GET') {
     const result = await env.DB.prepare(`
       SELECT e.*, d.name AS department_name, p.name AS position_name,
+             ap.nickname AS leave_approver_nickname, ap.first_name AS leave_approver_first_name, ap.last_name AS leave_approver_last_name,
              GROUP_CONCAT(DISTINCT wl.name) AS work_location_names
       FROM employees e
       LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN positions p ON p.id = e.position_id
+      LEFT JOIN employees ap ON ap.id=e.leave_approver_employee_id
       LEFT JOIN employee_work_locations ewl ON ewl.employee_id=e.id
       LEFT JOIN work_locations wl ON wl.id=ewl.location_id AND wl.is_active=1
       WHERE e.client_id = ?1
@@ -734,18 +827,99 @@ async function handleApi(request, env, url, auth) {
     return json({ ok: true });
   }
 
+  if (path === '/api/leave-policies' && method === 'GET') {
+    await ensureDefaultLeavePolicies(env.DB, clientId);
+    const result = await env.DB.prepare(`SELECT * FROM leave_policies WHERE client_id=?1 ORDER BY sort_order,name`).bind(clientId).all();
+    return json({ data: result.results || [] });
+  }
+
+  if (path === '/api/leave-policies' && method === 'POST') {
+    if (!canManagePeople(auth.role)) return json({ error: 'ไม่มีสิทธิ์จัดการนโยบายลา' }, 403);
+    const body = await safeJson(request);
+    const name = String(body.name || '').trim();
+    const code = slugCode(body.code || name);
+    if (name.length < 2 || !code) return json({ error: 'กรุณาใส่ชื่อประเภทลา' }, 400);
+    const result = await env.DB.prepare(`
+      INSERT INTO leave_policies (client_id,code,name,default_entitlement_days,is_unlimited,requires_reason,evidence_required_after_days,notice_days,allow_negative,is_active,sort_order)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,1,?10)
+    `).bind(clientId, code, name, num(body.default_entitlement_days,0), body.is_unlimited?1:0, body.requires_reason===false?0:1,
+      nullableNum(body.evidence_required_after_days), Math.max(0,Math.floor(num(body.notice_days,0))), body.allow_negative?1:0, Math.floor(num(body.sort_order,100))).run();
+    return json({ ok:true, id:result.meta.last_row_id },201);
+  }
+
+  const leavePolicyMatch = path.match(/^\/api\/leave-policies\/(\d+)$/);
+  if (leavePolicyMatch && method === 'PATCH') {
+    if (!canManagePeople(auth.role)) return json({ error: 'ไม่มีสิทธิ์จัดการนโยบายลา' }, 403);
+    const id=Number(leavePolicyMatch[1]);
+    const existing=await env.DB.prepare('SELECT * FROM leave_policies WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if(!existing) return json({error:'ไม่พบนโยบายลา'},404);
+    const body=await safeJson(request);
+    await env.DB.prepare(`UPDATE leave_policies SET name=?1,default_entitlement_days=?2,is_unlimited=?3,requires_reason=?4,evidence_required_after_days=?5,notice_days=?6,allow_negative=?7,is_active=?8,sort_order=?9,updated_at=CURRENT_TIMESTAMP WHERE id=?10 AND client_id=?11`)
+      .bind(String(body.name ?? existing.name).trim(),num(body.default_entitlement_days,existing.default_entitlement_days),body.is_unlimited==null?Number(existing.is_unlimited):(body.is_unlimited?1:0),body.requires_reason==null?Number(existing.requires_reason):(body.requires_reason?1:0),body.evidence_required_after_days===undefined?existing.evidence_required_after_days:nullableNum(body.evidence_required_after_days),Math.max(0,Math.floor(num(body.notice_days,existing.notice_days))),body.allow_negative==null?Number(existing.allow_negative):(body.allow_negative?1:0),body.is_active==null?Number(existing.is_active):(body.is_active?1:0),Math.floor(num(body.sort_order,existing.sort_order)),id,clientId).run();
+    return json({ok:true});
+  }
+
+  const employeeLeaveProfileMatch = path.match(/^\/api\/employees\/(\d+)\/leave-profile$/);
+  if (employeeLeaveProfileMatch && method === 'GET') {
+    const employeeId=Number(employeeLeaveProfileMatch[1]);
+    const employee=await getEmployeeForClient(env.DB,employeeId,clientId);
+    if(!employee) return json({error:'ไม่พบพนักงาน'},404);
+    const year=Math.floor(num(url.searchParams.get('year'), new Date().getFullYear()));
+    return json(await getEmployeeLeaveProfile(env.DB,employeeId,clientId,year));
+  }
+  if (employeeLeaveProfileMatch && method === 'PUT') {
+    if (!canManagePeople(auth.role)) return json({ error: 'ไม่มีสิทธิ์จัดการสิทธิ์ลา' }, 403);
+    const employeeId=Number(employeeLeaveProfileMatch[1]);
+    const employee=await getEmployeeForClient(env.DB,employeeId,clientId);
+    if(!employee) return json({error:'ไม่พบพนักงาน'},404);
+    const body=await safeJson(request);
+    const approverId=body.leave_approver_employee_id ? Number(body.leave_approver_employee_id) : null;
+    if(approverId){ const approver=await getEmployeeForClient(env.DB,approverId,clientId); if(!approver) return json({error:'ผู้อนุมัติไม่อยู่ในบริษัทนี้'},400); }
+    await env.DB.prepare('UPDATE employees SET leave_approver_employee_id=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3').bind(approverId,employeeId,clientId).run();
+    if(approverId){
+      const waiting=(await env.DB.prepare("SELECT id FROM leave_requests WHERE employee_id=?1 AND client_id=?2 AND status='pending' AND approver_employee_id IS NULL").bind(employeeId,clientId).all()).results||[];
+      await env.DB.prepare("UPDATE leave_requests SET approver_employee_id=?1,updated_at=CURRENT_TIMESTAMP WHERE employee_id=?2 AND client_id=?3 AND status='pending' AND approver_employee_id IS NULL").bind(approverId,employeeId,clientId).run();
+      for(const requestRow of waiting) await notifyLeaveApprover(env,Number(requestRow.id));
+    }
+    const year=Math.floor(num(body.year,new Date().getFullYear()));
+    for(const item of Array.isArray(body.entitlements)?body.entitlements:[]){
+      const policyId=Number(item.policy_id); if(!policyId) continue;
+      const policy=await env.DB.prepare('SELECT id FROM leave_policies WHERE id=?1 AND client_id=?2').bind(policyId,clientId).first(); if(!policy) continue;
+      await env.DB.prepare(`INSERT INTO employee_leave_entitlements (client_id,employee_id,leave_policy_id,year,entitlement_days,adjustment_days,note,updated_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+        ON CONFLICT(employee_id,leave_policy_id,year) DO UPDATE SET entitlement_days=excluded.entitlement_days,adjustment_days=excluded.adjustment_days,note=excluded.note,updated_by_user_id=excluded.updated_by_user_id,updated_at=CURRENT_TIMESTAMP`)
+        .bind(clientId,employeeId,policyId,year,num(item.entitlement_days,0),num(item.adjustment_days,0),item.note||null,Number(auth.user.id)).run();
+    }
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'leave.entitlement.update','employee',String(employeeId),{year,approver_id:approverId});
+    return json({ok:true,profile:await getEmployeeLeaveProfile(env.DB,employeeId,clientId,year)});
+  }
+
+  const evidenceMatch = path.match(/^\/api\/leave-evidence\/(\d+)$/);
+  if (evidenceMatch && method === 'GET') {
+    const row=await env.DB.prepare(`SELECT ev.* FROM leave_request_evidence ev JOIN leave_requests lr ON lr.id=ev.leave_request_id WHERE ev.id=?1 AND ev.client_id=?2`).bind(Number(evidenceMatch[1]),clientId).first();
+    if(!row) return json({error:'ไม่พบหลักฐาน'},404);
+    if(!env.EVIDENCE_BUCKET) return json({error:'Evidence storage ยังไม่พร้อม'},503);
+    const object=await env.EVIDENCE_BUCKET.get(row.r2_key);
+    if(!object) return json({error:'ไม่พบไฟล์หลักฐาน'},404);
+    const headers=new Headers(); object.writeHttpMetadata(headers); headers.set('cache-control','private, max-age=60'); headers.set('content-disposition',`inline; filename*=UTF-8''${encodeURIComponent(row.file_name||'evidence')}`);
+    return new Response(object.body,{headers});
+  }
+
   if (path === '/api/attendance/today' && method === 'GET') {
     const client = await getClient(env.DB, clientId);
     if (!client) return json({ error: 'Client not found' }, 404);
     const workDate = dateInBangkok();
     const result = await env.DB.prepare(`
       SELECT e.id AS employee_id, e.employee_code, e.first_name, e.last_name, e.nickname,
-             d.name AS department_name, a.check_in_at, a.check_out_at, a.status, a.late_minutes,
+             d.name AS department_name, a.check_in_at, a.check_out_at,
+             CASE WHEN lr.id IS NOT NULL AND a.check_in_at IS NULL THEN 'leave' ELSE a.status END AS status, a.late_minutes,
+             lr.id AS leave_request_id, lp.name AS leave_name,
              a.checkin_lat, a.checkin_lng, a.checkin_location_id, a.checkin_location_name, a.checkin_distance_m,
              a.checkout_lat, a.checkout_lng, a.checkout_location_id, a.checkout_location_name, a.checkout_distance_m
       FROM employees e
       LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN attendance a ON a.employee_id = e.id AND a.work_date = ?1
+      LEFT JOIN leave_requests lr ON lr.employee_id=e.id AND lr.status='approved' AND ?1 BETWEEN lr.start_date AND lr.end_date
+      LEFT JOIN leave_policies lp ON lp.id=lr.policy_id
       WHERE e.client_id = ?2 AND e.status = 'active'
       ORDER BY e.first_name
     `).bind(workDate, clientId).all();
@@ -776,33 +950,70 @@ async function handleApi(request, env, url, auth) {
 
   if (path === '/api/leaves' && method === 'GET') {
     const result = await env.DB.prepare(`
-      SELECT l.*, e.first_name, e.last_name, e.nickname
-      FROM leave_requests l JOIN employees e ON e.id = l.employee_id
-      WHERE l.client_id = ?1 ORDER BY l.created_at DESC
+      SELECT l.*, e.first_name,e.last_name,e.nickname,e.employee_code,
+             lp.name AS leave_type_name, lp.code AS leave_policy_code,
+             ap.nickname AS approver_nickname,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,
+             (SELECT COUNT(*) FROM leave_request_evidence ev WHERE ev.leave_request_id=l.id) AS evidence_count
+      FROM leave_requests l
+      JOIN employees e ON e.id=l.employee_id
+      LEFT JOIN leave_policies lp ON lp.id=l.policy_id
+      LEFT JOIN employees ap ON ap.id=l.approver_employee_id
+      WHERE l.client_id=?1 ORDER BY l.created_at DESC LIMIT 300
     `).bind(clientId).all();
-    return json({ data: result.results });
+    return json({ data: result.results || [] });
   }
 
   if (path === '/api/leaves' && method === 'POST') {
-    const body = await safeJson(request);
-    if (!body.employee_id || !body.leave_type || !body.start_date || !body.end_date) return json({ error: 'Missing leave fields' }, 400);
-    const employee = await env.DB.prepare('SELECT client_id FROM employees WHERE id = ?1').bind(Number(body.employee_id)).first();
-    if (!employee || Number(employee.client_id) !== clientId) return json({ error: 'Employee not found' }, 404);
-    const result = await env.DB.prepare(`
-      INSERT INTO leave_requests (client_id, employee_id, leave_type, start_date, end_date, reason)
-      VALUES (?1,?2,?3,?4,?5,?6)
-    `).bind(clientId, Number(body.employee_id), body.leave_type, body.start_date, body.end_date, body.reason || null).run();
-    return json({ ok: true, id: result.meta.last_row_id }, 201);
+    if (!canManagePeople(auth.role)) return json({error:'ไม่มีสิทธิ์สร้างคำขอลาแทนพนักงาน'},403);
+    const body=await safeJson(request);
+    try{
+      const requestRow=await createLeaveRequest(env,{
+        clientId,employeeId:Number(body.employee_id),policyId:Number(body.policy_id||0),leaveType:body.leave_type,
+        startDate:body.start_date,endDate:body.end_date,dayPart:body.day_part||'full',reason:String(body.reason||'').trim(),submittedVia:'dashboard',submittedByUserId:Number(auth.user.id)
+      });
+      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'leave.create','leave_request',String(requestRow.id),null);
+      if(requestRow.status==='pending') await notifyLeaveApprover(env,requestRow.id);
+      else if(requestRow.status==='awaiting_evidence') await notifyEmployeeEvidenceRequired(env,requestRow.id);
+      return json({ok:true,id:requestRow.id,status:requestRow.status},201);
+    }catch(e){ return json({error:e.message},e.status||400); }
   }
 
   const leaveStatusMatch = path.match(/^\/api\/leaves\/(\d+)\/(approve|reject)$/);
   if (leaveStatusMatch && method === 'PATCH') {
-    const status = leaveStatusMatch[2] === 'approve' ? 'approved' : 'rejected';
-    await env.DB.prepare(`
-      UPDATE leave_requests SET status = ?1, approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?2 AND client_id = ?3
-    `).bind(status, Number(leaveStatusMatch[1]), clientId).run();
-    return json({ ok: true, status });
+    if(!canOverrideLeave(auth.role)) return json({error:'การอนุมัติแทนใน Dashboard จำกัดเฉพาะ Owner/HR · ผู้อนุมัติปกติกดผ่าน LINE'},403);
+    const body=await safeJson(request);
+    try{
+      const result=await decideLeaveRequest(env,Number(leaveStatusMatch[1]),leaveStatusMatch[2]==='approve'?'approved':'rejected',{
+        actorType:'user',actorUserId:Number(auth.user.id),reason:String(body.reason||'').trim(),clientId
+      });
+      return json({ok:true,status:result.status});
+    }catch(e){return json({error:e.message},e.status||400);}
+  }
+
+  const leaveEvidenceUploadMatch=path.match(/^\/api\/leaves\/(\d+)\/evidence$/);
+  if(leaveEvidenceUploadMatch && method==='POST'){
+    if(!canManagePeople(auth.role)) return json({error:'ไม่มีสิทธิ์อัปโหลดหลักฐาน'},403);
+    if(!env.EVIDENCE_BUCKET) return json({error:'Evidence storage ยังไม่พร้อม'},503);
+    const requestId=Number(leaveEvidenceUploadMatch[1]); const row=await getLeaveRequestDetail(env.DB,requestId,clientId); if(!row) return json({error:'ไม่พบคำขอลา'},404);
+    const form=await request.formData(); const file=form.get('file'); if(!file||typeof file.arrayBuffer!=='function') return json({error:'กรุณาเลือกไฟล์'},400);
+    if(Number(file.size||0)>10*1024*1024) return json({error:'ไฟล์ใหญ่เกิน 10 MB'},413);
+    const key=`client-${clientId}/leave-${requestId}/${crypto.randomUUID()}-${String(file.name||'evidence').replace(/[^A-Za-z0-9._-]/g,'_')}`;
+    await env.EVIDENCE_BUCKET.put(key,await file.arrayBuffer(),{httpMetadata:{contentType:file.type||'application/octet-stream'}});
+    await env.DB.prepare(`INSERT INTO leave_request_evidence (client_id,leave_request_id,r2_key,file_name,content_type,file_size,source) VALUES (?1,?2,?3,?4,?5,?6,'dashboard')`).bind(clientId,requestId,key,file.name||'evidence',file.type||'application/octet-stream',Number(file.size||0)).run();
+    await env.DB.prepare("UPDATE leave_requests SET status=CASE WHEN status='awaiting_evidence' THEN 'pending' ELSE status END,evidence_count=(SELECT COUNT(*) FROM leave_request_evidence WHERE leave_request_id=?1),updated_at=CURRENT_TIMESTAMP WHERE id=?1").bind(requestId).run();
+    await notifyLeaveApprover(env,requestId);
+    return json({ok:true});
+  }
+
+  const leaveDetailMatch=path.match(/^\/api\/leaves\/(\d+)$/);
+  if(leaveDetailMatch && method==='GET'){
+    const id=Number(leaveDetailMatch[1]);
+    const row=await getLeaveRequestDetail(env.DB,id,clientId); if(!row) return json({error:'ไม่พบคำขอลา'},404);
+    const [evidence,events]=await env.DB.batch([
+      env.DB.prepare('SELECT id,file_name,content_type,file_size,source,created_at FROM leave_request_evidence WHERE leave_request_id=?1 ORDER BY created_at').bind(id),
+      env.DB.prepare('SELECT * FROM leave_approval_events WHERE leave_request_id=?1 ORDER BY created_at').bind(id)
+    ]);
+    return json({data:row,evidence:evidence.results||[],events:events.results||[]});
   }
 
   if (path === '/api/requests' && method === 'GET') {
@@ -829,7 +1040,7 @@ async function getDashboard(db, clientId) {
                 WHERE e.client_id=?1 AND e.status='active'`).bind(clientId),
     db.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date=?2`).bind(clientId, today),
     db.prepare(`SELECT l.*, e.nickname, e.first_name FROM leave_requests l JOIN employees e ON e.id=l.employee_id
-                WHERE l.client_id=?1 AND l.status='pending'`).bind(clientId),
+                WHERE l.client_id=?1 AND l.status IN ('pending','awaiting_evidence')`).bind(clientId),
     db.prepare(`SELECT * FROM candidates WHERE client_id=?1`).bind(clientId),
     db.prepare(`SELECT r.*, e.nickname, e.first_name FROM employee_requests r JOIN employees e ON e.id=r.employee_id
                 WHERE r.client_id=?1 AND r.status NOT IN ('ready','delivered','closed')`).bind(clientId),
@@ -849,7 +1060,7 @@ async function getDashboard(db, clientId) {
   `).bind(clientId, today).all();
   for (const row of approvedLeaveToday.results || []) onLeaveTodayIds.add(Number(row.employee_id));
 
-  const present = employees.filter(e => attendanceByEmployee.has(Number(e.id))).length;
+  const present = employees.filter(e => { const a=attendanceByEmployee.get(Number(e.id)); return Boolean(a?.check_in_at || ['present','late'].includes(a?.status)); }).length;
   const late = attendance.filter(a => a.status === 'late').length;
   const onLeave = employees.filter(e => onLeaveTodayIds.has(Number(e.id))).length;
   const missing = Math.max(0, employees.length - present - onLeave);
@@ -899,6 +1110,7 @@ async function handleLineWebhook(request, env, ctx) {
   const rawBody = await request.text();
   const valid = await verifyLineSignature(rawBody, signature, env.LINE_CHANNEL_SECRET);
   if (!valid) return json({ error: 'Invalid LINE signature' }, 401);
+  await ensureV050Ready(env.DB);
 
   let payload;
   try { payload = JSON.parse(rawBody); } catch { return json({ error: 'Invalid JSON' }, 400); }
@@ -912,95 +1124,164 @@ async function processLineEvent(event, env) {
   const lineUserId = event?.source?.userId;
   if (!lineUserId || !event.replyToken) return;
 
+  const employee = async () => env.DB.prepare(`
+    SELECT e.*, c.name AS company_name
+    FROM employees e JOIN clients c ON c.id=e.client_id
+    WHERE e.line_user_id=?1 AND e.status='active'
+  `).bind(lineUserId).first();
+
   if (event.type === 'message' && event.message?.type === 'text') {
     const text = String(event.message.text || '').trim();
-
     const joinMatch = text.match(/^JOIN\s+([A-Za-z0-9_-]{20,})$/i);
     if (joinMatch) {
       const linked = await linkLineJoinToken(env.DB, env.LINE_CHANNEL_ACCESS_TOKEN, lineUserId, joinMatch[1]);
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken,
-        linked.ok ? `✅ เชื่อม LINE กับ ${linked.company_name} สำเร็จ\nสวัสดี ${linked.name} 👋\nกดเช็กอินได้เลย ไม่ต้องจำรหัสอะไรแล้ว` : `❌ ${linked.error}`);
+      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[
+        linked.ok ? buildWelcomeFlex(linked.name,linked.company_name) : {type:'text',text:`❌ ${linked.error}`}
+      ]);
     }
-
     const linkMatch = text.match(/^LINK\s+(\d{6})$/i);
     if (linkMatch) {
       const linked = await linkLineAccount(env.DB, lineUserId, linkMatch[1]);
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken,
-        linked.ok ? `✅ เชื่อมบัญชีสำเร็จ\nสวัสดี ${linked.name}\nพิมพ์ “เช็กอิน” หรือ “เช็กเอาต์” ได้เลย` : `❌ ${linked.error}`);
+      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,linked.ok?`✅ เชื่อมบัญชีสำเร็จ\nสวัสดี ${linked.name}\nพิมพ์ “เมนู” เพื่อเริ่มใช้งาน`:`❌ ${linked.error}`);
     }
 
-    const employee = await env.DB.prepare(`
-      SELECT e.*, c.name AS company_name
-      FROM employees e JOIN clients c ON c.id=e.client_id
-      WHERE e.line_user_id=?1 AND e.status='active'
-    `).bind(lineUserId).first();
-    if (!employee) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, 'ยังไม่ได้เชื่อมบัญชีพนักงาน\nกรุณาเปิด “ลิงก์เชิญเข้าทีม” ที่ HR ส่งให้ แล้วกดเชื่อม LINE จากหน้านั้นได้เลย');
+    const emp=await employee();
+    if(!emp) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน\nกรุณาเปิด “ลิงก์เชิญเข้าทีม” ที่ HR ส่งให้ แล้วกดเชื่อม LINE จากหน้านั้นได้เลย');
+    const session=await getLineSession(env.DB,lineUserId);
 
-    if (['เช็กอิน','checkin','check-in'].includes(text.toLowerCase())) {
-      const mustShareLocation = await employeeNeedsLocation(env.DB, employee);
-      if (mustShareLocation) {
-        await setLineSession(env.DB, lineUserId, 'checkin');
-        return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, '📍 แชร์ Location ปัจจุบันเพื่อเช็กอิน\nนากนะจะตรวจเฉพาะว่าคุณอยู่ใน Work Location ที่บริษัทอนุญาตหรือไม่');
-      }
-      try {
-        const result = await checkIn(env.DB, Number(employee.id), null, null, 'line');
-        return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, `✅ Check-in สำเร็จ\nเวลา ${formatBangkokTime(result.check_in_at)}${result.late_minutes > 0 ? `\n🟠 สาย ${result.late_minutes} นาที` : '\n🟢 ตรงเวลา'}`);
-      } catch (e) { return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, `❌ ${e.message}`); }
+    if(session?.action==='leave_reason'){
+      if(text.length<2) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ขอเหตุผลสั้น ๆ อย่างน้อย 2 ตัวอักษรนะ');
+      try{
+        const payload=session.payload||{};
+        const requestRow=await createLeaveRequest(env,{clientId:Number(emp.client_id),employeeId:Number(emp.id),policyId:Number(payload.policy_id),startDate:payload.start_date,endDate:payload.end_date,dayPart:payload.day_part||'full',reason:text,submittedVia:'line'});
+        await clearLineSession(env.DB,lineUserId);
+        if(requestRow.status==='awaiting_evidence'){
+          await setLineSession(env.DB,lineUserId,'leave_evidence',{request_id:requestRow.id,required:true});
+          return replyEvidencePrompt(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,requestRow);
+        }
+        await notifyLeaveApprover(env,requestRow.id);
+        return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildLeaveSubmittedFlex(requestRow)]);
+      }catch(e){ await clearLineSession(env.DB,lineUserId); return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`); }
     }
 
-    if (['เช็กเอาต์','checkout','check-out'].includes(text.toLowerCase())) {
-      const mustShareLocation = await employeeNeedsLocation(env.DB, employee);
-      if (mustShareLocation) {
-        await setLineSession(env.DB, lineUserId, 'checkout');
-        return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, '📍 แชร์ Location ปัจจุบันเพื่อเช็กเอาต์');
-      }
-      try {
-        const result = await checkOut(env.DB, Number(employee.id), null, null, 'line');
-        return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, `✅ Check-out สำเร็จ\nเวลา ${formatBangkokTime(result.check_out_at)}`);
-      } catch (e) { return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, `❌ ${e.message}`); }
+    if(session?.action==='leave_reject_reason'){
+      try{
+        const result=await decideLeaveRequest(env,Number(session.payload?.request_id),'rejected',{actorType:'employee',actorEmployeeId:Number(emp.id),reason:text,clientId:Number(emp.client_id),enforceApprover:true});
+        await clearLineSession(env.DB,lineUserId);
+        return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`บันทึกว่าไม่อนุมัติแล้ว\nเหตุผล: ${text}`);
+      }catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
     }
 
-    if (text === 'สถานะ' || text.toLowerCase() === 'status') {
-      const today = dateInBangkok();
-      const a = await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(employee.id), today).first();
-      const l = await env.DB.prepare(`SELECT COUNT(*) AS n FROM leave_requests WHERE employee_id=?1 AND status='pending'`).bind(Number(employee.id)).first();
-      const statusText = a?.check_in_at ? `เข้า ${formatBangkokTime(a.check_in_at)}${a.check_out_at ? ` · ออก ${formatBangkokTime(a.check_out_at)}` : ''}` : 'ยังไม่เช็กอิน';
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, `👤 ${displayName(employee)}\nวันนี้: ${statusText}\nใบลารออนุมัติ: ${Number(l?.n || 0)} รายการ`);
+    if(session?.action==='leave_evidence' && ['ข้าม','skip'].includes(text.toLowerCase())){
+      if(session.payload?.required) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'คำขอนี้ต้องมีหลักฐาน กรุณาส่งรูปหรือไฟล์ก่อนนะ');
+      await clearLineSession(env.DB,lineUserId);
+      await notifyLeaveApprover(env,Number(session.payload?.request_id));
+      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ส่งคำขอให้ผู้อนุมัติแล้ว ✅');
     }
 
-    return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, 'HR LINE OS\n• พิมพ์ “เช็กอิน”\n• พิมพ์ “เช็กเอาต์”\n• พิมพ์ “สถานะ”');
+    const lower=text.toLowerCase();
+    if(['เมนู','menu','help','ช่วยเหลือ'].includes(lower)) return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildEmployeeMenuFlex(emp)]);
+    if(['ลา','ขอลา','leave','ขอลางาน'].includes(lower)) return sendLeaveTypeMenu(env,event.replyToken,emp);
+    if(['สิทธิ์ลา','วันลา','leave balance'].includes(lower)) return sendLeaveBalance(env,event.replyToken,emp);
+    if(['เช็กอิน','checkin','check-in'].includes(lower)){
+      const mustShareLocation=await employeeNeedsLocation(env.DB,emp);
+      if(mustShareLocation){ await setLineSession(env.DB,lineUserId,'checkin'); return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'📍 แชร์ Location ปัจจุบันเพื่อเช็กอิน\nนากนะจะตรวจเฉพาะ Work Location ที่บริษัทอนุญาต'); }
+      try{ const result=await checkIn(env.DB,Number(emp.id),null,null,'line'); return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`✅ Check-in สำเร็จ\nเวลา ${formatBangkokTime(result.check_in_at)}${result.late_minutes>0?`\n🟠 สาย ${result.late_minutes} นาที`:'\n🟢 ตรงเวลา'}`);}catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
+    }
+    if(['เช็กเอาต์','checkout','check-out'].includes(lower)){
+      const mustShareLocation=await employeeNeedsLocation(env.DB,emp);
+      if(mustShareLocation){ await setLineSession(env.DB,lineUserId,'checkout'); return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'📍 แชร์ Location ปัจจุบันเพื่อเช็กเอาต์'); }
+      try{const result=await checkOut(env.DB,Number(emp.id),null,null,'line');return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`✅ Check-out สำเร็จ\nเวลา ${formatBangkokTime(result.check_out_at)}`);}catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
+    }
+    if(lower==='สถานะ'){
+      const a=await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(emp.id),dateInBangkok()).first();
+      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildEmployeeStatusFlex(emp,a)]);
+    }
+    return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildEmployeeMenuFlex(emp)]);
   }
 
-  if (event.type === 'message' && event.message?.type === 'location') {
-    const employee = await env.DB.prepare('SELECT * FROM employees WHERE line_user_id=?1 AND status=\'active\'').bind(lineUserId).first();
-    if (!employee) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, 'ยังไม่ได้เชื่อมบัญชีพนักงาน');
-
-    const session = await env.DB.prepare('SELECT * FROM line_sessions WHERE line_user_id=?1').bind(lineUserId).first();
-    if (!session || new Date(session.expires_at).getTime() < Date.now()) {
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, 'คำขอหมดเวลาแล้ว กรุณาพิมพ์ “เช็กอิน” หรือ “เช็กเอาต์” ใหม่');
-    }
-
-    const lat = Number(event.message.latitude);
-    const lng = Number(event.message.longitude);
-    try {
-      const result = session.action === 'checkin'
-        ? await checkIn(env.DB, Number(employee.id), lat, lng, 'line')
-        : await checkOut(env.DB, Number(employee.id), lat, lng, 'line');
-      await env.DB.prepare('DELETE FROM line_sessions WHERE line_user_id=?1').bind(lineUserId).run();
-      const label = session.action === 'checkin' ? 'Check-in' : 'Check-out';
-      const time = session.action === 'checkin' ? result.check_in_at : result.check_out_at;
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, `✅ ${label} สำเร็จ\nเวลา ${formatBangkokTime(time)}${result.location_name ? `\n📍 ${result.location_name}` : ''}${result.distance_m != null ? ` · ${Math.round(result.distance_m)} ม.` : ''}${session.action === 'checkin' ? (result.late_minutes > 0 ? `\n🟠 สาย ${result.late_minutes} นาที` : '\n🟢 ตรงเวลา') : ''}`);
-    } catch (e) {
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, `❌ ${e.message}`);
-    }
+  if (event.type==='message' && ['image','file'].includes(event.message?.type)){
+    const emp=await employee(); if(!emp) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
+    const session=await getLineSession(env.DB,lineUserId);
+    if(session?.action!=='leave_evidence') return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ได้รับไฟล์แล้ว แต่ตอนนี้ยังไม่มีคำขอที่รอหลักฐาน\nพิมพ์ “ขอลา” เพื่อเริ่มคำขอ');
+    try{
+      const requestId=Number(session.payload?.request_id);
+      await storeLineLeaveEvidence(env,{requestId,employeeId:Number(emp.id),clientId:Number(emp.client_id),message:event.message});
+      await clearLineSession(env.DB,lineUserId);
+      await env.DB.prepare("UPDATE leave_requests SET status=CASE WHEN status='awaiting_evidence' THEN 'pending' ELSE status END,evidence_count=(SELECT COUNT(*) FROM leave_request_evidence WHERE leave_request_id=?1),updated_at=CURRENT_TIMESTAMP WHERE id=?1").bind(requestId).run();
+      await notifyLeaveApprover(env,requestId);
+      const detail=await getLeaveRequestDetail(env.DB,requestId,Number(emp.client_id));
+      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildLeaveSubmittedFlex(detail)]);
+    }catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ เก็บหลักฐานไม่สำเร็จ: ${e.message}`);}
   }
 
-  if (event.type === 'postback') {
-    const params = new URLSearchParams(event.postback?.data || '');
-    const action = params.get('action');
-    if (action === 'checkin' || action === 'checkout') {
-      await setLineSession(env.DB, lineUserId, action);
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, `📍 ส่ง Location ปัจจุบันมาเพื่อ${action === 'checkin' ? 'เช็กอิน' : 'เช็กเอาต์'}`);
+  if(event.type==='message' && event.message?.type==='location'){
+    const emp=await employee(); if(!emp) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
+    const session=await getLineSession(env.DB,lineUserId);
+    if(!session || new Date(session.expires_at).getTime()<=Date.now()) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'คำขอหมดเวลาแล้ว กรุณาพิมพ์ “เช็กอิน” หรือ “เช็กเอาต์” ใหม่');
+    if(!['checkin','checkout'].includes(session.action)) return;
+    try{
+      const lat=Number(event.message.latitude),lng=Number(event.message.longitude);
+      const result=session.action==='checkin'?await checkIn(env.DB,Number(emp.id),lat,lng,'line'):await checkOut(env.DB,Number(emp.id),lat,lng,'line');
+      await clearLineSession(env.DB,lineUserId);
+      const label=session.action==='checkin'?'Check-in':'Check-out'; const tm=session.action==='checkin'?result.check_in_at:result.check_out_at;
+      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`✅ ${label} สำเร็จ\nเวลา ${formatBangkokTime(tm)}${result.location_name?`\n📍 ${result.location_name}`:''}${result.distance_m!=null?` · ${Math.round(result.distance_m)} ม.`:''}${session.action==='checkin'?(result.late_minutes>0?`\n🟠 สาย ${result.late_minutes} นาที`:'\n🟢 ตรงเวลา'):''}`);
+    }catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
+  }
+
+  if(event.type==='postback'){
+    const emp=await employee(); if(!emp) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
+    const data=new URLSearchParams(event.postback?.data||''); const action=data.get('action');
+    if(action==='menu') return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildEmployeeMenuFlex(emp)]);
+    if(action==='checkin'||action==='checkout'){ await setLineSession(env.DB,lineUserId,action); return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`📍 ส่ง Location ปัจจุบันมาเพื่อ${action==='checkin'?'เช็กอิน':'เช็กเอาต์'}`); }
+    if(action==='leave_menu') return sendLeaveTypeMenu(env,event.replyToken,emp);
+    if(action==='leave_balance') return sendLeaveBalance(env,event.replyToken,emp);
+    if(action==='leave_type'){
+      const policyId=Number(data.get('policy_id')); const policy=await env.DB.prepare('SELECT * FROM leave_policies WHERE id=?1 AND client_id=?2 AND is_active=1').bind(policyId,Number(emp.client_id)).first();
+      if(!policy) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ไม่พบประเภทลานี้');
+      await setLineSession(env.DB,lineUserId,'leave_start',{policy_id:policyId});
+      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildDatePickerFlex('เลือกวันเริ่มลา','leave_start',policyId)]);
+    }
+    if(action==='leave_start'){
+      const date=event.postback?.params?.date; const policyId=Number(data.get('policy_id')); if(!date) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'กรุณาเลือกวันที่');
+      await setLineSession(env.DB,lineUserId,'leave_end',{policy_id:policyId,start_date:date});
+      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildDatePickerFlex(`เริ่ม ${formatThaiDateOnly(date)} · เลือกวันสุดท้าย`,'leave_end',policyId,date)]);
+    }
+    if(action==='leave_end'){
+      const endDate=event.postback?.params?.date; const startDate=data.get('start')||endDate; const policyId=Number(data.get('policy_id'));
+      if(!endDate||endDate<startDate) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'วันสิ้นสุดต้องไม่น้อยกว่าวันเริ่มลา');
+      if(startDate===endDate){
+        await setLineSession(env.DB,lineUserId,'leave_daypart',{policy_id:policyId,start_date:startDate,end_date:endDate});
+        return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildLeaveDayPartFlex(policyId,startDate,endDate)]);
+      }
+      await setLineSession(env.DB,lineUserId,'leave_reason',{policy_id:policyId,start_date:startDate,end_date:endDate,day_part:'full'});
+      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`📝 ระบุเหตุผลการลา
+${formatThaiDateOnly(startDate)} – ${formatThaiDateOnly(endDate)}
+
+พิมพ์เหตุผลส่งมาได้เลย`);
+    }
+    if(action==='leave_daypart'){
+      const policyId=Number(data.get('policy_id')); const startDate=data.get('start'); const endDate=data.get('end')||startDate; const dayPart=data.get('part')||'full';
+      if(!policyId||!startDate) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ข้อมูลคำขอไม่ครบ กรุณาพิมพ์ “ขอลา” ใหม่');
+      await setLineSession(env.DB,lineUserId,'leave_reason',{policy_id:policyId,start_date:startDate,end_date:endDate,day_part:dayPart});
+      const partLabel=dayPart==='am'?'ครึ่งวันเช้า':dayPart==='pm'?'ครึ่งวันบ่าย':'เต็มวัน';
+      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`📝 ระบุเหตุผลการลา
+${formatThaiDateOnly(startDate)} · ${partLabel}
+
+พิมพ์เหตุผลส่งมาได้เลย`);
+    }
+    if(action==='leave_attach'){
+      const id=Number(data.get('id')); const row=await env.DB.prepare("SELECT * FROM leave_requests WHERE id=?1 AND employee_id=?2 AND status IN ('pending','awaiting_evidence')").bind(id,Number(emp.id)).first(); if(!row) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'คำขอนี้แนบหลักฐานไม่ได้แล้ว');
+      await setLineSession(env.DB,lineUserId,'leave_evidence',{request_id:id,required:Number(row.evidence_required)===1});
+      return replyEvidencePrompt(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,row);
+    }
+    if(action==='leave_approve'){
+      try{const result=await decideLeaveRequest(env,Number(data.get('id')),'approved',{actorType:'employee',actorEmployeeId:Number(emp.id),clientId:Number(emp.client_id),enforceApprover:true});return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`✅ อนุมัติคำขอลา #LV-${String(result.id).padStart(4,'0')} แล้ว`);}catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
+    }
+    if(action==='leave_reject'){
+      const id=Number(data.get('id')); const row=await env.DB.prepare("SELECT id FROM leave_requests WHERE id=?1 AND approver_employee_id=?2 AND status='pending'").bind(id,Number(emp.id)).first(); if(!row) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'คำขอนี้ไม่ได้รอคุณอนุมัติแล้ว');
+      await setLineSession(env.DB,lineUserId,'leave_reject_reason',{request_id:id});
+      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'กรุณาพิมพ์เหตุผลที่ไม่อนุมัติ แล้วส่งมาได้เลย');
     }
   }
 }
@@ -1287,6 +1568,10 @@ function canManagePeople(role) {
   return ['owner','hr_admin','hr','manager'].includes(String(role || ''));
 }
 
+function canOverrideLeave(role) {
+  return ['owner','hr_admin','hr'].includes(String(role || ''));
+}
+
 async function linkLineAccount(db, lineUserId, token) {
   const row = await db.prepare(`
     SELECT t.*, e.first_name, e.nickname, e.client_id
@@ -1307,14 +1592,217 @@ async function linkLineAccount(db, lineUserId, token) {
   return { ok: true, name: row.nickname || row.first_name };
 }
 
-async function setLineSession(db, lineUserId, action) {
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-  await db.prepare(`
-    INSERT INTO line_sessions (line_user_id, action, expires_at)
-    VALUES (?1,?2,?3)
-    ON CONFLICT(line_user_id) DO UPDATE SET action=excluded.action, expires_at=excluded.expires_at, created_at=CURRENT_TIMESTAMP
-  `).bind(lineUserId, action, expiresAt).run();
+async function setLineSession(db,lineUserId,action,payload={}) {
+  const expiresAt=new Date(Date.now()+30*60*1000).toISOString();
+  await db.prepare(`INSERT INTO line_sessions (line_user_id,action,payload_json,expires_at) VALUES (?1,?2,?3,?4)
+    ON CONFLICT(line_user_id) DO UPDATE SET action=excluded.action,payload_json=excluded.payload_json,expires_at=excluded.expires_at,created_at=CURRENT_TIMESTAMP`)
+    .bind(lineUserId,action,JSON.stringify(payload||{}),expiresAt).run();
 }
+async function getLineSession(db,lineUserId){
+  const row=await db.prepare('SELECT * FROM line_sessions WHERE line_user_id=?1').bind(lineUserId).first();
+  if(!row) return null; if(new Date(row.expires_at).getTime()<=Date.now()){await clearLineSession(db,lineUserId);return null;}
+  let payload={}; try{payload=JSON.parse(row.payload_json||'{}')}catch{}
+  return {...row,payload};
+}
+async function clearLineSession(db,lineUserId){await db.prepare('DELETE FROM line_sessions WHERE line_user_id=?1').bind(lineUserId).run();}
+
+
+function num(value,fallback=0){const n=Number(value);return Number.isFinite(n)?n:fallback;}
+function nullableNum(value){if(value===null||value===undefined||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}
+function slugCode(value){return String(value||'').trim().toLowerCase().replace(/[^a-z0-9ก-๙]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40);}
+function formatThaiDateOnly(date){try{return new Date(`${date}T12:00:00+07:00`).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Bangkok'});}catch{return date;}}
+
+async function ensureV050Ready(db){
+  const ready=await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('leave_policies','leave_evidence_share_tokens')").first();
+  if(Number(ready?.n||0)<2) await ensureV050Schema(db);
+}
+
+async function ensureV050Schema(db){
+  const statements=V050_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
+  for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement)){console.warn(JSON.stringify({level:'warn',event:'v050_index_skip',message:String(error?.message||error)}));continue;}throw error;}}
+  for(const [column,type] of [['leave_approver_employee_id','INTEGER']]) await ensureColumn(db,'employees',column,type);
+  for(const [column,type] of [['payload_json','TEXT']]) await ensureColumn(db,'line_sessions',column,type);
+  const leaveCols=[['policy_id','INTEGER'],['duration_days','REAL'],['day_part','TEXT'],['evidence_required','INTEGER'],['evidence_count','INTEGER'],['decision_reason','TEXT'],['decided_by_employee_id','INTEGER'],['decided_by_user_id','INTEGER'],['submitted_via','TEXT']];
+  for(const [column,type] of leaveCols) await ensureColumn(db,'leave_requests',column,type);
+}
+
+async function ensureDefaultLeavePolicies(db,clientId){
+  if(!clientId) return;
+  const defaults=[
+    ['annual','ลาพักร้อน',6,0,1,null,1,0,10],
+    ['sick','ลาป่วย',30,0,1,3,0,0,20],
+    ['personal','ลากิจ',3,0,1,null,1,0,30],
+    ['unpaid','ลาไม่รับค่าจ้าง',0,1,1,null,0,1,40],
+  ];
+  for(const d of defaults){await db.prepare(`INSERT OR IGNORE INTO leave_policies (client_id,code,name,default_entitlement_days,is_unlimited,requires_reason,evidence_required_after_days,notice_days,allow_negative,is_active,sort_order) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,1,?10)`).bind(clientId,...d).run();}
+}
+
+async function getEmployeeForClient(db,id,clientId){return db.prepare('SELECT * FROM employees WHERE id=?1 AND client_id=?2').bind(id,clientId).first();}
+
+function businessDaysInclusive(startDate,endDate,dayPart='full'){
+  const start=new Date(`${startDate}T12:00:00+07:00`),end=new Date(`${endDate}T12:00:00+07:00`); if(!Number.isFinite(start.getTime())||!Number.isFinite(end.getTime())||end<start) throw httpError('ช่วงวันลาไม่ถูกต้อง',400);
+  let days=0; for(let d=new Date(start);d<=end;d.setDate(d.getDate()+1)){const dow=d.getDay();if(dow!==0&&dow!==6)days++;}
+  if(startDate===endDate&&['am','pm','half'].includes(dayPart)) days=0.5;
+  return days|| (startDate===endDate?1:0);
+}
+
+async function getEmployeeLeaveProfile(db,employeeId,clientId,year){
+  await ensureDefaultLeavePolicies(db,clientId);
+  const employee=await db.prepare(`SELECT e.*,ap.nickname AS approver_nickname,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name FROM employees e LEFT JOIN employees ap ON ap.id=e.leave_approver_employee_id WHERE e.id=?1 AND e.client_id=?2`).bind(employeeId,clientId).first();
+  if(!employee) throw httpError('ไม่พบพนักงาน',404);
+  const policies=(await db.prepare('SELECT * FROM leave_policies WHERE client_id=?1 AND is_active=1 ORDER BY sort_order,name').bind(clientId).all()).results||[];
+  const ent=(await db.prepare('SELECT * FROM employee_leave_entitlements WHERE employee_id=?1 AND year=?2').bind(employeeId,year).all()).results||[];
+  const requests=(await db.prepare(`SELECT policy_id,status,SUM(COALESCE(duration_days,0)) AS days FROM leave_requests WHERE employee_id=?1 AND substr(start_date,1,4)=?2 AND status IN ('approved','pending','awaiting_evidence') GROUP BY policy_id,status`).bind(employeeId,String(year)).all()).results||[];
+  const balances=policies.map(policy=>{
+    const override=ent.find(x=>Number(x.leave_policy_id)===Number(policy.id));
+    const entitlement=override?num(override.entitlement_days):num(policy.default_entitlement_days); const adjustment=override?num(override.adjustment_days):0;
+    const used=requests.filter(x=>Number(x.policy_id)===Number(policy.id)&&x.status==='approved').reduce((a,x)=>a+num(x.days),0);
+    const pending=requests.filter(x=>Number(x.policy_id)===Number(policy.id)&&x.status!=='approved').reduce((a,x)=>a+num(x.days),0);
+    const total=entitlement+adjustment; const remaining=Number(policy.is_unlimited)?null:Math.max(-999,total-used-pending);
+    return {...policy,entitlement_days:entitlement,adjustment_days:adjustment,total_days:total,used_days:used,pending_days:pending,remaining_days:remaining,note:override?.note||null};
+  });
+  return {employee,year,balances};
+}
+
+async function resolveLeavePolicy(db,clientId,policyId,leaveType){
+  await ensureDefaultLeavePolicies(db,clientId);
+  if(policyId) return db.prepare('SELECT * FROM leave_policies WHERE id=?1 AND client_id=?2 AND is_active=1').bind(policyId,clientId).first();
+  if(leaveType) return db.prepare('SELECT * FROM leave_policies WHERE code=?1 AND client_id=?2 AND is_active=1').bind(leaveType,clientId).first();
+  return null;
+}
+
+async function createLeaveRequest(env,{clientId,employeeId,policyId,leaveType,startDate,endDate,dayPart='full',reason='',submittedVia='line',submittedByUserId=null}){
+  const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee) throw httpError('ไม่พบพนักงาน',404);
+  const policy=await resolveLeavePolicy(env.DB,clientId,policyId,leaveType); if(!policy) throw httpError('ไม่พบประเภทลา',400);
+  if(!startDate||!endDate) throw httpError('กรุณาเลือกวันลาให้ครบ',400);
+  const duration=businessDaysInclusive(startDate,endDate,dayPart); if(duration<=0) throw httpError('ช่วงนี้ไม่มีวันทำงานให้ลา',400);
+  if(Number(policy.requires_reason)&&String(reason).trim().length<2) throw httpError('กรุณาระบุเหตุผลการลา',400);
+  const overlap=await env.DB.prepare("SELECT id FROM leave_requests WHERE employee_id=?1 AND status IN ('pending','awaiting_evidence','approved') AND NOT(end_date<?2 OR start_date>?3) LIMIT 1").bind(employeeId,startDate,endDate).first(); if(overlap) throw httpError('มีคำขอลาในช่วงวันที่นี้อยู่แล้ว',409);
+  const profile=await getEmployeeLeaveProfile(env.DB,employeeId,clientId,Number(startDate.slice(0,4)));
+  const bal=profile.balances.find(x=>Number(x.id)===Number(policy.id));
+  if(!Number(policy.is_unlimited)&&!Number(policy.allow_negative)&&num(bal?.remaining_days)<duration) throw httpError(`สิทธิ์${policy.name}ไม่พอ · เหลือ ${num(bal?.remaining_days)} วัน`,409);
+  if(submittedVia==='line' && num(policy.notice_days)>0){
+    const today=dateInBangkok(); const minDate=new Date(`${today}T12:00:00+07:00`); minDate.setDate(minDate.getDate()+num(policy.notice_days));
+    if(new Date(`${startDate}T12:00:00+07:00`)<minDate) throw httpError(`${policy.name} ต้องแจ้งล่วงหน้าอย่างน้อย ${policy.notice_days} วัน`,409);
+  }
+  const evidenceRequired=policy.evidence_required_after_days!=null && duration>=num(policy.evidence_required_after_days);
+  const approverId=employee.leave_approver_employee_id||employee.manager_employee_id||null;
+  if(submittedVia==='line' && !approverId) throw httpError('HR ยังไม่ได้กำหนดผู้อนุมัติเรื่องลาให้คุณ กรุณาติดต่อ HR ก่อนส่งคำขอ',409);
+  const status=evidenceRequired?'awaiting_evidence':'pending';
+  const result=await env.DB.prepare(`INSERT INTO leave_requests (client_id,employee_id,leave_type,policy_id,start_date,end_date,reason,status,approver_employee_id,duration_days,day_part,evidence_required,evidence_count,submitted_via) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,?13)`)
+    .bind(clientId,employeeId,policy.code,Number(policy.id),startDate,endDate,reason||null,status,approverId,duration,dayPart,evidenceRequired?1:0,submittedVia).run();
+  const id=Number(result.meta.last_row_id);
+  await env.DB.prepare(`INSERT INTO leave_approval_events (client_id,leave_request_id,action,actor_type,actor_employee_id,actor_user_id,reason) VALUES (?1,?2,'submitted',?3,?4,?5,?6)`).bind(clientId,id,submittedVia==='line'?'employee':'user',submittedVia==='line'?employeeId:null,submittedVia==='line'?null:submittedByUserId,reason||null).run();
+  return getLeaveRequestDetail(env.DB,id,clientId);
+}
+
+async function getLeaveRequestDetail(db,id,clientId=null){
+  return db.prepare(`SELECT l.*,e.first_name,e.last_name,e.nickname,e.employee_code,e.line_user_id AS employee_line_user_id,lp.name AS leave_type_name,lp.code AS leave_policy_code,lp.is_unlimited,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,ap.nickname AS approver_nickname,ap.line_user_id AS approver_line_user_id,(SELECT COUNT(*) FROM leave_request_evidence ev WHERE ev.leave_request_id=l.id) AS evidence_count FROM leave_requests l JOIN employees e ON e.id=l.employee_id LEFT JOIN leave_policies lp ON lp.id=l.policy_id LEFT JOIN employees ap ON ap.id=l.approver_employee_id WHERE l.id=?1 ${clientId?'AND l.client_id=?2':''}`).bind(...(clientId?[id,clientId]:[id])).first();
+}
+
+async function decideLeaveRequest(env,id,status,{actorType,actorEmployeeId=null,actorUserId=null,reason='',clientId=null,enforceApprover=false}={}){
+  const row=await getLeaveRequestDetail(env.DB,id,clientId); if(!row) throw httpError('ไม่พบคำขอลา',404); if(row.status!=='pending') throw httpError('คำขอนี้ไม่ได้รออนุมัติแล้ว',409);
+  if(enforceApprover&&Number(row.approver_employee_id)!==Number(actorEmployeeId)) throw httpError('คุณไม่ใช่ผู้อนุมัติของคำขอนี้',403);
+  if(status==='rejected'&&String(reason).trim().length<2) throw httpError('กรุณาระบุเหตุผลที่ไม่อนุมัติ',400);
+  if(status==='approved'&&Number(row.evidence_required)&&Number(row.evidence_count||0)<1) throw httpError('คำขอนี้ยังไม่มีหลักฐานตาม Policy',409);
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE leave_requests SET status=?1,approved_at=CASE WHEN ?1='approved' THEN CURRENT_TIMESTAMP ELSE approved_at END,decision_reason=?2,decided_by_employee_id=?3,decided_by_user_id=?4,updated_at=CURRENT_TIMESTAMP WHERE id=?5`).bind(status,reason||null,actorEmployeeId,actorUserId,id),
+    env.DB.prepare(`INSERT INTO leave_approval_events (client_id,leave_request_id,action,actor_type,actor_employee_id,actor_user_id,reason) VALUES (?1,?2,?3,?4,?5,?6,?7)`).bind(Number(row.client_id),id,status,actorType||'user',actorEmployeeId,actorUserId,reason||null)
+  ]);
+  if(status==='approved') await syncApprovedLeaveToAttendance(env.DB,row);
+  const updated=await getLeaveRequestDetail(env.DB,id,Number(row.client_id));
+  await notifyLeaveDecision(env,updated);
+  await safeAudit(env.DB,Number(row.client_id),actorType||'user',String(actorEmployeeId||actorUserId||''),`leave.${status}`,'leave_request',String(id),{reason:reason||null});
+  return updated;
+}
+
+async function syncApprovedLeaveToAttendance(db,row){
+  const start=new Date(`${row.start_date}T12:00:00+07:00`),end=new Date(`${row.end_date}T12:00:00+07:00`);
+  for(let d=new Date(start);d<=end;d.setDate(d.getDate()+1)){
+    if([0,6].includes(d.getDay())) continue;
+    const date=d.toISOString().slice(0,10);
+    await db.prepare(`INSERT OR IGNORE INTO attendance (client_id,employee_id,work_date,source,status,note) VALUES (?1,?2,?3,'leave','leave',?4)`).bind(Number(row.client_id),Number(row.employee_id),date,`${row.leave_type_name||row.leave_type} #LV-${String(row.id).padStart(4,'0')}`).run();
+  }
+}
+
+async function storeLineLeaveEvidence(env,{requestId,employeeId,clientId,message}){
+  if(!env.EVIDENCE_BUCKET) throw httpError('Evidence storage ยังไม่ได้เชื่อม R2',503);
+  const row=await env.DB.prepare("SELECT * FROM leave_requests WHERE id=?1 AND employee_id=?2 AND client_id=?3 AND status IN ('pending','awaiting_evidence')").bind(requestId,employeeId,clientId).first(); if(!row) throw httpError('ไม่พบคำขอที่รอหลักฐาน',404);
+  const response=await fetch(`https://api-data.line.me/v2/bot/message/${encodeURIComponent(message.id)}/content`,{headers:{authorization:`Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`}}); if(!response.ok) throw httpError(`LINE content ${response.status}`,502);
+  const contentType=response.headers.get('content-type')|| (message.type==='image'?'image/jpeg':'application/octet-stream');
+  const size=Number(response.headers.get('content-length')||message.fileSize||0); if(size>10*1024*1024) throw httpError('ไฟล์ใหญ่เกิน 10 MB',413);
+  const ext=contentType.includes('png')?'png':contentType.includes('jpeg')||contentType.includes('jpg')?'jpg':contentType.includes('pdf')?'pdf':'bin';
+  const fileName=message.fileName||`evidence-${Date.now()}.${ext}`; const key=`client-${clientId}/leave-${requestId}/${crypto.randomUUID()}-${fileName.replace(/[^A-Za-z0-9._-]/g,'_')}`;
+  await env.EVIDENCE_BUCKET.put(key,response.body,{httpMetadata:{contentType}});
+  const result=await env.DB.prepare(`INSERT INTO leave_request_evidence (client_id,leave_request_id,uploaded_by_employee_id,r2_key,file_name,content_type,file_size,source) VALUES (?1,?2,?3,?4,?5,?6,?7,'line')`).bind(clientId,requestId,employeeId,key,fileName,contentType,size||null).run();
+  return Number(result.meta.last_row_id);
+}
+
+async function createEvidenceShareUrl(env,requestId){
+  const evidence=await env.DB.prepare('SELECT id FROM leave_request_evidence WHERE leave_request_id=?1 ORDER BY created_at LIMIT 1').bind(requestId).first(); if(!evidence) return null;
+  const token=randomToken(32); const hash=await sha256Hex(token); const expiresAt=new Date(Date.now()+24*60*60*1000).toISOString();
+  await env.DB.prepare('INSERT INTO leave_evidence_share_tokens (token_hash,evidence_id,expires_at) VALUES (?1,?2,?3)').bind(hash,Number(evidence.id),expiresAt).run();
+  const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,''); return `${base}/evidence/${encodeURIComponent(token)}`;
+}
+async function serveSharedEvidence(env,token){
+  if(!env.EVIDENCE_BUCKET) return json({error:'Evidence storage ยังไม่พร้อม'},503);
+  const hash=await sha256Hex(token); const row=await env.DB.prepare(`SELECT st.expires_at,ev.* FROM leave_evidence_share_tokens st JOIN leave_request_evidence ev ON ev.id=st.evidence_id WHERE st.token_hash=?1`).bind(hash).first();
+  if(!row||new Date(row.expires_at).getTime()<=Date.now()) return new Response('Link expired',{status:410});
+  const object=await env.EVIDENCE_BUCKET.get(row.r2_key); if(!object) return new Response('Not found',{status:404});
+  const headers=new Headers(); object.writeHttpMetadata(headers); headers.set('cache-control','private, no-store'); headers.set('content-disposition',`inline; filename*=UTF-8''${encodeURIComponent(row.file_name||'evidence')}`); return new Response(object.body,{headers});
+}
+
+async function notifyLeaveApprover(env,requestId){
+  const row=await getLeaveRequestDetail(env.DB,requestId); if(!row||row.status!=='pending') return;
+  if(!row.approver_employee_id||!row.approver_line_user_id){
+    console.warn(JSON.stringify({level:'warn',event:'leave_approver_missing_line',request_id:requestId,approver_id:row.approver_employee_id||null})); return;
+  }
+  const profile=await getEmployeeLeaveProfile(env.DB,Number(row.employee_id),Number(row.client_id),Number(String(row.start_date).slice(0,4)));
+  const balance=profile.balances.find(x=>Number(x.id)===Number(row.policy_id));
+  let evidenceUrl=null; if(Number(row.evidence_count)>0) evidenceUrl=await createEvidenceShareUrl(env,requestId);
+  await pushLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,row.approver_line_user_id,[buildLeaveApprovalFlex({...row,balance,evidence_url:evidenceUrl})]);
+}
+
+async function notifyEmployeeEvidenceRequired(env,requestId){
+  const row=await getLeaveRequestDetail(env.DB,requestId); if(!row?.employee_line_user_id) return;
+  await setLineSession(env.DB,row.employee_line_user_id,'leave_evidence',{request_id:requestId,required:true});
+  await pushLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,row.employee_line_user_id,[{type:'text',text:`📎 คำขอ ${row.leave_type_name||row.leave_type} ${row.duration_days} วัน ต้องแนบหลักฐานตาม Policy\nส่งรูปหรือไฟล์ในแชตนี้ได้เลย`,quickReply:{items:[{type:'action',action:{type:'cameraRoll',label:'เลือกรูป'}},{type:'action',action:{type:'camera',label:'ถ่ายรูป'}}]}}]);
+}
+
+async function notifyLeaveDecision(env,row){
+  if(!row?.employee_line_user_id) return;
+  const approved=row.status==='approved';
+  await pushLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,row.employee_line_user_id,[buildLeaveDecisionFlex(row,approved)]);
+}
+
+function lineText(text,size='sm',color='#202B2D',weight='regular'){return {type:'text',text:String(text),size,color,weight,wrap:true};}
+function buildWelcomeFlex(name,company){return {type:'flex',altText:`เชื่อม LINE กับ ${company} สำเร็จ`,contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText('นากนะ','sm','#167D7F','bold'),lineText(`ยินดีต้อนรับ ${name} 👋`,'xl','#123C4A','bold'),lineText(`เชื่อมกับ ${company} เรียบร้อยแล้ว`,'sm','#637072'),{type:'button',style:'primary',color:'#167D7F',action:{type:'postback',label:'เปิดเมนูพนักงาน',data:'action=menu'}}]}}};}
+function buildEmployeeMenuFlex(emp){return {type:'flex',altText:'เมนูนากนะ',contents:{type:'bubble',header:{type:'box',layout:'vertical',backgroundColor:'#F8FAF8',contents:[lineText('นากนะ · Employee','sm','#167D7F','bold'),lineText(emp.company_name||'','xs','#637072')]},body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText(`สวัสดี ${emp.nickname||emp.first_name} 👋`,'xl','#123C4A','bold'),lineText('วันนี้จะทำอะไรดี?','sm','#637072'),{type:'box',layout:'vertical',spacing:'sm',contents:[{type:'button',style:'primary',color:'#167D7F',action:{type:'postback',label:'📍 เช็กอิน',data:'action=checkin'}},{type:'button',style:'secondary',action:{type:'postback',label:'🏠 เช็กเอาต์',data:'action=checkout'}},{type:'button',style:'secondary',action:{type:'postback',label:'🏖 ขอลา',data:'action=leave_menu'}},{type:'button',style:'link',action:{type:'postback',label:'ดูสิทธิ์ลา',data:'action=leave_balance'}}]}]}}};}
+function buildEmployeeStatusFlex(emp,a){
+  const contents=[lineText('สถานะวันนี้','lg','#123C4A','bold'),lineText(emp.nickname||emp.first_name,'sm','#637072'),{type:'separator'},lineText(a?.check_in_at?`เช็กอิน ${formatBangkokTime(a.check_in_at)}`:a?.status==='leave'?'วันนี้ลา':'ยังไม่ได้เช็กอิน','md',a?.check_in_at?'#2E9B68':'#E6A23C','bold')];
+  if(a?.check_out_at) contents.push(lineText(`เช็กเอาต์ ${formatBangkokTime(a.check_out_at)}`,'sm','#637072'));
+  return {type:'flex',altText:'สถานะวันนี้',contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents}}};
+}
+async function sendLeaveTypeMenu(env,replyToken,emp){await ensureDefaultLeavePolicies(env.DB,Number(emp.client_id));const policies=(await env.DB.prepare('SELECT * FROM leave_policies WHERE client_id=?1 AND is_active=1 ORDER BY sort_order,name').bind(Number(emp.client_id)).all()).results||[];const buttons=policies.slice(0,8).map(p=>({type:'button',style:'secondary',height:'sm',action:{type:'postback',label:p.name,data:`action=leave_type&policy_id=${p.id}`}}));return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,replyToken,[{type:'flex',altText:'เลือกประเภทการลา',contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText('ขอลางาน','xl','#123C4A','bold'),lineText('เลือกประเภทการลา','sm','#637072'),...buttons]}}}]);}
+async function sendLeaveBalance(env,replyToken,emp){const profile=await getEmployeeLeaveProfile(env.DB,Number(emp.id),Number(emp.client_id),new Date().getFullYear());const rows=profile.balances.map(b=>({type:'box',layout:'horizontal',contents:[lineText(b.name,'sm','#202B2D','bold'),lineText(Number(b.is_unlimited)?'ไม่จำกัด':`${Number(b.remaining_days).toFixed(Number(b.remaining_days)%1?1:0)} วัน`,'sm',Number(b.remaining_days)<2?'#D9534F':'#167D7F','bold')]}));return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,replyToken,[{type:'flex',altText:'สิทธิ์ลาคงเหลือ',contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText(`สิทธิ์ลา ${profile.year}`,'xl','#123C4A','bold'),...rows]}}}]);}
+function buildDatePickerFlex(title,action,policyId,start=null){const data=`action=${action}&policy_id=${policyId}${start?`&start=${start}`:''}`;return {type:'flex',altText:title,contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText(title,'lg','#123C4A','bold'),{type:'button',style:'primary',color:'#167D7F',action:{type:'datetimepicker',label:'เลือกวันที่',data,mode:'date'}}]}}};}
+function buildLeaveDayPartFlex(policyId,startDate,endDate){
+  const make=(label,part,style='secondary')=>{const button={type:'button',style,action:{type:'postback',label,data:`action=leave_daypart&policy_id=${policyId}&start=${startDate}&end=${endDate}&part=${part}`}};if(style==='primary')button.color='#167D7F';return button;};
+  return {type:'flex',altText:'เลือกรูปแบบวันลา',contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText('เลือกรูปแบบวันลา','lg','#123C4A','bold'),lineText(formatThaiDateOnly(startDate),'sm','#637072'),make('เต็มวัน','full','primary'),make('ครึ่งวันเช้า','am'),make('ครึ่งวันบ่าย','pm')]}}};
+}
+function buildLeaveSubmittedFlex(row){const pending=row.status==='pending';return {type:'flex',altText:`ส่งคำขอ${row.leave_type_name||row.leave_type}แล้ว`,contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText('ส่งคำขอเรียบร้อยแล้ว','lg','#123C4A','bold'),lineText(row.leave_type_name||row.leave_type,'sm','#167D7F','bold'),lineText(`${formatThaiDateOnly(row.start_date)}${row.start_date!==row.end_date?` – ${formatThaiDateOnly(row.end_date)}`:''} · ${row.duration_days} วัน`,'sm','#202B2D'),lineText(`สถานะ: ${pending?'รออนุมัติ':'รอหลักฐาน'}`,'sm',pending?'#E6A23C':'#FF8A65','bold'),{type:'button',style:'link',action:{type:'postback',label:'📎 แนบหลักฐาน',data:`action=leave_attach&id=${row.id}`}}]}}};}
+function buildLeaveApprovalFlex(row){
+  const before=row.balance?.is_unlimited?'ไม่จำกัด':row.balance?`${Number(row.balance.remaining_days||0)+Number(row.duration_days||0)} วัน`:'—';
+  const after=row.balance?.is_unlimited?'ไม่จำกัด':row.balance?`${Number(row.balance.remaining_days||0)} วัน`:'—';
+  const body=[lineText(`${row.nickname||row.first_name} ${row.last_name||''}`,'xl','#123C4A','bold'),lineText(row.leave_type_name||row.leave_type,'sm','#167D7F','bold'),lineText(`${formatThaiDateOnly(row.start_date)}${row.start_date!==row.end_date?` – ${formatThaiDateOnly(row.end_date)}`:''} · ${row.duration_days} วัน`,'sm','#202B2D'),{type:'separator'},lineText('เหตุผล','xs','#637072','bold'),lineText(row.reason||'—','sm','#202B2D'),lineText(`สิทธิ์ก่อนลา ${before} → หลังหัก ${after}`,'xs','#637072','bold'),lineText(`หลักฐาน ${Number(row.evidence_count||0)} ไฟล์`,'xs',Number(row.evidence_required)&&!Number(row.evidence_count)?'#D9534F':'#637072','bold')];
+  if(row.evidence_url) body.push({type:'button',style:'link',height:'sm',action:{type:'uri',label:'ดูหลักฐาน',uri:row.evidence_url}});
+  return {type:'flex',altText:`คำขอลาใหม่จาก ${row.nickname||row.first_name}`,contents:{type:'bubble',header:{type:'box',layout:'vertical',backgroundColor:'#F8FAF8',contents:[lineText('คำขอลาใหม่','sm','#167D7F','bold'),lineText(`#LV-${String(row.id).padStart(4,'0')}`,'xs','#637072')]},body:{type:'box',layout:'vertical',spacing:'md',contents:body},footer:{type:'box',layout:'horizontal',spacing:'sm',contents:[{type:'button',style:'primary',color:'#167D7F',action:{type:'postback',label:'อนุมัติ',data:`action=leave_approve&id=${row.id}`}},{type:'button',style:'secondary',action:{type:'postback',label:'ไม่อนุมัติ',data:`action=leave_reject&id=${row.id}`}}]}}};
+}
+
+function buildLeaveDecisionFlex(row,approved){return {type:'flex',altText:approved?'คำขอลาได้รับอนุมัติ':'คำขอลาไม่ผ่านการอนุมัติ',contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[lineText(approved?'อนุมัติแล้ว ✅':'ไม่อนุมัติ','xl',approved?'#2E9B68':'#D9534F','bold'),lineText(row.leave_type_name||row.leave_type,'sm','#123C4A','bold'),lineText(`${formatThaiDateOnly(row.start_date)}${row.start_date!==row.end_date?` – ${formatThaiDateOnly(row.end_date)}`:''}`,'sm','#202B2D'),!approved?lineText(`เหตุผล: ${row.decision_reason||'ไม่ระบุ'}`,'sm','#637072'):lineText('ระบบอัปเดต Attendance และสิทธิ์ลาให้แล้ว','sm','#637072')]}}};}
+async function replyEvidencePrompt(accessToken,replyToken,row){const messages=[{type:'text',text:`📎 กรุณาแนบหลักฐานสำหรับ ${row.leave_type_name||row.leave_type}\nส่งเป็นรูปหรือไฟล์ได้เลย`,quickReply:{items:[{type:'action',action:{type:'cameraRoll',label:'เลือกรูป'}},{type:'action',action:{type:'camera',label:'ถ่ายรูป'}}]}}];return replyLineMessages(accessToken,replyToken,messages);}
+async function replyLineMessages(accessToken,replyToken,messages){const response=await fetch('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`},body:JSON.stringify({replyToken,messages})});if(!response.ok)console.error(JSON.stringify({level:'error',event:'line_reply_messages_failed',status:response.status,body:await response.text()}));}
+async function pushLineMessages(accessToken,to,messages){if(!accessToken||!to)return;const response=await fetch('https://api.line.me/v2/bot/message/push',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`},body:JSON.stringify({to,messages})});if(!response.ok)console.error(JSON.stringify({level:'error',event:'line_push_messages_failed',status:response.status,body:await response.text()}));}
 
 async function sendDailyHrBrief(env) {
   if (!env.LINE_CHANNEL_ACCESS_TOKEN) {
@@ -1468,6 +1956,7 @@ async function ensureCoreSchema(db) {
   ];
   for (const [column,type] of employeeColumns) await ensureColumn(db,'employees',column,type);
   for (const [column,type] of attendanceColumns) await ensureColumn(db,'attendance',column,type);
+  await ensureV050Schema(db);
   console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_complete' }));
 }
 
