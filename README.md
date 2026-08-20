@@ -1,6 +1,14 @@
-# HR LINE OS v0.1.0
+# HR LINE OS v0.1.1
 
 HR Operating System แบบ LINE-first สำหรับบริษัทไทย
+
+## Fix ใน v0.1.1
+
+- เปลี่ยน Worker name ให้ตรงกับ Cloudflare project: `hr-line`
+- เอา `database_id` placeholder ที่ทำให้ deploy error 10021 ออก
+- ใช้ Cloudflare D1 automatic provisioning ผ่าน draft binding `DB`
+- Worker bootstrap schema + demo seed อัตโนมัติเมื่อ API ถูกเรียกครั้งแรก
+- ไม่ต้องสร้าง D1 UUID หรือแก้ `wrangler.jsonc` เองก่อน deploy
 
 ## มีอะไรใน V1 นี้
 
@@ -25,17 +33,40 @@ HR Operating System แบบ LINE-first สำหรับบริษัทไ
 
 - Cloudflare Workers + Static Assets
 - Cloudflare D1
-- Vanilla HTML/CSS/JS (ไม่มี build step ฝั่งหน้าเว็บ)
+- Vanilla HTML/CSS/JS
 - LINE Messaging API webhook
 
-## 1) ติดตั้ง
+## Deploy ผ่าน Cloudflare Workers Builds
+
+ใช้ Deploy command เดิมได้เลย:
+
+```bash
+npx wrangler deploy
+```
+
+Wrangler 4.124+ จะ provision D1 binding `DB` ให้อัตโนมัติในการ deploy ครั้งแรก
+
+หลัง deploy ให้ไปที่ Worker > Settings > Variables and Secrets แล้วเพิ่ม:
+
+```text
+HR_ADMIN_TOKEN = token ที่เดายาก
+LINE_CHANNEL_SECRET = ใส่ทีหลังเมื่อสร้าง LINE Bot แล้ว
+LINE_CHANNEL_ACCESS_TOKEN = ใส่ทีหลังเมื่อสร้าง LINE Bot แล้ว
+```
+
+> LINE secrets ยังไม่ต้องมีเพื่อเปิด Dashboard แต่ `HR_ADMIN_TOKEN` ต้องมีเพื่อเรียก API หลังบ้าน
+
+เมื่อเปิด Dashboard ครั้งแรกแล้ว login ด้วย `HR_ADMIN_TOKEN` ระบบจะสร้าง D1 tables และ demo data ให้อัตโนมัติถ้า database ยังว่าง
+
+## Local development
 
 ```bash
 npm install
 cp .dev.vars.example .dev.vars
+npm run dev
 ```
 
-แก้ `.dev.vars`:
+`.dev.vars`:
 
 ```env
 HR_ADMIN_TOKEN=ใส่-token-ที่เดายาก
@@ -43,59 +74,26 @@ LINE_CHANNEL_SECRET=...
 LINE_CHANNEL_ACCESS_TOKEN=...
 ```
 
-## 2) สร้าง D1
+## D1 migration commands (optional)
 
-```bash
-npx wrangler d1 create hr-line-os-db
-```
-
-เอา `database_id` ที่ได้ไปแทน `REPLACE_WITH_YOUR_D1_DATABASE_ID` ใน `wrangler.jsonc`
-
-## 3) Migration + Seed
-
-Local:
+ระบบ bootstrap schema อัตโนมัติอยู่แล้ว แต่ยังเก็บ migration scripts ไว้สำหรับการอัปเกรด schema ในรุ่นต่อไป:
 
 ```bash
 npm run db:migrate:local
-npm run db:seed:local
-```
-
-Production:
-
-```bash
 npm run db:migrate:remote
+npm run db:seed:local
 npm run db:seed:remote
 ```
 
-> seed.sql เป็นข้อมูล Demo เท่านั้น ไม่ต้องรัน Production ถ้ามีข้อมูลจริงแล้ว
+## LINE Webhook
 
-## 4) ตั้ง Secret Production
+หลังสร้าง LINE Messaging API channel แล้วตั้ง Webhook URL เป็น:
 
-```bash
-npx wrangler secret put HR_ADMIN_TOKEN
-npx wrangler secret put LINE_CHANNEL_SECRET
-npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
+```text
+https://hr-line.<your-subdomain>.workers.dev/webhooks/line
 ```
 
-## 5) Deploy
-
-```bash
-npm run deploy
-```
-
-หน้าเว็บจะอยู่ที่ URL ของ Worker เช่น:
-
-`https://hr-line-os.<subdomain>.workers.dev`
-
-LINE Webhook:
-
-`https://hr-line-os.<subdomain>.workers.dev/webhooks/line`
-
-## Daily HR Brief
-
-Worker ตั้ง Cron `0 1 * * *` ซึ่ง Cloudflare รันเป็น UTC = 08:00 น. ประเทศไทย ระบบจะส่งสรุป HR Radar, Birthday, Probation และ Contract ไปยังพนักงานที่อยู่ Department code `HR` หรือ Position มีคำว่า `HR` และเชื่อม LINE แล้ว
-
-## 6) เชื่อมพนักงานกับ LINE
+## เชื่อมพนักงานกับ LINE
 
 1. HR เปิด Employees
 2. กด “สร้างรหัส LINE”
@@ -106,7 +104,7 @@ Worker ตั้ง Cron `0 1 * * *` ซึ่ง Cloudflare รันเป็�
 LINK 123456
 ```
 
-5. หลังเชื่อมแล้ว พนักงานพิมพ์:
+หลังเชื่อมแล้วพนักงานใช้:
 
 ```text
 เช็กอิน
@@ -114,11 +112,11 @@ LINK 123456
 สถานะ
 ```
 
-ถ้าบริษัทตั้ง geofence แล้ว Bot จะขอให้พนักงานส่ง Location ก่อนบันทึกเวลา
+ถ้าบริษัทตั้ง geofence แล้ว Bot จะขอ Location ก่อนบันทึกเวลา
 
 ## ตั้ง Geofence
 
-ตอนนี้ V0.1 ตั้งผ่าน D1 ก่อน เช่น:
+V0.1.1 ตั้งผ่าน D1 ก่อน เช่น:
 
 ```sql
 UPDATE clients
@@ -129,27 +127,17 @@ SET geofence_name='DEAL Office',
 WHERE id=1;
 ```
 
-V0.2 ควรเพิ่มหน้า Company Settings ให้ HR ปักหมุดจาก UI
+V0.2 จะเพิ่ม Company Settings ให้ HR ปักหมุดจาก UI
 
-## Security ที่ใส่มาแล้ว
+## Security
 
-- LINE webhook ตรวจ `x-line-signature` จาก raw request body ก่อน parse JSON
+- LINE webhook ตรวจ `x-line-signature` จาก raw request bodyก่อน parse JSON
 - Secrets ไม่อยู่ใน source code
 - API หลังบ้านต้อง Bearer token
 - Link LINE ใช้รหัส one-time + expiry
 - Audit log สำหรับ action สำคัญ
-- D1 ใช้ prepared statements
+- D1 ใช้ prepared statements สำหรับข้อมูลจากผู้ใช้
 
-## ฟีเจอร์ถัดไปที่ควรทำ
+## Version
 
-1. LINE Rich Menu + LIFF Check-in UX
-2. Company Settings + map geofence
-3. Onboarding Autopilot
-4. Employee document center
-5. Interview scheduling + scorecard
-6. Manager approvals ผ่าน LINE
-7. HR notification scheduler (birthday / probation / contract)
-8. Payroll pre-flight
-9. Asset + Offboarding
-10. Role-based access แทน Admin token เดียว
-
+`V0.1.1 · 20 AUG 2026`
