@@ -1,0 +1,18 @@
+{
+  "name": "hr-line-os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create hr-line-os-db",
+    "db:migrate:local": "wrangler d1 migrations apply hr-line-os-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply hr-line-os-db --remote",
+    "db:seed:local": "wrangler d1 execute hr-line-os-db --local --file=./seed.sql",
+    "db:seed:remote": "wrangler d1 execute hr-line-os-db --remote --file=./seed.sql"
+  },
+  "devDependencies": {
+    "wrangler": "latest"
+  }
+}

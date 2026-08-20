@@ -1,0 +1,3 @@
+HR_ADMIN_TOKEN=change-this-local-admin-token
+LINE_CHANNEL_SECRET=put-line-channel-secret-here
+LINE_CHANNEL_ACCESS_TOKEN=put-line-channel-access-token-here
