@@ -7,6 +7,9 @@ const state = {
   attendance: [],
   leaves: [],
   requests: [],
+  invites: [],
+  lookups: { departments: [], positions: [], locations: [] },
+  workLocations: [],
   currentView: 'dashboard',
 };
 
@@ -106,6 +109,12 @@ function bindEvents() {
   });
 
   $('#addEmployeeBtn').onclick = openEmployeeModal;
+  $('#inviteEmployeeBtn').onclick = openInviteModal;
+  $('#inviteEmployeeBtnInline').onclick = openInviteModal;
+  $('#addWorkLocationBtn').onclick = openWorkLocationModal;
+  $('#inviteCreateBtn').onclick = createInvite;
+  $('#locationSaveBtn').onclick = saveWorkLocation;
+  $('#useCurrentLocationBtn').onclick = useCurrentLocation;
   $('#addCandidateBtn').onclick = openCandidateModal;
   $('#employeeSearch').addEventListener('input', event => renderEmployees(event.target.value));
 
@@ -300,7 +309,7 @@ async function ensureWorkspaceReady() {
 async function loadAll({ silent = false } = {}) {
   setLoading(true);
   try {
-    const [dashboard, employees, candidates, attendance, leaves, requests, gmail] = await Promise.all([
+    const [dashboard, employees, candidates, attendance, leaves, requests, gmail, invites, lookups, workLocations] = await Promise.all([
       api('/api/dashboard'),
       api('/api/employees'),
       api('/api/candidates'),
@@ -308,6 +317,9 @@ async function loadAll({ silent = false } = {}) {
       api('/api/leaves'),
       api('/api/requests'),
       api('/api/integrations/gmail'),
+      api('/api/invites'),
+      api('/api/lookups'),
+      api('/api/work-locations'),
     ]);
 
     state.dashboard = dashboard;
@@ -317,6 +329,9 @@ async function loadAll({ silent = false } = {}) {
     state.leaves = leaves.data || [];
     state.requests = requests.data || [];
     state.gmail = gmail;
+    state.invites = invites.data || [];
+    state.lookups = lookups || { departments: [], positions: [], locations: [] };
+    state.workLocations = workLocations.data || [];
 
     renderAll();
     renderIdentity();
@@ -351,6 +366,8 @@ function renderAll() {
   renderAttendance();
   renderLeaves();
   renderRequests();
+  renderInviteCenter();
+  renderWorkLocations();
 
   $('#todayText').textContent = formatDate(state.dashboard.today);
   $('#sidebarCompany').textContent = state.dashboard.client?.name || 'บริษัทของคุณ';
@@ -445,40 +462,122 @@ function renderEmployees(query = '') {
         employee.employee_code,
         employee.department_name,
         employee.position_name,
+        employee.line_display_name,
+        employee.work_location_names,
       ].some(value => String(value || '').toLowerCase().includes(normalized)))
     : state.employees;
 
   $('#employeeCountText').textContent = `${employees.length} คน`;
+  const connected = state.employees.filter(employee => employee.line_user_id).length;
+  $('#peopleTotal').textContent = state.employees.length;
+  $('#peopleLineConnected').textContent = connected;
+  $('#peopleLinePending').textContent = Math.max(0, state.employees.length - connected);
+  $('#peopleActiveInvites').textContent = state.invites.filter(invite => invite.status === 'active' && new Date(invite.expires_at).getTime() > Date.now() && Number(invite.used_count) < Number(invite.max_uses)).length;
 
   $('#employeesBody').innerHTML = employees.length
     ? employees.map(employee => `
       <tr>
         <td data-label="พนักงาน">
           <div class="person">
-            <div class="avatar">${initial(employee)}</div>
-            <div><strong>${escapeHtml(employee.nickname || employee.first_name)} ${escapeHtml(employee.last_name)}</strong><small>${escapeHtml(employee.employee_code)}</small></div>
+            <div class="avatar ${employee.line_picture_url ? 'avatar-photo' : ''}" ${employee.line_picture_url ? `style="background-image:url('${escapeHtml(employee.line_picture_url)}')"` : ''}>${employee.line_picture_url ? '' : initial(employee)}</div>
+            <div><strong>${escapeHtml(employee.nickname || employee.first_name)} ${escapeHtml(employee.last_name)}</strong><small>${escapeHtml(employee.employee_code)}${employee.position_name ? ` · ${escapeHtml(employee.position_name)}` : ''}</small></div>
           </div>
         </td>
         <td data-label="แผนก">${escapeHtml(employee.department_name || '—')}</td>
-        <td data-label="ตำแหน่ง">${escapeHtml(employee.position_name || '—')}</td>
+        <td data-label="Work Location">${employee.work_location_names ? `<span class="location-inline">📍 ${escapeHtml(employee.work_location_names)}</span>` : '<span class="muted">ทุก Location</span>'}</td>
         <td data-label="เริ่มงาน">${formatDate(employee.start_date)}</td>
-        <td data-label="LINE">${employee.line_user_id ? '<span class="badge badge-success"><span class="status-dot"></span> เชื่อมแล้ว</span>' : '<span class="badge badge-neutral">ยังไม่เชื่อม</span>'}</td>
-        <td data-label="จัดการ">${employee.line_user_id ? '<span class="muted">—</span>' : `<button class="text-btn" onclick="window.createLineCode(${employee.id})">สร้างรหัส LINE</button>`}</td>
+        <td data-label="LINE">${employee.line_user_id
+          ? `<div class="line-connected"><span class="badge badge-success"><span class="status-dot"></span> เชื่อมแล้ว</span><small>${escapeHtml(employee.line_display_name || 'LINE account')}</small></div>`
+          : '<span class="badge badge-neutral">ยังไม่เชื่อม</span>'}</td>
+        <td data-label="สถานะ"><span class="badge ${employee.status === 'active' ? 'badge-success' : 'badge-neutral'}">${employee.status === 'active' ? 'ทำงานอยู่' : escapeHtml(employee.status)}</span></td>
       </tr>`).join('')
-    : `<tr><td colspan="6">${emptyState('ไม่พบพนักงาน', 'ลองค้นหาด้วยชื่อ รหัสพนักงาน หรือแผนกอีกครั้ง')}</td></tr>`;
+    : `<tr><td colspan="6">${emptyState('ไม่พบพนักงาน', 'ลองค้นหาด้วยชื่อ รหัสพนักงาน แผนก หรือ LINE อีกครั้ง')}</td></tr>`;
 }
 
-window.createLineCode = async id => {
+function renderInviteCenter() {
+  const list = $('#inviteList');
+  if (!list) return;
+  const active = state.invites.filter(invite => invite.status === 'active' && new Date(invite.expires_at).getTime() > Date.now() && Number(invite.used_count) < Number(invite.max_uses));
+  const items = [...active, ...state.invites.filter(invite => !active.includes(invite))].slice(0, 8);
+  list.innerHTML = items.length ? items.map(invite => {
+    const remaining = Math.max(0, Number(invite.max_uses) - Number(invite.used_count));
+    const usable = invite.status === 'active' && new Date(invite.expires_at).getTime() > Date.now() && remaining > 0;
+    return `<div class="invite-row">
+      <div class="invite-main"><span class="invite-icon">↗</span><div><strong>${escapeHtml(invite.position_name || invite.department_name || 'พนักงานใหม่')}</strong><small>${invite.department_name ? `${escapeHtml(invite.department_name)} · ` : ''}${escapeHtml(invite.location_names || 'ทุก Work Location')}</small></div></div>
+      <div class="invite-usage"><strong>${Number(invite.used_count)}/${Number(invite.max_uses)}</strong><small>เข้าร่วมแล้ว</small></div>
+      <span class="badge ${usable ? 'badge-success' : 'badge-neutral'}">${usable ? `เหลือ ${remaining} สิทธิ์` : invite.status === 'revoked' ? 'ยกเลิกแล้ว' : 'ปิดแล้ว'}</span>
+      <div class="invite-actions">
+        ${usable ? `<button class="text-btn" onclick="window.copyInviteLink(${Number(invite.id)})">คัดลอกลิงก์</button><button class="text-btn danger-text" onclick="window.revokeInvite(${Number(invite.id)})">ยกเลิก</button>` : ''}
+      </div>
+    </div>`;
+  }).join('') : emptyState('ยังไม่มีลิงก์เชิญ', 'กด “เชิญเข้าทีม” แล้วกำหนดแผนก ตำแหน่ง และ Work Location ได้เลย');
+}
+
+window.copyInviteLink = async id => {
+  const invite = state.invites.find(item => Number(item.id) === Number(id));
+  if (!invite?.invite_url) return toast('ลิงก์เก่านี้ไม่มี URL ให้คัดลอก กรุณาสร้างลิงก์ใหม่', true);
+  try { await navigator.clipboard.writeText(invite.invite_url); toast('คัดลอกลิงก์เชิญแล้ว'); }
+  catch { window.prompt('คัดลอกลิงก์เชิญ', invite.invite_url); }
+};
+
+window.revokeInvite = async id => {
+  if (!confirm('ยกเลิกลิงก์เชิญนี้ใช่ไหม? คนที่ยังไม่ได้เข้าร่วมจะใช้ลิงก์นี้ต่อไม่ได้')) return;
   try {
-    const result = await api(`/api/employees/${id}/line-link-code`, { method: 'POST', body: '{}' });
-    const command = `LINK ${result.token}`;
-    try { await navigator.clipboard?.writeText(command); } catch {}
-    toast('สร้างรหัส LINE และคัดลอกคำสั่งแล้ว');
-    window.alert(`รหัสเชื่อม LINE: ${result.token}\n\nให้พนักงานส่งใน LINE OA:\n${command}\n\nรหัสหมดอายุใน 15 นาที`);
+    await api(`/api/invites/${id}/revoke`, { method: 'POST', body: '{}' });
+    await loadAll({ silent: true });
+    toast('ยกเลิกลิงก์เชิญแล้ว');
+  } catch (error) { toast(error.message, true); }
+};
+
+function openInviteModal() {
+  const departments = state.lookups.departments || [];
+  const positions = state.lookups.positions || [];
+  const locations = state.lookups.locations || [];
+  $('#inviteDepartment').innerHTML = `<option value="">ไม่ระบุ</option>${departments.map(item => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join('')}`;
+  $('#invitePosition').innerHTML = `<option value="">ไม่ระบุ</option>${positions.map(item => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join('')}`;
+  $('#inviteLocations').innerHTML = locations.length
+    ? locations.map(location => `<label class="location-check"><input type="checkbox" value="${location.id}" /><span><strong>${escapeHtml(location.name)}</strong><small>${escapeHtml(location.address || `รัศมี ${location.radius_m} ม.`)}</small></span></label>`).join('')
+    : `<div class="location-empty-inline"><strong>ยังไม่มี Work Location</strong><span>ไม่เป็นไร ลิงก์ยังสร้างได้ และพนักงานจะเช็กอินได้ทุกที่จนกว่าจะเพิ่ม Location</span></div>`;
+  $('#inviteStartDate').value = '';
+  $('#inviteMaxUses').value = '1';
+  $('#inviteExpiresDays').value = '7';
+  $('#inviteModal').showModal();
+}
+
+async function createInvite() {
+  const button = $('#inviteCreateBtn');
+  const locationIds = $$('#inviteLocations input:checked').map(input => Number(input.value));
+  button.disabled = true;
+  button.textContent = 'กำลังสร้าง…';
+  try {
+    const result = await api('/api/invites', {
+      method: 'POST',
+      body: JSON.stringify({
+        department_id: $('#inviteDepartment').value || null,
+        position_id: $('#invitePosition').value || null,
+        start_date: $('#inviteStartDate').value || null,
+        max_uses: Number($('#inviteMaxUses').value || 1),
+        expires_days: Number($('#inviteExpiresDays').value || 7),
+        location_ids: locationIds,
+      }),
+    });
+    try { await navigator.clipboard.writeText(result.invite_url); } catch {}
+    $('#inviteModal').close();
+    await loadAll({ silent: true });
+    showInviteCreated(result.invite_url, result.expires_at, result.max_uses);
   } catch (error) {
     toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'สร้างลิงก์เชิญ';
   }
-};
+}
+
+function showInviteCreated(url, expiresAt, maxUses) {
+  const message = `ลิงก์เชิญพร้อมแล้ว\n\n${url}\n\nใช้ได้ ${maxUses} คน · หมดอายุ ${formatDateTime(expiresAt)}\n\nระบบคัดลอกลิงก์ไว้ให้แล้ว ส่งให้พนักงานได้เลย`;
+  window.alert(message);
+  toast('สร้างและคัดลอกลิงก์เชิญแล้ว');
+}
 
 function renderCandidates() {
   const activeStages = ['new', 'screening', 'hr_interview', 'manager_interview', 'assignment', 'offer'];
@@ -519,25 +618,31 @@ window.moveCandidate = async (id, stage) => {
 };
 
 function renderAttendance() {
-  const total = state.attendance.length;
+  const checkedIn = state.attendance.filter(item => item.check_in_at).length;
   const late = state.attendance.filter(item => item.status === 'late').length;
   const checkedOut = state.attendance.filter(item => item.check_out_at).length;
+  const outside = state.attendance.filter(item => item.check_in_at && !item.checkin_location_name && item.checkin_lat != null).length;
 
   $('#attendanceSummary').innerHTML = `
-    <span><strong>${total}</strong> เช็กอินแล้ว</span>
+    <span><strong>${checkedIn}</strong> เช็กอินแล้ว</span>
     <span><strong>${late}</strong> มาสาย</span>
-    <span><strong>${checkedOut}</strong> เช็กเอาต์แล้ว</span>`;
+    <span><strong>${checkedOut}</strong> เช็กเอาต์แล้ว</span>
+    <span><strong>${outside}</strong> ไม่ระบุ Work Location</span>`;
 
   $('#attendanceBody').innerHTML = state.attendance.length
     ? state.attendance.map(attendance => `
       <tr>
         <td data-label="พนักงาน"><div class="person"><div class="avatar">${initial(attendance)}</div><div><strong>${escapeHtml(attendance.nickname || attendance.first_name)} ${escapeHtml(attendance.last_name)}</strong><small>${escapeHtml(attendance.employee_code)}</small></div></div></td>
-        <td data-label="แผนก">${escapeHtml(attendance.department_name || '—')}</td>
         <td data-label="Check-in">${attendance.check_in_at ? time(attendance.check_in_at) : '—'}</td>
+        <td data-label="Location">${attendance.check_in_at
+          ? attendance.checkin_location_name
+            ? `<div class="attendance-location"><strong>📍 ${escapeHtml(attendance.checkin_location_name)}</strong><small>${attendance.checkin_distance_m != null ? `${Math.round(Number(attendance.checkin_distance_m))} ม. จากจุดกลาง` : ''}</small>${attendance.checkin_lat != null ? `<a href="https://www.google.com/maps?q=${Number(attendance.checkin_lat)},${Number(attendance.checkin_lng)}" target="_blank" rel="noopener">ดูแผนที่</a>` : ''}</div>`
+            : attendance.checkin_lat != null ? '<span class="badge badge-warning">มีพิกัด · ไม่ได้ล็อก Location</span>' : '<span class="muted">ไม่เก็บพิกัด</span>'
+          : '—'}</td>
         <td data-label="Check-out">${attendance.check_out_at ? time(attendance.check_out_at) : '—'}</td>
         <td data-label="สถานะ">${attendanceStatus(attendance)}</td>
       </tr>`).join('')
-    : `<tr><td colspan="5">${emptyState('ยังไม่มีการเช็กอินวันนี้', 'เมื่อพนักงานเช็กอินผ่าน LINE รายการจะมาแสดงตรงนี้')}</td></tr>`;
+    : `<tr><td colspan="5">${emptyState('ยังไม่มีข้อมูลเวลาเข้างานวันนี้', 'พนักงานทั้งหมดจะแสดงตรงนี้ และเมื่อเช็กอินผ่าน LINE จะเห็น Location ที่ใช้ด้วย')}</td></tr>`;
 }
 
 function renderLeaves() {
@@ -603,6 +708,59 @@ function showView(name) {
 
   closeMobileNav();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function renderWorkLocations() {
+  const list = $('#workLocationList');
+  if (!list) return;
+  const locations = state.workLocations || [];
+  list.innerHTML = locations.length ? locations.map(location => `
+    <article class="work-location-card ${Number(location.is_active) ? '' : 'inactive'}">
+      <div class="work-location-pin">⌖</div>
+      <div><strong>${escapeHtml(location.name)}</strong><p>${escapeHtml(location.address || `${Number(location.latitude).toFixed(5)}, ${Number(location.longitude).toFixed(5)}`)}</p><small>อนุญาตภายใน ${Number(location.radius_m)} เมตร</small></div>
+      <span class="badge ${Number(location.is_active) ? 'badge-success' : 'badge-neutral'}">${Number(location.is_active) ? 'ใช้งาน' : 'ปิด'}</span>
+    </article>`).join('') : emptyState('ยังไม่มี Work Location', 'เพิ่มสำนักงานใหญ่ สาขา หรือหน้างาน แล้วเลือกให้พนักงานตอนส่งลิงก์เชิญ');
+}
+
+function openWorkLocationModal() {
+  $('#locationForm').reset();
+  $('#locationRadius').value = '150';
+  $('#locationModal').showModal();
+}
+
+async function useCurrentLocation() {
+  const button = $('#useCurrentLocationBtn');
+  if (!navigator.geolocation) return toast('Browser นี้ไม่รองรับ Location', true);
+  button.disabled = true;
+  button.textContent = 'กำลังอ่านพิกัด…';
+  navigator.geolocation.getCurrentPosition(position => {
+    $('#locationLat').value = position.coords.latitude.toFixed(7);
+    $('#locationLng').value = position.coords.longitude.toFixed(7);
+    button.disabled = false;
+    button.textContent = 'ใช้ตำแหน่งปัจจุบัน';
+    toast('ใส่พิกัดปัจจุบันให้แล้ว');
+  }, error => {
+    button.disabled = false;
+    button.textContent = 'ใช้ตำแหน่งปัจจุบัน';
+    toast(error.message || 'อ่าน Location ไม่สำเร็จ', true);
+  }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+}
+
+async function saveWorkLocation() {
+  const name = $('#locationName').value.trim();
+  const latitude = Number($('#locationLat').value);
+  const longitude = Number($('#locationLng').value);
+  const radius_m = Number($('#locationRadius').value || 150);
+  if (name.length < 2 || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return toast('กรุณาใส่ชื่อและพิกัดให้ครบ', true);
+  const button = $('#locationSaveBtn');
+  button.disabled = true;
+  try {
+    await api('/api/work-locations', { method: 'POST', body: JSON.stringify({ name, address: $('#locationAddress').value.trim(), latitude, longitude, radius_m }) });
+    $('#locationModal').close();
+    await loadAll({ silent: true });
+    toast('เพิ่ม Work Location แล้ว');
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
 }
 
 function openEmployeeModal() {

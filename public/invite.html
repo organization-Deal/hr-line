@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#F8FAF8" />
+  <title>เข้าร่วมทีม — นากนะ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/invite.css" />
+</head>
+<body>
+  <main class="invite-shell">
+    <section class="invite-card">
+      <header class="brand-row">
+        <div class="brand-mark">น</div>
+        <div><strong>นากนะ</strong><span>by Otterwork Co., Ltd.</span></div>
+      </header>
+
+      <div id="loadingState" class="center-state">
+        <div class="spinner"></div>
+        <strong>กำลังเปิดลิงก์เชิญ…</strong>
+        <p>นากนะกำลังตรวจว่าลิงก์นี้มาจากบริษัทไหน</p>
+      </div>
+
+      <div id="errorState" class="center-state hidden">
+        <div class="state-icon error">!</div>
+        <strong>ลิงก์นี้ใช้ไม่ได้แล้ว</strong>
+        <p id="errorText">กรุณาขอลิงก์ใหม่จาก HR</p>
+      </div>
+
+      <section id="formState" class="hidden">
+        <p class="kicker">TEAM INVITATION</p>
+        <h1><span id="companyName">บริษัท</span><br />เชิญคุณเข้าร่วมทีม</h1>
+        <p class="lead">กรอกข้อมูลครั้งเดียว แล้วระบบจะสร้างโปรไฟล์พนักงานและพาไปเชื่อม LINE ต่อให้</p>
+
+        <div class="invite-context">
+          <div><span>บริษัท</span><strong id="contextCompany">—</strong></div>
+          <div><span>ตำแหน่ง</span><strong id="contextPosition">ไม่ระบุ</strong></div>
+          <div><span>แผนก</span><strong id="contextDepartment">ไม่ระบุ</strong></div>
+          <div><span>เริ่มงาน</span><strong id="contextStart">ตามที่ HR กำหนด</strong></div>
+          <div class="wide"><span>Work Location</span><strong id="contextLocations">ทุก Location ของบริษัท</strong></div>
+        </div>
+
+        <form id="employeeForm">
+          <div class="section-title"><strong>ข้อมูลของคุณ</strong><span>ข้อมูลพื้นฐานสำหรับสร้าง Employee Profile</span></div>
+          <div class="form-grid">
+            <label><span>ชื่อ <em>*</em></span><input name="first_name" autocomplete="given-name" required /></label>
+            <label><span>นามสกุล <em>*</em></span><input name="last_name" autocomplete="family-name" required /></label>
+            <label><span>ชื่อเล่น</span><input name="nickname" /></label>
+            <label><span>เบอร์โทร <em>*</em></span><input name="phone" inputmode="tel" autocomplete="tel" required /></label>
+            <label><span>อีเมล</span><input name="email" type="email" autocomplete="email" /></label>
+            <label><span>วันเกิด</span><input name="birth_date" type="date" /></label>
+          </div>
+
+          <div class="section-title second"><strong>ผู้ติดต่อฉุกเฉิน</strong><span>ใส่ไว้เพื่อให้ HR ติดต่อได้เมื่อจำเป็น</span></div>
+          <div class="form-grid">
+            <label><span>ชื่อผู้ติดต่อ</span><input name="emergency_contact_name" /></label>
+            <label><span>เบอร์โทรผู้ติดต่อ</span><input name="emergency_contact_phone" inputmode="tel" /></label>
+          </div>
+
+          <label class="consent-row">
+            <input id="confirmCheck" type="checkbox" required />
+            <span>ยืนยันว่าข้อมูลด้านบนถูกต้อง และยินยอมให้บริษัทที่ระบุในลิงก์นี้ใช้ข้อมูลเพื่อการบริหารงานบุคคล</span>
+          </label>
+
+          <button id="submitBtn" class="primary-btn" type="submit">ยืนยันและสร้างโปรไฟล์พนักงาน</button>
+        </form>
+      </section>
+
+      <section id="successState" class="hidden">
+        <div class="state-icon success">✓</div>
+        <p class="kicker">WELCOME TO THE TEAM</p>
+        <h1>สร้างโปรไฟล์เรียบร้อยแล้ว</h1>
+        <p class="lead">เหลืออีกขั้นเดียว เชื่อม LINE เพื่อใช้เช็กอิน รับแจ้งเตือน และทำรายการ HR ได้จากแชตเดิม</p>
+
+        <div class="employee-result">
+          <span>พนักงาน</span><strong id="resultName">—</strong>
+          <small id="resultCompany">—</small>
+        </div>
+
+        <a id="lineConnectBtn" class="line-btn" href="#">เชื่อม LINE กับนากนะ</a>
+        <p class="line-help">กดปุ่มแล้ว LINE จะเปิดแชต “นากนะ” พร้อมข้อความเชื่อมบัญชีไว้ให้ — กดส่ง 1 ครั้งก็จบ</p>
+
+        <details id="fallbackBox">
+          <summary>ถ้าปุ่ม LINE เปิดไม่ได้</summary>
+          <p>เปิด LINE OA “นากนะ” แล้วส่งข้อความนี้</p>
+          <div class="copy-row"><code id="lineCommand">JOIN …</code><button id="copyCommandBtn" type="button">คัดลอก</button></div>
+        </details>
+      </section>
+    </section>
+    <footer>นากนะ · HR Tech สำหรับคนไทย · Otterwork Co., Ltd.</footer>
+  </main>
+  <script src="/invite.js" type="module"></script>
+</body>
+</html>
