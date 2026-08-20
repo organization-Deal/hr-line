@@ -1,3 +1,14 @@
-HR_ADMIN_TOKEN=change-this-local-admin-token
-LINE_CHANNEL_SECRET=put-line-channel-secret-here
-LINE_CHANNEL_ACCESS_TOKEN=put-line-channel-access-token-here
+# Google OAuth Web Application credentials
+GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
+
+# Random secret used only to encrypt stored Gmail OAuth tokens.
+# Example: generate a long random value (32+ chars).
+GOOGLE_TOKEN_ENCRYPTION_KEY=replace-with-a-long-random-secret
+
+# Optional. Leave blank in local dev to use the current request origin.
+# APP_ORIGIN=https://hr-line.organization-23c.workers.dev
+
+# LINE (add later when the LINE Bot is ready)
+LINE_CHANNEL_SECRET=
+LINE_CHANNEL_ACCESS_TOKEN=

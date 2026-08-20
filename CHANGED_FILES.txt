@@ -1,0 +1,18 @@
+เอาไฟล์เหล่านี้ไปทับ/เพิ่มใน repo เดิม:
+
+ทับ:
+- public/index.html
+- public/styles.css
+- public/app.js
+- src/index.js
+- wrangler.jsonc
+- .dev.vars.example (ใช้เป็นตัวอย่าง local เท่านั้น ห้ามใส่ secret จริงใน Git)
+
+เพิ่ม:
+- migrations/0002_saas_auth.sql
+- GOOGLE_SETUP.md
+
+ไม่ต้องแก้:
+- migrations/0001_init.sql
+- seed.sql
+- LINE schema เดิม
