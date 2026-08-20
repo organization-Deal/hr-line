@@ -313,7 +313,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.4', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.5', auth: 'google-oauth' });
       }
 
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
@@ -339,7 +339,7 @@ export default {
       if (url.pathname.startsWith('/api/')) {
         const auth = await authorizeUser(request, env, { requireCompany: !['/api/me','/api/companies','/api/onboarding/claim-company'].includes(url.pathname) });
         if (!auth.ok) return json({ error: auth.error }, auth.status);
-        return handleApi(request, env, url, auth);
+        return await handleApi(request, env, url, auth);
       }
 
       return new Response('Not found', { status: 404 });
@@ -369,6 +369,9 @@ async function handleApi(request, env, url, auth) {
   const clientId = auth.clientId ? Number(auth.clientId) : null;
 
   if (path === '/api/me' && method === 'GET') {
+    // Repair/create the HR core schema after a successful Google session.
+    // Do not seed demo data in SaaS workspaces.
+    await ensureCoreSchema(env.DB);
     const memberships = await getMemberships(env.DB, auth.user.id);
     const claimable = memberships.length ? null : await getClaimableLegacyCompany(env.DB);
     return json({
@@ -380,6 +383,7 @@ async function handleApi(request, env, url, auth) {
   }
 
   if (path === '/api/companies' && method === 'POST') {
+    await ensureCoreSchema(env.DB);
     const body = await safeJson(request);
     const name = String(body.name || '').trim();
     if (name.length < 2) return json({ error: 'กรุณาใส่ชื่อบริษัท' }, 400);
@@ -388,12 +392,13 @@ async function handleApi(request, env, url, auth) {
   }
 
   if (path === '/api/onboarding/claim-company' && method === 'POST') {
+    await ensureCoreSchema(env.DB);
     const body = await safeJson(request);
     const claimable = await getClaimableLegacyCompany(env.DB);
     if (!claimable || Number(body.client_id) !== Number(claimable.id)) return json({ error: 'Workspace นี้ไม่สามารถรับช่วงได้แล้ว' }, 409);
     await env.DB.prepare(`INSERT OR IGNORE INTO company_members (client_id, user_id, role, status) VALUES (?1,?2,'owner','active')`).bind(Number(claimable.id), Number(auth.user.id)).run();
     await env.DB.prepare('UPDATE auth_sessions SET selected_client_id=?1 WHERE token_hash=?2').bind(Number(claimable.id), auth.sessionHash).run();
-    await audit(env.DB, Number(claimable.id), 'user', String(auth.user.id), 'company.claim', 'client', String(claimable.id), null);
+    await safeAudit(env.DB, Number(claimable.id), 'user', String(auth.user.id), 'company.claim', 'client', String(claimable.id), null);
     return withCookie(json({ ok: true, company: claimable }), companyCookie(claimable.id));
   }
 
@@ -954,6 +959,20 @@ async function verifyLineSignature(rawBody, signature, channelSecret) {
   return constantTimeEqual(expected, signature);
 }
 
+async function ensureCoreSchema(db) {
+  if (!db) throw new Error('D1 binding DB is not available');
+  const row = await db.prepare(`
+    SELECT COUNT(*) AS total
+    FROM sqlite_master
+    WHERE type='table' AND name IN ('departments','positions','employees','attendance','leave_requests','candidates','employee_requests','line_link_tokens','line_sessions','audit_logs')
+  `).first();
+  if (Number(row?.total || 0) < 10) {
+    console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_start' }));
+    await db.exec(INIT_SCHEMA_SQL);
+    console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_complete' }));
+  }
+}
+
 async function ensureDbReady(db) {
   if (!db) throw new Error('D1 binding DB is not available');
   const ready = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='clients'").first();
@@ -1267,7 +1286,7 @@ async function createCompanyForUser(db, auth, name) {
   const clientId = Number(created.meta.last_row_id);
   await db.prepare(`INSERT INTO company_members (client_id, user_id, role, status) VALUES (?1,?2,'owner','active')`).bind(clientId, Number(auth.user.id)).run();
   await db.prepare('UPDATE auth_sessions SET selected_client_id=?1 WHERE token_hash=?2').bind(clientId, auth.sessionHash).run();
-  await audit(db, clientId, 'user', String(auth.user.id), 'company.create', 'client', String(clientId), { name, code });
+  await safeAudit(db, clientId, 'user', String(auth.user.id), 'company.create', 'client', String(clientId), { name, code });
   return { id: clientId, name, code, role: 'owner' };
 }
 
@@ -1377,6 +1396,14 @@ function companyCode(name) {
 
 async function getClient(db, id) {
   return db.prepare('SELECT * FROM clients WHERE id=?1').bind(id).first();
+}
+
+async function safeAudit(db, clientId, actorType, actorId, action, entityType, entityId, detail) {
+  try {
+    await audit(db, clientId, actorType, actorId, action, entityType, entityId, detail);
+  } catch (error) {
+    console.error(JSON.stringify({ level: 'error', event: 'audit_write_failed', action, message: String(error?.message || error) }));
+  }
 }
 
 async function audit(db, clientId, actorType, actorId, action, entityType, entityId, detail) {
