@@ -313,7 +313,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.5', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.6', auth: 'google-oauth' });
       }
 
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
@@ -369,9 +369,6 @@ async function handleApi(request, env, url, auth) {
   const clientId = auth.clientId ? Number(auth.clientId) : null;
 
   if (path === '/api/me' && method === 'GET') {
-    // Repair/create the HR core schema after a successful Google session.
-    // Do not seed demo data in SaaS workspaces.
-    await ensureCoreSchema(env.DB);
     const memberships = await getMemberships(env.DB, auth.user.id);
     const claimable = memberships.length ? null : await getClaimableLegacyCompany(env.DB);
     return json({
@@ -382,8 +379,18 @@ async function handleApi(request, env, url, auth) {
     });
   }
 
+  if (path === '/api/bootstrap' && method === 'GET') {
+    try {
+      await ensureCoreSchema(env.DB);
+      return json({ ok: true, core_schema: 'ready' });
+    } catch (error) {
+      const detail = safeCoreSchemaErrorDetail(error);
+      console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
+      return json({ error: 'CORE_SCHEMA_REPAIR_FAILED', stage: 'core_schema', detail }, 500);
+    }
+  }
+
   if (path === '/api/companies' && method === 'POST') {
-    await ensureCoreSchema(env.DB);
     const body = await safeJson(request);
     const name = String(body.name || '').trim();
     if (name.length < 2) return json({ error: 'กรุณาใส่ชื่อบริษัท' }, 400);
@@ -961,16 +968,38 @@ async function verifyLineSignature(rawBody, signature, channelSecret) {
 
 async function ensureCoreSchema(db) {
   if (!db) throw new Error('D1 binding DB is not available');
-  const row = await db.prepare(`
-    SELECT COUNT(*) AS total
-    FROM sqlite_master
-    WHERE type='table' AND name IN ('departments','positions','employees','attendance','leave_requests','candidates','employee_requests','line_link_tokens','line_sessions','audit_logs')
-  `).first();
-  if (Number(row?.total || 0) < 10) {
-    console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_start' }));
-    await db.exec(INIT_SCHEMA_SQL);
-    console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_complete' }));
+  const requiredTables = ['departments','positions','employees','attendance','leave_requests','candidates','employee_requests','line_link_tokens','line_sessions','audit_logs'];
+  const placeholders = requiredTables.map(() => '?').join(',');
+  const existing = await db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`)
+    .bind(...requiredTables).all();
+  const names = new Set((existing.results || []).map(row => row.name));
+  if (requiredTables.every(name => names.has(name))) return;
+
+  console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_start', missing: requiredTables.filter(name => !names.has(name)) }));
+  const statements = INIT_SCHEMA_SQL.split(';').map(statement => statement.trim()).filter(Boolean);
+  for (const statement of statements) {
+    const tableMatch = statement.match(/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)/i);
+    const indexMatch = statement.match(/CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)/i);
+    const label = tableMatch?.[1] || indexMatch?.[1] || 'schema_statement';
+    try {
+      await db.prepare(statement).run();
+    } catch (error) {
+      // Indexes are performance helpers; a legacy table shape must not block login/onboarding.
+      if (indexMatch) {
+        console.warn(JSON.stringify({ level: 'warn', event: 'core_schema_index_skipped', label, detail: safeDbErrorDetail(error) }));
+        continue;
+      }
+      throw new Error(`CORE_SCHEMA_STEP:${label}:${String(error?.message || error)}`);
+    }
   }
+  console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_complete' }));
+}
+
+function safeCoreSchemaErrorDetail(error) {
+  const text = String(error?.message || error || 'unknown');
+  const step = text.match(/CORE_SCHEMA_STEP:([A-Za-z0-9_]+):(.*)$/);
+  if (step) return `${step[1]}:${safeDbErrorDetail(new Error(step[2]))}`;
+  return safeDbErrorDetail(error);
 }
 
 async function ensureDbReady(db) {
