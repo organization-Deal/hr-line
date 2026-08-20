@@ -74,7 +74,7 @@ async function boot() {
   renderLoadingState();
   const ready = await loadSessionOnly();
   handleReturnMessage();
-  if (ready) await loadAll({ silent: true });
+  if (ready && await ensureWorkspaceReady()) await loadAll({ silent: true });
 }
 
 function bindEvents() {
@@ -172,7 +172,7 @@ async function createCompany() {
   try {
     await api('/api/companies', { method: 'POST', body: JSON.stringify({ name }) });
     const ready = await loadSessionOnly();
-    if (ready) await loadAll({ silent: true });
+    if (ready && await ensureWorkspaceReady()) await loadAll({ silent: true });
     toast('สร้าง Workspace เรียบร้อยแล้ว');
   } catch (error) {
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) toast(error.message, true);
@@ -190,7 +190,7 @@ async function claimLegacyCompany() {
   try {
     await api('/api/onboarding/claim-company', { method: 'POST', body: JSON.stringify({ client_id: company.id }) });
     const ready = await loadSessionOnly();
-    if (ready) await loadAll({ silent: true });
+    if (ready && await ensureWorkspaceReady()) await loadAll({ silent: true });
     toast(`เชื่อม Workspace ${company.name} เรียบร้อยแล้ว`);
   } catch (error) {
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) toast(error.message, true);
@@ -211,7 +211,7 @@ async function switchCompany(clientId) {
   try {
     await api('/api/session/company', { method: 'POST', body: JSON.stringify({ client_id: Number(clientId) }) });
     const ready = await loadSessionOnly();
-    if (ready) await loadAll({ silent: true });
+    if (ready && await ensureWorkspaceReady()) await loadAll({ silent: true });
     toast('เปลี่ยนบริษัทเรียบร้อยแล้ว');
   } catch (error) {
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) toast(error.message, true);
@@ -282,6 +282,18 @@ function handleReturnMessage() {
   if ([...url.searchParams.keys()].some(key => ['gmail','auth','auth_error','gmail_error'].includes(key))) {
     url.search = '';
     history.replaceState({}, '', url.pathname + url.hash);
+  }
+}
+
+async function ensureWorkspaceReady() {
+  try {
+    await api('/api/bootstrap');
+    return true;
+  } catch (error) {
+    if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
+      toast(`เตรียมฐานข้อมูลไม่สำเร็จ: ${error.message}`, true);
+    }
+    return false;
   }
 }
 
