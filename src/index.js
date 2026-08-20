@@ -173,6 +173,68 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS work_locations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  address TEXT,
+  latitude REAL NOT NULL,
+  longitude REAL NOT NULL,
+  radius_m INTEGER NOT NULL DEFAULT 150,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS employee_work_locations (
+  employee_id INTEGER NOT NULL,
+  location_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (employee_id, location_id),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+  FOREIGN KEY (location_id) REFERENCES work_locations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS employee_invites (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  token_value TEXT,
+  token_hint TEXT,
+  department_id INTEGER,
+  position_id INTEGER,
+  employee_role TEXT NOT NULL DEFAULT 'employee',
+  start_date TEXT,
+  expires_at TEXT NOT NULL,
+  max_uses INTEGER NOT NULL DEFAULT 1,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_by_user_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
+  FOREIGN KEY (position_id) REFERENCES positions(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS employee_invite_locations (
+  invite_id INTEGER NOT NULL,
+  location_id INTEGER NOT NULL,
+  PRIMARY KEY (invite_id, location_id),
+  FOREIGN KEY (invite_id) REFERENCES employee_invites(id) ON DELETE CASCADE,
+  FOREIGN KEY (location_id) REFERENCES work_locations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS line_join_tokens (
+  token_hash TEXT PRIMARY KEY,
+  employee_id INTEGER NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_employees_client_status ON employees(client_id, status);
 CREATE INDEX IF NOT EXISTS idx_employees_birth_date ON employees(birth_date);
 CREATE INDEX IF NOT EXISTS idx_attendance_client_date ON attendance(client_id, work_date);
@@ -180,6 +242,10 @@ CREATE INDEX IF NOT EXISTS idx_leave_client_status ON leave_requests(client_id, 
 CREATE INDEX IF NOT EXISTS idx_candidates_client_stage ON candidates(client_id, stage);
 CREATE INDEX IF NOT EXISTS idx_candidates_activity ON candidates(last_activity_at);
 CREATE INDEX IF NOT EXISTS idx_requests_client_status ON employee_requests(client_id, status);
+CREATE INDEX IF NOT EXISTS idx_work_locations_client ON work_locations(client_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_employee_locations_employee ON employee_work_locations(employee_id);
+CREATE INDEX IF NOT EXISTS idx_invites_client_status ON employee_invites(client_id, status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_line_join_expiry ON line_join_tokens(expires_at);
 `;
 
 const INIT_AUTH_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS users (
@@ -313,7 +379,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.3.6', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.4.0', auth: 'google-oauth' });
       }
 
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
@@ -330,6 +396,21 @@ export default {
       }
       if (url.pathname === '/integrations/gmail/callback' && request.method === 'GET') {
         return await finishGmailConnection(request, env);
+      }
+
+      const joinPageMatch = url.pathname.match(/^\/join\/([A-Za-z0-9_-]{20,})$/);
+      if (joinPageMatch && request.method === 'GET') {
+        return Response.redirect(`${appOrigin(request, env)}/invite.html?token=${encodeURIComponent(joinPageMatch[1])}`, 302);
+      }
+
+      const publicInviteMatch = url.pathname.match(/^\/api\/public\/invites\/([A-Za-z0-9_-]{20,})$/);
+      if (publicInviteMatch && request.method === 'GET') {
+        await ensureCoreSchema(env.DB);
+        return await getPublicInvite(env.DB, publicInviteMatch[1]);
+      }
+      if (publicInviteMatch && request.method === 'POST') {
+        await ensureCoreSchema(env.DB);
+        return await acceptPublicInvite(request, env, publicInviteMatch[1]);
       }
 
       if (url.pathname === '/webhooks/line' && request.method === 'POST') {
@@ -434,11 +515,15 @@ async function handleApi(request, env, url, auth) {
 
   if (path === '/api/employees' && method === 'GET') {
     const result = await env.DB.prepare(`
-      SELECT e.*, d.name AS department_name, p.name AS position_name
+      SELECT e.*, d.name AS department_name, p.name AS position_name,
+             GROUP_CONCAT(DISTINCT wl.name) AS work_location_names
       FROM employees e
       LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN positions p ON p.id = e.position_id
+      LEFT JOIN employee_work_locations ewl ON ewl.employee_id=e.id
+      LEFT JOIN work_locations wl ON wl.id=ewl.location_id AND wl.is_active=1
       WHERE e.client_id = ?1
+      GROUP BY e.id
       ORDER BY e.status = 'active' DESC, e.first_name ASC
     `).bind(clientId).all();
     return json({ data: result.results });
@@ -481,6 +566,133 @@ async function handleApi(request, env, url, auth) {
       ON CONFLICT(token) DO UPDATE SET employee_id = excluded.employee_id, expires_at = excluded.expires_at, used_at = NULL
     `).bind(token, employeeId, expiresAt).run();
     return json({ ok: true, token, expires_at: expiresAt, instruction: `ส่งข้อความ LINK ${token} ไปที่ LINE OA` });
+  }
+
+  if (path === '/api/lookups' && method === 'GET') {
+    const [departments, positions, locations] = await env.DB.batch([
+      env.DB.prepare('SELECT id,name,code FROM departments WHERE client_id=?1 ORDER BY name').bind(clientId),
+      env.DB.prepare('SELECT id,department_id,name FROM positions WHERE client_id=?1 ORDER BY name').bind(clientId),
+      env.DB.prepare('SELECT id,name,address,latitude,longitude,radius_m,is_active FROM work_locations WHERE client_id=?1 AND is_active=1 ORDER BY name').bind(clientId),
+    ]);
+    return json({
+      departments: departments.results || [],
+      positions: positions.results || [],
+      locations: locations.results || [],
+    });
+  }
+
+  if (path === '/api/invites' && method === 'GET') {
+    const result = await env.DB.prepare(`
+      SELECT i.id, i.token_value, i.token_hint, i.employee_role, i.start_date, i.expires_at, i.max_uses, i.used_count, i.status, i.created_at,
+             d.name AS department_name, p.name AS position_name,
+             GROUP_CONCAT(DISTINCT wl.name) AS location_names
+      FROM employee_invites i
+      LEFT JOIN departments d ON d.id=i.department_id
+      LEFT JOIN positions p ON p.id=i.position_id
+      LEFT JOIN employee_invite_locations eil ON eil.invite_id=i.id
+      LEFT JOIN work_locations wl ON wl.id=eil.location_id
+      WHERE i.client_id=?1
+      GROUP BY i.id
+      ORDER BY i.created_at DESC
+      LIMIT 100
+    `).bind(clientId).all();
+    return json({ data: (result.results || []).map(row => ({
+      ...row,
+      invite_url: row.token_value ? `${appOrigin(request, env)}/invite.html?token=${encodeURIComponent(row.token_value)}` : null,
+      token_value: undefined,
+    })) });
+  }
+
+  if (path === '/api/invites' && method === 'POST') {
+    if (!canManagePeople(auth.role)) return json({ error: 'ไม่มีสิทธิ์สร้างลิงก์เชิญ' }, 403);
+    const body = await safeJson(request);
+    const maxUses = Math.max(1, Math.min(100, Number(body.max_uses || 1)));
+    const expiresDays = Math.max(1, Math.min(30, Number(body.expires_days || 7)));
+    const departmentId = body.department_id ? Number(body.department_id) : null;
+    const positionId = body.position_id ? Number(body.position_id) : null;
+    const startDate = body.start_date || null;
+    const locationIds = [...new Set((Array.isArray(body.location_ids) ? body.location_ids : []).map(Number).filter(Number.isFinite))];
+
+    if (departmentId) {
+      const row = await env.DB.prepare('SELECT id FROM departments WHERE id=?1 AND client_id=?2').bind(departmentId, clientId).first();
+      if (!row) return json({ error: 'แผนกไม่อยู่ในบริษัทนี้' }, 400);
+    }
+    if (positionId) {
+      const row = await env.DB.prepare('SELECT id FROM positions WHERE id=?1 AND client_id=?2').bind(positionId, clientId).first();
+      if (!row) return json({ error: 'ตำแหน่งไม่อยู่ในบริษัทนี้' }, 400);
+    }
+    for (const locationId of locationIds) {
+      const row = await env.DB.prepare('SELECT id FROM work_locations WHERE id=?1 AND client_id=?2 AND is_active=1').bind(locationId, clientId).first();
+      if (!row) return json({ error: 'มี Work Location ที่ไม่อยู่ในบริษัทนี้' }, 400);
+    }
+
+    const token = randomToken(24);
+    const tokenHash = await sha256Hex(token);
+    const expiresAt = new Date(Date.now() + expiresDays * 86400000).toISOString();
+    const result = await env.DB.prepare(`
+      INSERT INTO employee_invites (client_id,token_hash,token_value,token_hint,department_id,position_id,employee_role,start_date,expires_at,max_uses,used_count,status,created_by_user_id)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,'active',?11)
+    `).bind(clientId, tokenHash, token, token.slice(-6), departmentId, positionId, body.employee_role || 'employee', startDate, expiresAt, maxUses, Number(auth.user.id)).run();
+    const inviteId = Number(result.meta.last_row_id);
+    for (const locationId of locationIds) {
+      await env.DB.prepare('INSERT OR IGNORE INTO employee_invite_locations (invite_id,location_id) VALUES (?1,?2)').bind(inviteId, locationId).run();
+    }
+    await safeAudit(env.DB, clientId, 'user', String(auth.user.id), 'employee_invite.create', 'employee_invite', String(inviteId), { max_uses: maxUses, location_ids: locationIds });
+    return json({
+      ok: true,
+      id: inviteId,
+      invite_url: `${appOrigin(request, env)}/invite.html?token=${encodeURIComponent(token)}`,
+      expires_at: expiresAt,
+      max_uses: maxUses,
+    }, 201);
+  }
+
+  const revokeInviteMatch = path.match(/^\/api\/invites\/(\d+)\/revoke$/);
+  if (revokeInviteMatch && method === 'POST') {
+    if (!canManagePeople(auth.role)) return json({ error: 'ไม่มีสิทธิ์ยกเลิกลิงก์เชิญ' }, 403);
+    const id = Number(revokeInviteMatch[1]);
+    await env.DB.prepare("UPDATE employee_invites SET status='revoked',updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2").bind(id, clientId).run();
+    return json({ ok: true });
+  }
+
+  if (path === '/api/work-locations' && method === 'GET') {
+    const result = await env.DB.prepare('SELECT * FROM work_locations WHERE client_id=?1 ORDER BY is_active DESC,name').bind(clientId).all();
+    return json({ data: result.results || [] });
+  }
+
+  if (path === '/api/work-locations' && method === 'POST') {
+    if (!canManagePeople(auth.role)) return json({ error: 'ไม่มีสิทธิ์จัดการ Work Location' }, 403);
+    const body = await safeJson(request);
+    const name = String(body.name || '').trim();
+    const lat = Number(body.latitude);
+    const lng = Number(body.longitude);
+    const radius = Math.max(30, Math.min(5000, Number(body.radius_m || 150)));
+    if (name.length < 2 || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      return json({ error: 'กรุณาใส่ชื่อและพิกัด Work Location ให้ครบ' }, 400);
+    }
+    const result = await env.DB.prepare(`INSERT INTO work_locations (client_id,name,address,latitude,longitude,radius_m,is_active) VALUES (?1,?2,?3,?4,?5,?6,1)`)
+      .bind(clientId, name, body.address || null, lat, lng, radius).run();
+    return json({ ok: true, id: result.meta.last_row_id }, 201);
+  }
+
+  const locationMatch = path.match(/^\/api\/work-locations\/(\d+)$/);
+  if (locationMatch && method === 'PATCH') {
+    if (!canManagePeople(auth.role)) return json({ error: 'ไม่มีสิทธิ์จัดการ Work Location' }, 403);
+    const id = Number(locationMatch[1]);
+    const body = await safeJson(request);
+    const existing = await env.DB.prepare('SELECT * FROM work_locations WHERE id=?1 AND client_id=?2').bind(id, clientId).first();
+    if (!existing) return json({ error: 'ไม่พบ Work Location' }, 404);
+    await env.DB.prepare(`UPDATE work_locations SET name=?1,address=?2,latitude=?3,longitude=?4,radius_m=?5,is_active=?6,updated_at=CURRENT_TIMESTAMP WHERE id=?7 AND client_id=?8`)
+      .bind(
+        String(body.name ?? existing.name).trim(),
+        body.address ?? existing.address,
+        Number(body.latitude ?? existing.latitude),
+        Number(body.longitude ?? existing.longitude),
+        Math.max(30, Math.min(5000, Number(body.radius_m ?? existing.radius_m))),
+        body.is_active == null ? Number(existing.is_active) : (body.is_active ? 1 : 0),
+        id, clientId
+      ).run();
+    return json({ ok: true });
   }
 
   if (path === '/api/candidates' && method === 'GET') {
@@ -528,7 +740,9 @@ async function handleApi(request, env, url, auth) {
     const workDate = dateInBangkok();
     const result = await env.DB.prepare(`
       SELECT e.id AS employee_id, e.employee_code, e.first_name, e.last_name, e.nickname,
-             d.name AS department_name, a.check_in_at, a.check_out_at, a.status, a.late_minutes
+             d.name AS department_name, a.check_in_at, a.check_out_at, a.status, a.late_minutes,
+             a.checkin_lat, a.checkin_lng, a.checkin_location_id, a.checkin_location_name, a.checkin_distance_m,
+             a.checkout_lat, a.checkout_lng, a.checkout_location_id, a.checkout_location_name, a.checkout_distance_m
       FROM employees e
       LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN attendance a ON a.employee_id = e.id AND a.work_date = ?1
@@ -701,6 +915,13 @@ async function processLineEvent(event, env) {
   if (event.type === 'message' && event.message?.type === 'text') {
     const text = String(event.message.text || '').trim();
 
+    const joinMatch = text.match(/^JOIN\s+([A-Za-z0-9_-]{20,})$/i);
+    if (joinMatch) {
+      const linked = await linkLineJoinToken(env.DB, env.LINE_CHANNEL_ACCESS_TOKEN, lineUserId, joinMatch[1]);
+      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken,
+        linked.ok ? `✅ เชื่อม LINE กับ ${linked.company_name} สำเร็จ\nสวัสดี ${linked.name} 👋\nกดเช็กอินได้เลย ไม่ต้องจำรหัสอะไรแล้ว` : `❌ ${linked.error}`);
+    }
+
     const linkMatch = text.match(/^LINK\s+(\d{6})$/i);
     if (linkMatch) {
       const linked = await linkLineAccount(env.DB, lineUserId, linkMatch[1]);
@@ -709,16 +930,17 @@ async function processLineEvent(event, env) {
     }
 
     const employee = await env.DB.prepare(`
-      SELECT e.*, c.geofence_lat, c.geofence_lng, c.geofence_radius_m, c.geofence_name
+      SELECT e.*, c.name AS company_name
       FROM employees e JOIN clients c ON c.id=e.client_id
       WHERE e.line_user_id=?1 AND e.status='active'
     `).bind(lineUserId).first();
-    if (!employee) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, 'ยังไม่ได้เชื่อมบัญชีพนักงาน\nกรุณาขอรหัสจาก HR แล้วส่ง: LINK 123456');
+    if (!employee) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, 'ยังไม่ได้เชื่อมบัญชีพนักงาน\nกรุณาเปิด “ลิงก์เชิญเข้าทีม” ที่ HR ส่งให้ แล้วกดเชื่อม LINE จากหน้านั้นได้เลย');
 
     if (['เช็กอิน','checkin','check-in'].includes(text.toLowerCase())) {
-      if (employee.geofence_lat != null && employee.geofence_lng != null) {
+      const mustShareLocation = await employeeNeedsLocation(env.DB, employee);
+      if (mustShareLocation) {
         await setLineSession(env.DB, lineUserId, 'checkin');
-        return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, '📍 ส่ง Location ปัจจุบันมาในแชตนี้เพื่อเช็กอิน');
+        return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, '📍 แชร์ Location ปัจจุบันเพื่อเช็กอิน\nนากนะจะตรวจเฉพาะว่าคุณอยู่ใน Work Location ที่บริษัทอนุญาตหรือไม่');
       }
       try {
         const result = await checkIn(env.DB, Number(employee.id), null, null, 'line');
@@ -727,9 +949,10 @@ async function processLineEvent(event, env) {
     }
 
     if (['เช็กเอาต์','checkout','check-out'].includes(text.toLowerCase())) {
-      if (employee.geofence_lat != null && employee.geofence_lng != null) {
+      const mustShareLocation = await employeeNeedsLocation(env.DB, employee);
+      if (mustShareLocation) {
         await setLineSession(env.DB, lineUserId, 'checkout');
-        return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, '📍 ส่ง Location ปัจจุบันมาในแชตนี้เพื่อเช็กเอาต์');
+        return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, '📍 แชร์ Location ปัจจุบันเพื่อเช็กเอาต์');
       }
       try {
         const result = await checkOut(env.DB, Number(employee.id), null, null, 'line');
@@ -766,7 +989,7 @@ async function processLineEvent(event, env) {
       await env.DB.prepare('DELETE FROM line_sessions WHERE line_user_id=?1').bind(lineUserId).run();
       const label = session.action === 'checkin' ? 'Check-in' : 'Check-out';
       const time = session.action === 'checkin' ? result.check_in_at : result.check_out_at;
-      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, `✅ ${label} สำเร็จ\nเวลา ${formatBangkokTime(time)}${result.distance_m != null ? `\nระยะจากจุดทำงาน ${Math.round(result.distance_m)} เมตร` : ''}`);
+      return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, `✅ ${label} สำเร็จ\nเวลา ${formatBangkokTime(time)}${result.location_name ? `\n📍 ${result.location_name}` : ''}${result.distance_m != null ? ` · ${Math.round(result.distance_m)} ม.` : ''}${session.action === 'checkin' ? (result.late_minutes > 0 ? `\n🟠 สาย ${result.late_minutes} นาที` : '\n🟢 ตรงเวลา') : ''}`);
     } catch (e) {
       return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken, `❌ ${e.message}`);
     }
@@ -794,21 +1017,33 @@ async function checkIn(db, employeeId, lat, lng, source) {
   const existing = await db.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(employeeId, workDate).first();
   if (existing?.check_in_at) throw httpError('วันนี้เช็กอินไปแล้ว', 409);
 
-  const distance = validateGeofence(employee, lat, lng);
+  const matchedLocation = await resolveAllowedWorkLocation(db, employee, lat, lng);
   const lateMinutes = calculateLateMinutes(now, employee.work_start, Number(employee.late_grace_minutes || 0));
   const status = lateMinutes > 0 ? 'late' : 'present';
   const nowIso = now.toISOString();
 
   await db.prepare(`
-    INSERT INTO attendance (client_id, employee_id, work_date, check_in_at, checkin_lat, checkin_lng, source, status, late_minutes)
-    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
+    INSERT INTO attendance (
+      client_id, employee_id, work_date, check_in_at, checkin_lat, checkin_lng, source, status, late_minutes,
+      checkin_location_id, checkin_location_name, checkin_distance_m
+    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
     ON CONFLICT(employee_id, work_date) DO UPDATE SET
       check_in_at=excluded.check_in_at, checkin_lat=excluded.checkin_lat, checkin_lng=excluded.checkin_lng,
-      source=excluded.source, status=excluded.status, late_minutes=excluded.late_minutes, updated_at=CURRENT_TIMESTAMP
-  `).bind(Number(employee.client_id), employeeId, workDate, nowIso, lat ?? null, lng ?? null, source, status, lateMinutes).run();
+      source=excluded.source, status=excluded.status, late_minutes=excluded.late_minutes,
+      checkin_location_id=excluded.checkin_location_id, checkin_location_name=excluded.checkin_location_name,
+      checkin_distance_m=excluded.checkin_distance_m, updated_at=CURRENT_TIMESTAMP
+  `).bind(
+    Number(employee.client_id), employeeId, workDate, nowIso, lat ?? null, lng ?? null, source, status, lateMinutes,
+    matchedLocation?.id || null, matchedLocation?.name || null, matchedLocation?.distance_m ?? null
+  ).run();
 
-  await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_in', 'attendance', `${employeeId}:${workDate}`, { lat, lng, late_minutes: lateMinutes });
-  return { check_in_at: nowIso, work_date: workDate, status, late_minutes: lateMinutes, distance_m: distance };
+  await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_in', 'attendance', `${employeeId}:${workDate}`, {
+    lat, lng, late_minutes: lateMinutes, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
+  });
+  return {
+    check_in_at: nowIso, work_date: workDate, status, late_minutes: lateMinutes,
+    distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
+  };
 }
 
 async function checkOut(db, employeeId, lat, lng, source) {
@@ -823,25 +1058,233 @@ async function checkOut(db, employeeId, lat, lng, source) {
   if (!existing?.check_in_at) throw httpError('ยังไม่ได้เช็กอินวันนี้', 409);
   if (existing?.check_out_at) throw httpError('วันนี้เช็กเอาต์ไปแล้ว', 409);
 
-  const distance = validateGeofence(employee, lat, lng);
+  const matchedLocation = await resolveAllowedWorkLocation(db, employee, lat, lng);
   const nowIso = new Date().toISOString();
   await db.prepare(`
-    UPDATE attendance SET check_out_at=?1, checkout_lat=?2, checkout_lng=?3, updated_at=CURRENT_TIMESTAMP
-    WHERE employee_id=?4 AND work_date=?5
-  `).bind(nowIso, lat ?? null, lng ?? null, employeeId, workDate).run();
+    UPDATE attendance SET check_out_at=?1, checkout_lat=?2, checkout_lng=?3,
+      checkout_location_id=?4, checkout_location_name=?5, checkout_distance_m=?6, updated_at=CURRENT_TIMESTAMP
+    WHERE employee_id=?7 AND work_date=?8
+  `).bind(
+    nowIso, lat ?? null, lng ?? null, matchedLocation?.id || null, matchedLocation?.name || null,
+    matchedLocation?.distance_m ?? null, employeeId, workDate
+  ).run();
 
-  await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_out', 'attendance', `${employeeId}:${workDate}`, { lat, lng });
-  return { check_out_at: nowIso, work_date: workDate, distance_m: distance };
+  await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_out', 'attendance', `${employeeId}:${workDate}`, {
+    lat, lng, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
+  });
+  return {
+    check_out_at: nowIso, work_date: workDate,
+    distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
+  };
 }
 
-function validateGeofence(employee, lat, lng) {
-  if (employee.geofence_lat == null || employee.geofence_lng == null) return null;
-  if (lat == null || lng == null) throw httpError('ต้องส่ง Location เพื่อเช็กอิน/เอาต์', 400);
-  const d = haversineMeters(Number(employee.geofence_lat), Number(employee.geofence_lng), Number(lat), Number(lng));
-  if (d > Number(employee.geofence_radius_m || 250)) {
-    throw httpError(`อยู่นอกพื้นที่ ${employee.geofence_name || 'จุดทำงาน'} (${Math.round(d)} เมตร)`, 403);
+async function employeeNeedsLocation(db, employee) {
+  const assigned = await db.prepare(`
+    SELECT COUNT(*) AS n FROM employee_work_locations ewl
+    JOIN work_locations wl ON wl.id=ewl.location_id AND wl.is_active=1
+    WHERE ewl.employee_id=?1
+  `).bind(Number(employee.id)).first();
+  if (Number(assigned?.n || 0) > 0) return true;
+  const companyLocations = await db.prepare('SELECT COUNT(*) AS n FROM work_locations WHERE client_id=?1 AND is_active=1').bind(Number(employee.client_id)).first();
+  if (Number(companyLocations?.n || 0) > 0) return true;
+  return employee.geofence_lat != null && employee.geofence_lng != null;
+}
+
+async function resolveAllowedWorkLocation(db, employee, lat, lng) {
+  const assigned = await db.prepare(`
+    SELECT wl.* FROM employee_work_locations ewl
+    JOIN work_locations wl ON wl.id=ewl.location_id
+    WHERE ewl.employee_id=?1 AND wl.is_active=1
+    ORDER BY wl.name
+  `).bind(Number(employee.id)).all();
+  let locations = assigned.results || [];
+
+  if (!locations.length) {
+    const company = await db.prepare('SELECT * FROM work_locations WHERE client_id=?1 AND is_active=1 ORDER BY name').bind(Number(employee.client_id)).all();
+    locations = company.results || [];
   }
-  return d;
+
+  if (!locations.length && employee.geofence_lat != null && employee.geofence_lng != null) {
+    locations = [{
+      id: null,
+      name: employee.geofence_name || 'จุดทำงาน',
+      latitude: Number(employee.geofence_lat),
+      longitude: Number(employee.geofence_lng),
+      radius_m: Number(employee.geofence_radius_m || 250),
+    }];
+  }
+
+  if (!locations.length) return null;
+  if (lat == null || lng == null) throw httpError('ต้องแชร์ Location เพื่อเช็กอิน/เอาต์', 400);
+
+  const ranked = locations.map(location => ({
+    ...location,
+    distance_m: haversineMeters(Number(location.latitude), Number(location.longitude), Number(lat), Number(lng)),
+  })).sort((a,b) => a.distance_m - b.distance_m);
+  const nearest = ranked[0];
+  if (nearest.distance_m > Number(nearest.radius_m || 150)) {
+    throw httpError(`อยู่นอกพื้นที่ ${nearest.name} · ห่าง ${Math.round(nearest.distance_m)} ม. (อนุญาต ${Number(nearest.radius_m || 150)} ม.)`, 403);
+  }
+  return nearest;
+}
+
+async function getPublicInvite(db, token) {
+  const tokenHash = await sha256Hex(token);
+  const invite = await db.prepare(`
+    SELECT i.*, c.name AS company_name, d.name AS department_name, p.name AS position_name
+    FROM employee_invites i
+    JOIN clients c ON c.id=i.client_id
+    LEFT JOIN departments d ON d.id=i.department_id
+    LEFT JOIN positions p ON p.id=i.position_id
+    WHERE i.token_hash=?1
+  `).bind(tokenHash).first();
+  if (!invite) return json({ error: 'INVITE_NOT_FOUND' }, 404);
+  const invalid = invite.status !== 'active' || new Date(invite.expires_at).getTime() <= Date.now() || Number(invite.used_count) >= Number(invite.max_uses);
+  if (invalid) return json({ error: 'INVITE_EXPIRED', company_name: invite.company_name }, 410);
+  const locations = await db.prepare(`
+    SELECT wl.id,wl.name,wl.address FROM employee_invite_locations eil
+    JOIN work_locations wl ON wl.id=eil.location_id AND wl.is_active=1
+    WHERE eil.invite_id=?1 ORDER BY wl.name
+  `).bind(Number(invite.id)).all();
+  return json({
+    invite: {
+      company_name: invite.company_name,
+      department_name: invite.department_name || null,
+      position_name: invite.position_name || null,
+      start_date: invite.start_date || null,
+      expires_at: invite.expires_at,
+      remaining_uses: Math.max(0, Number(invite.max_uses) - Number(invite.used_count)),
+      locations: locations.results || [],
+    },
+  });
+}
+
+async function acceptPublicInvite(request, env, token) {
+  const tokenHash = await sha256Hex(token);
+  const invite = await env.DB.prepare(`
+    SELECT i.*, c.name AS company_name FROM employee_invites i
+    JOIN clients c ON c.id=i.client_id
+    WHERE i.token_hash=?1
+  `).bind(tokenHash).first();
+  if (!invite) return json({ error: 'ลิงก์เชิญไม่ถูกต้อง' }, 404);
+  if (invite.status !== 'active' || new Date(invite.expires_at).getTime() <= Date.now() || Number(invite.used_count) >= Number(invite.max_uses)) {
+    return json({ error: 'ลิงก์เชิญหมดอายุหรือถูกใช้ครบแล้ว' }, 410);
+  }
+
+  const body = await safeJson(request);
+  const firstName = String(body.first_name || '').trim();
+  const lastName = String(body.last_name || '').trim();
+  const nickname = String(body.nickname || '').trim();
+  const email = String(body.email || '').trim().toLowerCase();
+  const phone = String(body.phone || '').trim();
+  const birthDate = body.birth_date || null;
+  if (firstName.length < 1 || lastName.length < 1 || phone.length < 8) return json({ error: 'กรุณากรอกชื่อ นามสกุล และเบอร์โทรให้ครบ' }, 400);
+
+  const employeeCode = await generateEmployeeCode(env.DB, Number(invite.client_id));
+  const startDate = invite.start_date || dateInBangkok();
+  let result;
+  try {
+    result = await env.DB.prepare(`
+      INSERT INTO employees (
+        client_id,employee_code,first_name,last_name,nickname,email,phone,birth_date,start_date,
+        department_id,position_id,employment_type,status,onboarding_source,emergency_contact_name,emergency_contact_phone
+      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'full_time','active','invite',?12,?13)
+    `).bind(
+      Number(invite.client_id), employeeCode, firstName, lastName, nickname || null, email || null, phone,
+      birthDate, startDate, invite.department_id || null, invite.position_id || null,
+      String(body.emergency_contact_name || '').trim() || null,
+      String(body.emergency_contact_phone || '').trim() || null,
+    ).run();
+  } catch (error) {
+    if (/UNIQUE constraint failed: employees\.email/i.test(String(error?.message || error)) && email) {
+      return json({ error: 'อีเมลนี้มีอยู่ในบริษัทแล้ว กรุณาติดต่อ HR' }, 409);
+    }
+    throw error;
+  }
+  const employeeId = Number(result.meta.last_row_id);
+
+  const locations = await env.DB.prepare('SELECT location_id FROM employee_invite_locations WHERE invite_id=?1').bind(Number(invite.id)).all();
+  for (const row of locations.results || []) {
+    await env.DB.prepare('INSERT OR IGNORE INTO employee_work_locations (employee_id,location_id) VALUES (?1,?2)').bind(employeeId, Number(row.location_id)).run();
+  }
+
+  const nextUsed = Number(invite.used_count) + 1;
+  await env.DB.prepare(`UPDATE employee_invites SET used_count=?1,status=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3`)
+    .bind(nextUsed, nextUsed >= Number(invite.max_uses) ? 'consumed' : 'active', Number(invite.id)).run();
+
+  const lineToken = randomToken(24);
+  const lineTokenHash = await sha256Hex(lineToken);
+  const lineExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  await env.DB.prepare('INSERT INTO line_join_tokens (token_hash,employee_id,expires_at) VALUES (?1,?2,?3)')
+    .bind(lineTokenHash, employeeId, lineExpiresAt).run();
+
+  let lineConnectUrl = null;
+  try {
+    const bot = await getLineBotInfo(env.LINE_CHANNEL_ACCESS_TOKEN);
+    if (bot?.basicId) lineConnectUrl = `https://line.me/R/oaMessage/${encodeURIComponent(bot.basicId)}/?${encodeURIComponent(`JOIN ${lineToken}`)}`;
+  } catch (error) {
+    console.warn(JSON.stringify({ level: 'warn', event: 'line_bot_info_failed', message: String(error?.message || error) }));
+  }
+
+  await safeAudit(env.DB, Number(invite.client_id), 'public_invite', String(employeeId), 'employee.self_onboard', 'employee', String(employeeId), { invite_id: Number(invite.id) });
+  return json({
+    ok: true,
+    employee: { id: employeeId, employee_code: employeeCode, name: nickname || firstName, company_name: invite.company_name },
+    line_connect_url: lineConnectUrl,
+    line_command: `JOIN ${lineToken}`,
+    line_token_expires_at: lineExpiresAt,
+  }, 201);
+}
+
+async function generateEmployeeCode(db, clientId) {
+  for (let attempt=0; attempt<5; attempt++) {
+    const code = `EMP-${String(clientId).padStart(2,'0')}-${randomToken(4).replace(/[-_]/g,'').slice(0,6).toUpperCase()}`;
+    const exists = await db.prepare('SELECT id FROM employees WHERE client_id=?1 AND employee_code=?2').bind(clientId, code).first();
+    if (!exists) return code;
+  }
+  return `EMP-${clientId}-${Date.now().toString(36).toUpperCase()}`;
+}
+
+async function getLineBotInfo(accessToken) {
+  if (!accessToken) return null;
+  const response = await fetch('https://api.line.me/v2/bot/info', { headers: { authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) throw new Error(`LINE bot info failed ${response.status}`);
+  return response.json();
+}
+
+async function getLineProfile(accessToken, userId) {
+  if (!accessToken || !userId) return null;
+  const response = await fetch(`https://api.line.me/v2/bot/profile/${encodeURIComponent(userId)}`, { headers: { authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) return null;
+  return response.json();
+}
+
+async function linkLineJoinToken(db, accessToken, lineUserId, token) {
+  const tokenHash = await sha256Hex(token);
+  const row = await db.prepare(`
+    SELECT t.*, e.id AS employee_id,e.first_name,e.nickname,e.client_id,e.line_user_id,c.name AS company_name
+    FROM line_join_tokens t
+    JOIN employees e ON e.id=t.employee_id
+    JOIN clients c ON c.id=e.client_id
+    WHERE t.token_hash=?1 AND t.used_at IS NULL
+  `).bind(tokenHash).first();
+  if (!row) return { ok:false, error:'ลิงก์เชื่อม LINE ไม่ถูกต้องหรือถูกใช้แล้ว' };
+  if (new Date(row.expires_at).getTime() <= Date.now()) return { ok:false, error:'ลิงก์เชื่อม LINE หมดอายุแล้ว กรุณาขอลิงก์เชิญใหม่จาก HR' };
+  const used = await db.prepare('SELECT id FROM employees WHERE line_user_id=?1').bind(lineUserId).first();
+  if (used && Number(used.id) !== Number(row.employee_id)) return { ok:false, error:'LINE นี้เชื่อมกับพนักงานคนอื่นอยู่แล้ว' };
+
+  const profile = await getLineProfile(accessToken, lineUserId);
+  await db.batch([
+    db.prepare(`UPDATE employees SET line_user_id=?1,line_display_name=?2,line_picture_url=?3,line_linked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?4`)
+      .bind(lineUserId, profile?.displayName || null, profile?.pictureUrl || null, Number(row.employee_id)),
+    db.prepare('UPDATE line_join_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1').bind(tokenHash),
+  ]);
+  await safeAudit(db, Number(row.client_id), 'line', lineUserId, 'employee.line_link_invite', 'employee', String(row.employee_id), null);
+  return { ok:true, name:row.nickname || row.first_name, company_name:row.company_name };
+}
+
+function canManagePeople(role) {
+  return ['owner','hr_admin','hr','manager'].includes(String(role || ''));
 }
 
 async function linkLineAccount(db, lineUserId, token) {
@@ -947,6 +1390,22 @@ function formatThaiShortDate(isoDate) {
   return d.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+async function replyLineWithLocationQuickReply(accessToken, replyToken, text) {
+  const response = await fetch('https://api.line.me/v2/bot/message/reply', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({
+      replyToken,
+      messages: [{
+        type: 'text',
+        text: text.slice(0, 4900),
+        quickReply: { items: [{ type: 'action', action: { type: 'location', label: 'ส่งตำแหน่งปัจจุบัน' } }] },
+      }],
+    }),
+  });
+  if (!response.ok) console.error(JSON.stringify({ level:'error', event:'line_reply_location_failed', status:response.status, body:await response.text() }));
+}
+
 async function replyLine(accessToken, replyToken, text) {
   const response = await fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',
@@ -968,31 +1427,54 @@ async function verifyLineSignature(rawBody, signature, channelSecret) {
 
 async function ensureCoreSchema(db) {
   if (!db) throw new Error('D1 binding DB is not available');
-  const requiredTables = ['departments','positions','employees','attendance','leave_requests','candidates','employee_requests','line_link_tokens','line_sessions','audit_logs'];
+  const requiredTables = [
+    'departments','positions','employees','attendance','leave_requests','candidates','employee_requests',
+    'line_link_tokens','line_sessions','audit_logs','work_locations','employee_work_locations','employee_invites',
+    'employee_invite_locations','line_join_tokens'
+  ];
   const placeholders = requiredTables.map(() => '?').join(',');
   const existing = await db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`)
     .bind(...requiredTables).all();
   const names = new Set((existing.results || []).map(row => row.name));
-  if (requiredTables.every(name => names.has(name))) return;
+  const missing = requiredTables.filter(name => !names.has(name));
 
-  console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_start', missing: requiredTables.filter(name => !names.has(name)) }));
-  const statements = INIT_SCHEMA_SQL.split(';').map(statement => statement.trim()).filter(Boolean);
-  for (const statement of statements) {
-    const tableMatch = statement.match(/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)/i);
-    const indexMatch = statement.match(/CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)/i);
-    const label = tableMatch?.[1] || indexMatch?.[1] || 'schema_statement';
-    try {
-      await db.prepare(statement).run();
-    } catch (error) {
-      // Indexes are performance helpers; a legacy table shape must not block login/onboarding.
-      if (indexMatch) {
-        console.warn(JSON.stringify({ level: 'warn', event: 'core_schema_index_skipped', label, detail: safeDbErrorDetail(error) }));
-        continue;
+  if (missing.length) {
+    console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_start', missing }));
+    const statements = INIT_SCHEMA_SQL.split(';').map(statement => statement.trim()).filter(Boolean);
+    for (const statement of statements) {
+      const tableMatch = statement.match(/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)/i);
+      const indexMatch = statement.match(/CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)/i);
+      const label = tableMatch?.[1] || indexMatch?.[1] || 'schema_statement';
+      try {
+        await db.prepare(statement).run();
+      } catch (error) {
+        if (indexMatch) {
+          console.warn(JSON.stringify({ level: 'warn', event: 'core_schema_index_skipped', label, detail: safeDbErrorDetail(error) }));
+          continue;
+        }
+        throw new Error(`CORE_SCHEMA_STEP:${label}:${String(error?.message || error)}`);
       }
-      throw new Error(`CORE_SCHEMA_STEP:${label}:${String(error?.message || error)}`);
     }
   }
+
+  await ensureColumn(db,'employee_invites','token_value','TEXT');
+  const employeeColumns = [
+    ['line_display_name','TEXT'],['line_picture_url','TEXT'],['line_linked_at','TEXT'],['onboarding_source','TEXT'],
+    ['emergency_contact_name','TEXT'],['emergency_contact_phone','TEXT']
+  ];
+  const attendanceColumns = [
+    ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
+    ['checkout_location_id','INTEGER'],['checkout_location_name','TEXT'],['checkout_distance_m','REAL'],['checkout_accuracy_m','REAL']
+  ];
+  for (const [column,type] of employeeColumns) await ensureColumn(db,'employees',column,type);
+  for (const [column,type] of attendanceColumns) await ensureColumn(db,'attendance',column,type);
   console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_complete' }));
+}
+
+async function ensureColumn(db, table, column, type) {
+  const columns = await db.prepare(`PRAGMA table_info(${table})`).all();
+  if ((columns.results || []).some(row => row.name === column)) return;
+  await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`).run();
 }
 
 function safeCoreSchemaErrorDetail(error) {
