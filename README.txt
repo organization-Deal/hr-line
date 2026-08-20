@@ -1,16 +1,5 @@
-Nakna HR V0.5.1 — R2 binding deploy fix
+Nakna HR V0.5.2 deploy config fix
 
-Replace only:
-  wrangler.jsonc
-
-Fix:
-  EVIDENCE_BUCKET now binds explicitly to existing R2 bucket:
-  hr-line-evidence-bucket
-
-This prevents Wrangler/Cloudflare Builds from trying to auto-provision the same bucket again and failing with R2 error 10004.
-
-Deploy:
-  npx wrangler deploy
-
-Expected deploy binding:
-  env.EVIDENCE_BUCKET -> hr-line-evidence-bucket
+Replace only wrangler.jsonc.
+Changed compatibility_date from 2026-08-21 to 2026-08-20 so Cloudflare UTC deployment does not treat it as a future date.
+R2 binding remains pinned to hr-line-evidence-bucket.
