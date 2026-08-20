@@ -1,143 +1,44 @@
-# HR LINE OS v0.1.1
+# นากนะ HR — V0.5.0
 
-HR Operating System แบบ LINE-first สำหรับบริษัทไทย
+Thai-first HR Tech โดย Otterwork Co., Ltd.  
+Google OAuth + Cloudflare Workers + D1 + LINE Messaging API + R2
 
-## Fix ใน v0.1.1
+## V0.5 Core
+- SaaS Workspace / Google Login
+- Employee Invite + Self Onboarding
+- LINE auto-link + Employee LINE menu
+- Work Location / Geofence Check-in & Check-out
+- Leave Policy ต่อบริษัท
+- สิทธิ์ลารายคนต่อปี + Adjustment
+- ผู้อนุมัติเรื่องลารายพนักงาน
+- LINE Flex Card ขอ/อนุมัติ/ไม่อนุมัติลา
+- เหตุผล + หลักฐานรูป/ไฟล์ เก็บใน R2
+- Leave Control Center + Team Calendar + Audit trail
+- Approved leave sync เข้า Attendance
+- Birthday / Probation / Contract / Recruitment / HR Inbox foundation
 
-- เปลี่ยน Worker name ให้ตรงกับ Cloudflare project: `hr-line`
-- เอา `database_id` placeholder ที่ทำให้ deploy error 10021 ออก
-- ใช้ Cloudflare D1 automatic provisioning ผ่าน draft binding `DB`
-- Worker bootstrap schema + demo seed อัตโนมัติเมื่อ API ถูกเรียกครั้งแรก
-- ไม่ต้องสร้าง D1 UUID หรือแก้ `wrangler.jsonc` เองก่อน deploy
-
-## มีอะไรใน V1 นี้
-
-- HR Autopilot Dashboard / HR Radar
-- Employee 360 (พื้นฐาน)
-- Recruitment ATS + Candidate Pipeline
-- Attendance Today
-- Leave approve / reject
-- HR Request Inbox
-- Birthday Radar
-- Daily HR Morning Brief ส่งเข้า LINE HR เวลา 08:00 น. (Cron 01:00 UTC)
-- Probation & Contract Radar
-- Multi-client schema ตั้งแต่ฐานข้อมูล
-- LINE account linking ด้วย one-time code
-- LINE Check-in / Check-out
-- รองรับ GPS geofence
-- LINE webhook signature verification (HMAC-SHA256)
-- Audit log
-- Admin API Token authentication
-
-## Stack
-
-- Cloudflare Workers + Static Assets
-- Cloudflare D1
-- Vanilla HTML/CSS/JS
-- LINE Messaging API webhook
-
-## Deploy ผ่าน Cloudflare Workers Builds
-
-ใช้ Deploy command เดิมได้เลย:
-
-```bash
-npx wrangler deploy
-```
-
-Wrangler 4.124+ จะ provision D1 binding `DB` ให้อัตโนมัติในการ deploy ครั้งแรก
-
-หลัง deploy ให้ไปที่ Worker > Settings > Variables and Secrets แล้วเพิ่ม:
+## Cloudflare Secrets
+ตั้งเป็น Secret ใน Worker:
 
 ```text
-HR_ADMIN_TOKEN = token ที่เดายาก
-LINE_CHANNEL_SECRET = ใส่ทีหลังเมื่อสร้าง LINE Bot แล้ว
-LINE_CHANNEL_ACCESS_TOKEN = ใส่ทีหลังเมื่อสร้าง LINE Bot แล้ว
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+GOOGLE_TOKEN_ENCRYPTION_KEY
+LINE_CHANNEL_SECRET
+LINE_CHANNEL_ACCESS_TOKEN
 ```
 
-> LINE secrets ยังไม่ต้องมีเพื่อเปิด Dashboard แต่ `HR_ADMIN_TOKEN` ต้องมีเพื่อเรียก API หลังบ้าน
+`EVIDENCE_BUCKET` เป็น R2 binding ใน `wrangler.jsonc` ไม่ใช่ Secret
 
-เมื่อเปิด Dashboard ครั้งแรกแล้ว login ด้วย `HR_ADMIN_TOKEN` ระบบจะสร้าง D1 tables และ demo data ให้อัตโนมัติถ้า database ยังว่าง
-
-## Local development
+## Deploy
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars
-npm run dev
+npx wrangler deploy
 ```
 
-`.dev.vars`:
+Static Assets ใช้ `public/` และ Worker หลักอยู่ที่ `src/index.js`.
 
-```env
-HR_ADMIN_TOKEN=ใส่-token-ที่เดายาก
-LINE_CHANNEL_SECRET=...
-LINE_CHANNEL_ACCESS_TOKEN=...
-```
+หลัง deploy ให้ Login เข้า Dashboard หนึ่งครั้งเพื่อให้ `/api/bootstrap` อัปเกรด schema แบบ idempotent และสร้าง Leave Policy template สำหรับ Workspace.
 
-## D1 migration commands (optional)
-
-ระบบ bootstrap schema อัตโนมัติอยู่แล้ว แต่ยังเก็บ migration scripts ไว้สำหรับการอัปเกรด schema ในรุ่นต่อไป:
-
-```bash
-npm run db:migrate:local
-npm run db:migrate:remote
-npm run db:seed:local
-npm run db:seed:remote
-```
-
-## LINE Webhook
-
-หลังสร้าง LINE Messaging API channel แล้วตั้ง Webhook URL เป็น:
-
-```text
-https://hr-line.<your-subdomain>.workers.dev/webhooks/line
-```
-
-## เชื่อมพนักงานกับ LINE
-
-1. HR เปิด Employees
-2. กด “สร้างรหัส LINE”
-3. ระบบออก code 6 หลัก อายุ 15 นาที
-4. ให้พนักงานส่งใน LINE OA:
-
-```text
-LINK 123456
-```
-
-หลังเชื่อมแล้วพนักงานใช้:
-
-```text
-เช็กอิน
-เช็กเอาต์
-สถานะ
-```
-
-ถ้าบริษัทตั้ง geofence แล้ว Bot จะขอ Location ก่อนบันทึกเวลา
-
-## ตั้ง Geofence
-
-V0.1.1 ตั้งผ่าน D1 ก่อน เช่น:
-
-```sql
-UPDATE clients
-SET geofence_name='DEAL Office',
-    geofence_lat=13.000000,
-    geofence_lng=100.000000,
-    geofence_radius_m=250
-WHERE id=1;
-```
-
-V0.2 จะเพิ่ม Company Settings ให้ HR ปักหมุดจาก UI
-
-## Security
-
-- LINE webhook ตรวจ `x-line-signature` จาก raw request bodyก่อน parse JSON
-- Secrets ไม่อยู่ใน source code
-- API หลังบ้านต้อง Bearer token
-- Link LINE ใช้รหัส one-time + expiry
-- Audit log สำหรับ action สำคัญ
-- D1 ใช้ prepared statements สำหรับข้อมูลจากผู้ใช้
-
-## Version
-
-`V0.1.1 · 20 AUG 2026`
+ดูรายละเอียดการอัปเกรดและ Test Flow ใน `UPGRADE_V050.md`.
