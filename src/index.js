@@ -1424,7 +1424,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.1', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1580,6 +1580,7 @@ async function handleApi(request, env, url, auth, ctx) {
       user: publicUser(auth.user),
       companies: memberships,
       active_company_id: auth.clientId || null,
+      setup_mode: auth.setupMode || null,
       claimable_company: claimable,
     });
   }
@@ -1673,7 +1674,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.1', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -1698,7 +1699,10 @@ async function handleApi(request, env, url, auth, ctx) {
     await env.DB.prepare(`UPDATE clients SET work_start=?1,work_end=?2 WHERE id=?3`).bind(workStart,workEnd,Number(created.id)).run();
     await env.DB.prepare(`INSERT INTO company_onboarding (client_id,owner_user_id,source,current_step,employee_estimate,legal_name,tax_id,phone,address,province,recruitment_gmail_enabled,recruitment_gmail_query) VALUES (?1,?2,?3,'google_workspace',?4,?5,?6,?7,?8,?9,1,'newer_than:30d {สมัคร resume CV "job application"}') ON CONFLICT(client_id) DO UPDATE SET owner_user_id=excluded.owner_user_id,source=excluded.source,current_step='google_workspace',employee_estimate=excluded.employee_estimate,legal_name=excluded.legal_name,tax_id=excluded.tax_id,phone=excluded.phone,address=excluded.address,province=excluded.province,completed_at=NULL,updated_at=CURRENT_TIMESTAMP`)
       .bind(Number(created.id),Number(auth.user.id),String(body.onboarding_source||'web'),employeeEstimate,String(body.legal_name||name).trim(),String(body.tax_id||'').trim()||null,String(body.phone||'').trim()||null,String(body.address||'').trim()||null,String(body.province||'').trim()||null).run();
-    return withCookie(json({ ok: true, company: created, onboarding: await getWebOnboardingStatus(env,{...auth,clientId:Number(created.id),role:'owner'}) }, 201), companyCookie(created.id));
+    const response=json({ ok: true, company: created, onboarding: await getWebOnboardingStatus(env,{...auth,clientId:Number(created.id),role:'owner',setupMode:null}) }, 201);
+    response.headers.append('Set-Cookie',companyCookie(created.id));
+    response.headers.append('Set-Cookie',clearCookie('nakna_setup_mode'));
+    return response;
   }
 
   if (path === '/api/onboarding/claim-company' && method === 'POST') {
@@ -3722,10 +3726,19 @@ async function finishLineWebLogin(request,env){
     env.DB.prepare(`UPDATE line_web_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(tokenHash),
     env.DB.prepare(`INSERT INTO auth_sessions (token_hash,user_id,selected_client_id,expires_at) VALUES (?1,?2,?3,?4)`).bind(sessionHash,Number(row.user_id),selectedClientId,sessionExpiresAt),
   ]);
+  const isBusinessSetup=String(row.purpose||'')==='business_setup';
   const cookies=[sessionCookie(sessionToken)];
-  if(selectedClientId) cookies.push(companyCookie(selectedClientId));
-  const setup=String(row.purpose||'')==='business_setup'?'&setup=new':'';
-  return redirectResponse(`${appOrigin(request,env)}/?auth=line${setup}`,cookies);
+  if(isBusinessSetup){
+    // A setup link must NEVER inherit the previously selected company.
+    // This is important when the same LINE account is already an employee/owner elsewhere.
+    cookies.push(clearCookie('nakna_company'));
+    cookies.push(setupModeCookie('new'));
+  }else{
+    cookies.push(clearCookie('nakna_setup_mode'));
+    if(selectedClientId) cookies.push(companyCookie(selectedClientId));
+  }
+  const setup=isBusinessSetup?'&setup=new':'';
+  return redirectResponse(`${appOrigin(request,env)}/?auth=line${setup}&fresh=p71`,cookies);
 }
 
 async function getPublicOnboardingConfig(env){
@@ -3751,7 +3764,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7',
+    version:'1.0-P7.1',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -5497,14 +5510,18 @@ async function authorizeUser(request, env, { requireCompany = true } = {}) {
     return { ok: false, status: 401, error: 'AUTH_REQUIRED' };
   }
 
-  let clientId = Number(session.selected_client_id || getCookie(request, 'nakna_company') || 0) || null;
+  const setupMode = getCookie(request, 'nakna_setup_mode') === 'new';
+  // When LINE explicitly opened Business Setup, do not silently fall back to an
+  // old company membership. The customer must stay in the setup wizard until
+  // they create/select the new workspace.
+  let clientId = setupMode ? null : (Number(session.selected_client_id || getCookie(request, 'nakna_company') || 0) || null);
   let role = null;
   if (clientId) {
     const member = await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(Number(session.user_id), clientId).first();
     if (!member) clientId = null;
     else role = member.role;
   }
-  if (!clientId) {
+  if (!clientId && !setupMode) {
     const first = await env.DB.prepare(`SELECT client_id, role FROM company_members WHERE user_id=?1 AND status='active' ORDER BY id LIMIT 1`).bind(Number(session.user_id)).first();
     if (first) {
       clientId = Number(first.client_id);
@@ -5520,6 +5537,7 @@ async function authorizeUser(request, env, { requireCompany = true } = {}) {
     sessionHash,
     clientId,
     role,
+    setupMode: setupMode ? 'new' : null,
     user: {
       id: Number(session.user_id),
       google_sub: session.google_sub,
@@ -6372,6 +6390,12 @@ function sessionCookie(token) {
 
 function companyCookie(clientId) {
   return `nakna_company=${encodeURIComponent(String(clientId))}; Path=/; Secure; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`;
+}
+
+function setupModeCookie(mode='new') {
+  // Server-readable guard so Business Setup still works even if the browser has
+  // a cached frontend bundle from a previous deployment.
+  return `nakna_setup_mode=${encodeURIComponent(String(mode))}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${30 * 60}`;
 }
 
 function oauthStateCookie(name, state, maxAge) {
