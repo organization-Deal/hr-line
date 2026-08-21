@@ -278,7 +278,7 @@ async function loadSessionOnly({ forceNewBusiness = false } = {}) {
     hideLogin();
     renderIdentity();
 
-    if (forceNewBusiness) {
+    if (forceNewBusiness || data.setup_mode === 'new') {
       showOnboarding({ step: 'company', forceNewBusiness: true });
       return false;
     }
