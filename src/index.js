@@ -1175,6 +1175,116 @@ VALUES
 ('enterprise','Enterprise','Custom plan / Custom billing','custom',0,0,0,NULL,30,'["all_features","custom_support"]','active');
 `;
 
+const V100P7_SCHEMA_SQL = String.raw`-- Nakna HR V1.0-P7
+-- LINE -> Web business setup, Recruitment Gmail sync, Benefits catalog
+
+CREATE TABLE IF NOT EXISTS line_web_login_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  client_id INTEGER,
+  purpose TEXT NOT NULL DEFAULT 'business_setup',
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_line_web_login_tokens_user ON line_web_login_tokens(user_id,purpose,expires_at,used_at);
+
+CREATE TABLE IF NOT EXISTS company_onboarding (
+  client_id INTEGER PRIMARY KEY,
+  owner_user_id INTEGER,
+  source TEXT NOT NULL DEFAULT 'web',
+  current_step TEXT NOT NULL DEFAULT 'google_workspace',
+  employee_estimate INTEGER,
+  legal_name TEXT,
+  tax_id TEXT,
+  phone TEXT,
+  address TEXT,
+  province TEXT,
+  recruitment_gmail_enabled INTEGER NOT NULL DEFAULT 1,
+  recruitment_gmail_query TEXT NOT NULL DEFAULT 'newer_than:30d {สมัคร resume CV "job application"}',
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_email_settings (
+  client_id INTEGER PRIMARY KEY,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  query TEXT NOT NULL DEFAULT 'newer_than:30d {สมัคร resume CV "job application"}',
+  auto_sync INTEGER NOT NULL DEFAULT 1,
+  last_sync_at TEXT,
+  last_error TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS recruitment_email_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  gmail_message_id TEXT NOT NULL,
+  gmail_thread_id TEXT,
+  sender_name TEXT,
+  sender_email TEXT,
+  subject TEXT,
+  received_at TEXT,
+  snippet TEXT,
+  attachment_names TEXT,
+  candidate_id INTEGER,
+  import_status TEXT NOT NULL DEFAULT 'seen',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(client_id,gmail_message_id),
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_recruitment_email_client ON recruitment_email_messages(client_id,received_at);
+
+CREATE TABLE IF NOT EXISTS benefit_programs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  benefit_type TEXT NOT NULL DEFAULT 'custom',
+  description TEXT,
+  employer_amount REAL NOT NULL DEFAULT 0,
+  employee_amount REAL NOT NULL DEFAULT 0,
+  frequency TEXT NOT NULL DEFAULT 'monthly',
+  is_statutory INTEGER NOT NULL DEFAULT 0,
+  eligibility_json TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_by_user_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(client_id,code),
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_benefit_programs_client ON benefit_programs(client_id,status);
+
+CREATE TABLE IF NOT EXISTS employee_benefit_enrollments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  benefit_id INTEGER NOT NULL,
+  employee_id INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  start_date TEXT,
+  end_date TEXT,
+  note TEXT,
+  created_by_user_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(benefit_id,employee_id),
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (benefit_id) REFERENCES benefit_programs(id) ON DELETE CASCADE,
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_employee_benefits_employee ON employee_benefit_enrollments(client_id,employee_id,status);
+`;
+
 const APPROVER_PERMISSION_KEYS = new Set([
   'leave.approve',
   'attendance.approve',
@@ -1314,7 +1424,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P6.2', auth: 'line-first+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1324,7 +1434,7 @@ export default {
         return await getPublicDiagnostics(env);
       }
       if (url.pathname === '/auth/line/start' && request.method === 'GET') {
-        return await finishLineAdminLogin(request, env);
+        return await finishLineWebLogin(request, env);
       }
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
         return await startGoogleLogin(request, env);
@@ -1421,13 +1531,14 @@ export default {
       }
 
       if (url.pathname === '/webhooks/line' && request.method === 'POST') {
-        await ensureV100P1Ready(env.DB);
-        await ensureV100P2Ready(env.DB);
+        // Global Nakna OA must acknowledge LINE before any schema work.
+        // handleLineWebhook verifies the signature, returns 200 immediately,
+        // then prepares schema + processes events in ctx.waitUntil().
         return await handleLineWebhook(request, env, ctx, null);
       }
 
       if (url.pathname.startsWith('/api/')) {
-        const auth = await authorizeUser(request, env, { requireCompany: !['/api/me','/api/companies','/api/onboarding/claim-company'].includes(url.pathname) });
+        const auth = await authorizeUser(request, env, { requireCompany: !['/api/me','/api/companies','/api/onboarding/claim-company','/api/onboarding/status'].includes(url.pathname) });
         if (!auth.ok) return json({ error: auth.error }, auth.status);
         return await handleApi(request, env, url, auth, ctx);
       }
@@ -1451,7 +1562,8 @@ export default {
     // Cloudflare Cron runs in UTC. 01:00 UTC = 08:00 Asia/Bangkok.
     await Promise.all([
       sendDailyHrBrief(env),
-      runPhase5DailyAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'phase5_daily_failed',message:String(error?.message||error)})))
+      runPhase5DailyAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'phase5_daily_failed',message:String(error?.message||error)}))),
+      syncAllRecruitmentGmail(env).catch(error=>console.error(JSON.stringify({level:'error',event:'recruitment_gmail_daily_failed',message:String(error?.message||error)})))
     ]);
   },
 };
@@ -1472,6 +1584,81 @@ async function handleApi(request, env, url, auth, ctx) {
     });
   }
 
+  if (path === '/api/onboarding/status' && method === 'GET') {
+    await ensureV100P7Ready(env.DB);
+    return json(await getWebOnboardingStatus(env, auth));
+  }
+
+  if (path === '/api/onboarding/recruitment-gmail' && method === 'POST') {
+    if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
+    if (!['owner','hr_admin','hr'].includes(String(auth.role||''))) return json({ error:'ไม่มีสิทธิ์ตั้งค่า Recruitment Gmail' },403);
+    await ensureV100P7Ready(env.DB);
+    const body=await safeJson(request);
+    const enabled=body.enabled===false?0:1;
+    const query=String(body.query||'newer_than:30d {สมัคร resume CV "job application"}').trim().slice(0,500)||'newer_than:30d {สมัคร resume CV "job application"}';
+    await env.DB.prepare(`INSERT INTO recruitment_email_settings (client_id,enabled,query,auto_sync,updated_at) VALUES (?1,?2,?3,?4,CURRENT_TIMESTAMP) ON CONFLICT(client_id) DO UPDATE SET enabled=excluded.enabled,query=excluded.query,auto_sync=excluded.auto_sync,updated_at=CURRENT_TIMESTAMP`).bind(clientId,enabled,query,body.auto_sync===false?0:1).run();
+    await env.DB.prepare(`UPDATE company_onboarding SET recruitment_gmail_enabled=?1,recruitment_gmail_query=?2,current_step='recruitment_gmail',updated_at=CURRENT_TIMESTAMP WHERE client_id=?3`).bind(enabled,query,clientId).run();
+    return json({ok:true,enabled:Boolean(enabled),query});
+  }
+
+  if (path === '/api/onboarding/complete' && method === 'POST') {
+    if (!clientId) return json({ error:'COMPANY_REQUIRED' },409);
+    if (!['owner','hr_admin','hr'].includes(String(auth.role||''))) return json({ error:'ไม่มีสิทธิ์จบการตั้งค่า' },403);
+    await ensureV100P7Ready(env.DB);
+    const google=await env.DB.prepare(`SELECT id FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
+    if(!google) return json({error:'กรุณาเชื่อม Google Workspace ก่อนเริ่มใช้งาน'},409);
+    await env.DB.prepare(`UPDATE company_onboarding SET current_step='complete',completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE client_id=?1`).bind(clientId).run();
+    await ensureP7CompanyDefaults(env.DB,clientId,auth.user.id);
+    const status=await getWebOnboardingStatus(env,auth);
+    return json({ok:true,onboarding:status});
+  }
+
+  if (path === '/api/recruitment/gmail/status' && method === 'GET') {
+    if (!clientId) return json({error:'COMPANY_REQUIRED'},409);
+    await ensureV100P7Ready(env.DB);
+    return json(await getRecruitmentGmailStatus(env,clientId));
+  }
+
+  if (path === '/api/recruitment/gmail/sync' && method === 'POST') {
+    if (!clientId) return json({error:'COMPANY_REQUIRED'},409);
+    if (!['owner','hr_admin','hr'].includes(String(auth.role||''))) return json({error:'ไม่มีสิทธิ์ Sync Gmail ผู้สมัคร'},403);
+    try{
+      const result=await syncRecruitmentGmailForClient(env,clientId,{limit:30});
+      return json({ok:true,...result});
+    }catch(error){
+      await ensureV100P7Ready(env.DB);
+      await env.DB.prepare(`UPDATE recruitment_email_settings SET last_error=?1,updated_at=CURRENT_TIMESTAMP WHERE client_id=?2`).bind(String(error?.message||error).slice(0,300),clientId).run().catch(()=>{});
+      return json({error:safeRecruitmentGmailError(error)},400);
+    }
+  }
+
+  if (path === '/api/benefits' && method === 'GET') {
+    if (!clientId) return json({error:'COMPANY_REQUIRED'},409);
+    await ensureP7CompanyDefaults(env.DB,clientId,auth.user.id);
+    const programs=await env.DB.prepare(`SELECT b.*,COUNT(CASE WHEN e.status='active' THEN 1 END) AS enrolled_count FROM benefit_programs b LEFT JOIN employee_benefit_enrollments e ON e.benefit_id=b.id WHERE b.client_id=?1 GROUP BY b.id ORDER BY b.is_statutory DESC,b.id`).bind(clientId).all();
+    const enrollments=await env.DB.prepare(`SELECT e.*,b.name AS benefit_name,emp.employee_code,emp.first_name,emp.last_name,emp.nickname FROM employee_benefit_enrollments e JOIN benefit_programs b ON b.id=e.benefit_id JOIN employees emp ON emp.id=e.employee_id WHERE e.client_id=?1 ORDER BY e.id DESC`).bind(clientId).all();
+    return json({data:programs.results||[],enrollments:enrollments.results||[]});
+  }
+
+  if (path === '/api/benefits' && method === 'POST') {
+    if (!['owner','hr_admin','hr'].includes(String(auth.role||''))) return json({error:'ไม่มีสิทธิ์จัดการสวัสดิการ'},403);
+    await ensureV100P7Ready(env.DB);
+    const body=await safeJson(request); const name=String(body.name||'').trim(); if(name.length<2)return json({error:'กรุณาใส่ชื่อสวัสดิการ'},400);
+    const code=slugCode(body.code||name)||`benefit-${Date.now()}`;
+    const result=await env.DB.prepare(`INSERT INTO benefit_programs (client_id,code,name,benefit_type,description,employer_amount,employee_amount,frequency,is_statutory,eligibility_json,status,created_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`).bind(clientId,code,name,String(body.benefit_type||'custom'),body.description||null,Number(body.employer_amount||0),Number(body.employee_amount||0),String(body.frequency||'monthly'),body.is_statutory?1:0,body.eligibility?JSON.stringify(body.eligibility):null,String(body.status||'active'),Number(auth.user.id)).run();
+    return json({ok:true,id:result.meta.last_row_id},201);
+  }
+
+  const benefitEnrollMatch=path.match(/^\/api\/benefits\/(\d+)\/enroll$/);
+  if(benefitEnrollMatch && method==='POST'){
+    if(!['owner','hr_admin','hr'].includes(String(auth.role||'')))return json({error:'ไม่มีสิทธิ์จัดการสวัสดิการ'},403);
+    await ensureV100P7Ready(env.DB); const benefitId=Number(benefitEnrollMatch[1]); const body=await safeJson(request); const employeeId=Number(body.employee_id||0);
+    const [benefit,employee]=await Promise.all([env.DB.prepare(`SELECT id FROM benefit_programs WHERE id=?1 AND client_id=?2`).bind(benefitId,clientId).first(),env.DB.prepare(`SELECT id FROM employees WHERE id=?1 AND client_id=?2`).bind(employeeId,clientId).first()]);
+    if(!benefit||!employee)return json({error:'ไม่พบสวัสดิการหรือพนักงาน'},404);
+    await env.DB.prepare(`INSERT INTO employee_benefit_enrollments (client_id,benefit_id,employee_id,status,start_date,end_date,note,created_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(benefit_id,employee_id) DO UPDATE SET status=excluded.status,start_date=excluded.start_date,end_date=excluded.end_date,note=excluded.note,updated_at=CURRENT_TIMESTAMP`).bind(clientId,benefitId,employeeId,String(body.status||'active'),body.start_date||dateInBangkok(),body.end_date||null,body.note||null,Number(auth.user.id)).run();
+    return json({ok:true});
+  }
+
   if (path === '/api/bootstrap' && method === 'GET') {
     try {
       // Fast bootstrap: each phase is chained and cached per Worker isolate.
@@ -1479,13 +1666,14 @@ async function handleApi(request, env, url, auth, ctx) {
       // many times and could push D1 beyond the browser's 30s timeout.
       await ensureCoreSchema(env.DB);
       await ensureV063Ready(env.DB);
-      await ensureV100P5Ready(env.DB);
+      await ensureV100P7Ready(env.DB);
       if (clientId) {
         await ensureDefaultLeavePolicies(env.DB, clientId);
         await ensurePayrollDefaults(env.DB, clientId);
         await ensurePhase5Defaults(env.DB, clientId);
+        await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P6.2', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -1497,12 +1685,20 @@ async function handleApi(request, env, url, auth, ctx) {
     const body = await safeJson(request);
     const name = String(body.name || '').trim();
     if (name.length < 2) return json({ error: 'กรุณาใส่ชื่อบริษัท' }, 400);
+    await ensureV100P7Ready(env.DB);
     const created = await createCompanyForUser(env.DB, auth, name);
     await ensureCoreSchema(env.DB);
     await ensureDefaultLeavePolicies(env.DB, Number(created.id));
-    await ensureV100P5Ready(env.DB);
+    await ensurePayrollDefaults(env.DB, Number(created.id));
     await ensurePhase5Defaults(env.DB, Number(created.id));
-    return withCookie(json({ ok: true, company: created }, 201), companyCookie(created.id));
+    await ensureP7CompanyDefaults(env.DB, Number(created.id), Number(auth.user.id));
+    const employeeEstimate=Math.max(1,Math.min(100000,Number(body.employee_estimate||1)||1));
+    const workStart=normalizeTimeHM(body.work_start)||'09:00';
+    const workEnd=normalizeTimeHM(body.work_end)||'18:00';
+    await env.DB.prepare(`UPDATE clients SET work_start=?1,work_end=?2 WHERE id=?3`).bind(workStart,workEnd,Number(created.id)).run();
+    await env.DB.prepare(`INSERT INTO company_onboarding (client_id,owner_user_id,source,current_step,employee_estimate,legal_name,tax_id,phone,address,province,recruitment_gmail_enabled,recruitment_gmail_query) VALUES (?1,?2,?3,'google_workspace',?4,?5,?6,?7,?8,?9,1,'newer_than:30d {สมัคร resume CV "job application"}') ON CONFLICT(client_id) DO UPDATE SET owner_user_id=excluded.owner_user_id,source=excluded.source,current_step='google_workspace',employee_estimate=excluded.employee_estimate,legal_name=excluded.legal_name,tax_id=excluded.tax_id,phone=excluded.phone,address=excluded.address,province=excluded.province,completed_at=NULL,updated_at=CURRENT_TIMESTAMP`)
+      .bind(Number(created.id),Number(auth.user.id),String(body.onboarding_source||'web'),employeeEstimate,String(body.legal_name||name).trim(),String(body.tax_id||'').trim()||null,String(body.phone||'').trim()||null,String(body.address||'').trim()||null,String(body.province||'').trim()||null).run();
+    return withCookie(json({ ok: true, company: created, onboarding: await getWebOnboardingStatus(env,{...auth,clientId:Number(created.id),role:'owner'}) }, 201), companyCookie(created.id));
   }
 
   if (path === '/api/onboarding/claim-company' && method === 'POST') {
@@ -3486,6 +3682,52 @@ async function finishLineAdminLogin(request,env){
   return response;
 }
 
+
+async function issueLineWebLoginLink(env,userId,{clientId=null,purpose='business_setup'}={}){
+  await ensureV100P7Ready(env.DB);
+  const token=randomToken(40);
+  const tokenHash=await sha256Hex(token);
+  const expiresAt=new Date(Date.now()+15*60*1000).toISOString();
+  await env.DB.prepare(`DELETE FROM line_web_login_tokens WHERE user_id=?1 AND purpose=?2 AND used_at IS NULL`).bind(Number(userId),String(purpose)).run();
+  await env.DB.prepare(`INSERT INTO line_web_login_tokens (token_hash,user_id,client_id,purpose,expires_at) VALUES (?1,?2,?3,?4,?5)`)
+    .bind(tokenHash,Number(userId),clientId?Number(clientId):null,String(purpose),expiresAt).run();
+  const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
+  return `${base}/auth/line/start?token=${encodeURIComponent(token)}`;
+}
+
+async function finishLineWebLogin(request,env){
+  await ensureV100P7Ready(env.DB);
+  const url=new URL(request.url);
+  const token=String(url.searchParams.get('token')||'');
+  if(token.length<20) return redirectResponse(`${appOrigin(request,env)}/?auth_error=line_token`);
+  const tokenHash=await sha256Hex(token);
+  const row=await env.DB.prepare(`SELECT t.*,u.status AS user_status FROM line_web_login_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=?1 AND t.used_at IS NULL`).bind(tokenHash).first();
+  if(!row){
+    // Compatibility with short-lived P6 links while customers update the bot message.
+    return finishLineAdminLogin(request,env);
+  }
+  if(row.user_status!=='active'||new Date(row.expires_at).getTime()<=Date.now()){
+    await env.DB.prepare(`UPDATE line_web_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(tokenHash).run();
+    return redirectResponse(`${appOrigin(request,env)}/?auth_error=line_token`);
+  }
+  let selectedClientId=row.client_id?Number(row.client_id):null;
+  if(selectedClientId){
+    const membership=await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(Number(row.user_id),selectedClientId).first();
+    if(!membership) selectedClientId=null;
+  }
+  const sessionToken=randomToken(40);
+  const sessionHash=await sha256Hex(sessionToken);
+  const sessionExpiresAt=new Date(Date.now()+30*24*60*60*1000).toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE line_web_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(tokenHash),
+    env.DB.prepare(`INSERT INTO auth_sessions (token_hash,user_id,selected_client_id,expires_at) VALUES (?1,?2,?3,?4)`).bind(sessionHash,Number(row.user_id),selectedClientId,sessionExpiresAt),
+  ]);
+  const cookies=[sessionCookie(sessionToken)];
+  if(selectedClientId) cookies.push(companyCookie(selectedClientId));
+  const setup=String(row.purpose||'')==='business_setup'?'&setup=new':'';
+  return redirectResponse(`${appOrigin(request,env)}/?auth=line${setup}`,cookies);
+}
+
 async function getPublicOnboardingConfig(env){
   const ctx=defaultLineContext(env);
   if(!ctx?.accessToken) return json({line_configured:false,command:'เชื่อมธุรกิจ',line_add_url:null,line_connect_url:null});
@@ -3509,7 +3751,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P6.2',
+    version:'1.0-P7',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -3532,71 +3774,69 @@ async function getPublicDiagnostics(env){
 }
 
 async function handleLineBusinessOnboardingText({text,event,env,lineCtx,lineUserId,accessToken,sessionKey}){
-  await ensureLineBusinessOnboardingReady(env.DB);
+  await ensureV100P7Ready(env.DB);
   const lower=String(text||'').trim().toLowerCase();
   const providerScope=String(lineCtx.providerScope||'default');
-  const session=await getLineSession(env.DB,sessionKey);
-  const existingBusinessUser=await findLineBusinessUser(env.DB,providerScope,lineUserId);
-  const existingBusinesses=existingBusinessUser?await getLineBusinessMemberships(env.DB,Number(existingBusinessUser.id)):[];
-  const linkedEmployee=await findLinkedEmployeeByLine(env.DB,providerScope,lineUserId).catch(()=>null);
-  const employeeOnly=Boolean(linkedEmployee&&!existingBusinesses.length);
 
-  if(session?.action==='business_create_name'){
-    if(['ยกเลิก','cancel','เลิก'].includes(lower)){
-      await clearLineSession(env.DB,sessionKey);
-      await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ยกเลิกแล้ว','พิมพ์ “เชื่อมธุรกิจ” เมื่อพร้อมเริ่มใหม่ได้เลย','neutral')]);
-      return true;
+  if(isBusinessConnectCommand(text)||isCreateBusinessCommand(text)){
+    // P7: LINE is only the identity + entry point. Business creation and Google
+    // provisioning happen on the web so customers can see every step/status.
+    await clearLineSession(env.DB,sessionKey).catch(()=>{});
+    const user=await ensureLineBusinessUser(env,lineCtx,lineUserId);
+    const businesses=await getLineBusinessMemberships(env.DB,Number(user.id));
+    const linkedEmployee=await findLinkedEmployeeByLine(env.DB,providerScope,lineUserId).catch(()=>null);
+    const setupUrl=await issueLineWebLoginLink(env,Number(user.id),{purpose:'business_setup'});
+    let dashboardUrl=null;
+    if(businesses.length){
+      dashboardUrl=await issueLineWebLoginLink(env,Number(user.id),{clientId:Number(businesses[0].id),purpose:'dashboard'});
     }
-    const companyName=String(text||'').trim().replace(/\s+/g,' ').slice(0,120);
-    if(companyName.length<2){
-      await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ขอชื่อบริษัทอีกนิด','พิมพ์ชื่อบริษัทอย่างน้อย 2 ตัวอักษร เช่น “Otterwork Co., Ltd.”','warning')]);
-      return true;
-    }
-    try{
-      const user=await ensureLineBusinessUser(env,lineCtx,lineUserId);
-      const company=await createCompanyForLineOwner(env,user,companyName,lineUserId);
-      const loginUrl=await issueLineAdminLoginLink(env,Number(user.id),Number(company.id));
-      await clearLineSession(env.DB,sessionKey);
-      await replyLineMessages(accessToken,event.replyToken,[buildBusinessReadyFlex(company,loginUrl,false)]);
-    }catch(error){
-      console.error(JSON.stringify({level:'error',event:'line_business_create_failed',message:String(error?.message||error)}));
-      await clearLineSession(env.DB,sessionKey);
-      await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('สร้างธุรกิจไม่สำเร็จ','ระบบมีปัญหาชั่วคราว กรุณาพิมพ์ “เชื่อมธุรกิจ” แล้วลองอีกครั้ง','error')]);
-    }
-    return true;
-  }
-
-  if(isBusinessConnectCommand(text)){
-    if(existingBusinessUser&&existingBusinesses.length){
-      const company=existingBusinesses[0];
-      const loginUrl=await issueLineAdminLoginLink(env,Number(existingBusinessUser.id),Number(company.id));
-      await replyLineMessages(accessToken,event.replyToken,[buildBusinessReadyFlex(company,loginUrl,true,existingBusinesses.length)]);
-      return true;
-    }
-    if(employeeOnly){
-      await replyLineMessages(accessToken,event.replyToken,[buildBusinessConnectEmployeeFlex(linkedEmployee)]);
-      return true;
-    }
-    await replyLineMessages(accessToken,event.replyToken,[buildBusinessConnectStartFlex()]);
-    return true;
-  }
-
-  if(isCreateBusinessCommand(text)){
-    await setLineSession(env.DB,sessionKey,'business_create_name',{});
-    await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('สร้างธุรกิจใหม่','พิมพ์ “ชื่อบริษัท” ที่ต้องการใช้ในนากนะได้เลย\nเช่น Otterwork Co., Ltd.','teal')]);
+    await replyLineMessages(accessToken,event.replyToken,[buildBusinessWebSetupFlex({businesses,linkedEmployee,setupUrl,dashboardUrl})]);
     return true;
   }
 
   if(['ฉันเป็นพนักงาน','เป็นพนักงาน','พนักงาน','employee'].includes(lower)){
-    await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex(
-      'สำหรับพนักงาน',
-      'ไม่ต้องสร้างธุรกิจเองนะ ให้ HR ส่งลิงก์เชิญหรือรหัสเชื่อมบัญชีให้ แล้วเปิดลิงก์/พิมพ์รหัสนั้นใน LINE ได้เลย',
-      'teal'
-    )]);
+    const linkedEmployee=await findLinkedEmployeeByLine(env.DB,providerScope,lineUserId).catch(()=>null);
+    if(linkedEmployee){
+      await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex(
+        'บัญชีพนักงานพร้อมใช้งาน',
+        `คุณเชื่อมกับ ${linkedEmployee.company_name||'บริษัท'} แล้ว\nใช้เมนู HR ด้านล่างเพื่อเช็กอิน ลา วันหยุด เรียนรู้ และดูข้อมูลของคุณ`,
+        'teal'
+      )]);
+    }else{
+      await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex(
+        'สำหรับพนักงาน',
+        'ให้ HR ส่งลิงก์เชิญเข้าทีมให้ก่อน แล้วเปิดลิงก์นั้นเพื่อผูก LINE กับข้อมูลพนักงานของบริษัท',
+        'teal'
+      )]);
+    }
     return true;
   }
 
   return false;
+}
+
+function buildBusinessWebSetupFlex({businesses=[],linkedEmployee=null,setupUrl,dashboardUrl=null}={}){
+  const hasBusiness=Array.isArray(businesses)&&businesses.length>0;
+  const companyName=hasBusiness?businesses[0].name:null;
+  const body=[
+    lineInfoCard([
+      lineInfoRow('1','เปิดศูนย์ตั้งค่าบนเว็บ'),
+      lineInfoRow('2','สร้าง/เลือกธุรกิจ'),
+      lineInfoRow('3','เชื่อม Gmail + Drive + Sheets'),
+      lineInfoRow('4','เริ่ม Free Trial 30 วัน')
+    ],'teal'),
+    lineText('ตั้งแต่เวอร์ชันนี้ LINE จะไม่ถามชื่อบริษัทในแชตแล้ว การสร้างธุรกิจและเชื่อม Google ทำบน Dashboard ทั้งหมด','xs',LINE_CI.muted)
+  ];
+  if(linkedEmployee) body.push(lineText(`LINE นี้เป็นพนักงานของ ${linkedEmployee.company_name||'บริษัท'} อยู่แล้ว และยังสามารถเป็น Owner ของธุรกิจอื่นได้`,'xs',LINE_CI.muted));
+  if(hasBusiness) body.push(lineText(`มี Workspace อยู่แล้ว ${businesses.length} ธุรกิจ${companyName?` · ${companyName}`:''}`,'xs',LINE_CI.muted));
+  const footer=[linePrimaryButton(hasBusiness?'ตั้งค่า / สร้างธุรกิจเพิ่ม':'เริ่มตั้งค่าธุรกิจ',{type:'uri',label:hasBusiness?'ตั้งค่าธุรกิจ':'เริ่มตั้งค่า',uri:setupUrl})];
+  if(dashboardUrl) footer.push(lineSecondaryButton('เปิด Dashboard',{type:'uri',label:'เปิด Dashboard',uri:dashboardUrl}));
+  return {type:'flex',altText:'ตั้งค่าธุรกิจ Nakna HR บนเว็บ',contents:lineBubble({
+    eyebrow:'NAKNA · BUSINESS SETUP',
+    title:hasBusiness?'จัดการธุรกิจของคุณ':'เชื่อมธุรกิจกับนากนะ',
+    subtitle:'LINE → Web Setup → Google Workspace → HR Dashboard',
+    status:hasBusiness?'Owner':'30-day Trial',statusTone:'success',body,footer
+  })};
 }
 
 function buildBusinessConnectEmployeeFlex(linkedEmployee){
@@ -4341,6 +4581,35 @@ async function ensureV100P5Ready(db){
     }
   }
   SCHEMA_READY.add('p5');
+}
+
+
+async function ensureV100P7Ready(db){
+  if(SCHEMA_READY.has('p7')) return;
+  await ensureV100P5Ready(db);
+  const ready=await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('line_web_login_tokens','company_onboarding','recruitment_email_settings','recruitment_email_messages','benefit_programs','employee_benefit_enrollments')").first();
+  if(Number(ready?.n||0)<6){
+    const statements=V100P7_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
+    for(const statement of statements){
+      try{await db.prepare(statement).run();}
+      catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}
+    }
+  }
+  SCHEMA_READY.add('p7');
+}
+
+async function ensureP7CompanyDefaults(db,clientId,userId=null){
+  await ensureV100P7Ready(db);
+  const cid=Number(clientId);
+  await db.prepare(`INSERT OR IGNORE INTO recruitment_email_settings (client_id,enabled,query,auto_sync) VALUES (?1,1,'newer_than:30d {สมัคร resume CV "job application"}',1)`).bind(cid).run();
+  const defaults=[
+    ['social-security','ประกันสังคม','social_security','สิทธิประกันสังคมสำหรับพนักงานตามเงื่อนไขที่บริษัทและกฎหมายกำหนด',0,0,'monthly',1],
+    ['group-insurance','ประกันกลุ่ม','insurance','ประกันกลุ่มของบริษัท',0,0,'monthly',0],
+    ['medical','ค่ารักษาพยาบาล','medical','วงเงินค่ารักษาพยาบาล / OPD / IPD ตามนโยบายบริษัท',0,0,'annual',0]
+  ];
+  for(const row of defaults){
+    await db.prepare(`INSERT OR IGNORE INTO benefit_programs (client_id,code,name,benefit_type,description,employer_amount,employee_amount,frequency,is_statutory,status,created_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'active',?10)`).bind(cid,...row,userId?Number(userId):null).run();
+  }
 }
 
 async function ensurePhase5Defaults(db,clientId){
@@ -5384,6 +5653,149 @@ async function logoutSession(request, env) {
   return response;
 }
 
+
+async function getWebOnboardingStatus(env,auth){
+  await ensureV100P7Ready(env.DB);
+  const clientId=auth.clientId?Number(auth.clientId):null;
+  if(!clientId){
+    return {completed:false,requires_company:true,current_step:'company',company:null,google:{connected:false},recruitment_gmail:{connected:false,enabled:true},trial:null};
+  }
+  const [client,onboarding,google,recruitment,subscription]=await Promise.all([
+    getClient(env.DB,clientId),
+    env.DB.prepare(`SELECT * FROM company_onboarding WHERE client_id=?1`).bind(clientId).first(),
+    env.DB.prepare(`SELECT id,email,drive_folder_id,spreadsheet_id,status,last_sync_at,last_error FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first(),
+    env.DB.prepare(`SELECT * FROM recruitment_email_settings WHERE client_id=?1`).bind(clientId).first(),
+    env.DB.prepare(`SELECT s.*,p.name AS plan_name,p.code AS plan_code FROM company_subscriptions s LEFT JOIN subscription_plans p ON p.id=s.plan_id WHERE s.client_id=?1`).bind(clientId).first(),
+  ]);
+  // Existing workspaces created before P7 must not get blocked by the new wizard.
+  const legacyCompleted=!onboarding;
+  const completed=legacyCompleted||Boolean(onboarding?.completed_at);
+  let currentStep=completed?'complete':String(onboarding?.current_step||'google_workspace');
+  if(!completed&&!google) currentStep='google_workspace';
+  if(!completed&&google&&currentStep==='google_workspace') currentStep='recruitment_gmail';
+  const trial=subscription?{
+    status:subscription.status,plan_name:subscription.plan_name||'Free Trial',plan_code:subscription.plan_code||'trial',
+    trial_started_at:subscription.trial_started_at,trial_ends_at:subscription.trial_ends_at,
+    days_remaining:subscription.trial_ends_at?Math.max(0,Math.ceil((new Date(subscription.trial_ends_at)-new Date())/86400000)):null
+  }:null;
+  return {
+    completed,legacy_completed:legacyCompleted,requires_company:false,current_step:currentStep,
+    company:client?{...publicCompanyProfile(client),employee_estimate:Number(onboarding?.employee_estimate||0),legal_name:onboarding?.legal_name||client.name,tax_id:onboarding?.tax_id||null,phone:onboarding?.phone||null,address:onboarding?.address||null,province:onboarding?.province||null}:null,
+    google:{connected:Boolean(google),email:google?.email||null,drive_folder_id:google?.drive_folder_id||null,spreadsheet_id:google?.spreadsheet_id||null,last_sync_at:google?.last_sync_at||null,last_error:google?.last_error||null},
+    recruitment_gmail:{connected:Boolean(google),enabled:recruitment?Boolean(Number(recruitment.enabled)):Boolean(Number(onboarding?.recruitment_gmail_enabled??1)),query:recruitment?.query||onboarding?.recruitment_gmail_query||'newer_than:30d {สมัคร resume CV "job application"}',auto_sync:recruitment?Boolean(Number(recruitment.auto_sync)):true,last_sync_at:recruitment?.last_sync_at||null,last_error:recruitment?.last_error||null},
+    trial
+  };
+}
+
+async function getRecruitmentGmailStatus(env,clientId){
+  await ensureV100P7Ready(env.DB);
+  const [settings,workspace,count]=await Promise.all([
+    env.DB.prepare(`SELECT * FROM recruitment_email_settings WHERE client_id=?1`).bind(Number(clientId)).first(),
+    env.DB.prepare(`SELECT email,status,scopes FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM recruitment_email_messages WHERE client_id=?1`).bind(Number(clientId)).first(),
+  ]);
+  return {connected:Boolean(workspace),email:workspace?.email||null,enabled:settings?Boolean(Number(settings.enabled)):true,auto_sync:settings?Boolean(Number(settings.auto_sync)):true,query:settings?.query||'newer_than:30d {สมัคร resume CV "job application"}',last_sync_at:settings?.last_sync_at||null,last_error:settings?.last_error||null,imported_messages:Number(count?.n||0)};
+}
+
+function gmailHeader(message,name){
+  const headers=message?.payload?.headers||[];
+  const row=headers.find(h=>String(h.name||'').toLowerCase()===String(name||'').toLowerCase());
+  return String(row?.value||'').trim();
+}
+
+function parseEmailIdentity(value){
+  const raw=String(value||'').trim();
+  const match=raw.match(/^(.*?)\s*<([^<>\s]+@[^<>\s]+)>$/);
+  if(match) return {name:match[1].replace(/^"|"$/g,'').trim(),email:match[2].toLowerCase()};
+  const email=(raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)||[])[0]||'';
+  return {name:email?raw.replace(email,'').replace(/[<>"']/g,'').trim():'',email:email.toLowerCase()};
+}
+
+function candidateNameParts(displayName,email){
+  const clean=String(displayName||'').replace(/\s+/g,' ').trim();
+  if(clean){
+    const parts=clean.split(' ').filter(Boolean);
+    if(parts.length===1)return {first_name:parts[0].slice(0,80),last_name:'ไม่ระบุ'};
+    return {first_name:parts.shift().slice(0,80),last_name:parts.join(' ').slice(0,120)};
+  }
+  const local=String(email||'candidate').split('@')[0].replace(/[._-]+/g,' ').trim()||'ผู้สมัคร';
+  const parts=local.split(' ').filter(Boolean);
+  return {first_name:(parts.shift()||'ผู้สมัคร').slice(0,80),last_name:(parts.join(' ')||'ไม่ระบุ').slice(0,120)};
+}
+
+function inferCandidatePosition(subject){
+  const text=String(subject||'').replace(/\s+/g,' ').trim();
+  const patterns=[/สมัคร(?:งาน|ตำแหน่ง)?\s*[:\-–]?\s*(.+)$/i,/application\s+(?:for|position)\s*[:\-–]?\s*(.+)$/i,/apply\s+(?:for)?\s*[:\-–]?\s*(.+)$/i];
+  for(const p of patterns){const m=text.match(p);if(m?.[1])return m[1].slice(0,120);}
+  return text&&text.length<=80?text.slice(0,120):'ไม่ระบุตำแหน่ง';
+}
+
+function gmailAttachmentNames(part,out=[]){
+  if(!part)return out;
+  if(part.filename)out.push(String(part.filename).slice(0,180));
+  for(const child of part.parts||[])gmailAttachmentNames(child,out);
+  return out;
+}
+
+async function syncRecruitmentGmailForClient(env,clientId,{limit=25}={}){
+  await ensureV100P7Ready(env.DB);
+  const cid=Number(clientId);
+  const settings=await env.DB.prepare(`SELECT * FROM recruitment_email_settings WHERE client_id=?1`).bind(cid).first();
+  if(settings&&Number(settings.enabled)===0)return {skipped:true,reason:'disabled',imported:0,linked:0,scanned:0};
+  const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(cid).first();
+  if(!workspace)throw new Error('GOOGLE_WORKSPACE_REQUIRED');
+  const accessToken=await getWorkspaceGoogleAccessToken(env,workspace);
+  const query=String(settings?.query||'newer_than:30d {สมัคร resume CV "job application"}').trim();
+  const listUrl=new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
+  listUrl.searchParams.set('maxResults',String(Math.max(1,Math.min(50,Number(limit)||25))));
+  if(query)listUrl.searchParams.set('q',query);
+  const listing=await googleApiJson(listUrl.toString(),accessToken);
+  const messages=listing.messages||[];
+  let imported=0,linked=0,skipped=0;
+  for(const ref of messages){
+    const gmailId=String(ref.id||''); if(!gmailId)continue;
+    const seen=await env.DB.prepare(`SELECT id FROM recruitment_email_messages WHERE client_id=?1 AND gmail_message_id=?2`).bind(cid,gmailId).first();
+    if(seen){skipped++;continue;}
+    const msg=await googleApiJson(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(gmailId)}?format=full`,accessToken);
+    const from=gmailHeader(msg,'From'); const subject=gmailHeader(msg,'Subject'); const dateHeader=gmailHeader(msg,'Date');
+    const identity=parseEmailIdentity(from); const receivedAt=dateHeader&&!Number.isNaN(new Date(dateHeader).getTime())?new Date(dateHeader).toISOString():new Date(Number(msg.internalDate||Date.now())).toISOString();
+    const attachments=gmailAttachmentNames(msg.payload,[]);
+    let candidateId=null,importStatus='seen';
+    if(identity.email){
+      const existing=await env.DB.prepare(`SELECT id FROM candidates WHERE client_id=?1 AND lower(email)=lower(?2) ORDER BY id DESC LIMIT 1`).bind(cid,identity.email).first();
+      if(existing){candidateId=Number(existing.id);linked++;importStatus='linked_existing';await env.DB.prepare(`UPDATE candidates SET last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(candidateId).run();}
+      else{
+        const names=candidateNameParts(identity.name,identity.email); const position=inferCandidatePosition(subject);
+        const noteParts=[`นำเข้าจาก Gmail: ${subject||'(ไม่มีหัวข้อ)'}`]; if(attachments.length)noteParts.push(`ไฟล์แนบ: ${attachments.join(', ')}`);
+        const created=await env.DB.prepare(`INSERT INTO candidates (client_id,first_name,last_name,email,position_name,source,stage,notes,last_activity_at) VALUES (?1,?2,?3,?4,?5,'Gmail','new',?6,CURRENT_TIMESTAMP)`).bind(cid,names.first_name,names.last_name,identity.email,position,noteParts.join('\n').slice(0,1500)).run();
+        candidateId=Number(created.meta.last_row_id); imported++; importStatus='candidate_created';
+      }
+    }
+    await env.DB.prepare(`INSERT INTO recruitment_email_messages (client_id,gmail_message_id,gmail_thread_id,sender_name,sender_email,subject,received_at,snippet,attachment_names,candidate_id,import_status) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`).bind(cid,gmailId,msg.threadId||null,identity.name||null,identity.email||null,subject||null,receivedAt,String(msg.snippet||'').slice(0,500),attachments.length?JSON.stringify(attachments):null,candidateId,importStatus).run();
+  }
+  await env.DB.prepare(`INSERT INTO recruitment_email_settings (client_id,enabled,query,auto_sync,last_sync_at,last_error,updated_at) VALUES (?1,1,?2,1,CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP) ON CONFLICT(client_id) DO UPDATE SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP`).bind(cid,query).run();
+  return {scanned:messages.length,imported,linked,skipped,query};
+}
+
+async function syncAllRecruitmentGmail(env){
+  await ensureV100P7Ready(env.DB);
+  const rows=await env.DB.prepare(`SELECT s.client_id FROM recruitment_email_settings s JOIN google_workspace_integrations g ON g.client_id=s.client_id AND g.status='connected' WHERE s.enabled=1 AND s.auto_sync=1 ORDER BY COALESCE(s.last_sync_at,'2000-01-01') ASC LIMIT 20`).all();
+  const results=[];
+  for(const row of rows.results||[]){
+    try{results.push({client_id:Number(row.client_id),...(await syncRecruitmentGmailForClient(env,Number(row.client_id),{limit:20}))});}
+    catch(error){await env.DB.prepare(`UPDATE recruitment_email_settings SET last_error=?1,updated_at=CURRENT_TIMESTAMP WHERE client_id=?2`).bind(String(error?.message||error).slice(0,300),Number(row.client_id)).run().catch(()=>{});results.push({client_id:Number(row.client_id),error:String(error?.message||error)});}
+  }
+  return results;
+}
+
+function safeRecruitmentGmailError(error){
+  const text=String(error?.message||error||'');
+  if(text.includes('GOOGLE_WORKSPACE_REQUIRED'))return 'กรุณาเชื่อม Google Workspace ก่อน';
+  if(/401|invalid_grant|refresh/i.test(text))return 'สิทธิ์ Google หมดอายุ กรุณาเชื่อม Google Workspace ใหม่';
+  if(/gmail/i.test(text))return 'อ่าน Gmail ไม่สำเร็จ กรุณาตรวจ Gmail API และสิทธิ์ OAuth';
+  return 'Sync Gmail ผู้สมัครไม่สำเร็จ กรุณาลองใหม่';
+}
+
 async function startGoogleWorkspaceConnection(request, env) {
   assertGoogleConfig(env);
   if (!integrationEncryptionKey(env)) return json({ error: 'Integration encryption key is not configured' }, 500);
@@ -5414,8 +5826,9 @@ async function startGoogleWorkspaceConnection(request, env) {
     access_type: 'offline',
     include_granted_scopes: 'true',
     prompt: 'consent',
-    login_hint: auth.user.email,
+    login_hint: String(auth.user.email||'').endsWith('@nakna.local') ? '' : auth.user.email,
   });
+  if (!params.get('login_hint')) params.delete('login_hint');
   return redirectResponse(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, [oauthStateCookie('nakna_google_workspace_state', state, 600)]);
 }
 
@@ -5473,7 +5886,9 @@ async function finishGoogleWorkspaceConnection(request, env) {
       await env.DB.prepare(`UPDATE google_workspace_integrations SET last_error=?1 WHERE id=?2`).bind(String(syncError?.message||syncError).slice(0,300),Number(row.id)).run();
     }
     await safeAudit(env.DB, Number(auth.clientId), 'user', String(auth.user.id), 'google_workspace.connect', 'google_workspace', String(row.id), { email: profile.email, drive_folder_id: resources.drive_folder_id, spreadsheet_id: resources.spreadsheet_id });
-    return redirectResponse(`${appOrigin(request, env)}/?google_workspace=connected`, [clearCookie('nakna_google_workspace_state')]);
+    await ensureP7CompanyDefaults(env.DB,Number(auth.clientId),Number(auth.user.id));
+    await env.DB.prepare(`UPDATE company_onboarding SET current_step='recruitment_gmail',updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND completed_at IS NULL`).bind(Number(auth.clientId)).run().catch(()=>{});
+    return redirectResponse(`${appOrigin(request, env)}/?google_workspace=connected&setup=1`, [clearCookie('nakna_google_workspace_state')]);
   } catch (error) {
     console.error(JSON.stringify({level:'error',event:'google_workspace_connect_failed',message:String(error?.message||error)}));
     return googleWorkspaceErrorRedirect(request, env, safeGoogleWorkspaceErrorCode(error));
@@ -5499,7 +5914,7 @@ async function ensureGoogleWorkspaceResources(accessToken, client, current) {
     leaveEvidenceFolderId = evidenceFolder.id;
   }
   if (!spreadsheetId) {
-    const sheetTitles = ['Employees','Candidates','Attendance','Leave Requests','Leave Balance','Leave Policy','Approvers','Work Locations','Departments','Positions','Invitations','Documents','Work Schedules','Company Holidays','HR Cases','Broadcasts','Leave Ledger','Payroll Profiles','Payroll Periods','Payroll Items','Payroll Adjustments','Payroll Documents','Employee Documents','Learning Courses','Learning Assignments','KPI Goals','KPI Updates','One on Ones','Probation Reviews','Points Wallet','Point Transactions','Point Rules','Reward Catalog','Reward Redemptions','Subscriptions','Usage Snapshots','Billing Invoices','Billing Payments','Audit Log'];
+    const sheetTitles = ['Employees','Candidates','Attendance','Leave Requests','Leave Balance','Leave Policy','Approvers','Work Locations','Departments','Positions','Invitations','Documents','Work Schedules','Company Holidays','HR Cases','Broadcasts','Leave Ledger','Payroll Profiles','Payroll Periods','Payroll Items','Payroll Adjustments','Payroll Documents','Employee Documents','Learning Courses','Learning Assignments','KPI Goals','KPI Updates','One on Ones','Probation Reviews','Points Wallet','Point Transactions','Point Rules','Reward Catalog','Reward Redemptions','Subscriptions','Usage Snapshots','Billing Invoices','Billing Payments','Recruitment Gmail','Benefits','Benefit Enrollments','Audit Log'];
     const spreadsheet = await googleApiJson('https://sheets.googleapis.com/v4/spreadsheets', accessToken, {
       method: 'POST',
       body: JSON.stringify({ properties: { title: `Nakna HR Database - ${safeName}` }, sheets: sheetTitles.map(title => ({ properties: { title } })) }),
@@ -5521,7 +5936,7 @@ async function moveGoogleFileToFolder(accessToken, fileId, folderId) {
 }
 
 async function ensureNaknaPhase2SheetTabs(accessToken, spreadsheetId){
-  const wanted=['Candidates','Work Schedules','Company Holidays','HR Cases','Broadcasts','Leave Ledger','Payroll Profiles','Payroll Periods','Payroll Items','Payroll Adjustments','Payroll Documents','Employee Documents','Learning Courses','Learning Assignments','KPI Goals','KPI Updates','One on Ones','Probation Reviews','Points Wallet','Point Transactions','Point Rules','Reward Catalog','Reward Redemptions','Subscriptions','Usage Snapshots','Billing Invoices','Billing Payments'];
+  const wanted=['Candidates','Work Schedules','Company Holidays','HR Cases','Broadcasts','Leave Ledger','Payroll Profiles','Payroll Periods','Payroll Items','Payroll Adjustments','Payroll Documents','Employee Documents','Learning Courses','Learning Assignments','KPI Goals','KPI Updates','One on Ones','Probation Reviews','Points Wallet','Point Transactions','Point Rules','Reward Catalog','Reward Redemptions','Subscriptions','Usage Snapshots','Billing Invoices','Billing Payments','Recruitment Gmail','Benefits','Benefit Enrollments'];
   const book=await googleApiJson(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties.title`,accessToken);
   const existing=new Set((book.sheets||[]).map(s=>s.properties?.title).filter(Boolean));
   const requests=wanted.filter(title=>!existing.has(title)).map(title=>({addSheet:{properties:{title}}}));
@@ -5580,6 +5995,9 @@ function googleSheetHeaders() {
     'Usage Snapshots':['snapshot_id','snapshot_date','active_employee_seats','line_connected_seats','storage_bytes','created_at'],
     'Billing Invoices':['invoice_id','invoice_no','period_start','period_end','active_seats','base_fee','seat_amount','subtotal','vat_rate','vat_amount','total','currency','status','due_date','paid_at','created_at'],
     'Billing Payments':['payment_id','invoice_id','amount','method','provider','provider_payment_id','note','paid_at'],
+    'Recruitment Gmail':['message_id','gmail_message_id','thread_id','sender_name','sender_email','subject','received_at','attachment_names','candidate_id','import_status','created_at'],
+    'Benefits':['benefit_id','code','name','benefit_type','description','employer_amount','employee_amount','frequency','is_statutory','status','enrolled_count','updated_at'],
+    'Benefit Enrollments':['enrollment_id','benefit_id','benefit_name','employee_id','employee_code','employee_name','status','start_date','end_date','note','updated_at'],
     'Audit Log':['timestamp','actor','action','detail']
   };
 }
@@ -5665,9 +6083,11 @@ async function syncWorkspaceSnapshotToSheet(env, clientId, integration, accessTo
   await ensureV100P3Ready(db);
   await ensureV100P4Ready(db);
   await ensureV100P5Ready(db);
+  await ensureV100P7Ready(db);
   await ensurePhase5Defaults(db,clientId);
+  await ensureP7CompanyDefaults(db,clientId);
   await ensureNaknaPhase2SheetTabs(accessToken,integration.spreadsheet_id);
-  const [employees,candidates,attendance,leaves,locations,departments,positions,invites,permissions,leavePolicies,leaveBalances,documents,schedules,holidays,hrCases,broadcasts,leaveLedger,payrollProfiles,payrollPeriods,payrollItems,payrollAdjustments,payrollDocuments,employeeDocuments,learningCourses,learningAssignments,kpiGoals,kpiUpdates,oneOnOnes,probationReviews,pointWallets,pointTransactions,pointRules,rewardCatalog,rewardRedemptions,subscriptions,usageSnapshots,billingInvoices,billingPayments] = await db.batch([
+  const [employees,candidates,attendance,leaves,locations,departments,positions,invites,permissions,leavePolicies,leaveBalances,documents,schedules,holidays,hrCases,broadcasts,leaveLedger,payrollProfiles,payrollPeriods,payrollItems,payrollAdjustments,payrollDocuments,employeeDocuments,learningCourses,learningAssignments,kpiGoals,kpiUpdates,oneOnOnes,probationReviews,pointWallets,pointTransactions,pointRules,rewardCatalog,rewardRedemptions,subscriptions,usageSnapshots,billingInvoices,billingPayments,recruitmentEmails,benefitPrograms,benefitEnrollments] = await db.batch([
     db.prepare(`SELECT e.*,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 ORDER BY e.id`).bind(clientId),
     db.prepare(`SELECT * FROM candidates WHERE client_id=?1 ORDER BY id`).bind(clientId),
     db.prepare(`SELECT a.*,wl.name AS location_name FROM attendance a LEFT JOIN work_locations wl ON wl.id=a.checkin_location_id WHERE a.client_id=?1 ORDER BY a.work_date DESC,a.id DESC LIMIT 1000`).bind(clientId),
@@ -5706,6 +6126,9 @@ async function syncWorkspaceSnapshotToSheet(env, clientId, integration, accessTo
     db.prepare(`SELECT * FROM usage_snapshots WHERE client_id=?1 ORDER BY snapshot_date`).bind(clientId),
     db.prepare(`SELECT * FROM billing_invoices WHERE client_id=?1 ORDER BY id`).bind(clientId),
     db.prepare(`SELECT * FROM billing_payments WHERE client_id=?1 ORDER BY id`).bind(clientId),
+    db.prepare(`SELECT * FROM recruitment_email_messages WHERE client_id=?1 ORDER BY received_at DESC,id DESC LIMIT 1000`).bind(clientId),
+    db.prepare(`SELECT b.*,COUNT(CASE WHEN e.status='active' THEN 1 END) AS enrolled_count FROM benefit_programs b LEFT JOIN employee_benefit_enrollments e ON e.benefit_id=b.id WHERE b.client_id=?1 GROUP BY b.id ORDER BY b.id`).bind(clientId),
+    db.prepare(`SELECT be.*,b.name AS benefit_name,e.employee_code,e.first_name,e.last_name,e.nickname FROM employee_benefit_enrollments be JOIN benefit_programs b ON b.id=be.benefit_id JOIN employees e ON e.id=be.employee_id WHERE be.client_id=?1 ORDER BY be.id`).bind(clientId),
   ]);
   const tableData = {
     'Employees': (employees.results||[]).map(e=>[e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.phone,e.department_name,e.position_name,e.manager_employee_id,e.people_status,e.status,e.start_date,e.probation_end_date,e.confirmed_at,e.end_date,e.end_reason,e.line_user_id?'yes':'no']),
@@ -5746,6 +6169,9 @@ async function syncWorkspaceSnapshotToSheet(env, clientId, integration, accessTo
     'Usage Snapshots': (usageSnapshots.results||[]).map(u=>[u.id,u.snapshot_date,u.active_employee_seats,u.line_connected_seats,u.storage_bytes,u.created_at]),
     'Billing Invoices': (billingInvoices.results||[]).map(i=>[i.id,i.invoice_no,i.period_start,i.period_end,i.active_seats,i.base_fee,i.seat_amount,i.subtotal,i.vat_rate,i.vat_amount,i.total,i.currency,i.status,i.due_date,i.paid_at,i.created_at]),
     'Billing Payments': (billingPayments.results||[]).map(b=>[b.id,b.invoice_id,b.amount,b.method,b.provider,b.provider_payment_id,b.note,b.paid_at]),
+    'Recruitment Gmail': (recruitmentEmails.results||[]).map(m=>[m.id,m.gmail_message_id,m.gmail_thread_id,m.sender_name,m.sender_email,m.subject,m.received_at,m.attachment_names,m.candidate_id,m.import_status,m.created_at]),
+    'Benefits': (benefitPrograms.results||[]).map(b=>[b.id,b.code,b.name,b.benefit_type,b.description,b.employer_amount,b.employee_amount,b.frequency,b.is_statutory,b.status,b.enrolled_count,b.updated_at]),
+    'Benefit Enrollments': (benefitEnrollments.results||[]).map(e=>[e.id,e.benefit_id,e.benefit_name,e.employee_id,e.employee_code,`${e.nickname||e.first_name||''} ${e.last_name||''}`.trim(),e.status,e.start_date,e.end_date,e.note,e.updated_at]),
   };
   const spreadsheetId=integration.spreadsheet_id;
   for(const [sheet,rows] of Object.entries(tableData)){
@@ -5784,8 +6210,9 @@ async function startGmailConnection(request, env) {
     access_type: 'offline',
     include_granted_scopes: 'true',
     prompt: 'consent',
-    login_hint: auth.user.email,
+    login_hint: String(auth.user.email||'').endsWith('@nakna.local') ? '' : auth.user.email,
   });
+  if (!params.get('login_hint')) params.delete('login_hint');
   return redirectResponse(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, [oauthStateCookie('nakna_gmail_state', state, 600)]);
 }
 
