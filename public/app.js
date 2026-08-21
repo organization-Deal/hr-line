@@ -12,6 +12,9 @@ const state = {
   lookups: { departments: [], positions: [], locations: [] },
   workLocations: [],
   leavePolicies: [],
+  approverAccess: [],
+  approverPermissionCatalog: [],
+  activeApproverEmployeeId: null,
   activeLeaveProfileEmployeeId: null,
   currentView: 'dashboard',
 };
@@ -107,6 +110,10 @@ function bindEvents() {
   $('#lineTestBtn').onclick = testLineIntegration;
   $('#lineDisconnectBtn').onclick = disconnectLineIntegration;
   $('#lineIntegrationSaveBtn').onclick = saveLineIntegration;
+  $('#approverAccessShortcut').onclick = () => document.querySelector('#approverAccessSection')?.scrollIntoView({behavior:'smooth',block:'start'});
+  $('#addApproverAccessBtn').onclick = () => openApproverAccessModal();
+  $('#approverAccessSaveBtn').onclick = saveApproverAccess;
+  $('#approverRolePreset').onchange = applyApproverRolePreset;
   $('#copyLineWebhookModalBtn').onclick = copyLineWebhookFromModal;
   $('#refreshBtn').onclick = () => loadAll();
 
@@ -334,7 +341,7 @@ async function ensureWorkspaceReady() {
 async function loadAll({ silent = false } = {}) {
   setLoading(true);
   try {
-    const [dashboard, employees, candidates, attendance, leaves, requests, gmail, lineIntegration, invites, lookups, workLocations, leavePolicies] = await Promise.all([
+    const [dashboard, employees, candidates, attendance, leaves, requests, gmail, lineIntegration, invites, lookups, workLocations, leavePolicies, approverAccess] = await Promise.all([
       api('/api/dashboard'),
       api('/api/employees'),
       api('/api/candidates'),
@@ -347,6 +354,7 @@ async function loadAll({ silent = false } = {}) {
       api('/api/lookups'),
       api('/api/work-locations'),
       api('/api/leave-policies'),
+      ['owner','hr_admin','hr'].includes(String(activeCompanyRole()||'')) ? api('/api/approver-access') : Promise.resolve({data:[],catalog:[]}),
     ]);
 
     state.dashboard = dashboard;
@@ -361,6 +369,8 @@ async function loadAll({ silent = false } = {}) {
     state.lookups = lookups || { departments: [], positions: [], locations: [] };
     state.workLocations = workLocations.data || [];
     state.leavePolicies = leavePolicies.data || [];
+    state.approverAccess = approverAccess.data || [];
+    state.approverPermissionCatalog = approverAccess.catalog || [];
 
     renderAll();
     renderIdentity();
@@ -912,7 +922,8 @@ async function openLeaveProfile(employeeId, keepOpen = false) {
     $('#leaveProfileSubtitle').textContent = `${employee.employee_code} · กำหนดผู้อนุมัติและสิทธิ์รายคน`;
     const years=[year-1,year,year+1];
     $('#leaveProfileYear').innerHTML=years.map(y=>`<option value="${y}" ${y===result.year?'selected':''}>${y+543}</option>`).join('');
-    $('#leaveApproverSelect').innerHTML = `<option value="">ยังไม่กำหนด</option>${state.employees.filter(e=>Number(e.id)!==Number(employeeId)).map(e=>`<option value="${e.id}" ${Number(e.id)===Number(employee.leave_approver_employee_id)?'selected':''}>${escapeHtml(e.nickname || e.first_name)}${e.department_name?` · ${escapeHtml(e.department_name)}`:''}${e.line_user_id?' · LINE✓':''}</option>`).join('')}`;
+    const leaveApproverIds=new Set((state.approverAccess||[]).filter(item=>(item.permissions||[]).includes('leave.approve')).map(item=>Number(item.id)));
+    $('#leaveApproverSelect').innerHTML = `<option value="">ยังไม่กำหนด</option>${state.employees.filter(e=>Number(e.id)!==Number(employeeId) && (leaveApproverIds.has(Number(e.id)) || Number(e.id)===Number(employee.leave_approver_employee_id))).map(e=>`<option value="${e.id}" ${Number(e.id)===Number(employee.leave_approver_employee_id)?'selected':''}>${escapeHtml(e.nickname || e.first_name)}${e.department_name?` · ${escapeHtml(e.department_name)}`:''}${e.line_user_id?' · LINE✓':''} · ผู้อนุมัติ✓</option>`).join('')}`;
     $('#leaveEntitlementRows').innerHTML=result.balances.map(b=>`
       <div class="entitlement-row" data-policy-id="${b.id}">
         <div class="entitlement-name"><strong>${escapeHtml(b.name)}</strong><small>${Number(b.is_unlimited)?'ไม่จำกัดสิทธิ์':`ใช้แล้ว ${formatLeaveDays(b.used_days)} · รอ ${formatLeaveDays(b.pending_days)}`}</small></div>
@@ -985,6 +996,70 @@ function renderSettings() {
   $('#gmailDisconnectBtn').classList.toggle('hidden', !connected);
 
   renderLineIntegration();
+  renderApproverAccess();
+}
+
+function renderApproverAccess() {
+  const section = $('#approverAccessSection');
+  if (!section) return;
+  const canManage = ['owner','hr_admin','hr'].includes(String(activeCompanyRole() || ''));
+  section.classList.toggle('hidden', !canManage);
+  if (!canManage) return;
+  const granted = (state.approverAccess || []).filter(item => (item.permissions || []).length);
+  $('#approverAccessCount').textContent = `${granted.length} คน`;
+  $('#approverAccessList').innerHTML = granted.length ? granted.map(item => {
+    const labels=(item.permissions||[]).map(key=>state.approverPermissionCatalog.find(x=>x.key===key)?.label||key);
+    return `<article class="approver-access-row">
+      <div class="employee-cell"><span class="avatar ${item.line_picture_url?'photo':''}" ${item.line_picture_url?`style="background-image:url('${escapeHtml(item.line_picture_url)}')"`:''}>${item.line_picture_url?'':initial(item)}</span><div><strong>${escapeHtml(item.nickname||item.first_name)} ${escapeHtml(item.last_name||'')}</strong><small>${escapeHtml(item.department_name||'ไม่ระบุทีม')} · ${item.line_user_id?'LINE เชื่อมแล้ว':'ยังไม่เชื่อม LINE'}</small></div></div>
+      <div class="permission-chip-list">${labels.map(label=>`<span class="permission-chip">${escapeHtml(label)}</span>`).join('')}</div>
+      <button class="text-btn" type="button" onclick="window.editApproverAccess(${Number(item.id)})">แก้สิทธิ์</button>
+    </article>`;
+  }).join('') : emptyState('ยังไม่มีผู้อนุมัติ','เพิ่มสิทธิ์ให้พนักงานที่ต้องอนุมัติการลา หรือ Flow อื่น ๆ');
+}
+
+window.editApproverAccess = id => openApproverAccessModal(Number(id));
+function openApproverAccessModal(employeeId=null){
+  const available=(state.approverAccess||[]);
+  if(!available.length) return toast('ยังไม่มีข้อมูลพนักงานสำหรับกำหนดสิทธิ์',true);
+  state.activeApproverEmployeeId=employeeId || Number(available[0]?.id||0);
+  $('#approverEmployeeSelect').innerHTML=available.map(emp=>`<option value="${emp.id}" ${Number(emp.id)===Number(state.activeApproverEmployeeId)?'selected':''}>${escapeHtml(emp.nickname||emp.first_name)}${emp.department_name?` · ${escapeHtml(emp.department_name)}`:''}${emp.line_user_id?' · LINE✓':''}</option>`).join('');
+  $('#approverEmployeeSelect').onchange=()=>{state.activeApproverEmployeeId=Number($('#approverEmployeeSelect').value);fillApproverPermissionChecks();};
+  fillApproverPermissionChecks();
+  $('#approverAccessModal').showModal();
+}
+function applyApproverRolePreset(){
+  const preset=$('#approverRolePreset').value;
+  const presets={
+    leave_approver:['leave.approve','team.read'],
+    team_manager:['leave.approve','attendance.approve','hr_request.approve','team.read'],
+    full_approver:['leave.approve','attendance.approve','ot.approve','hr_request.approve','team.read']
+  };
+  if(preset==='custom') return;
+  const wanted=new Set(presets[preset]||[]);
+  $$('#approverPermissionChecks input[type="checkbox"]').forEach(input=>{input.checked=wanted.has(input.value);});
+}
+
+function fillApproverPermissionChecks(){
+  const row=(state.approverAccess||[]).find(item=>Number(item.id)===Number(state.activeApproverEmployeeId));
+  const current=new Set(row?.permissions||[]);
+  $('#approverPermissionChecks').innerHTML=(state.approverPermissionCatalog||[]).map(item=>`<label class="permission-option"><input type="checkbox" value="${escapeHtml(item.key)}" ${current.has(item.key)?'checked':''}><span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.description||'')}</small></span></label>`).join('');
+  const key=[...current].sort().join('|');
+  const presetMap={
+    ['leave.approve|team.read'.split('|').sort().join('|')]:'leave_approver',
+    ['attendance.approve|hr_request.approve|leave.approve|team.read'.split('|').sort().join('|')]:'team_manager',
+    ['attendance.approve|hr_request.approve|leave.approve|ot.approve|team.read'.split('|').sort().join('|')]:'full_approver'
+  };
+  $('#approverRolePreset').value=presetMap[key]||'custom';
+  $('#approverLineHint').textContent=row?.line_user_id?'LINE เชื่อมแล้ว · สิทธิ์อนุมัติการลาจะใช้ผ่าน LINE ได้ทันที':'ยังไม่เชื่อม LINE · ตั้งสิทธิ์ไว้ก่อนได้ แต่การอนุมัติผ่าน LINE ต้องเชื่อมบัญชีก่อน';
+}
+async function saveApproverAccess(){
+  const employeeId=Number($('#approverEmployeeSelect').value||state.activeApproverEmployeeId); if(!employeeId)return;
+  const permissions=$$('#approverPermissionChecks input:checked').map(input=>input.value);
+  const button=$('#approverAccessSaveBtn');button.disabled=true;
+  try{
+    await api(`/api/approver-access/${employeeId}`,{method:'PUT',body:JSON.stringify({permissions})});
+    $('#approverAccessModal').close();await loadAll({silent:true});toast('บันทึกสิทธิ์ผู้อนุมัติแล้ว');
+  }catch(error){toast(error.message,true);}finally{button.disabled=false;}
 }
 
 function renderLineIntegration() {
