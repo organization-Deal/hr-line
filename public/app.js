@@ -1,6 +1,7 @@
 const state = {
   me: null,
   gmail: null,
+  lineIntegration: null,
   dashboard: null,
   employees: [],
   candidates: [],
@@ -101,6 +102,12 @@ function bindEvents() {
   });
   $('#gmailConnectBtn').onclick = () => { window.location.href = '/integrations/gmail/start'; };
   $('#gmailDisconnectBtn').onclick = disconnectGmail;
+  $('#lineIntegrationShortcut').onclick = openLineIntegrationModal;
+  $('#lineConfigureBtn').onclick = openLineIntegrationModal;
+  $('#lineTestBtn').onclick = testLineIntegration;
+  $('#lineDisconnectBtn').onclick = disconnectLineIntegration;
+  $('#lineIntegrationSaveBtn').onclick = saveLineIntegration;
+  $('#copyLineWebhookModalBtn').onclick = copyLineWebhookFromModal;
   $('#refreshBtn').onclick = () => loadAll();
 
   $$('.nav-item').forEach(button => {
@@ -130,7 +137,7 @@ function bindEvents() {
   $('#mobileNavBackdrop').onclick = closeMobileNav;
 
   $$('.future-view .secondary-btn').forEach(button => {
-    button.onclick = () => toast('โมดูลนี้อยู่ใน Roadmap ของนากนะ V0.5', false, 'i');
+    button.onclick = () => toast('โมดูลนี้อยู่ใน Roadmap ของนากนะ V0.6', false, 'i');
   });
 }
 
@@ -220,6 +227,7 @@ async function logout() {
   try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
   state.me = null;
   state.gmail = null;
+  state.lineIntegration = null;
   window.location.href = '/';
 }
 
@@ -326,7 +334,7 @@ async function ensureWorkspaceReady() {
 async function loadAll({ silent = false } = {}) {
   setLoading(true);
   try {
-    const [dashboard, employees, candidates, attendance, leaves, requests, gmail, invites, lookups, workLocations, leavePolicies] = await Promise.all([
+    const [dashboard, employees, candidates, attendance, leaves, requests, gmail, lineIntegration, invites, lookups, workLocations, leavePolicies] = await Promise.all([
       api('/api/dashboard'),
       api('/api/employees'),
       api('/api/candidates'),
@@ -334,6 +342,7 @@ async function loadAll({ silent = false } = {}) {
       api('/api/leaves'),
       api('/api/requests'),
       api('/api/integrations/gmail'),
+      api('/api/integrations/line'),
       api('/api/invites'),
       api('/api/lookups'),
       api('/api/work-locations'),
@@ -347,6 +356,7 @@ async function loadAll({ silent = false } = {}) {
     state.leaves = leaves.data || [];
     state.requests = requests.data || [];
     state.gmail = gmail;
+    state.lineIntegration = lineIntegration;
     state.invites = invites.data || [];
     state.lookups = lookups || { departments: [], positions: [], locations: [] };
     state.workLocations = workLocations.data || [];
@@ -973,6 +983,140 @@ function renderSettings() {
   $('#gmailConnectionBadge').textContent = connected ? 'เชื่อมแล้ว' : 'ยังไม่เชื่อม';
   $('#gmailConnectBtn').classList.toggle('hidden', connected);
   $('#gmailDisconnectBtn').classList.toggle('hidden', !connected);
+
+  renderLineIntegration();
+}
+
+function renderLineIntegration() {
+  const data = state.lineIntegration || { mode: 'nakna_default', connected: false };
+  const dedicated = data.mode === 'dedicated' && data.connected;
+  const info = data.integration || {};
+  const title = $('#lineCompanyTitle');
+  const text = $('#lineCompanyText');
+  const badge = $('#lineCompanyBadge');
+  const logo = $('#lineCompanyLogo');
+  const meta = $('#lineIntegrationMeta');
+
+  const canManage = ['owner','hr_admin'].includes(String(activeCompanyRole() || ''));
+  if (dedicated) {
+    $('#sidebarLineTitle').textContent = info.bot_display_name || 'LINE OA บริษัท';
+    $('#sidebarLineText').textContent = info.webhook_active ? 'เชื่อมกับ Workspace แล้ว' : 'รอเปิด Use webhook';
+    title.textContent = info.bot_display_name || 'LINE OA ของบริษัท';
+    text.textContent = info.webhook_active
+      ? 'เชื่อมกับ Workspace นี้แล้ว และ LINE เปิดใช้งาน Webhook อยู่'
+      : 'เชื่อม OA แล้ว แต่ LINE ยังไม่ได้เปิด Use webhook';
+    badge.className = `badge ${info.webhook_active ? 'badge-success' : 'badge-warning'}`;
+    badge.textContent = info.webhook_active ? 'พร้อมใช้งาน' : 'รอเปิด Webhook';
+    logo.textContent = 'LINE';
+    meta.classList.remove('hidden');
+    meta.innerHTML = `
+      <span><b>Basic ID</b> ${escapeHtml(info.bot_basic_id || '—')}</span>
+      <span><b>Webhook</b> <button type="button" class="inline-copy-btn" onclick="window.copyWorkspaceWebhook()">คัดลอก URL</button></span>
+      ${info.last_test_at ? `<span><b>ทดสอบล่าสุด</b> ${escapeHtml(formatDateTime(info.last_test_at))}</span>` : ''}`;
+    $('#lineConfigureBtn').textContent = 'แก้การเชื่อมต่อ';
+    $('#lineTestBtn').classList.remove('hidden');
+    $('#lineDisconnectBtn').classList.remove('hidden');
+  } else {
+    $('#sidebarLineTitle').textContent = data.default_available ? 'LINE นากนะ' : 'ยังไม่เชื่อม LINE';
+    $('#sidebarLineText').textContent = data.default_available ? 'Nakna Default' : 'ตั้งค่าที่เมนูระบบ';
+    title.textContent = data.bot?.display_name ? `ใช้ ${data.bot.display_name}` : 'LINE นากนะ';
+    text.textContent = data.default_available
+      ? 'ตอนนี้ Workspace ใช้ LINE “นากนะ” กลาง พนักงานใช้งานได้ทันที'
+      : 'ยังไม่มี LINE OA สำหรับ Workspace นี้';
+    badge.className = `badge ${data.default_available ? 'badge-soft' : 'badge-neutral'}`;
+    badge.textContent = data.default_available ? 'Nakna Default' : 'ยังไม่เชื่อม';
+    meta.classList.add('hidden');
+    meta.innerHTML = '';
+    $('#lineConfigureBtn').textContent = 'เชื่อม LINE OA บริษัท';
+    $('#lineTestBtn').classList.add('hidden');
+    $('#lineDisconnectBtn').classList.add('hidden');
+  }
+  $('#lineConfigureBtn').classList.toggle('hidden', !canManage);
+  if (!canManage) { $('#lineTestBtn').classList.add('hidden'); $('#lineDisconnectBtn').classList.add('hidden'); }
+}
+
+function openLineIntegrationModal() {
+  const data = state.lineIntegration || {};
+  const info = data.integration || {};
+  $('#lineIntegrationForm').reset();
+  $('#lineChannelId').value = info.channel_id || '';
+  $('#lineChannelSecret').value = '';
+  $('#lineAccessToken').value = '';
+  $('#lineWebhookPreview').value = info.webhook_url || 'ระบบจะสร้างหลังเชื่อม';
+  $('#lineIntegrationSaveBtn').textContent = data.mode === 'dedicated' ? 'อัปเดตการเชื่อมต่อ' : 'เชื่อมและตั้ง Webhook';
+  $('#lineIntegrationModal').showModal();
+}
+
+async function saveLineIntegration() {
+  const channel_secret = $('#lineChannelSecret').value.trim();
+  const access_token = $('#lineAccessToken').value.trim();
+  const channel_id = $('#lineChannelId').value.trim();
+  if (channel_secret.length < 16 || access_token.length < 20) return toast('กรุณาใส่ Channel Secret และ Channel Access Token ให้ครบ', true);
+  const button = $('#lineIntegrationSaveBtn');
+  button.disabled = true;
+  button.textContent = 'กำลังเชื่อม LINE…';
+  try {
+    const result = await api('/api/integrations/line', { method: 'PUT', body: JSON.stringify({ channel_id, channel_secret, access_token }) });
+    state.lineIntegration = { mode: 'dedicated', connected: true, integration: result.integration };
+    $('#lineWebhookPreview').value = result.integration?.webhook_url || '';
+    $('#lineIntegrationModal').close();
+    renderLineIntegration();
+    toast('เชื่อม LINE Official Account เรียบร้อยแล้ว');
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'เชื่อมและตั้ง Webhook';
+  }
+}
+
+async function testLineIntegration() {
+  const button = $('#lineTestBtn');
+  button.disabled = true;
+  button.textContent = 'กำลังทดสอบ…';
+  try {
+    const result = await api('/api/integrations/line/test', { method: 'POST', body: '{}' });
+    if (result.ok) toast('Webhook ของ LINE รับข้อมูลจากนากนะได้แล้ว');
+    else toast(`Webhook ยังไม่พร้อม: ${result.webhook?.test?.reason || 'กรุณาตรวจ Use webhook'}`, true);
+    state.lineIntegration = await api('/api/integrations/line');
+    renderLineIntegration();
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'ทดสอบ';
+  }
+}
+
+async function disconnectLineIntegration() {
+  if (!confirm('ยกเลิก LINE OA ของบริษัทนี้? หลังยกเลิก Invite ใหม่จะกลับไปใช้ LINE นากนะกลาง')) return;
+  const button = $('#lineDisconnectBtn');
+  button.disabled = true;
+  try {
+    await api('/api/integrations/line', { method: 'DELETE' });
+    state.lineIntegration = await api('/api/integrations/line');
+    renderLineIntegration();
+    toast('ยกเลิก LINE OA ของบริษัทแล้ว');
+  } catch (error) {
+    toast(error.message, true);
+  } finally { button.disabled = false; }
+}
+
+function copyLineWebhookFromModal() {
+  const value = $('#lineWebhookPreview').value;
+  if (!value || value.startsWith('ระบบจะ')) return toast('เชื่อม LINE OA ก่อน ระบบจึงจะสร้าง Webhook URL', true);
+  copyText(value);
+}
+
+window.copyWorkspaceWebhook = () => {
+  const value = state.lineIntegration?.integration?.webhook_url;
+  if (value) copyText(value);
+};
+
+function copyText(value) {
+  navigator.clipboard?.writeText(value).then(() => toast('คัดลอกแล้ว')).catch(() => {
+    const area = document.createElement('textarea'); area.value = value; document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove(); toast('คัดลอกแล้ว');
+  });
 }
 
 function attentionCopy(item) {
