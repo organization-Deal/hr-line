@@ -1,5 +1,16 @@
 # Changelog
 
+## V1.0-P7 — Web Business Setup
+- เปลี่ยน LINE `เชื่อมธุรกิจ` ให้เปิด Business Setup บนเว็บแทนการพิมพ์ชื่อบริษัทในแชต
+- เพิ่ม one-time LINE web login token สำหรับ setup / dashboard
+- เพิ่ม onboarding state ต่อ Workspace และ Free Trial 30 วัน
+- เพิ่ม Google Workspace setup step: Gmail + Drive + Sheets
+- เพิ่ม Recruitment Gmail auto/manual sync + dedupe
+- เพิ่ม Benefits catalog + enrollment รายพนักงาน
+- เพิ่มหน้า Recruitment Gmail status และหน้าสวัสดิการ
+- รองรับ LINE identity เดียวเป็น Employee และ Owner คนละ Workspace
+
+
 ## V1.0-P6 — LINE-first Business Onboarding + Resilient Loading
 
 - ลูกค้าเริ่มจาก LINE OA: พิมพ์ `เชื่อมธุรกิจ` → สร้างธุรกิจ → ได้สิทธิ์ Owner → เปิด HR ด้วยลิงก์ครั้งเดียว

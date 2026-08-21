@@ -1,14 +1,16 @@
-# Nakna HR — V1.0-P6
+# Nakna HR — V1.0-P7
 
 **Phase 1 + Phase 2 + Thailand Payroll & Documents + Learning & Performance** for นากนะ (Nakna) by Otterwork Co., Ltd.
 
 This is a **full project ZIP**. It already contains every Phase 1 and Phase 2 file/migration. Do not merge older ZIPs into it.
 
-## V1.0-P6 — LINE-first + Dashboard recovery
+## V1.0-P7 — LINE identity → Web Business Setup
 
-ลูกค้าใหม่เริ่มจาก **LINE OA → พิมพ์ `เชื่อมธุรกิจ` → สร้างธุรกิจ → เปิดระบบ HR** โดยผู้สร้างถูกตั้งเป็น Owner อัตโนมัติ และเข้าเว็บด้วย one-time magic link อายุ 15 นาที ส่วนหน้า Dashboard จะไม่ค้าง Skeleton ทั้งหน้าเมื่อ API บางตัวล้มอีกต่อไป แต่จะแสดงข้อมูลที่โหลดได้พร้อม Error Banner + Retry.
+Flow ลูกค้าใหม่เปลี่ยนเป็น **Add LINE OA → พิมพ์ `เชื่อมธุรกิจ` → เปิด Business Setup บนเว็บ → สร้าง Workspace → เชื่อม Gmail + Drive + Sheets → ตั้งค่า Gmail ผู้สมัคร → Free Trial 30 วัน → Dashboard**.
 
-ดูขั้นตอน Deploy ที่ `UPGRADE_P6_LINE_FIRST.md`.
+LINE ไม่ถามชื่อบริษัทในแชตอีกแล้ว และ 1 LINE identity สามารถเป็นพนักงานของบริษัทหนึ่งพร้อมเป็น Owner ของอีก Workspace ได้. P7 เพิ่ม Recruitment Gmail auto-sync (กันซ้ำด้วย Gmail Message ID), Benefits catalog + enrollment รายพนักงาน และ setup wizard บนเว็บ.
+
+ดูขั้นตอน Deploy ที่ `UPGRADE_P7_WEB_BUSINESS_SETUP.md`.
 
 ## Included from Phase 1
 - Google Login + Multi-company Workspace
@@ -137,7 +139,7 @@ npm run deploy
 Health endpoint should return:
 
 ```json
-{"ok":true,"service":"Nakna HR","version":"1.0-P6","auth":"line-first+google"}
+{"ok":true,"service":"Nakna HR","version":"1.0-P7","auth":"line-first-web-setup+google"}
 ```
 
 Read `UPGRADE_PHASE3.md` and `TEST_CHECKLIST.md` before production use.
