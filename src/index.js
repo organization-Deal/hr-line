@@ -354,6 +354,32 @@ const V060_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS line_integrations 
 CREATE INDEX IF NOT EXISTS idx_line_integrations_status ON line_integrations(status);
 `;
 
+const V061_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS employee_permissions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  employee_id INTEGER NOT NULL,
+  permission_key TEXT NOT NULL,
+  granted_by_user_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(client_id, employee_id, permission_key),
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+  FOREIGN KEY (granted_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_employee_permissions_employee ON employee_permissions(client_id, employee_id);
+CREATE INDEX IF NOT EXISTS idx_employee_permissions_key ON employee_permissions(client_id, permission_key);
+`;
+
+const APPROVER_PERMISSION_KEYS = new Set([
+  'leave.approve',
+  'attendance.approve',
+  'ot.approve',
+  'hr_request.approve',
+  'team.read'
+]);
+
 const INIT_AUTH_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   google_sub TEXT NOT NULL UNIQUE,
@@ -485,7 +511,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.6.0', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.6.1', auth: 'google-oauth' });
       }
 
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
@@ -584,8 +610,9 @@ async function handleApi(request, env, url, auth) {
     try {
       await ensureCoreSchema(env.DB);
       await ensureV060Ready(env.DB);
+      await ensureV061Ready(env.DB);
       if (clientId) await ensureDefaultLeavePolicies(env.DB, clientId);
-      return json({ ok: true, core_schema: 'ready', leave_policy: 'ready', line_integrations: 'ready' });
+      return json({ ok: true, core_schema: 'ready', leave_policy: 'ready', line_integrations: 'ready', approver_permissions: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -922,6 +949,46 @@ async function handleApi(request, env, url, auth) {
     return json({ ok: true });
   }
 
+  if (path === '/api/approver-access' && method === 'GET') {
+    await ensureV061Ready(env.DB);
+    if (!canManageApproverAccess(auth.role)) return json({ error: 'ไม่มีสิทธิ์ดูหรือจัดการสิทธิ์ผู้อนุมัติ' }, 403);
+    const rows = await env.DB.prepare(`
+      SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.status,e.line_user_id,e.line_display_name,e.line_picture_url,
+             d.name AS department_name, GROUP_CONCAT(ep.permission_key) AS permission_keys
+      FROM employees e
+      LEFT JOIN departments d ON d.id=e.department_id
+      LEFT JOIN employee_permissions ep ON ep.employee_id=e.id AND ep.client_id=e.client_id
+      WHERE e.client_id=?1 AND e.status='active'
+      GROUP BY e.id
+      ORDER BY e.first_name,e.last_name
+    `).bind(clientId).all();
+    return json({ data:(rows.results||[]).map(row=>({ ...row, permissions:String(row.permission_keys||'').split(',').filter(Boolean) })), catalog:approverPermissionCatalog() });
+  }
+
+  const approverAccessMatch = path.match(/^\/api\/approver-access\/(\d+)$/);
+  if (approverAccessMatch && method === 'PUT') {
+    await ensureV061Ready(env.DB);
+    if (!canManageApproverAccess(auth.role)) return json({ error: 'ไม่มีสิทธิ์จัดการสิทธิ์ผู้อนุมัติ' }, 403);
+    const employeeId=Number(approverAccessMatch[1]);
+    const employee=await getEmployeeForClient(env.DB,employeeId,clientId);
+    if(!employee) return json({error:'ไม่พบพนักงาน'},404);
+    const body=await safeJson(request);
+    const requested=[...new Set((Array.isArray(body.permissions)?body.permissions:[]).map(String).filter(key=>APPROVER_PERMISSION_KEYS.has(key)))];
+    const previous=(await env.DB.prepare('SELECT permission_key FROM employee_permissions WHERE client_id=?1 AND employee_id=?2').bind(clientId,employeeId).all()).results||[];
+    const previousKeys=new Set(previous.map(row=>row.permission_key));
+    const statements=[env.DB.prepare('DELETE FROM employee_permissions WHERE client_id=?1 AND employee_id=?2').bind(clientId,employeeId)];
+    for(const key of requested) statements.push(env.DB.prepare('INSERT INTO employee_permissions (client_id,employee_id,permission_key,granted_by_user_id) VALUES (?1,?2,?3,?4)').bind(clientId,employeeId,key,Number(auth.user.id)));
+    await env.DB.batch(statements);
+    if(previousKeys.has('leave.approve')&&!requested.includes('leave.approve')){
+      await env.DB.batch([
+        env.DB.prepare('UPDATE employees SET leave_approver_employee_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND leave_approver_employee_id=?2').bind(clientId,employeeId),
+        env.DB.prepare("UPDATE leave_requests SET approver_employee_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND approver_employee_id=?2 AND status='pending'").bind(clientId,employeeId)
+      ]);
+    }
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'approver.permissions.update','employee',String(employeeId),{permissions:requested});
+    return json({ok:true,employee_id:employeeId,permissions:requested});
+  }
+
   if (path === '/api/leave-policies' && method === 'GET') {
     await ensureDefaultLeavePolicies(env.DB, clientId);
     const result = await env.DB.prepare(`SELECT * FROM leave_policies WHERE client_id=?1 ORDER BY sort_order,name`).bind(clientId).all();
@@ -969,7 +1036,7 @@ async function handleApi(request, env, url, auth) {
     if(!employee) return json({error:'ไม่พบพนักงาน'},404);
     const body=await safeJson(request);
     const approverId=body.leave_approver_employee_id ? Number(body.leave_approver_employee_id) : null;
-    if(approverId){ const approver=await getEmployeeForClient(env.DB,approverId,clientId); if(!approver) return json({error:'ผู้อนุมัติไม่อยู่ในบริษัทนี้'},400); }
+    if(approverId){ const approver=await getEmployeeForClient(env.DB,approverId,clientId); if(!approver) return json({error:'ผู้อนุมัติไม่อยู่ในบริษัทนี้'},400); if(!await employeeHasPermission(env.DB,clientId,approverId,'leave.approve')) return json({error:'พนักงานคนนี้ยังไม่มีสิทธิ์ “อนุมัติการลา” กรุณาเพิ่มสิทธิ์ผู้อนุมัติก่อน'},409); }
     await env.DB.prepare('UPDATE employees SET leave_approver_employee_id=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3').bind(approverId,employeeId,clientId).run();
     if(approverId){
       const waiting=(await env.DB.prepare("SELECT id FROM leave_requests WHERE employee_id=?1 AND client_id=?2 AND status='pending' AND approver_employee_id IS NULL").bind(employeeId,clientId).all()).results||[];
@@ -1672,6 +1739,27 @@ function canManageIntegrations(role) {
   return ['owner','hr_admin'].includes(String(role || ''));
 }
 
+function canManageApproverAccess(role) {
+  return ['owner','hr_admin','hr'].includes(String(role || ''));
+}
+
+function approverPermissionCatalog(){
+  return [
+    {key:'leave.approve',label:'อนุมัติการลา',description:'รับและตัดสินคำขอลาที่ถูกมอบหมายผ่าน LINE'},
+    {key:'attendance.approve',label:'อนุมัติแก้เวลา',description:'สิทธิ์สำหรับ Flow แก้ไขเวลาเข้างาน/ออก'},
+    {key:'ot.approve',label:'อนุมัติ OT',description:'เตรียมไว้สำหรับโมดูล OT'},
+    {key:'hr_request.approve',label:'อนุมัติคำขอ HR',description:'เตรียมไว้สำหรับคำขอเอกสารและคำร้อง'},
+    {key:'team.read',label:'ดูข้อมูลทีม',description:'ให้ผู้อนุมัติเห็นข้อมูลพื้นฐานของทีมที่เกี่ยวข้อง'}
+  ];
+}
+
+async function employeeHasPermission(db,clientId,employeeId,key){
+  if(!employeeId) return false;
+  await ensureV061Ready(db);
+  const row=await db.prepare('SELECT 1 AS ok FROM employee_permissions WHERE client_id=?1 AND employee_id=?2 AND permission_key=?3 LIMIT 1').bind(Number(clientId),Number(employeeId),String(key)).first();
+  return Boolean(row);
+}
+
 async function linkLineAccount(db, lineUserId, token, { providerScope='default', expectedClientId=null, accessToken=null } = {}) {
   const row = await db.prepare(`
     SELECT t.*, e.first_name, e.nickname, e.client_id, c.name AS company_name
@@ -1734,6 +1822,18 @@ async function ensureV060Ready(db){
     for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement)){continue;}throw error;}}
   }
   await ensureColumn(db,'employees','line_provider_scope','TEXT');
+}
+
+async function ensureV061Ready(db){
+  await ensureV050Ready(db);
+  const ready=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='employee_permissions'").first();
+  if(!ready){
+    const statements=V061_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
+    for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}}
+  }
+  // Preserve existing leave approval flows when upgrading from V0.6.0.
+  await db.prepare(`INSERT OR IGNORE INTO employee_permissions (client_id,employee_id,permission_key)
+    SELECT DISTINCT client_id,leave_approver_employee_id,'leave.approve' FROM employees WHERE leave_approver_employee_id IS NOT NULL`).run();
 }
 
 function lineSessionKey(providerScope,lineUserId){return `${providerScope||'default'}:${lineUserId}`;}
@@ -1884,8 +1984,9 @@ async function createLeaveRequest(env,{clientId,employeeId,policyId,leaveType,st
     if(new Date(`${startDate}T12:00:00+07:00`)<minDate) throw httpError(`${policy.name} ต้องแจ้งล่วงหน้าอย่างน้อย ${policy.notice_days} วัน`,409);
   }
   const evidenceRequired=policy.evidence_required_after_days!=null && duration>=num(policy.evidence_required_after_days);
-  const approverId=employee.leave_approver_employee_id||employee.manager_employee_id||null;
-  if(submittedVia==='line' && !approverId) throw httpError('HR ยังไม่ได้กำหนดผู้อนุมัติเรื่องลาให้คุณ กรุณาติดต่อ HR ก่อนส่งคำขอ',409);
+  let approverId=employee.leave_approver_employee_id||employee.manager_employee_id||null;
+  if(approverId && !await employeeHasPermission(env.DB,clientId,Number(approverId),'leave.approve')) approverId=null;
+  if(submittedVia==='line' && !approverId) throw httpError('HR ยังไม่ได้กำหนดผู้อนุมัติที่มีสิทธิ์อนุมัติการลาให้คุณ กรุณาติดต่อ HR ก่อนส่งคำขอ',409);
   const status=evidenceRequired?'awaiting_evidence':'pending';
   const result=await env.DB.prepare(`INSERT INTO leave_requests (client_id,employee_id,leave_type,policy_id,start_date,end_date,reason,status,approver_employee_id,duration_days,day_part,evidence_required,evidence_count,submitted_via) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,?13)`)
     .bind(clientId,employeeId,policy.code,Number(policy.id),startDate,endDate,reason||null,status,approverId,duration,dayPart,evidenceRequired?1:0,submittedVia).run();
@@ -1900,7 +2001,7 @@ async function getLeaveRequestDetail(db,id,clientId=null){
 
 async function decideLeaveRequest(env,id,status,{actorType,actorEmployeeId=null,actorUserId=null,reason='',clientId=null,enforceApprover=false}={}){
   const row=await getLeaveRequestDetail(env.DB,id,clientId); if(!row) throw httpError('ไม่พบคำขอลา',404); if(row.status!=='pending') throw httpError('คำขอนี้ไม่ได้รออนุมัติแล้ว',409);
-  if(enforceApprover&&Number(row.approver_employee_id)!==Number(actorEmployeeId)) throw httpError('คุณไม่ใช่ผู้อนุมัติของคำขอนี้',403);
+  if(enforceApprover){ if(Number(row.approver_employee_id)!==Number(actorEmployeeId)) throw httpError('คุณไม่ใช่ผู้อนุมัติของคำขอนี้',403); if(!await employeeHasPermission(env.DB,Number(row.client_id),Number(actorEmployeeId),'leave.approve')) throw httpError('บัญชีพนักงานนี้ไม่มีสิทธิ์อนุมัติการลา กรุณาให้ HR เพิ่มสิทธิ์ผู้อนุมัติ',403); }
   if(status==='rejected'&&String(reason).trim().length<2) throw httpError('กรุณาระบุเหตุผลที่ไม่อนุมัติ',400);
   if(status==='approved'&&Number(row.evidence_required)&&Number(row.evidence_count||0)<1) throw httpError('คำขอนี้ยังไม่มีหลักฐานตาม Policy',409);
   await env.DB.batch([
@@ -2350,6 +2451,7 @@ async function ensureCoreSchema(db) {
   for (const [column,type] of attendanceColumns) await ensureColumn(db,'attendance',column,type);
   await ensureV050Schema(db);
   await ensureV060Ready(db);
+  await ensureV061Ready(db);
   console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_complete' }));
 }
 
