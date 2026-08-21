@@ -1,5 +1,7 @@
 const state = {
   me: null,
+  onboardingConfig: null,
+  loadErrors: [],
   companyProfile: null,
   googleWorkspace: null,
   lineIntegration: null,
@@ -73,14 +75,27 @@ const viewMeta = {
 };
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    ...options,
-    credentials: 'same-origin',
-    headers: {
-      'content-type': 'application/json',
-      ...(options.headers || {}),
-    },
-  });
+  const controller = new AbortController();
+  const { timeoutMs: requestedTimeout, ...fetchOptions } = options;
+  const timeoutMs = Number(requestedTimeout || 18000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(path, {
+      ...fetchOptions,
+      signal: controller.signal,
+      credentials: 'same-origin',
+      headers: {
+        'content-type': 'application/json',
+        ...(fetchOptions.headers || {}),
+      },
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error(`API_TIMEOUT:${path}`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 
   let data = {};
   try { data = await res.json(); } catch {}
@@ -93,20 +108,35 @@ async function api(path, options = {}) {
     await loadSessionOnly();
     throw new Error('COMPANY_REQUIRED');
   }
-  if (!res.ok) throw new Error(data.error || 'โหลดข้อมูลไม่สำเร็จ');
+  if (!res.ok) {
+    const detail = data.detail ? ` · ${data.detail}` : '';
+    throw new Error(`${data.error || `HTTP_${res.status}`}${detail}`);
+  }
   return data;
 }
 
 async function boot() {
   bindEvents();
   renderLoadingState();
-  const ready = await loadSessionOnly();
-  handleReturnMessage();
-  if (ready && await ensureWorkspaceReady()) await loadAll({ silent: true });
+  loadPublicOnboarding();
+  try {
+    const ready = await loadSessionOnly();
+    handleReturnMessage();
+    if (!ready) return;
+    if (await ensureWorkspaceReady()) await loadAll({ silent: true });
+  } catch (error) {
+    if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
+      renderLoadProblem([{ label: 'เริ่มระบบ', message: error.message }]);
+    }
+  }
 }
 
 function bindEvents() {
+  $('#lineBusinessBtn').onclick = openLineBusinessOnboarding;
   $('#googleLoginBtn').onclick = () => { window.location.href = '/auth/google/start'; };
+  $('#retryDataLoadBtn').onclick = async () => {
+    if (await ensureWorkspaceReady()) await loadAll();
+  };
   $('#logoutBtn').onclick = logout;
   $('#onboardingLogoutBtn').onclick = logout;
   $('#createCompanyBtn').onclick = createCompany;
@@ -224,15 +254,7 @@ function bindEvents() {
 
 async function loadSessionOnly() {
   try {
-    const res = await fetch('/api/me', { credentials: 'same-origin' });
-    let data = {};
-    try { data = await res.json(); } catch {}
-    if (res.status === 401) {
-      state.me = null;
-      showLogin();
-      return false;
-    }
-    if (!res.ok) throw new Error(data.error || 'โหลดบัญชีไม่สำเร็จ');
+    const data = await api('/api/me', { timeoutMs: 12000 });
     state.me = data;
     hideLogin();
     renderIdentity();
@@ -243,8 +265,13 @@ async function loadSessionOnly() {
     hideOnboarding();
     return true;
   } catch (error) {
+    if (error.message === 'AUTH_REQUIRED') {
+      state.me = null;
+      showLogin();
+      return false;
+    }
     showLogin();
-    showLoginError(error.message);
+    showLoginError(error.message.startsWith('API_TIMEOUT') ? 'ระบบเข้าสู่ระบบตอบช้าเกินไป กรุณาลองใหม่อีกครั้ง' : error.message);
     return false;
   }
 }
@@ -428,7 +455,15 @@ function handleReturnMessage() {
   const url = new URL(window.location.href);
   if (url.searchParams.get('google_workspace') === 'connected') toast('เชื่อม Gmail + Drive + Google Sheets เรียบร้อยแล้ว');
   if (url.searchParams.get('auth') === 'success') toast('เข้าสู่ระบบด้วย Google เรียบร้อยแล้ว');
-  if (url.searchParams.has('auth_error')) showLoginError('เข้าสู่ระบบ Google ไม่สำเร็จ กรุณาลองใหม่');
+  if (url.searchParams.get('auth') === 'line') toast('เชื่อมธุรกิจผ่าน LINE และเข้าสู่ระบบเรียบร้อยแล้ว');
+  if (url.searchParams.has('auth_error')) {
+    const code = url.searchParams.get('auth_error');
+    showLoginError(code === 'line_token'
+      ? 'ลิงก์จาก LINE หมดอายุหรือถูกใช้แล้ว พิมพ์ “เชื่อมธุรกิจ” ใน LINE เพื่อขอลิงก์ใหม่'
+      : code === 'line_membership'
+        ? 'บัญชี LINE นี้ไม่มีสิทธิ์เข้าธุรกิจดังกล่าว'
+        : 'เข้าสู่ระบบ Google ไม่สำเร็จ กรุณาลองใหม่');
+  }
   if (url.searchParams.has('google_workspace_error')) toast(googleWorkspaceErrorText(url.searchParams.get('google_workspace_error')), true);
   if ([...url.searchParams.keys()].some(key => ['google_workspace','google_workspace_error','auth','auth_error'].includes(key))) {
     url.search = '';
@@ -438,11 +473,12 @@ function handleReturnMessage() {
 
 async function ensureWorkspaceReady() {
   try {
-    await api('/api/bootstrap');
+    await api('/api/bootstrap', { timeoutMs: 30000 });
     return true;
   } catch (error) {
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
-      toast(`เตรียมฐานข้อมูลไม่สำเร็จ: ${error.message}`, true);
+      renderFallbackShell();
+      renderLoadProblem([{ label: 'ฐานข้อมูล', message: error.message }]);
     }
     return false;
   }
@@ -450,50 +486,60 @@ async function ensureWorkspaceReady() {
 
 async function loadAll({ silent = false } = {}) {
   setLoading(true);
+  const errors = [];
+  const safeLoad = async (label, promise, fallback) => {
+    try { return await promise; }
+    catch (error) {
+      if (['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) throw error;
+      errors.push({ label, message: error.message });
+      return typeof fallback === 'function' ? fallback() : fallback;
+    }
+  };
+
   try {
     const role=String(activeCompanyRole()||'');
     const isHr=['owner','hr_admin','hr'].includes(role);
     const canReadBroadcasts=['owner','hr_admin','hr','manager'].includes(role);
     const canViewPeople=['owner','hr_admin','hr','manager','viewer'].includes(role);
     const [dashboard, companyProfile, peopleCore, employees, candidates, attendance, leaves, requests, employeeService, hrCases, broadcasts, payroll, documents, learning, performance, engagement, analytics, subscription, googleWorkspace, lineIntegration, invites, lookups, workLocations, leavePolicies, approverAccess] = await Promise.all([
-      api('/api/dashboard'),
-      api('/api/company-profile'),
-      api('/api/people-core'),
-      api('/api/employees'),
-      api('/api/candidates'),
-      api('/api/attendance/today'),
-      api('/api/leaves'),
-      api('/api/requests'),
-      api('/api/employee-service'),
-      isHr ? api('/api/hr-cases') : Promise.resolve({data:[]}),
-      canReadBroadcasts ? api('/api/broadcasts') : Promise.resolve({data:[]}),
-      isHr ? api('/api/payroll/overview') : Promise.resolve(null),
-      isHr ? api('/api/documents') : Promise.resolve({data:[],payslips:[]}),
-      canReadBroadcasts ? api('/api/learning/overview') : Promise.resolve({courses:[],assignments:[],summary:{}}),
-      canReadBroadcasts ? api('/api/performance/overview') : Promise.resolve({cycles:[],goals:[],one_on_ones:[],probation_reviews:[],probation_due:[],summary:{}}),
-      canViewPeople ? api('/api/engagement/overview') : Promise.resolve({rules:[],rewards:[],redemptions:[],leaderboard:[],recent_transactions:[],summary:{}}),
-      canViewPeople ? api('/api/analytics/overview') : Promise.resolve({summary:{},headcount_trend:[],departments:[],recruitment:{},moments:[]}),
-      api('/api/subscription'),
-      api('/api/integrations/google-workspace'),
-      api('/api/integrations/line'),
-      api('/api/invites'),
-      api('/api/lookups'),
-      api('/api/work-locations'),
-      api('/api/leave-policies'),
-      isHr ? api('/api/approver-access') : Promise.resolve({data:[],catalog:[]}),
+      safeLoad('ภาพรวม', api('/api/dashboard'), () => state.dashboard || emptyDashboard()),
+      safeLoad('ข้อมูลบริษัท', api('/api/company-profile'), () => ({company:state.companyProfile || activeCompany() || {}})),
+      safeLoad('โครงสร้างองค์กร', api('/api/people-core'), () => state.peopleCore || { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} }),
+      safeLoad('พนักงาน', api('/api/employees'), () => ({data:state.employees || []})),
+      safeLoad('Recruitment', api('/api/candidates'), () => ({data:state.candidates || []})),
+      safeLoad('เวลาเข้างาน', api('/api/attendance/today'), () => ({data:state.attendance || []})),
+      safeLoad('การลา', api('/api/leaves'), () => ({data:state.leaves || []})),
+      safeLoad('Employee Service', api('/api/requests'), () => ({data:state.requests || []})),
+      safeLoad('Employee Service Center', api('/api/employee-service'), () => state.employeeService || {}),
+      isHr ? safeLoad('HR Cases', api('/api/hr-cases'), () => ({data:state.hrCases || []})) : Promise.resolve({data:[]}),
+      canReadBroadcasts ? safeLoad('ประกาศ', api('/api/broadcasts'), () => ({data:state.broadcasts || []})) : Promise.resolve({data:[]}),
+      isHr ? safeLoad('Payroll', api('/api/payroll/overview'), () => state.payroll) : Promise.resolve(null),
+      isHr ? safeLoad('เอกสาร', api('/api/documents'), () => state.documents || {data:[],payslips:[]}) : Promise.resolve({data:[],payslips:[]}),
+      canReadBroadcasts ? safeLoad('Learning', api('/api/learning/overview'), () => state.learning || {courses:[],assignments:[],summary:{}}) : Promise.resolve({courses:[],assignments:[],summary:{}}),
+      canReadBroadcasts ? safeLoad('Performance', api('/api/performance/overview'), () => state.performance || {cycles:[],goals:[],one_on_ones:[],probation_reviews:[],probation_due:[],summary:{}}) : Promise.resolve({cycles:[],goals:[],one_on_ones:[],probation_reviews:[],probation_due:[],summary:{}}),
+      canViewPeople ? safeLoad('Engagement', api('/api/engagement/overview'), () => state.engagement || {rules:[],rewards:[],redemptions:[],leaderboard:[],recent_transactions:[],summary:{}}) : Promise.resolve({rules:[],rewards:[],redemptions:[],leaderboard:[],recent_transactions:[],summary:{}}),
+      canViewPeople ? safeLoad('People Analytics', api('/api/analytics/overview'), () => state.analytics || {summary:{},headcount_trend:[],departments:[],recruitment:{},moments:[]}) : Promise.resolve({summary:{},headcount_trend:[],departments:[],recruitment:{},moments:[]}),
+      safeLoad('Subscription', api('/api/subscription'), () => state.subscription),
+      safeLoad('Google Workspace', api('/api/integrations/google-workspace'), () => state.googleWorkspace || {connected:false,integration:null}),
+      safeLoad('LINE Integration', api('/api/integrations/line'), () => state.lineIntegration || {connected:false,integration:null}),
+      safeLoad('ลิงก์เชิญ', api('/api/invites'), () => ({data:state.invites || []})),
+      safeLoad('ข้อมูลตัวเลือก', api('/api/lookups'), () => state.lookups || {departments:[],positions:[],locations:[]}),
+      safeLoad('สถานที่ทำงาน', api('/api/work-locations'), () => ({data:state.workLocations || []})),
+      safeLoad('สิทธิ์ลา', api('/api/leave-policies'), () => ({data:state.leavePolicies || []})),
+      isHr ? safeLoad('สิทธิ์ผู้อนุมัติ', api('/api/approver-access'), () => ({data:state.approverAccess || [],catalog:state.approverPermissionCatalog || []})) : Promise.resolve({data:[],catalog:[]}),
     ]);
 
-    state.dashboard = dashboard;
-    state.companyProfile = companyProfile.company || companyProfile;
+    state.dashboard = dashboard || emptyDashboard();
+    state.companyProfile = companyProfile?.company || companyProfile || state.companyProfile || activeCompany() || {};
     state.peopleCore = peopleCore || { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} };
-    state.employees = employees.data || [];
-    state.candidates = candidates.data || [];
-    state.attendance = attendance.data || [];
-    state.leaves = leaves.data || [];
-    state.requests = requests.data || [];
+    state.employees = employees?.data || [];
+    state.candidates = candidates?.data || [];
+    state.attendance = attendance?.data || [];
+    state.leaves = leaves?.data || [];
+    state.requests = requests?.data || [];
     state.employeeService = employeeService || {};
-    state.hrCases = hrCases.data || [];
-    state.broadcasts = broadcasts.data || [];
+    state.hrCases = hrCases?.data || [];
+    state.broadcasts = broadcasts?.data || [];
     state.payroll = payroll;
     state.documents = documents || {data:[],payslips:[]};
     state.learning = learning || {courses:[],assignments:[],summary:{}};
@@ -503,21 +549,29 @@ async function loadAll({ silent = false } = {}) {
     state.subscription = subscription || null;
     state.saasAdmin = null;
     if (subscription?.saas_admin) {
-      try { state.saasAdmin = await api('/api/admin/saas/overview'); } catch {}
+      try { state.saasAdmin = await api('/api/admin/saas/overview'); }
+      catch (error) { errors.push({label:'Nakna Admin',message:error.message}); }
     }
     state.googleWorkspace = googleWorkspace;
     state.lineIntegration = lineIntegration;
-    state.invites = invites.data || [];
+    state.invites = invites?.data || [];
     state.lookups = lookups || { departments: [], positions: [], locations: [] };
-    state.workLocations = workLocations.data || [];
-    state.leavePolicies = leavePolicies.data || [];
-    state.approverAccess = approverAccess.data || [];
-    state.approverPermissionCatalog = approverAccess.catalog || [];
+    state.workLocations = workLocations?.data || [];
+    state.leavePolicies = leavePolicies?.data || [];
+    state.approverAccess = approverAccess?.data || [];
+    state.approverPermissionCatalog = approverAccess?.catalog || [];
 
     renderAll();
     renderIdentity();
     renderSettings();
-    if (!silent) toast('อัปเดตข้อมูลล่าสุดแล้ว');
+    renderLoadProblem(errors);
+    if (!silent && !errors.length) toast('อัปเดตข้อมูลล่าสุดแล้ว');
+    if (!silent && errors.length) toast(`โหลดได้บางส่วน · มี ${errors.length} จุดที่ต้องลองใหม่`, true);
+  } catch (error) {
+    if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
+      renderFallbackShell();
+      renderLoadProblem([{ label: 'ระบบ HR', message: error.message }]);
+    }
   } finally {
     setLoading(false);
   }
@@ -526,6 +580,70 @@ async function loadAll({ silent = false } = {}) {
 function setLoading(loading) {
   $('#refreshBtn').classList.toggle('loading', loading);
   $('#refreshBtn').disabled = loading;
+}
+
+function emptyDashboard() {
+  const active = activeCompany() || state.companyProfile || {};
+  const today = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return {
+    today,
+    client: { id: active.id || null, name: active.name || 'บริษัทของคุณ', code: active.code || '' },
+    summary: { employees: Number(state.employees?.length || 0), present: 0, late: 0, leave: 0, missing: 0, holiday_name: null },
+    attention: [], birthdays: [], recruitment: {}, probation: [], contracts: [],
+  };
+}
+
+function renderFallbackShell() {
+  if (!state.dashboard) state.dashboard = emptyDashboard();
+  try {
+    renderAll();
+    renderIdentity();
+  } catch {}
+}
+
+function renderLoadProblem(errors = []) {
+  state.loadErrors = errors;
+  const banner = $('#dataLoadBanner');
+  if (!banner) return;
+  if (!errors.length) {
+    banner.classList.add('hidden');
+    $('#dataLoadMessage').textContent = '';
+    return;
+  }
+  const labels = errors.slice(0, 4).map(item => item.label).join(' · ');
+  const timeout = errors.some(item => String(item.message || '').startsWith('API_TIMEOUT'));
+  $('#dataLoadMessage').textContent = timeout
+    ? `บางข้อมูลตอบช้าเกินไป (${labels}) — หน้าเว็บส่วนที่โหลดได้ยังใช้งานต่อได้`
+    : `บางข้อมูลโหลดไม่สำเร็จ (${labels}) — หน้าเว็บจะไม่ค้าง Skeleton และลองโหลดใหม่ได้`;
+  banner.classList.remove('hidden');
+}
+
+async function loadPublicOnboarding() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
+  try {
+    const res = await fetch('/api/public/onboarding', { signal: controller.signal });
+    if (!res.ok) return;
+    state.onboardingConfig = await res.json();
+    const button = $('#lineBusinessBtn');
+    if (button && state.onboardingConfig?.line_configured) {
+      button.disabled = false;
+      button.dataset.ready = 'true';
+      $('#lineSetupHint').textContent = 'Add LINE → พิมพ์ “เชื่อมธุรกิจ” → สร้างธุรกิจ → เปิดระบบ HR';
+    }
+  } catch {} finally {
+    clearTimeout(timer);
+  }
+}
+
+function openLineBusinessOnboarding() {
+  const config = state.onboardingConfig || {};
+  const url = config.line_connect_url || config.line_add_url;
+  if (!url) {
+    showLoginError('LINE Official Account หลักยังไม่พร้อม กรุณาตรวจ LINE_CHANNEL_ACCESS_TOKEN / LINE_CHANNEL_SECRET');
+    return;
+  }
+  window.location.href = url;
 }
 
 function renderLoadingState() {

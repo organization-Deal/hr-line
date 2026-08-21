@@ -881,3 +881,76 @@ body.mobile-nav-open .mobile-nav-backdrop { display:block; }
 .admin-grid{grid-template-columns:1fr 1fr}.admin-invoice-panel{grid-column:1/-1}
 @media(max-width:1100px){.engagement-summary{grid-template-columns:repeat(3,1fr)}.analytics-summary{grid-template-columns:repeat(3,1fr)}.engagement-summary article:nth-child(4):before,.analytics-summary article:nth-child(4):before{display:none}.reward-catalog-list{grid-template-columns:repeat(2,1fr)}.subscription-card{grid-template-columns:1fr 1fr}.subscription-actions{grid-column:1/-1;grid-template-columns:auto auto;justify-content:end}}
 @media(max-width:800px){.engagement-grid,.analytics-grid,.admin-grid{grid-template-columns:1fr}.engagement-reward-panel,.analytics-department-panel,.admin-invoice-panel{grid-column:auto}.engagement-summary,.analytics-summary{grid-template-columns:repeat(2,1fr)}.engagement-summary article:nth-child(odd):before,.analytics-summary article:nth-child(odd):before{display:none}.reward-catalog-list{grid-template-columns:1fr}.department-health-row{grid-template-columns:1fr}.subscription-card{grid-template-columns:1fr}.subscription-actions{grid-column:auto;grid-template-columns:1fr}.subscription-invoice-head{display:none}.subscription-invoice-row{grid-template-columns:1fr auto}.subscription-invoice-row span:nth-child(2){grid-column:1/-1}.headcount-trend{gap:4px}}
+
+/* Nakna V1.0-P6 — LINE-first onboarding */
+.line-business-btn {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  border: 1px solid #06B956;
+  border-radius: var(--radius-button);
+  background: #06C755;
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(6, 199, 85, .14);
+  transition: transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+}
+.line-business-btn:hover { transform: translateY(-1px); box-shadow: 0 14px 28px rgba(6, 199, 85, .18); }
+.line-business-btn:active { transform: translateY(0); }
+.line-login-mark {
+  display: inline-grid;
+  place-items: center;
+  min-width: 42px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 7px;
+  background: rgba(255,255,255,.96);
+  color: #06B956;
+  font: 800 9px/1 var(--font-en);
+  letter-spacing: -.02em;
+}
+.line-setup-hint {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #D9EEE3;
+  border-radius: 11px;
+  background: #F4FBF7;
+  color: #42705A;
+  font-size: 10.5px;
+  text-align: center;
+}
+.compact-login-points { margin-top: 16px; }
+
+.data-load-banner {
+  margin: 14px 20px 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+  border: 1px solid #E8D4A8;
+  border-radius: 14px;
+  background: #FFF9ED;
+  color: #775B20;
+}
+.data-load-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #F6E4B7;
+  color: #8B6414;
+  font: 700 13px/1 var(--font-en);
+}
+.data-load-copy { min-width: 0; display: grid; gap: 2px; flex: 1; }
+.data-load-copy strong { font-size: 11px; color: #6E531D; }
+.data-load-copy span { font-size: 10px; color: #8A7343; }
+.data-load-banner .secondary-btn { min-height: 34px; padding: 0 12px; white-space: nowrap; background: #fff; }
+
+@media (max-width: 680px) {
+  .data-load-banner { margin: 10px 12px 0; align-items: flex-start; flex-wrap: wrap; }
+  .data-load-banner .secondary-btn { width: 100%; }
+}

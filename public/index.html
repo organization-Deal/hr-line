@@ -43,19 +43,24 @@
           <div class="brand-mark">น</div>
           <div class="brand-wordmark"><strong>นากนะ</strong><span>HR Tech สำหรับคนไทย</span></div>
         </div>
-        <p class="kicker">WELCOME TO NAKNA</p>
-        <h2>เข้าสู่ระบบนากนะ</h2>
-        <p class="muted login-description">ไม่ต้องจำรหัสผ่าน ใช้บัญชี Google ของคุณเพื่อเข้าสู่ Workspace ได้เลย</p>
+        <p class="kicker">LINE-FIRST HR</p>
+        <h2>เริ่มใช้นากนะจาก LINE</h2>
+        <p class="muted login-description">ลูกค้าใหม่ไม่ต้องสมัครหน้าเว็บ — Add LINE นากนะ แล้วพิมพ์ <strong>“เชื่อมธุรกิจ”</strong> เพื่อสร้างบริษัทและเปิดระบบ HR ได้ทันที</p>
+        <button id="lineBusinessBtn" class="line-business-btn wide-btn" type="button">
+          <span class="line-login-mark" aria-hidden="true">LINE</span>
+          <span>เปิด LINE นากนะ</span>
+        </button>
+        <div id="lineSetupHint" class="line-setup-hint">Add LINE → พิมพ์ “เชื่อมธุรกิจ” → สร้างธุรกิจ</div>
+        <div class="login-divider"><span>หรือบัญชีเดิม</span></div>
         <button id="googleLoginBtn" class="google-btn wide-btn" type="button">
           <span class="google-mark" aria-hidden="true">G</span>
           <span>เข้าสู่ระบบด้วย Google</span>
         </button>
-        <div class="login-divider"><span>สำหรับ HR และผู้ดูแลบริษัท</span></div>
-        <div class="login-points">
-          <span><i>✓</i> Google ใช้สำหรับยืนยันตัวตน</span>
-          <span><i>✓</i> Gmail จะขอสิทธิ์แยกเมื่อคุณเลือกเชื่อม</span>
+        <div class="login-points compact-login-points">
+          <span><i>✓</i> LINE ใช้สร้างธุรกิจและเปิด HR แบบ Magic Link</span>
+          <span><i>✓</i> Google ยังใช้เป็นทางเลือกสำหรับบัญชีเดิม</span>
         </div>
-        <p class="security-note"><span>●</span> นากนะไม่เก็บรหัสผ่าน Google ของคุณ</p>
+        <p class="security-note"><span>●</span> ลิงก์จาก LINE ใช้ได้ครั้งเดียวและหมดอายุอัตโนมัติ</p>
         <div id="loginError" class="error-text" role="alert"></div>
       </section>
     </div>
@@ -69,7 +74,7 @@
       </div>
       <p class="kicker">FIRST SETUP</p>
       <h2>ยินดีต้อนรับ <span id="onboardingName">👋</span></h2>
-      <p class="muted">บัญชี Google เชื่อมแล้ว เหลือแค่เลือกว่าคุณจะเริ่มจาก Workspace แบบไหน</p>
+      <p class="muted">บัญชีนี้เชื่อมแล้ว เหลือแค่เลือกว่าคุณจะเริ่มจาก Workspace แบบไหน</p>
 
       <button id="claimCompanyBtn" class="claim-company-card hidden" type="button">
         <span class="claim-icon">↗</span>
@@ -129,7 +134,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P5</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P6</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -146,6 +151,12 @@
           <button class="profile-chip" aria-label="โปรไฟล์ผู้ใช้"><span id="profileAvatar">HR</span><div><strong id="profileName">ผู้ใช้งาน</strong><small id="profileRole">กำลังโหลด...</small></div></button>
         </div>
       </header>
+
+      <div id="dataLoadBanner" class="data-load-banner hidden" role="status" aria-live="polite">
+        <div class="data-load-icon">!</div>
+        <div class="data-load-copy"><strong>ข้อมูลบางส่วนยังมาไม่ครบ</strong><span id="dataLoadMessage">กำลังลองโหลดข้อมูลอีกครั้ง</span></div>
+        <button id="retryDataLoadBtn" class="secondary-btn" type="button">ลองโหลดใหม่</button>
+      </div>
 
       <section id="view-dashboard" class="view active">
         <div class="welcome-bar">
