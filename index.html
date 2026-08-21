@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.2" />
 </head>
 <body>
   <div id="login" class="login-overlay" aria-live="polite">
@@ -189,8 +189,20 @@
       </nav>
 
       <div class="sidebar-footer">
-        <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7</span></div>
+        <button id="sidebarConnectionCard" class="sidebar-connection-card" type="button" aria-label="ดูสถานะการเชื่อมต่อระบบ">
+          <div class="sidebar-connection-head">
+            <span class="sidebar-connection-icon" aria-hidden="true">↗</span>
+            <div><strong id="sidebarConnectionTitle">การเชื่อมต่อระบบ</strong><small id="sidebarConnectionText">กำลังตรวจสอบสถานะ…</small></div>
+            <span class="sidebar-connection-arrow" aria-hidden="true">›</span>
+          </div>
+          <div class="sidebar-service-list" aria-label="บริการที่เชื่อมต่อ">
+            <span id="sidebarServiceLine" class="sidebar-service-pill"><i></i>LINE</span>
+            <span id="sidebarServiceGmail" class="sidebar-service-pill"><i></i>Gmail</span>
+            <span id="sidebarServiceDrive" class="sidebar-service-pill"><i></i>Drive</span>
+            <span id="sidebarServiceSheets" class="sidebar-service-pill"><i></i>Sheets</span>
+          </div>
+        </button>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.2</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -443,12 +455,14 @@
           </div>
 
           <div class="setup-overview-section">
-            <div class="page-intro compact"><div><p class="kicker">WORKSPACE STATUS</p><h2>สถานะการตั้งค่าระบบ</h2><p>เห็นทันทีว่าบริษัทกรอกข้อมูล เชื่อม LINE และเชื่อม Google Workspace พร้อมหรือยัง</p></div><span id="setupOverviewBadge" class="badge badge-soft">0/3 พร้อมใช้งาน</span></div>
+            <div class="page-intro compact"><div><p class="kicker">CONNECTION CENTER</p><h2>สถานะการเชื่อมต่อระบบ</h2><p>ดูแยกเป็นบริการว่า LINE, Gmail, Google Drive และ Google Sheets พร้อมใช้งานจริงหรือยัง</p></div><span id="setupOverviewBadge" class="badge badge-soft">0/5 พร้อมใช้งาน</span></div>
             <div class="setup-progress"><div id="setupProgressBar" class="setup-progress-bar"></div></div>
-            <div class="setup-status-grid">
+            <div class="setup-status-grid connection-status-grid">
               <article class="status-card"><div class="status-card-head"><div class="status-icon">🏢</div><span id="statusCompanyBadge" class="badge badge-neutral">รอตั้งค่า</span></div><strong>รายละเอียดบริษัท</strong><p id="statusCompanyText">กำลังโหลดข้อมูลบริษัท…</p><button id="statusCompanyAction" class="secondary-btn" type="button">แก้ข้อมูลบริษัท</button></article>
-              <article class="status-card"><div class="status-card-head"><div class="status-icon line-status-icon">LINE</div><span id="statusLineBadge" class="badge badge-neutral">รอตั้งค่า</span></div><strong>เชื่อมธุรกิจใน LINE</strong><p id="statusLineText">กำลังตรวจสอบ LINE Official Account…</p><button id="statusLineAction" class="secondary-btn" type="button">ตั้งค่า LINE OA</button></article>
-              <article class="status-card"><div class="status-card-head"><div class="status-icon google-status-icon">G</div><span id="statusGoogleBadge" class="badge badge-neutral">รอตั้งค่า</span></div><strong>Google Workspace</strong><p id="statusGoogleText">กำลังตรวจสอบ Gmail, Drive และ Sheets…</p><button id="statusGoogleAction" class="secondary-btn" type="button">เชื่อม Google Workspace</button></article>
+              <article class="status-card"><div class="status-card-head"><div class="status-icon line-status-icon">LINE</div><span id="statusLineBadge" class="badge badge-neutral">กำลังตรวจ</span></div><strong>LINE</strong><p id="statusLineText">กำลังตรวจสอบ LINE Official Account…</p><button id="statusLineAction" class="secondary-btn" type="button">ตั้งค่า LINE</button></article>
+              <article class="status-card"><div class="status-card-head"><div class="status-icon gmail-status-icon">M</div><span id="statusGmailBadge" class="badge badge-neutral">กำลังตรวจ</span></div><strong>Gmail</strong><p id="statusGmailText">กำลังตรวจสอบสิทธิ์ Gmail…</p><button id="statusGmailAction" class="secondary-btn" type="button">เชื่อม Gmail</button></article>
+              <article class="status-card"><div class="status-card-head"><div class="status-icon drive-status-icon">D</div><span id="statusDriveBadge" class="badge badge-neutral">กำลังตรวจ</span></div><strong>Google Drive</strong><p id="statusDriveText">กำลังตรวจสอบพื้นที่เอกสาร HR…</p><button id="statusDriveAction" class="secondary-btn" type="button">เชื่อม Drive</button></article>
+              <article class="status-card"><div class="status-card-head"><div class="status-icon sheets-status-icon">S</div><span id="statusSheetsBadge" class="badge badge-neutral">กำลังตรวจ</span></div><strong>Google Sheets</strong><p id="statusSheetsText">กำลังตรวจสอบ HR Database Sheet…</p><button id="statusSheetsAction" class="secondary-btn" type="button">เชื่อม Sheets</button></article>
             </div>
           </div>
 
@@ -778,6 +792,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js" type="module"></script>
+  <script src="/app.js?v=1.0-p7.2" type="module"></script>
 </body>
 </html>
