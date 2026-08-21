@@ -88,3 +88,15 @@
 - Salary certificate
 - Employee Document Center
 - Payroll/Document Google Sheet tabs
+
+## V1.0-P7.2 — QA & UX Stability Hotfix
+- Prevent login page and restored dialogs from flashing during refresh/session restore.
+- Fix every dialog Cancel/X button so HTML required validation cannot trap the user.
+- Add missing leave-evidence upload frontend handler.
+- Reset reusable modal save button state/label between features.
+- Limit dashboard API fan-out to 6 concurrent requests to reduce D1/API pressure.
+- Simplify visible Google wording for normal Gmail accounts (Gmail + Drive + Sheets).
+- Make employee code optional on manual hire; backend generates a unique code automatically.
+- Prefill new employee start date with today.
+- Add reproducible static audit script (`npm run audit`).
+- No database migration required.
