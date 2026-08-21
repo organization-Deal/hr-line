@@ -1,5 +1,16 @@
 # Changelog
 
+## V1.0-P6 — LINE-first Business Onboarding + Resilient Loading
+
+- ลูกค้าเริ่มจาก LINE OA: พิมพ์ `เชื่อมธุรกิจ` → สร้างธุรกิจ → ได้สิทธิ์ Owner → เปิด HR ด้วยลิงก์ครั้งเดียว
+- เพิ่ม LINE magic login อายุ 15 นาที โดยไม่บังคับสมัคร Google ก่อน
+- พนักงานไม่สร้าง Workspace เอง ใช้ลิงก์เชิญ/รหัสเชื่อมจาก HR
+- เพิ่ม public onboarding config สำหรับปุ่มเปิด LINE จากหน้า Login
+- Dashboard เปลี่ยนจาก `Promise.all()` แบบพังทั้งหน้าเป็น partial loading; API ตัวเดียวล้มไม่ทำให้ Skeleton ค้างทั้งระบบ
+- เพิ่ม API timeout, visible error banner และปุ่ม Retry
+- เพิ่ม migration `0017_line_first_onboarding.sql`
+
+
 ## V1.0-P5 — Engagement + People Analytics + SaaS Business
 - Points wallet, rules, automatic attendance/learning/KPI/birthday/anniversary rewards
 - Reward catalog, redemption workflow and Payroll incentive bridge

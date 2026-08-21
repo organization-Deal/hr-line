@@ -1,6 +1,6 @@
-# Nakna HR V1.0-P5 — Full Release Manifest
+# Nakna HR V1.0-P6 — Full Release Manifest
 
-This ZIP contains the cumulative product from Phase 1 through Phase 5.
+This ZIP contains the cumulative product from Phase 1 through Phase 5 plus the P6 LINE-first onboarding and loading-recovery patch.
 
 ## Phase 1 — Foundation + People Core
 Google auth, multi-company, LINE OA, Google Workspace, employee database, organization, schedules, attendance/geofence, holidays.
@@ -17,6 +17,10 @@ Onboarding courses, Drive media, quizzes, learning progress, KPI, 1:1 and probat
 ## Phase 5 — Engagement + SaaS Business
 Points, rewards, leaderboard, Payroll incentive bridge, People Analytics, 30-day Trial, Active Employee Seats, plans, invoices/payments ledger and internal SaaS Admin Console.
 
+## P6 — LINE-first Business Onboarding
+LINE OA business creation, Owner provisioning, one-time web login links, employee/owner path separation, public LINE onboarding config, API timeouts and partial Dashboard loading with retry.
+
 ## Release
-Health endpoint version: `1.0-P5`
-New P5 migrations: `0015`, `0016`
+Health endpoint version: `1.0-P6`
+P5 migrations: `0015`, `0016`
+New P6 migration: `0017_line_first_onboarding.sql`

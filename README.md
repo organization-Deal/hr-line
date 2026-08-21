@@ -1,8 +1,14 @@
-# Nakna HR — V1.0-P5
+# Nakna HR — V1.0-P6
 
 **Phase 1 + Phase 2 + Thailand Payroll & Documents + Learning & Performance** for นากนะ (Nakna) by Otterwork Co., Ltd.
 
 This is a **full project ZIP**. It already contains every Phase 1 and Phase 2 file/migration. Do not merge older ZIPs into it.
+
+## V1.0-P6 — LINE-first + Dashboard recovery
+
+ลูกค้าใหม่เริ่มจาก **LINE OA → พิมพ์ `เชื่อมธุรกิจ` → สร้างธุรกิจ → เปิดระบบ HR** โดยผู้สร้างถูกตั้งเป็น Owner อัตโนมัติ และเข้าเว็บด้วย one-time magic link อายุ 15 นาที ส่วนหน้า Dashboard จะไม่ค้าง Skeleton ทั้งหน้าเมื่อ API บางตัวล้มอีกต่อไป แต่จะแสดงข้อมูลที่โหลดได้พร้อม Error Banner + Retry.
+
+ดูขั้นตอน Deploy ที่ `UPGRADE_P6_LINE_FIRST.md`.
 
 ## Included from Phase 1
 - Google Login + Multi-company Workspace
@@ -131,7 +137,7 @@ npm run deploy
 Health endpoint should return:
 
 ```json
-{"ok":true,"service":"Nakna HR","version":"1.0-P3"}
+{"ok":true,"service":"Nakna HR","version":"1.0-P6","auth":"line-first+google"}
 ```
 
 Read `UPGRADE_PHASE3.md` and `TEST_CHECKLIST.md` before production use.
