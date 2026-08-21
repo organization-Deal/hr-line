@@ -1,6 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
+// Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
+// work on every API request was causing /api/bootstrap to exceed 30s.
+const SCHEMA_READY = new Set();
 
 const INIT_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1311,11 +1314,14 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P6', auth: 'line-first+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P6.1', auth: 'line-first+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
         return await getPublicOnboardingConfig(env);
+      }
+      if (url.pathname === '/api/public/diagnostics' && request.method === 'GET') {
+        return await getPublicDiagnostics(env);
       }
       if (url.pathname === '/auth/line/start' && request.method === 'GET') {
         return await finishLineAdminLogin(request, env);
@@ -1468,21 +1474,18 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/bootstrap' && method === 'GET') {
     try {
+      // Fast bootstrap: each phase is chained and cached per Worker isolate.
+      // Calling every phase separately caused the same DDL/PRAGMA work to repeat
+      // many times and could push D1 beyond the browser's 30s timeout.
       await ensureCoreSchema(env.DB);
-      await ensureV060Ready(env.DB);
-      await ensureV061Ready(env.DB);
       await ensureV063Ready(env.DB);
-      await ensureV100P1Ready(env.DB);
-      await ensureV100P2Ready(env.DB);
-      await ensureV100P3Ready(env.DB);
-      await ensureV100P4Ready(env.DB);
       await ensureV100P5Ready(env.DB);
       if (clientId) {
         await ensureDefaultLeavePolicies(env.DB, clientId);
         await ensurePayrollDefaults(env.DB, clientId);
         await ensurePhase5Defaults(env.DB, clientId);
       }
-      return json({ ok: true, release: 'V1.0-P6', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready' });
+      return json({ ok: true, release: 'V1.0-P6.1', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -2801,16 +2804,29 @@ async function handleLineWebhook(request, env, ctx, integration = null) {
   const rawBody = await request.text();
   const valid = await verifyLineSignature(rawBody, signature, lineCtx.channelSecret);
   if (!valid) return json({ error: 'Invalid LINE signature' }, 401);
-  await ensureV050Ready(env.DB);
-  await ensureV060Ready(env.DB);
-  await ensureV100P4Ready(env.DB);
 
   let payload;
   try { payload = JSON.parse(rawBody); } catch { return json({ error: 'Invalid JSON' }, 400); }
 
-  const work = Promise.all((payload.events || []).map(event => processLineEvent(event, env, lineCtx)));
+  // Acknowledge LINE immediately. Schema preparation and event processing run
+  // in waitUntil so LINE's webhook verification never waits on D1 migrations.
+  const events = payload.events || [];
+  const work = (async () => {
+    if (!integration) await ensureLineBusinessOnboardingReady(env.DB);
+    else await ensureCoreSchema(env.DB);
+    await Promise.all(events.map(async event => {
+      try {
+        await processLineEvent(event, env, lineCtx);
+      } catch (error) {
+        console.error(JSON.stringify({level:'error',event:'line_event_failed',type:event?.type||null,message:String(error?.message||error),stack:String(error?.stack||'').slice(0,1600)}));
+        if (event?.replyToken) {
+          try { await replyLine(lineCtx.accessToken, event.replyToken, 'ระบบนากนะขัดข้องชั่วคราว กรุณาลองส่งข้อความอีกครั้ง'); } catch {}
+        }
+      }
+    }));
+  })();
   ctx.waitUntil(work);
-  return json({ ok: true });
+  return json({ ok: true, events: events.length });
 }
 
 async function processLineEvent(event, env, lineCtx) {
@@ -3336,13 +3352,28 @@ function isCreateBusinessCommand(text){
 }
 
 async function ensureLineBusinessOnboardingReady(db){
+  if(SCHEMA_READY.has('line_business')) return;
   if(!db) throw new Error('D1 binding DB is not available');
-  // CREATE IF NOT EXISTS keeps this safe and also repairs a partially-created
-  // auth schema before LINE tries to create an Owner account.
-  await db.exec(INIT_AUTH_SCHEMA_SQL);
-  await ensureColumn(db,'users','line_user_id','TEXT');
-  await ensureColumn(db,'users','line_provider_scope','TEXT');
-  await ensureColumn(db,'users','auth_provider',"TEXT NOT NULL DEFAULT 'google'");
+  const usersReady = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").first();
+  if(!usersReady) await db.exec(INIT_AUTH_SCHEMA_SQL);
+  await ensureColumns(db,'users',[
+    ['line_user_id','TEXT'],
+    ['line_provider_scope','TEXT'],
+    ['auth_provider',"TEXT NOT NULL DEFAULT 'google'"]
+  ]);
+  // Business onboarding uses the same short-lived LINE session table as leave flows.
+  const lineSessionsReady = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='line_sessions'").first();
+  if(!lineSessionsReady) {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS line_sessions (
+      line_user_id TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      payload_json TEXT,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+  } else {
+    await ensureColumns(db,'line_sessions',[['payload_json','TEXT']]);
+  }
   try{await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_line_identity ON users(line_provider_scope,line_user_id) WHERE line_user_id IS NOT NULL`).run();}catch(error){console.warn(JSON.stringify({level:'warn',event:'line_identity_index_skip',message:String(error?.message||error)}));}
   await db.prepare(`CREATE TABLE IF NOT EXISTS line_admin_login_tokens (
     token_hash TEXT PRIMARY KEY,
@@ -3355,6 +3386,7 @@ async function ensureLineBusinessOnboardingReady(db){
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
   )`).run();
   try{await db.prepare(`CREATE INDEX IF NOT EXISTS idx_line_admin_login_expiry ON line_admin_login_tokens(user_id,expires_at,used_at)`).run();}catch{}
+  SCHEMA_READY.add('line_business');
 }
 
 async function findLineBusinessUser(db,providerScope,lineUserId){
@@ -3471,6 +3503,32 @@ async function getPublicOnboardingConfig(env){
     console.warn(JSON.stringify({level:'warn',event:'public_line_config_failed',message:String(error?.message||error)}));
     return json({line_configured:false,command:'เชื่อมธุรกิจ',line_add_url:null,line_connect_url:null});
   }
+}
+
+async function getPublicDiagnostics(env){
+  const started=Date.now();
+  const result={
+    ok:true,
+    version:'1.0-P6.1',
+    db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
+    line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
+    google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
+  };
+  if(env.DB){
+    const t=Date.now();
+    try{await env.DB.prepare('SELECT 1 AS ok').first();result.db.ok=true;}catch(error){result.db.error=safeDbErrorDetail(error);}finally{result.db.latency_ms=Date.now()-t;}
+  }
+  if(env.LINE_CHANNEL_ACCESS_TOKEN){
+    try{
+      const bot=await getLineBotInfo(env.LINE_CHANNEL_ACCESS_TOKEN);
+      result.line.bot_ok=true;
+      result.line.basic_id=bot?.basicId||null;
+      const info=await getLineWebhookInfo(env.LINE_CHANNEL_ACCESS_TOKEN).catch(()=>null);
+      if(info){result.line.webhook_endpoint=info.endpoint||null;result.line.webhook_active=Boolean(info.active);}
+    }catch(error){result.line.error=String(error?.message||error).slice(0,180);}
+  }
+  result.elapsed_ms=Date.now()-started;
+  return json(result);
 }
 
 async function handleLineBusinessOnboardingText({text,event,env,lineCtx,lineUserId,accessToken,sessionKey}){
@@ -4160,8 +4218,14 @@ function slugCode(value){return String(value||'').trim().toLowerCase().replace(/
 function formatThaiDateOnly(date){try{return new Date(`${date}T12:00:00+07:00`).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Bangkok'});}catch{return date;}}
 
 async function ensureV050Ready(db){
+  if(SCHEMA_READY.has('v050')) return;
   const ready=await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('leave_policies','leave_evidence_share_tokens')").first();
   if(Number(ready?.n||0)<2) await ensureV050Schema(db);
+  else {
+    await ensureColumns(db,'line_sessions',[['payload_json','TEXT']]);
+    await ensureColumns(db,'employees',[['leave_approver_employee_id','INTEGER']]);
+  }
+  SCHEMA_READY.add('v050');
 }
 
 async function ensureV050Schema(db){
@@ -4174,94 +4238,106 @@ async function ensureV050Schema(db){
 }
 
 async function ensureV060Ready(db){
+  if(SCHEMA_READY.has('v060')) return;
   const ready=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='line_integrations'").first();
   if(!ready){
     const statements=V060_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
     for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement)){continue;}throw error;}}
   }
-  await ensureColumn(db,'employees','line_provider_scope','TEXT');
+  await ensureColumns(db,'employees',[['line_provider_scope','TEXT']]);
+  SCHEMA_READY.add('v060');
 }
 
 async function ensureV061Ready(db){
+  if(SCHEMA_READY.has('v061')) return;
   await ensureV050Ready(db);
   const ready=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='employee_permissions'").first();
   if(!ready){
     const statements=V061_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
     for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}}
+    await db.prepare(`INSERT OR IGNORE INTO employee_permissions (client_id,employee_id,permission_key)
+      SELECT DISTINCT client_id,leave_approver_employee_id,'leave.approve' FROM employees WHERE leave_approver_employee_id IS NOT NULL`).run();
   }
-  // Preserve existing leave approval flows when upgrading from V0.6.0.
-  await db.prepare(`INSERT OR IGNORE INTO employee_permissions (client_id,employee_id,permission_key)
-    SELECT DISTINCT client_id,leave_approver_employee_id,'leave.approve' FROM employees WHERE leave_approver_employee_id IS NOT NULL`).run();
+  SCHEMA_READY.add('v061');
 }
 
 async function ensureV063Ready(db){
+  if(SCHEMA_READY.has('v063')) return;
   const ready=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='google_workspace_integrations'").first();
   if(!ready){
     const statements=V063_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
     for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}}
   }
-  await ensureColumn(db,'google_workspace_integrations','leave_evidence_folder_id','TEXT');
-  await ensureColumn(db,'leave_request_evidence','drive_file_id','TEXT');
-  await ensureColumn(db,'leave_request_evidence','drive_url','TEXT');
-  await ensureColumn(db,'leave_request_evidence','storage_provider','TEXT');
+  await ensureColumns(db,'google_workspace_integrations',[['leave_evidence_folder_id','TEXT']]);
+  await ensureColumns(db,'leave_request_evidence',[['drive_file_id','TEXT'],['drive_url','TEXT'],['storage_provider','TEXT']]);
+  SCHEMA_READY.add('v063');
 }
 
 
 async function ensureV100P1Ready(db){
-  const statements=V100P1_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
-  for(const statement of statements){
-    try{await db.prepare(statement).run();}
-    catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}
+  if(SCHEMA_READY.has('p1')) return;
+  const ready=await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('work_schedule_rules','company_holidays')").first();
+  if(Number(ready?.n||0)<2){
+    const statements=V100P1_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
+    for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}}
   }
-  for(const [column,type] of [['parent_department_id','INTEGER'],['sort_order','INTEGER NOT NULL DEFAULT 0']]) await ensureColumn(db,'departments',column,type);
-  for(const [column,type] of [['people_status',"TEXT NOT NULL DEFAULT 'employee'"],['confirmed_at','TEXT'],['end_date','TEXT'],['end_reason','TEXT']]) await ensureColumn(db,'employees',column,type);
-  await ensureColumn(db,'clients','allow_checkout_outside_geofence','INTEGER NOT NULL DEFAULT 0');
-  for(const [column,type] of [['checkout_outside_geofence','INTEGER NOT NULL DEFAULT 0'],['scheduled_start','TEXT'],['scheduled_end','TEXT'],['schedule_source','TEXT']]) await ensureColumn(db,'attendance',column,type);
+  await ensureColumns(db,'departments',[['parent_department_id','INTEGER'],['sort_order','INTEGER NOT NULL DEFAULT 0']]);
+  await ensureColumns(db,'employees',[['people_status',"TEXT NOT NULL DEFAULT 'employee'"],['confirmed_at','TEXT'],['end_date','TEXT'],['end_reason','TEXT']]);
+  await ensureColumns(db,'clients',[['allow_checkout_outside_geofence','INTEGER NOT NULL DEFAULT 0']]);
+  await ensureColumns(db,'attendance',[['checkout_outside_geofence','INTEGER NOT NULL DEFAULT 0'],['scheduled_start','TEXT'],['scheduled_end','TEXT'],['schedule_source','TEXT']]);
+  SCHEMA_READY.add('p1');
 }
 
 async function ensureV100P2Ready(db){
+  if(SCHEMA_READY.has('p2')) return;
   await ensureV100P1Ready(db);
   await ensureV050Ready(db);
-  const statements=V100P2_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
-  for(const statement of statements){
-    try{await db.prepare(statement).run();}
-    catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}
+  const ready=await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('hr_cases','broadcasts','leave_ledger')").first();
+  if(Number(ready?.n||0)<3){
+    const statements=V100P2_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
+    for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}}
   }
-  await ensureColumn(db,'clients','lock_leave_during_probation','INTEGER NOT NULL DEFAULT 1');
-  await ensureColumn(db,'employees','leave_access_override','INTEGER');
-  await ensureColumn(db,'leave_policies','available_during_probation','INTEGER NOT NULL DEFAULT 0');
-  await ensureColumn(db,'line_integrations','rich_menu_id','TEXT');
-  await ensureColumn(db,'line_integrations','rich_menu_updated_at','TEXT');
+  await ensureColumns(db,'clients',[['lock_leave_during_probation','INTEGER NOT NULL DEFAULT 1']]);
+  await ensureColumns(db,'employees',[['leave_access_override','INTEGER']]);
+  await ensureColumns(db,'leave_policies',[['available_during_probation','INTEGER NOT NULL DEFAULT 0']]);
+  await ensureColumns(db,'line_integrations',[['rich_menu_id','TEXT'],['rich_menu_updated_at','TEXT']]);
+  SCHEMA_READY.add('p2');
 }
 
 async function ensureV100P3Ready(db){
+  if(SCHEMA_READY.has('p3')) return;
   await ensureV100P2Ready(db);
-  const statements=V100P3_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
-  for(const statement of statements){
-    try{await db.prepare(statement).run();}
-    catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}
+  const ready=await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('payroll_periods','payroll_documents','employee_documents')").first();
+  if(Number(ready?.n||0)<3){
+    const statements=V100P3_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
+    for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}}
   }
+  SCHEMA_READY.add('p3');
 }
 
 async function ensureV100P4Ready(db){
+  if(SCHEMA_READY.has('p4')) return;
   await ensureV100P3Ready(db);
-  const statements=V100P4_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
-  for(const statement of statements){
-    try{await db.prepare(statement).run();}
-    catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}
+  const ready=await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('learning_courses','performance_cycles','kpi_goals')").first();
+  if(Number(ready?.n||0)<3){
+    const statements=V100P4_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
+    for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}}
   }
+  SCHEMA_READY.add('p4');
 }
 
 async function ensureV100P5Ready(db){
+  if(SCHEMA_READY.has('p5')) return;
   await ensureV100P4Ready(db);
-  const statements=V100P5_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
-  for(const statement of statements){
-    try{await db.prepare(statement).run();}
-    catch(error){
-      if(/CREATE INDEX/i.test(statement))continue;
-      throw error;
+  const ready=await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('engagement_settings','reward_catalog','company_subscriptions','billing_invoices')").first();
+  if(Number(ready?.n||0)<4){
+    const statements=V100P5_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
+    for(const statement of statements){
+      try{await db.prepare(statement).run();}
+      catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}
     }
   }
+  SCHEMA_READY.add('p5');
 }
 
 async function ensurePhase5Defaults(db,clientId){
@@ -5052,6 +5128,7 @@ async function verifyLineSignature(rawBody, signature, channelSecret) {
 }
 
 async function ensureCoreSchema(db) {
+  if(SCHEMA_READY.has('core')) return;
   if (!db) throw new Error('D1 binding DB is not available');
   const requiredTables = [
     'departments','positions','employees','attendance','leave_requests','candidates','employee_requests',
@@ -5083,27 +5160,34 @@ async function ensureCoreSchema(db) {
     }
   }
 
-  await ensureColumn(db,'employee_invites','token_value','TEXT');
-  const employeeColumns = [
+  await ensureColumns(db,'employee_invites',[['token_value','TEXT']]);
+  await ensureColumns(db,'employees',[
     ['line_display_name','TEXT'],['line_picture_url','TEXT'],['line_linked_at','TEXT'],['onboarding_source','TEXT'],
     ['emergency_contact_name','TEXT'],['emergency_contact_phone','TEXT']
-  ];
-  const attendanceColumns = [
+  ]);
+  await ensureColumns(db,'attendance',[
     ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
     ['checkout_location_id','INTEGER'],['checkout_location_name','TEXT'],['checkout_distance_m','REAL'],['checkout_accuracy_m','REAL']
-  ];
-  for (const [column,type] of employeeColumns) await ensureColumn(db,'employees',column,type);
-  for (const [column,type] of attendanceColumns) await ensureColumn(db,'attendance',column,type);
-  await ensureV050Schema(db);
+  ]);
+  await ensureV050Ready(db);
   await ensureV060Ready(db);
   await ensureV061Ready(db);
-  console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_complete' }));
+  SCHEMA_READY.add('core');
+  console.log(JSON.stringify({ level: 'info', event: 'core_schema_ready' }));
 }
 
 async function ensureColumn(db, table, column, type) {
+  return ensureColumns(db, table, [[column,type]]);
+}
+
+async function ensureColumns(db, table, definitions) {
   const columns = await db.prepare(`PRAGMA table_info(${table})`).all();
-  if ((columns.results || []).some(row => row.name === column)) return;
-  await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`).run();
+  const names = new Set((columns.results || []).map(row => row.name));
+  for (const [column,type] of definitions) {
+    if (names.has(column)) continue;
+    await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`).run();
+    names.add(column);
+  }
 }
 
 function safeCoreSchemaErrorDetail(error) {
