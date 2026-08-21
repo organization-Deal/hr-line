@@ -330,6 +330,30 @@ CREATE INDEX IF NOT EXISTS idx_leave_events_request ON leave_approval_events(lea
 CREATE INDEX IF NOT EXISTS idx_leave_evidence_request ON leave_request_evidence(leave_request_id, created_at);
 `;
 
+const V060_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS line_integrations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL UNIQUE,
+  channel_id TEXT,
+  bot_user_id TEXT,
+  bot_basic_id TEXT,
+  bot_display_name TEXT,
+  bot_picture_url TEXT,
+  encrypted_credentials TEXT NOT NULL,
+  webhook_key TEXT NOT NULL UNIQUE,
+  webhook_url TEXT NOT NULL,
+  webhook_active INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'connected',
+  last_test_at TEXT,
+  last_error TEXT,
+  connected_by_user_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_line_integrations_status ON line_integrations(status);
+`;
+
 const INIT_AUTH_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   google_sub TEXT NOT NULL UNIQUE,
@@ -461,7 +485,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.5.3', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '0.6.0', auth: 'google-oauth' });
       }
 
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
@@ -501,8 +525,16 @@ export default {
         return await serveSharedEvidence(env, sharedEvidenceMatch[1]);
       }
 
+      const dedicatedLineWebhookMatch = url.pathname.match(/^\/webhooks\/line\/([A-Za-z0-9_-]{32,})$/);
+      if (dedicatedLineWebhookMatch && request.method === 'POST') {
+        await ensureV060Ready(env.DB);
+        const integration = await getLineIntegrationByWebhookKey(env, dedicatedLineWebhookMatch[1]);
+        if (!integration) return json({ error: 'LINE integration not found' }, 404);
+        return await handleLineWebhook(request, env, ctx, integration);
+      }
+
       if (url.pathname === '/webhooks/line' && request.method === 'POST') {
-        return await handleLineWebhook(request, env, ctx);
+        return await handleLineWebhook(request, env, ctx, null);
       }
 
       if (url.pathname.startsWith('/api/')) {
@@ -551,8 +583,9 @@ async function handleApi(request, env, url, auth) {
   if (path === '/api/bootstrap' && method === 'GET') {
     try {
       await ensureCoreSchema(env.DB);
+      await ensureV060Ready(env.DB);
       if (clientId) await ensureDefaultLeavePolicies(env.DB, clientId);
-      return json({ ok: true, core_schema: 'ready', leave_policy: 'ready' });
+      return json({ ok: true, core_schema: 'ready', leave_policy: 'ready', line_integrations: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -598,6 +631,68 @@ async function handleApi(request, env, url, auth) {
   if (path === '/api/integrations/gmail' && method === 'DELETE') {
     await env.DB.prepare('DELETE FROM gmail_connections WHERE user_id=?1').bind(Number(auth.user.id)).run();
     return json({ ok: true });
+  }
+
+  if (path === '/api/integrations/line' && method === 'GET') {
+    await ensureV060Ready(env.DB);
+    const integration = await getWorkspaceLineIntegration(env, clientId, false);
+    if (integration) {
+      let live = null;
+      try {
+        const creds = await decryptLineIntegrationCredentials(env, integration);
+        live = await getLineWebhookInfo(creds.access_token);
+        if (live) await env.DB.prepare('UPDATE line_integrations SET webhook_active=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2').bind(live.active ? 1 : 0, Number(integration.id)).run();
+      } catch {}
+      return json({ mode: 'dedicated', connected: true, integration: publicLineIntegration(integration, live, canManageIntegrations(auth.role)) });
+    }
+    let defaultBot = null;
+    if (env.LINE_CHANNEL_ACCESS_TOKEN) { try { defaultBot = await getLineBotInfo(env.LINE_CHANNEL_ACCESS_TOKEN); } catch {} }
+    return json({ mode: 'nakna_default', connected: false, default_available: Boolean(env.LINE_CHANNEL_ACCESS_TOKEN && env.LINE_CHANNEL_SECRET), bot: defaultBot ? { basic_id: defaultBot.basicId || null, display_name: defaultBot.displayName || 'นากนะ' } : null });
+  }
+
+  if (path === '/api/integrations/line' && method === 'PUT') {
+    if (!canManageIntegrations(auth.role)) return json({ error: 'เฉพาะ Owner หรือ HR Admin ที่เชื่อม LINE OA ได้' }, 403);
+    await ensureV060Ready(env.DB);
+    const body = await safeJson(request);
+    const channelSecret = String(body.channel_secret || '').trim();
+    const accessToken = String(body.access_token || '').trim();
+    const channelId = String(body.channel_id || '').trim() || null;
+    if (channelSecret.length < 16 || accessToken.length < 20) return json({ error: 'กรุณาใส่ Channel Secret และ Channel Access Token ให้ครบ' }, 400);
+    try {
+      const saved = await saveWorkspaceLineIntegration(env, { clientId, userId: Number(auth.user.id), channelId, channelSecret, accessToken });
+      await safeAudit(env.DB, clientId, 'user', String(auth.user.id), 'line.integration.connect', 'line_integration', String(saved.id), { bot: saved.bot_display_name });
+      return json({ ok: true, integration: publicLineIntegration(saved) });
+    } catch (error) {
+      return json({ error: safeLineIntegrationError(error) }, 400);
+    }
+  }
+
+  if (path === '/api/integrations/line/test' && method === 'POST') {
+    if (!canManageIntegrations(auth.role)) return json({ error: 'ไม่มีสิทธิ์ทดสอบ LINE Integration' }, 403);
+    await ensureV060Ready(env.DB);
+    const integration = await getWorkspaceLineIntegration(env, clientId, false);
+    if (!integration) return json({ error: 'ยังไม่ได้เชื่อม LINE Official Account' }, 404);
+    try {
+      const creds = await decryptLineIntegrationCredentials(env, integration);
+      const [bot, webhook, test] = await Promise.all([getLineBotInfo(creds.access_token), getLineWebhookInfo(creds.access_token), testLineWebhook(creds.access_token, integration.webhook_url)]);
+      const ok = Boolean(test?.success);
+      await env.DB.prepare('UPDATE line_integrations SET webhook_active=?1,last_test_at=CURRENT_TIMESTAMP,last_error=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3')
+        .bind(webhook?.active ? 1 : 0, ok ? null : String(test?.reason || test?.detail || 'webhook_test_failed'), Number(integration.id)).run();
+      return json({ ok, bot: { display_name: bot.displayName, basic_id: bot.basicId }, webhook: { ...webhook, test } });
+    } catch (error) {
+      await env.DB.prepare('UPDATE line_integrations SET last_test_at=CURRENT_TIMESTAMP,last_error=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2').bind(String(error?.message || error).slice(0,300), Number(integration.id)).run();
+      return json({ error: safeLineIntegrationError(error) }, 400);
+    }
+  }
+
+  if (path === '/api/integrations/line' && method === 'DELETE') {
+    if (!canManageIntegrations(auth.role)) return json({ error: 'เฉพาะ Owner หรือ HR Admin ที่ยกเลิก LINE Integration ได้' }, 403);
+    const integration = await getWorkspaceLineIntegration(env, clientId, false);
+    if (integration) {
+      await env.DB.prepare('DELETE FROM line_integrations WHERE id=?1 AND client_id=?2').bind(Number(integration.id),clientId).run();
+      await safeAudit(env.DB, clientId, 'user', String(auth.user.id), 'line.integration.disconnect', 'line_integration', String(integration.id), null);
+    }
+    return json({ ok: true, fallback: Boolean(env.LINE_CHANNEL_ACCESS_TOKEN && env.LINE_CHANNEL_SECRET) });
   }
 
   if (path === '/api/dashboard' && method === 'GET') {
@@ -1101,182 +1196,186 @@ async function getDashboard(db, clientId) {
   };
 }
 
-async function handleLineWebhook(request, env, ctx) {
-  if (!env.LINE_CHANNEL_SECRET || !env.LINE_CHANNEL_ACCESS_TOKEN) {
-    return json({ error: 'LINE secrets not configured' }, 503);
-  }
+async function handleLineWebhook(request, env, ctx, integration = null) {
+  const lineCtx = integration || defaultLineContext(env);
+  if (!lineCtx?.channelSecret || !lineCtx?.accessToken) return json({ error: 'LINE integration not configured' }, 503);
 
   const signature = request.headers.get('x-line-signature') || '';
   const rawBody = await request.text();
-  const valid = await verifyLineSignature(rawBody, signature, env.LINE_CHANNEL_SECRET);
+  const valid = await verifyLineSignature(rawBody, signature, lineCtx.channelSecret);
   if (!valid) return json({ error: 'Invalid LINE signature' }, 401);
   await ensureV050Ready(env.DB);
+  await ensureV060Ready(env.DB);
 
   let payload;
   try { payload = JSON.parse(rawBody); } catch { return json({ error: 'Invalid JSON' }, 400); }
 
-  const work = Promise.all((payload.events || []).map(event => processLineEvent(event, env)));
+  const work = Promise.all((payload.events || []).map(event => processLineEvent(event, env, lineCtx)));
   ctx.waitUntil(work);
   return json({ ok: true });
 }
 
-async function processLineEvent(event, env) {
+async function processLineEvent(event, env, lineCtx) {
   const lineUserId = event?.source?.userId;
   if (!lineUserId || !event.replyToken) return;
+  const accessToken = lineCtx.accessToken;
+  const providerScope = lineCtx.providerScope || 'default';
+  const sessionKey = lineSessionKey(providerScope, lineUserId);
 
-  const employee = async () => env.DB.prepare(`
-    SELECT e.*, c.name AS company_name
-    FROM employees e JOIN clients c ON c.id=e.client_id
-    WHERE e.line_user_id=?1 AND e.status='active'
-  `).bind(lineUserId).first();
+  const employee = async () => {
+    if (lineCtx.clientId) {
+      return env.DB.prepare(`SELECT e.*, c.name AS company_name FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.client_id=?1 AND e.line_user_id=?2 AND COALESCE(e.line_provider_scope,'default')=?3 AND e.status='active'`).bind(Number(lineCtx.clientId), lineUserId, providerScope).first();
+    }
+    return env.DB.prepare(`SELECT e.*, c.name AS company_name FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.line_user_id=?1 AND COALESCE(e.line_provider_scope,'default')='default' AND e.status='active'`).bind(lineUserId).first();
+  };
 
   if (event.type === 'message' && event.message?.type === 'text') {
     const text = String(event.message.text || '').trim();
     const joinMatch = text.match(/^JOIN\s+([A-Za-z0-9_-]{20,})$/i);
     if (joinMatch) {
-      const linked = await linkLineJoinToken(env.DB, env.LINE_CHANNEL_ACCESS_TOKEN, lineUserId, joinMatch[1]);
-      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[
+      const linked = await linkLineJoinToken(env.DB, accessToken, lineUserId, joinMatch[1], { providerScope, expectedClientId: lineCtx.clientId });
+      return replyLineMessages(accessToken,event.replyToken,[
         linked.ok ? buildWelcomeFlex(linked.name,linked.company_name) : buildSimpleNoticeFlex('เชื่อม LINE ไม่สำเร็จ',linked.error,'error')
       ]);
     }
     const linkMatch = text.match(/^LINK\s+(\d{6})$/i);
     if (linkMatch) {
-      const linked = await linkLineAccount(env.DB, lineUserId, linkMatch[1]);
-      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[linked.ok?buildWelcomeFlex(linked.name,linked.company_name||'บริษัทของคุณ'):buildSimpleNoticeFlex('เชื่อม LINE ไม่สำเร็จ',linked.error,'error')]);
+      const linked = await linkLineAccount(env.DB, lineUserId, linkMatch[1], { providerScope, expectedClientId: lineCtx.clientId, accessToken });
+      return replyLineMessages(accessToken,event.replyToken,[linked.ok?buildWelcomeFlex(linked.name,linked.company_name||'บริษัทของคุณ'):buildSimpleNoticeFlex('เชื่อม LINE ไม่สำเร็จ',linked.error,'error')]);
     }
 
     const emp=await employee();
-    if(!emp) return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('ยังไม่ได้เชื่อมบัญชีพนักงาน','เปิดลิงก์เชิญเข้าทีมที่ HR ส่งให้ แล้วกดเชื่อม LINE จากหน้านั้นได้เลย','warning')]);
-    const session=await getLineSession(env.DB,lineUserId);
+    if(!emp) return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ยังไม่ได้เชื่อมบัญชีพนักงาน','เปิดลิงก์เชิญเข้าทีมที่ HR ส่งให้ แล้วกดเชื่อม LINE จากหน้านั้นได้เลย','warning')]);
+    const session=await getLineSession(env.DB,sessionKey);
 
     if(session?.action==='leave_reason'){
-      if(text.length<2) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ขอเหตุผลสั้น ๆ อย่างน้อย 2 ตัวอักษรนะ');
+      if(text.length<2) return replyLine(accessToken,event.replyToken,'ขอเหตุผลสั้น ๆ อย่างน้อย 2 ตัวอักษรนะ');
       try{
         const payload=session.payload||{};
         const requestRow=await createLeaveRequest(env,{clientId:Number(emp.client_id),employeeId:Number(emp.id),policyId:Number(payload.policy_id),startDate:payload.start_date,endDate:payload.end_date,dayPart:payload.day_part||'full',reason:text,submittedVia:'line'});
-        await clearLineSession(env.DB,lineUserId);
+        await clearLineSession(env.DB,sessionKey);
         if(requestRow.status==='awaiting_evidence'){
-          await setLineSession(env.DB,lineUserId,'leave_evidence',{request_id:requestRow.id,required:true});
-          return replyEvidencePrompt(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,requestRow);
+          await setLineSession(env.DB,sessionKey,'leave_evidence',{request_id:requestRow.id,required:true});
+          return replyEvidencePrompt(accessToken,event.replyToken,requestRow);
         }
         await notifyLeaveApprover(env,requestRow.id);
-        return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildLeaveSubmittedFlex(requestRow)]);
-      }catch(e){ await clearLineSession(env.DB,lineUserId); return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`); }
+        return replyLineMessages(accessToken,event.replyToken,[buildLeaveSubmittedFlex(requestRow)]);
+      }catch(e){ await clearLineSession(env.DB,sessionKey); return replyLine(accessToken,event.replyToken,`❌ ${e.message}`); }
     }
 
     if(session?.action==='leave_reject_reason'){
       try{
         const result=await decideLeaveRequest(env,Number(session.payload?.request_id),'rejected',{actorType:'employee',actorEmployeeId:Number(emp.id),reason:text,clientId:Number(emp.client_id),enforceApprover:true});
-        await clearLineSession(env.DB,lineUserId);
-        return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('บันทึกผลเรียบร้อยแล้ว',`ไม่อนุมัติคำขอ · ${text}`,'success')]);
-      }catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
+        await clearLineSession(env.DB,sessionKey);
+        return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('บันทึกผลเรียบร้อยแล้ว',`ไม่อนุมัติคำขอ · ${text}`,'success')]);
+      }catch(e){return replyLine(accessToken,event.replyToken,`❌ ${e.message}`);}
     }
 
     if(session?.action==='leave_evidence' && ['ข้าม','skip'].includes(text.toLowerCase())){
-      if(session.payload?.required) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'คำขอนี้ต้องมีหลักฐาน กรุณาส่งรูปหรือไฟล์ก่อนนะ');
-      await clearLineSession(env.DB,lineUserId);
+      if(session.payload?.required) return replyLine(accessToken,event.replyToken,'คำขอนี้ต้องมีหลักฐาน กรุณาส่งรูปหรือไฟล์ก่อนนะ');
+      await clearLineSession(env.DB,sessionKey);
       await notifyLeaveApprover(env,Number(session.payload?.request_id));
-      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('ส่งคำขอแล้ว','นากนะส่งคำขอให้ผู้อนุมัติเรียบร้อยแล้ว','success')]);
+      return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ส่งคำขอแล้ว','นากนะส่งคำขอให้ผู้อนุมัติเรียบร้อยแล้ว','success')]);
     }
 
     const lower=text.toLowerCase();
-    if(['เมนู','menu','help','ช่วยเหลือ'].includes(lower)) return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildEmployeeMenuFlex(emp)]);
-    if(['ลา','ขอลา','leave','ขอลางาน'].includes(lower)) return sendLeaveTypeMenu(env,event.replyToken,emp);
-    if(['สิทธิ์ลา','วันลา','leave balance'].includes(lower)) return sendLeaveBalance(env,event.replyToken,emp);
+    if(['เมนู','menu','help','ช่วยเหลือ'].includes(lower)) return replyLineMessages(accessToken,event.replyToken,[buildEmployeeMenuFlex(emp)]);
+    if(['ลา','ขอลา','leave','ขอลางาน'].includes(lower)) return sendLeaveTypeMenu(env,event.replyToken,emp,accessToken);
+    if(['สิทธิ์ลา','วันลา','leave balance'].includes(lower)) return sendLeaveBalance(env,event.replyToken,emp,accessToken);
     if(['เช็กอิน','checkin','check-in'].includes(lower)){
       const mustShareLocation=await employeeNeedsLocation(env.DB,emp);
-      if(mustShareLocation){ await setLineSession(env.DB,lineUserId,'checkin'); return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'📍 แชร์ Location ปัจจุบันเพื่อเช็กอิน\nนากนะจะตรวจเฉพาะ Work Location ที่บริษัทอนุญาต'); }
-      try{ const result=await checkIn(env.DB,Number(emp.id),null,null,'line'); return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildAttendanceResultFlex('checkin',result)]);}catch(e){return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('เช็กอินไม่สำเร็จ',e.message,'error')]);}
+      if(mustShareLocation){ await setLineSession(env.DB,sessionKey,'checkin'); return replyLineWithLocationQuickReply(accessToken,event.replyToken,'📍 แชร์ Location ปัจจุบันเพื่อเช็กอิน\nนากนะจะตรวจเฉพาะ Work Location ที่บริษัทอนุญาต'); }
+      try{ const result=await checkIn(env.DB,Number(emp.id),null,null,'line'); return replyLineMessages(accessToken,event.replyToken,[buildAttendanceResultFlex('checkin',result)]);}catch(e){return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('เช็กอินไม่สำเร็จ',e.message,'error')]);}
     }
     if(['เช็กเอาต์','checkout','check-out'].includes(lower)){
       const mustShareLocation=await employeeNeedsLocation(env.DB,emp);
-      if(mustShareLocation){ await setLineSession(env.DB,lineUserId,'checkout'); return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'📍 แชร์ Location ปัจจุบันเพื่อเช็กเอาต์'); }
-      try{const result=await checkOut(env.DB,Number(emp.id),null,null,'line');return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildAttendanceResultFlex('checkout',result)]);}catch(e){return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('เช็กเอาต์ไม่สำเร็จ',e.message,'error')]);}
+      if(mustShareLocation){ await setLineSession(env.DB,sessionKey,'checkout'); return replyLineWithLocationQuickReply(accessToken,event.replyToken,'📍 แชร์ Location ปัจจุบันเพื่อเช็กเอาต์'); }
+      try{const result=await checkOut(env.DB,Number(emp.id),null,null,'line');return replyLineMessages(accessToken,event.replyToken,[buildAttendanceResultFlex('checkout',result)]);}catch(e){return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('เช็กเอาต์ไม่สำเร็จ',e.message,'error')]);}
     }
     if(lower==='สถานะ'){
       const a=await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(emp.id),dateInBangkok()).first();
-      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildEmployeeStatusFlex(emp,a)]);
+      return replyLineMessages(accessToken,event.replyToken,[buildEmployeeStatusFlex(emp,a)]);
     }
-    return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildEmployeeMenuFlex(emp)]);
+    return replyLineMessages(accessToken,event.replyToken,[buildEmployeeMenuFlex(emp)]);
   }
 
   if (event.type==='message' && ['image','file'].includes(event.message?.type)){
-    const emp=await employee(); if(!emp) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
-    const session=await getLineSession(env.DB,lineUserId);
-    if(session?.action!=='leave_evidence') return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ได้รับไฟล์แล้ว แต่ตอนนี้ยังไม่มีคำขอที่รอหลักฐาน\nพิมพ์ “ขอลา” เพื่อเริ่มคำขอ');
+    const emp=await employee(); if(!emp) return replyLine(accessToken,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
+    const session=await getLineSession(env.DB,sessionKey);
+    if(session?.action!=='leave_evidence') return replyLine(accessToken,event.replyToken,'ได้รับไฟล์แล้ว แต่ตอนนี้ยังไม่มีคำขอที่รอหลักฐาน\nพิมพ์ “ขอลา” เพื่อเริ่มคำขอ');
     try{
       const requestId=Number(session.payload?.request_id);
-      await storeLineLeaveEvidence(env,{requestId,employeeId:Number(emp.id),clientId:Number(emp.client_id),message:event.message});
-      await clearLineSession(env.DB,lineUserId);
+      await storeLineLeaveEvidence(env,{requestId,employeeId:Number(emp.id),clientId:Number(emp.client_id),message:event.message,accessToken});
+      await clearLineSession(env.DB,sessionKey);
       await env.DB.prepare("UPDATE leave_requests SET status=CASE WHEN status='awaiting_evidence' THEN 'pending' ELSE status END,evidence_count=(SELECT COUNT(*) FROM leave_request_evidence WHERE leave_request_id=?1),updated_at=CURRENT_TIMESTAMP WHERE id=?1").bind(requestId).run();
       await notifyLeaveApprover(env,requestId);
       const detail=await getLeaveRequestDetail(env.DB,requestId,Number(emp.client_id));
-      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildLeaveSubmittedFlex(detail)]);
-    }catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ เก็บหลักฐานไม่สำเร็จ: ${e.message}`);}
+      return replyLineMessages(accessToken,event.replyToken,[buildLeaveSubmittedFlex(detail)]);
+    }catch(e){return replyLine(accessToken,event.replyToken,`❌ เก็บหลักฐานไม่สำเร็จ: ${e.message}`);}
   }
 
   if(event.type==='message' && event.message?.type==='location'){
-    const emp=await employee(); if(!emp) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
-    const session=await getLineSession(env.DB,lineUserId);
-    if(!session || new Date(session.expires_at).getTime()<=Date.now()) return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('คำขอหมดเวลาแล้ว','กรุณาเริ่มเช็กอินหรือเช็กเอาต์ใหม่อีกครั้ง','warning')]);
+    const emp=await employee(); if(!emp) return replyLine(accessToken,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
+    const session=await getLineSession(env.DB,sessionKey);
+    if(!session || new Date(session.expires_at).getTime()<=Date.now()) return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('คำขอหมดเวลาแล้ว','กรุณาเริ่มเช็กอินหรือเช็กเอาต์ใหม่อีกครั้ง','warning')]);
     if(!['checkin','checkout'].includes(session.action)) return;
     try{
       const lat=Number(event.message.latitude),lng=Number(event.message.longitude);
       const result=session.action==='checkin'?await checkIn(env.DB,Number(emp.id),lat,lng,'line'):await checkOut(env.DB,Number(emp.id),lat,lng,'line');
-      await clearLineSession(env.DB,lineUserId);
+      await clearLineSession(env.DB,sessionKey);
       const label=session.action==='checkin'?'Check-in':'Check-out'; const tm=session.action==='checkin'?result.check_in_at:result.check_out_at;
-      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildAttendanceResultFlex(session.action,result)]);
-    }catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
+      return replyLineMessages(accessToken,event.replyToken,[buildAttendanceResultFlex(session.action,result)]);
+    }catch(e){return replyLine(accessToken,event.replyToken,`❌ ${e.message}`);}
   }
 
   if(event.type==='postback'){
-    const emp=await employee(); if(!emp) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
+    const emp=await employee(); if(!emp) return replyLine(accessToken,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
     const data=new URLSearchParams(event.postback?.data||''); const action=data.get('action');
-    if(action==='menu') return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildEmployeeMenuFlex(emp)]);
-    if(action==='checkin'||action==='checkout'){ await setLineSession(env.DB,lineUserId,action); return replyLineWithLocationQuickReply(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`📍 ส่ง Location ปัจจุบันมาเพื่อ${action==='checkin'?'เช็กอิน':'เช็กเอาต์'}`); }
-    if(action==='leave_menu') return sendLeaveTypeMenu(env,event.replyToken,emp);
-    if(action==='leave_balance') return sendLeaveBalance(env,event.replyToken,emp);
-    if(action==='status'){ const a=await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(emp.id),dateInBangkok()).first(); return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildEmployeeStatusFlex(emp,a)]); }
+    if(action==='menu') return replyLineMessages(accessToken,event.replyToken,[buildEmployeeMenuFlex(emp)]);
+    if(action==='checkin'||action==='checkout'){ await setLineSession(env.DB,sessionKey,action); return replyLineWithLocationQuickReply(accessToken,event.replyToken,`📍 ส่ง Location ปัจจุบันมาเพื่อ${action==='checkin'?'เช็กอิน':'เช็กเอาต์'}`); }
+    if(action==='leave_menu') return sendLeaveTypeMenu(env,event.replyToken,emp,accessToken);
+    if(action==='leave_balance') return sendLeaveBalance(env,event.replyToken,emp,accessToken);
+    if(action==='status'){ const a=await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(emp.id),dateInBangkok()).first(); return replyLineMessages(accessToken,event.replyToken,[buildEmployeeStatusFlex(emp,a)]); }
     if(action==='leave_type'){
       const policyId=Number(data.get('policy_id')); const policy=await env.DB.prepare('SELECT * FROM leave_policies WHERE id=?1 AND client_id=?2 AND is_active=1').bind(policyId,Number(emp.client_id)).first();
-      if(!policy) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ไม่พบประเภทลานี้');
-      await setLineSession(env.DB,lineUserId,'leave_start',{policy_id:policyId});
-      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildDatePickerFlex('เลือกวันเริ่มลา','leave_start',policyId)]);
+      if(!policy) return replyLine(accessToken,event.replyToken,'ไม่พบประเภทลานี้');
+      await setLineSession(env.DB,sessionKey,'leave_start',{policy_id:policyId});
+      return replyLineMessages(accessToken,event.replyToken,[buildDatePickerFlex('เลือกวันเริ่มลา','leave_start',policyId)]);
     }
     if(action==='leave_start'){
-      const date=event.postback?.params?.date; const policyId=Number(data.get('policy_id')); if(!date) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'กรุณาเลือกวันที่');
-      await setLineSession(env.DB,lineUserId,'leave_end',{policy_id:policyId,start_date:date});
-      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildDatePickerFlex(`เริ่ม ${formatThaiDateOnly(date)} · เลือกวันสุดท้าย`,'leave_end',policyId,date)]);
+      const date=event.postback?.params?.date; const policyId=Number(data.get('policy_id')); if(!date) return replyLine(accessToken,event.replyToken,'กรุณาเลือกวันที่');
+      await setLineSession(env.DB,sessionKey,'leave_end',{policy_id:policyId,start_date:date});
+      return replyLineMessages(accessToken,event.replyToken,[buildDatePickerFlex(`เริ่ม ${formatThaiDateOnly(date)} · เลือกวันสุดท้าย`,'leave_end',policyId,date)]);
     }
     if(action==='leave_end'){
       const endDate=event.postback?.params?.date; const startDate=data.get('start')||endDate; const policyId=Number(data.get('policy_id'));
-      if(!endDate||endDate<startDate) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'วันสิ้นสุดต้องไม่น้อยกว่าวันเริ่มลา');
+      if(!endDate||endDate<startDate) return replyLine(accessToken,event.replyToken,'วันสิ้นสุดต้องไม่น้อยกว่าวันเริ่มลา');
       if(startDate===endDate){
-        await setLineSession(env.DB,lineUserId,'leave_daypart',{policy_id:policyId,start_date:startDate,end_date:endDate});
-        return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildLeaveDayPartFlex(policyId,startDate,endDate)]);
+        await setLineSession(env.DB,sessionKey,'leave_daypart',{policy_id:policyId,start_date:startDate,end_date:endDate});
+        return replyLineMessages(accessToken,event.replyToken,[buildLeaveDayPartFlex(policyId,startDate,endDate)]);
       }
-      await setLineSession(env.DB,lineUserId,'leave_reason',{policy_id:policyId,start_date:startDate,end_date:endDate,day_part:'full'});
-      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildLeaveReasonPromptFlex(startDate,endDate,'full')]);
+      await setLineSession(env.DB,sessionKey,'leave_reason',{policy_id:policyId,start_date:startDate,end_date:endDate,day_part:'full'});
+      return replyLineMessages(accessToken,event.replyToken,[buildLeaveReasonPromptFlex(startDate,endDate,'full')]);
     }
     if(action==='leave_daypart'){
       const policyId=Number(data.get('policy_id')); const startDate=data.get('start'); const endDate=data.get('end')||startDate; const dayPart=data.get('part')||'full';
-      if(!policyId||!startDate) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'ข้อมูลคำขอไม่ครบ กรุณาพิมพ์ “ขอลา” ใหม่');
-      await setLineSession(env.DB,lineUserId,'leave_reason',{policy_id:policyId,start_date:startDate,end_date:endDate,day_part:dayPart});
+      if(!policyId||!startDate) return replyLine(accessToken,event.replyToken,'ข้อมูลคำขอไม่ครบ กรุณาพิมพ์ “ขอลา” ใหม่');
+      await setLineSession(env.DB,sessionKey,'leave_reason',{policy_id:policyId,start_date:startDate,end_date:endDate,day_part:dayPart});
       const partLabel=dayPart==='am'?'ครึ่งวันเช้า':dayPart==='pm'?'ครึ่งวันบ่าย':'เต็มวัน';
-      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildLeaveReasonPromptFlex(startDate,endDate,dayPart)]);
+      return replyLineMessages(accessToken,event.replyToken,[buildLeaveReasonPromptFlex(startDate,endDate,dayPart)]);
     }
     if(action==='leave_attach'){
-      const id=Number(data.get('id')); const row=await env.DB.prepare("SELECT * FROM leave_requests WHERE id=?1 AND employee_id=?2 AND status IN ('pending','awaiting_evidence')").bind(id,Number(emp.id)).first(); if(!row) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'คำขอนี้แนบหลักฐานไม่ได้แล้ว');
-      await setLineSession(env.DB,lineUserId,'leave_evidence',{request_id:id,required:Number(row.evidence_required)===1});
-      return replyEvidencePrompt(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,row);
+      const id=Number(data.get('id')); const row=await env.DB.prepare("SELECT * FROM leave_requests WHERE id=?1 AND employee_id=?2 AND status IN ('pending','awaiting_evidence')").bind(id,Number(emp.id)).first(); if(!row) return replyLine(accessToken,event.replyToken,'คำขอนี้แนบหลักฐานไม่ได้แล้ว');
+      await setLineSession(env.DB,sessionKey,'leave_evidence',{request_id:id,required:Number(row.evidence_required)===1});
+      return replyEvidencePrompt(accessToken,event.replyToken,row);
     }
     if(action==='leave_approve'){
-      try{const result=await decideLeaveRequest(env,Number(data.get('id')),'approved',{actorType:'employee',actorEmployeeId:Number(emp.id),clientId:Number(emp.client_id),enforceApprover:true});return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('อนุมัติเรียบร้อยแล้ว',`คำขอ #LV-${String(result.id).padStart(4,'0')} ถูกอนุมัติแล้ว`,'success')]);}catch(e){return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,`❌ ${e.message}`);}
+      try{const result=await decideLeaveRequest(env,Number(data.get('id')),'approved',{actorType:'employee',actorEmployeeId:Number(emp.id),clientId:Number(emp.client_id),enforceApprover:true});return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('อนุมัติเรียบร้อยแล้ว',`คำขอ #LV-${String(result.id).padStart(4,'0')} ถูกอนุมัติแล้ว`,'success')]);}catch(e){return replyLine(accessToken,event.replyToken,`❌ ${e.message}`);}
     }
     if(action==='leave_reject'){
-      const id=Number(data.get('id')); const row=await env.DB.prepare("SELECT id FROM leave_requests WHERE id=?1 AND approver_employee_id=?2 AND status='pending'").bind(id,Number(emp.id)).first(); if(!row) return replyLine(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,'คำขอนี้ไม่ได้รอคุณอนุมัติแล้ว');
-      await setLineSession(env.DB,lineUserId,'leave_reject_reason',{request_id:id});
-      return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,event.replyToken,[buildSimpleNoticeFlex('ระบุเหตุผลที่ไม่อนุมัติ','พิมพ์เหตุผลส่งเป็นข้อความถัดไป เพื่อแจ้งกลับให้พนักงาน','coral')]);
+      const id=Number(data.get('id')); const row=await env.DB.prepare("SELECT id FROM leave_requests WHERE id=?1 AND approver_employee_id=?2 AND status='pending'").bind(id,Number(emp.id)).first(); if(!row) return replyLine(accessToken,event.replyToken,'คำขอนี้ไม่ได้รอคุณอนุมัติแล้ว');
+      await setLineSession(env.DB,sessionKey,'leave_reject_reason',{request_id:id});
+      return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ระบุเหตุผลที่ไม่อนุมัติ','พิมพ์เหตุผลส่งเป็นข้อความถัดไป เพื่อแจ้งกลับให้พนักงาน','coral')]);
     }
   }
 }
@@ -1496,7 +1595,8 @@ async function acceptPublicInvite(request, env, token) {
 
   let lineConnectUrl = null;
   try {
-    const bot = await getLineBotInfo(env.LINE_CHANNEL_ACCESS_TOKEN);
+    const lineCtx = await getEffectiveLineContextForClient(env, Number(invite.client_id));
+    const bot = lineCtx?.accessToken ? await getLineBotInfo(lineCtx.accessToken) : null;
     if (bot?.basicId) lineConnectUrl = `https://line.me/R/oaMessage/${encodeURIComponent(bot.basicId)}/?${encodeURIComponent(`JOIN ${lineToken}`)}`;
   } catch (error) {
     console.warn(JSON.stringify({ level: 'warn', event: 'line_bot_info_failed', message: String(error?.message || error) }));
@@ -1535,7 +1635,7 @@ async function getLineProfile(accessToken, userId) {
   return response.json();
 }
 
-async function linkLineJoinToken(db, accessToken, lineUserId, token) {
+async function linkLineJoinToken(db, accessToken, lineUserId, token, { providerScope='default', expectedClientId=null } = {}) {
   const tokenHash = await sha256Hex(token);
   const row = await db.prepare(`
     SELECT t.*, e.id AS employee_id,e.first_name,e.nickname,e.client_id,e.line_user_id,c.name AS company_name
@@ -1545,14 +1645,15 @@ async function linkLineJoinToken(db, accessToken, lineUserId, token) {
     WHERE t.token_hash=?1 AND t.used_at IS NULL
   `).bind(tokenHash).first();
   if (!row) return { ok:false, error:'ลิงก์เชื่อม LINE ไม่ถูกต้องหรือถูกใช้แล้ว' };
+  if (expectedClientId && Number(row.client_id) !== Number(expectedClientId)) return { ok:false, error:'ลิงก์นี้เป็นของคนละบริษัทกับ LINE Official Account นี้' };
   if (new Date(row.expires_at).getTime() <= Date.now()) return { ok:false, error:'ลิงก์เชื่อม LINE หมดอายุแล้ว กรุณาขอลิงก์เชิญใหม่จาก HR' };
-  const used = await db.prepare('SELECT id FROM employees WHERE line_user_id=?1').bind(lineUserId).first();
+  const used = await db.prepare("SELECT id FROM employees WHERE line_user_id=?1 AND COALESCE(line_provider_scope,'default')=?2").bind(lineUserId,providerScope).first();
   if (used && Number(used.id) !== Number(row.employee_id)) return { ok:false, error:'LINE นี้เชื่อมกับพนักงานคนอื่นอยู่แล้ว' };
 
   const profile = await getLineProfile(accessToken, lineUserId);
   await db.batch([
-    db.prepare(`UPDATE employees SET line_user_id=?1,line_display_name=?2,line_picture_url=?3,line_linked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?4`)
-      .bind(lineUserId, profile?.displayName || null, profile?.pictureUrl || null, Number(row.employee_id)),
+    db.prepare(`UPDATE employees SET line_user_id=?1,line_provider_scope=?2,line_display_name=?3,line_picture_url=?4,line_linked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?5`)
+      .bind(lineUserId, providerScope, profile?.displayName || null, profile?.pictureUrl || null, Number(row.employee_id)),
     db.prepare('UPDATE line_join_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1').bind(tokenHash),
   ]);
   await safeAudit(db, Number(row.client_id), 'line', lineUserId, 'employee.line_link_invite', 'employee', String(row.employee_id), null);
@@ -1567,20 +1668,25 @@ function canOverrideLeave(role) {
   return ['owner','hr_admin','hr'].includes(String(role || ''));
 }
 
-async function linkLineAccount(db, lineUserId, token) {
+function canManageIntegrations(role) {
+  return ['owner','hr_admin'].includes(String(role || ''));
+}
+
+async function linkLineAccount(db, lineUserId, token, { providerScope='default', expectedClientId=null, accessToken=null } = {}) {
   const row = await db.prepare(`
     SELECT t.*, e.first_name, e.nickname, e.client_id, c.name AS company_name
     FROM line_link_tokens t JOIN employees e ON e.id=t.employee_id JOIN clients c ON c.id=e.client_id
     WHERE t.token=?1 AND t.used_at IS NULL
   `).bind(token).first();
   if (!row) return { ok: false, error: 'รหัสไม่ถูกต้องหรือถูกใช้แล้ว' };
+  if (expectedClientId && Number(row.client_id) !== Number(expectedClientId)) return { ok:false, error:'รหัสนี้เป็นของคนละบริษัทกับ LINE Official Account นี้' };
   if (new Date(row.expires_at).getTime() < Date.now()) return { ok: false, error: 'รหัสหมดอายุแล้ว กรุณาขอรหัสใหม่จาก HR' };
 
-  const used = await db.prepare('SELECT id FROM employees WHERE line_user_id=?1').bind(lineUserId).first();
+  const used = await db.prepare("SELECT id FROM employees WHERE line_user_id=?1 AND COALESCE(line_provider_scope,'default')=?2").bind(lineUserId,providerScope).first();
   if (used && Number(used.id) !== Number(row.employee_id)) return { ok: false, error: 'LINE นี้เชื่อมกับพนักงานคนอื่นอยู่แล้ว' };
 
   await db.batch([
-    db.prepare('UPDATE employees SET line_user_id=?1, updated_at=CURRENT_TIMESTAMP WHERE id=?2').bind(lineUserId, Number(row.employee_id)),
+    db.prepare('UPDATE employees SET line_user_id=?1,line_provider_scope=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3').bind(lineUserId,providerScope,Number(row.employee_id)),
     db.prepare('UPDATE line_link_tokens SET used_at=CURRENT_TIMESTAMP WHERE token=?1').bind(token),
   ]);
   await audit(db, Number(row.client_id), 'line', lineUserId, 'employee.line_link', 'employee', String(row.employee_id), null);
@@ -1619,6 +1725,103 @@ async function ensureV050Schema(db){
   for(const [column,type] of [['payload_json','TEXT']]) await ensureColumn(db,'line_sessions',column,type);
   const leaveCols=[['policy_id','INTEGER'],['duration_days','REAL'],['day_part','TEXT'],['evidence_required','INTEGER'],['evidence_count','INTEGER'],['decision_reason','TEXT'],['decided_by_employee_id','INTEGER'],['decided_by_user_id','INTEGER'],['submitted_via','TEXT']];
   for(const [column,type] of leaveCols) await ensureColumn(db,'leave_requests',column,type);
+}
+
+async function ensureV060Ready(db){
+  const ready=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='line_integrations'").first();
+  if(!ready){
+    const statements=V060_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
+    for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement)){continue;}throw error;}}
+  }
+  await ensureColumn(db,'employees','line_provider_scope','TEXT');
+}
+
+function lineSessionKey(providerScope,lineUserId){return `${providerScope||'default'}:${lineUserId}`;}
+function integrationEncryptionKey(env){return env.NAKNA_INTEGRATION_ENCRYPTION_KEY || env.GOOGLE_TOKEN_ENCRYPTION_KEY || null;}
+function defaultLineContext(env){return env.LINE_CHANNEL_SECRET&&env.LINE_CHANNEL_ACCESS_TOKEN?{channelSecret:env.LINE_CHANNEL_SECRET,accessToken:env.LINE_CHANNEL_ACCESS_TOKEN,providerScope:'default',clientId:null,integrationId:null}:null;}
+
+async function decryptLineIntegrationCredentials(env,row){
+  const key=integrationEncryptionKey(env); if(!key) throw new Error('Integration encryption key is not configured');
+  const data=await decryptJson(row.encrypted_credentials,key);
+  if(!data?.channel_secret||!data?.access_token) throw new Error('LINE credentials are incomplete');
+  return data;
+}
+
+async function getWorkspaceLineIntegration(env,clientId,withCredentials=false){
+  if(!clientId)return null;
+  const row=await env.DB.prepare("SELECT * FROM line_integrations WHERE client_id=?1 AND status='connected'").bind(Number(clientId)).first();
+  if(!row)return null;
+  if(withCredentials)return {...row,credentials:await decryptLineIntegrationCredentials(env,row)};
+  return row;
+}
+
+async function getLineIntegrationByWebhookKey(env,webhookKey){
+  const row=await env.DB.prepare("SELECT * FROM line_integrations WHERE webhook_key=?1 AND status='connected'").bind(webhookKey).first();
+  if(!row)return null;
+  const credentials=await decryptLineIntegrationCredentials(env,row);
+  return {channelSecret:credentials.channel_secret,accessToken:credentials.access_token,providerScope:`integration:${row.id}`,clientId:Number(row.client_id),integrationId:Number(row.id),webhookKey:row.webhook_key};
+}
+
+async function getEffectiveLineContextForClient(env,clientId){
+  await ensureV060Ready(env.DB);
+  const row=await getWorkspaceLineIntegration(env,clientId,true);
+  if(row)return {channelSecret:row.credentials.channel_secret,accessToken:row.credentials.access_token,providerScope:`integration:${row.id}`,clientId:Number(clientId),integrationId:Number(row.id),webhookKey:row.webhook_key};
+  return defaultLineContext(env);
+}
+
+async function getAccessTokenForProviderScope(env,clientId,scope){
+  const normalized=scope||'default';
+  if(normalized==='default')return env.LINE_CHANNEL_ACCESS_TOKEN||null;
+  const match=String(normalized).match(/^integration:(\d+)$/); if(!match)return null;
+  const row=await env.DB.prepare("SELECT * FROM line_integrations WHERE id=?1 AND client_id=?2 AND status='connected'").bind(Number(match[1]),Number(clientId)).first();
+  if(!row)return null;
+  const creds=await decryptLineIntegrationCredentials(env,row); return creds.access_token;
+}
+
+function publicLineIntegration(row,live=null,includeWebhook=true){
+  return {id:Number(row.id),channel_id:row.channel_id||null,bot_user_id:row.bot_user_id||null,bot_basic_id:row.bot_basic_id||null,bot_display_name:row.bot_display_name||null,bot_picture_url:row.bot_picture_url||null,webhook_url:includeWebhook?row.webhook_url:null,webhook_active:live?Boolean(live.active):Boolean(Number(row.webhook_active)),status:row.status,last_test_at:row.last_test_at||null,last_error:row.last_error||null,connected_at:row.created_at};
+}
+
+async function setLineWebhookEndpoint(accessToken,endpoint){
+  const response=await fetch('https://api.line.me/v2/bot/channel/webhook/endpoint',{method:'PUT',headers:{authorization:`Bearer ${accessToken}`,'content-type':'application/json'},body:JSON.stringify({endpoint})});
+  if(!response.ok)throw new Error(`LINE webhook setup failed ${response.status}`);
+}
+async function getLineWebhookInfo(accessToken){
+  const response=await fetch('https://api.line.me/v2/bot/channel/webhook/endpoint',{headers:{authorization:`Bearer ${accessToken}`,'content-type':'application/json'}});
+  if(response.status===404)return {endpoint:null,active:false};
+  if(!response.ok)throw new Error(`LINE webhook info failed ${response.status}`); return response.json();
+}
+async function testLineWebhook(accessToken,endpoint){
+  const response=await fetch('https://api.line.me/v2/bot/channel/webhook/test',{method:'POST',headers:{authorization:`Bearer ${accessToken}`,'content-type':'application/json'},body:JSON.stringify(endpoint?{endpoint}:{})});
+  const data=await response.json().catch(()=>({})); if(!response.ok)throw new Error(`LINE webhook test failed ${response.status}`); return data;
+}
+
+async function saveWorkspaceLineIntegration(env,{clientId,userId,channelId,channelSecret,accessToken}){
+  const key=integrationEncryptionKey(env); if(!key)throw new Error('NAKNA_INTEGRATION_ENCRYPTION_KEY_OR_GOOGLE_TOKEN_ENCRYPTION_KEY_MISSING');
+  const bot=await getLineBotInfo(accessToken);
+  const duplicate=bot?.userId ? await env.DB.prepare("SELECT client_id FROM line_integrations WHERE bot_user_id=?1 AND client_id<>?2 AND status='connected'").bind(bot.userId,Number(clientId)).first() : null;
+  if(duplicate) throw new Error('LINE_OA_ALREADY_CONNECTED');
+  let existing=await env.DB.prepare('SELECT * FROM line_integrations WHERE client_id=?1').bind(Number(clientId)).first();
+  const webhookKey=existing?.webhook_key||randomToken(32);
+  const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
+  const webhookUrl=`${base}/webhooks/line/${webhookKey}`;
+  await setLineWebhookEndpoint(accessToken,webhookUrl);
+  const webhook=await getLineWebhookInfo(accessToken).catch(()=>({endpoint:webhookUrl,active:false}));
+  const encrypted=await encryptJson({channel_secret:channelSecret,access_token:accessToken},key);
+  await env.DB.prepare(`INSERT INTO line_integrations (client_id,channel_id,bot_user_id,bot_basic_id,bot_display_name,bot_picture_url,encrypted_credentials,webhook_key,webhook_url,webhook_active,status,last_test_at,last_error,connected_by_user_id)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'connected',CURRENT_TIMESTAMP,NULL,?11)
+    ON CONFLICT(client_id) DO UPDATE SET channel_id=excluded.channel_id,bot_user_id=excluded.bot_user_id,bot_basic_id=excluded.bot_basic_id,bot_display_name=excluded.bot_display_name,bot_picture_url=excluded.bot_picture_url,encrypted_credentials=excluded.encrypted_credentials,webhook_key=excluded.webhook_key,webhook_url=excluded.webhook_url,webhook_active=excluded.webhook_active,status='connected',last_test_at=CURRENT_TIMESTAMP,last_error=NULL,connected_by_user_id=excluded.connected_by_user_id,updated_at=CURRENT_TIMESTAMP`)
+    .bind(Number(clientId),channelId,bot.userId||null,bot.basicId||null,bot.displayName||null,bot.pictureUrl||null,encrypted,webhookKey,webhookUrl,webhook?.active?1:0,userId).run();
+  return env.DB.prepare('SELECT * FROM line_integrations WHERE client_id=?1').bind(Number(clientId)).first();
+}
+
+function safeLineIntegrationError(error){
+  const text=String(error?.message||error||'LINE integration failed');
+  if(text.includes('bot info failed 401'))return 'Channel Access Token ไม่ถูกต้อง หรือถูกยกเลิกแล้ว';
+  if(text.includes('LINE_OA_ALREADY_CONNECTED'))return 'LINE Official Account นี้ถูกเชื่อมกับ Workspace อื่นแล้ว';
+  if(text.includes('webhook setup failed'))return 'ตั้ง Webhook ที่ LINE ไม่สำเร็จ กรุณาตรวจ Channel Access Token';
+  if(text.includes('ENCRYPTION_KEY'))return 'ยังไม่มี Encryption Key สำหรับเก็บ LINE credentials';
+  return 'เชื่อม LINE Official Account ไม่สำเร็จ กรุณาตรวจข้อมูลแล้วลองใหม่';
 }
 
 async function ensureDefaultLeavePolicies(db,clientId){
@@ -1692,7 +1895,7 @@ async function createLeaveRequest(env,{clientId,employeeId,policyId,leaveType,st
 }
 
 async function getLeaveRequestDetail(db,id,clientId=null){
-  return db.prepare(`SELECT l.*,e.first_name,e.last_name,e.nickname,e.employee_code,e.line_user_id AS employee_line_user_id,lp.name AS leave_type_name,lp.code AS leave_policy_code,lp.is_unlimited,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,ap.nickname AS approver_nickname,ap.line_user_id AS approver_line_user_id,(SELECT COUNT(*) FROM leave_request_evidence ev WHERE ev.leave_request_id=l.id) AS evidence_count FROM leave_requests l JOIN employees e ON e.id=l.employee_id LEFT JOIN leave_policies lp ON lp.id=l.policy_id LEFT JOIN employees ap ON ap.id=l.approver_employee_id WHERE l.id=?1 ${clientId?'AND l.client_id=?2':''}`).bind(...(clientId?[id,clientId]:[id])).first();
+  return db.prepare(`SELECT l.*,e.first_name,e.last_name,e.nickname,e.employee_code,e.line_user_id AS employee_line_user_id,e.line_provider_scope AS employee_line_provider_scope,lp.name AS leave_type_name,lp.code AS leave_policy_code,lp.is_unlimited,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,ap.nickname AS approver_nickname,ap.line_user_id AS approver_line_user_id,ap.line_provider_scope AS approver_line_provider_scope,(SELECT COUNT(*) FROM leave_request_evidence ev WHERE ev.leave_request_id=l.id) AS evidence_count FROM leave_requests l JOIN employees e ON e.id=l.employee_id LEFT JOIN leave_policies lp ON lp.id=l.policy_id LEFT JOIN employees ap ON ap.id=l.approver_employee_id WHERE l.id=?1 ${clientId?'AND l.client_id=?2':''}`).bind(...(clientId?[id,clientId]:[id])).first();
 }
 
 async function decideLeaveRequest(env,id,status,{actorType,actorEmployeeId=null,actorUserId=null,reason='',clientId=null,enforceApprover=false}={}){
@@ -1720,10 +1923,10 @@ async function syncApprovedLeaveToAttendance(db,row){
   }
 }
 
-async function storeLineLeaveEvidence(env,{requestId,employeeId,clientId,message}){
+async function storeLineLeaveEvidence(env,{requestId,employeeId,clientId,message,accessToken}){
   if(!env.EVIDENCE_BUCKET) throw httpError('Evidence storage ยังไม่ได้เชื่อม R2',503);
   const row=await env.DB.prepare("SELECT * FROM leave_requests WHERE id=?1 AND employee_id=?2 AND client_id=?3 AND status IN ('pending','awaiting_evidence')").bind(requestId,employeeId,clientId).first(); if(!row) throw httpError('ไม่พบคำขอที่รอหลักฐาน',404);
-  const response=await fetch(`https://api-data.line.me/v2/bot/message/${encodeURIComponent(message.id)}/content`,{headers:{authorization:`Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`}}); if(!response.ok) throw httpError(`LINE content ${response.status}`,502);
+  const response=await fetch(`https://api-data.line.me/v2/bot/message/${encodeURIComponent(message.id)}/content`,{headers:{authorization:`Bearer ${accessToken}`}}); if(!response.ok) throw httpError(`LINE content ${response.status}`,502);
   const contentType=response.headers.get('content-type')|| (message.type==='image'?'image/jpeg':'application/octet-stream');
   const size=Number(response.headers.get('content-length')||message.fileSize||0); if(size>10*1024*1024) throw httpError('ไฟล์ใหญ่เกิน 10 MB',413);
   const ext=contentType.includes('png')?'png':contentType.includes('jpeg')||contentType.includes('jpg')?'jpg':contentType.includes('pdf')?'pdf':'bin';
@@ -1755,19 +1958,23 @@ async function notifyLeaveApprover(env,requestId){
   const profile=await getEmployeeLeaveProfile(env.DB,Number(row.employee_id),Number(row.client_id),Number(String(row.start_date).slice(0,4)));
   const balance=profile.balances.find(x=>Number(x.id)===Number(row.policy_id));
   let evidenceUrl=null; if(Number(row.evidence_count)>0) evidenceUrl=await createEvidenceShareUrl(env,requestId);
-  await pushLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,row.approver_line_user_id,[buildLeaveApprovalFlex({...row,balance,evidence_url:evidenceUrl})]);
+  const token=await getAccessTokenForProviderScope(env,Number(row.client_id),row.approver_line_provider_scope); if(!token)return;
+  await pushLineMessages(token,row.approver_line_user_id,[buildLeaveApprovalFlex({...row,balance,evidence_url:evidenceUrl})]);
 }
 
 async function notifyEmployeeEvidenceRequired(env,requestId){
   const row=await getLeaveRequestDetail(env.DB,requestId); if(!row?.employee_line_user_id) return;
-  await setLineSession(env.DB,row.employee_line_user_id,'leave_evidence',{request_id:requestId,required:true});
-  await pushLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,row.employee_line_user_id,[{type:'text',text:`📎 คำขอ ${row.leave_type_name||row.leave_type} ${row.duration_days} วัน ต้องแนบหลักฐานตาม Policy\nส่งรูปหรือไฟล์ในแชตนี้ได้เลย`,quickReply:{items:[{type:'action',action:{type:'cameraRoll',label:'เลือกรูป'}},{type:'action',action:{type:'camera',label:'ถ่ายรูป'}}]}}]);
+  const scope=row.employee_line_provider_scope||'default';
+  const token=await getAccessTokenForProviderScope(env,Number(row.client_id),scope); if(!token)return;
+  await setLineSession(env.DB,lineSessionKey(scope,row.employee_line_user_id),'leave_evidence',{request_id:requestId,required:true});
+  await pushLineMessages(token,row.employee_line_user_id,[{type:'text',text:`📎 คำขอ ${row.leave_type_name||row.leave_type} ${row.duration_days} วัน ต้องแนบหลักฐานตาม Policy\nส่งรูปหรือไฟล์ในแชตนี้ได้เลย`,quickReply:{items:[{type:'action',action:{type:'cameraRoll',label:'เลือกรูป'}},{type:'action',action:{type:'camera',label:'ถ่ายรูป'}}]}}]);
 }
 
 async function notifyLeaveDecision(env,row){
   if(!row?.employee_line_user_id) return;
   const approved=row.status==='approved';
-  await pushLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,row.employee_line_user_id,[buildLeaveDecisionFlex(row,approved)]);
+  const token=await getAccessTokenForProviderScope(env,Number(row.client_id),row.employee_line_provider_scope); if(!token)return;
+  await pushLineMessages(token,row.employee_line_user_id,[buildLeaveDecisionFlex(row,approved)]);
 }
 
 const LINE_CI = {
@@ -1892,7 +2099,7 @@ function buildEmployeeStatusFlex(emp,a){
   }
   return {type:'flex',altText:'สถานะวันนี้',contents:lineBubble({eyebrow:'ATTENDANCE',title:'สถานะวันนี้',subtitle:emp.nickname||emp.first_name,status,statusTone:tone,body:[lineInfoCard(rows,tone)]})};
 }
-async function sendLeaveTypeMenu(env,replyToken,emp){
+async function sendLeaveTypeMenu(env,replyToken,emp,accessToken){
   await ensureDefaultLeavePolicies(env.DB,Number(emp.client_id));
   const policies=(await env.DB.prepare('SELECT * FROM leave_policies WHERE client_id=?1 AND is_active=1 ORDER BY sort_order,name').bind(Number(emp.client_id)).all()).results||[];
   const profile=await getEmployeeLeaveProfile(env.DB,Number(emp.id),Number(emp.client_id),new Date().getFullYear());
@@ -1903,11 +2110,11 @@ async function sendLeaveTypeMenu(env,replyToken,emp){
     const suffix=balance?` · ${balance}`:'';
     return lineSecondaryButton(`${leavePolicyIcon(p)}  ${p.name}${suffix}`,{type:'postback',label:p.name,data:`action=leave_type&policy_id=${p.id}`},LINE_CI.mintSoft);
   });
-  return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,replyToken,[{type:'flex',altText:'เลือกประเภทการลา',contents:lineBubble({
+  return replyLineMessages(accessToken,replyToken,[{type:'flex',altText:'เลือกประเภทการลา',contents:lineBubble({
     eyebrow:'LEAVE',title:'ขอลางาน',subtitle:'เลือกประเภทการลาที่ต้องการ',body:buttons.length?buttons:[lineInfoCard([lineText('ยังไม่มีประเภทการลาที่เปิดใช้งาน','sm',LINE_CI.muted)],'neutral')]
   })}]);
 }
-async function sendLeaveBalance(env,replyToken,emp){
+async function sendLeaveBalance(env,replyToken,emp,accessToken){
   const profile=await getEmployeeLeaveProfile(env.DB,Number(emp.id),Number(emp.client_id),new Date().getFullYear());
   const rows=(profile.balances||[]).map(b=>{
     const remaining=Number(b.is_unlimited)?'ไม่จำกัด':`${Number(b.remaining_days).toFixed(Number(b.remaining_days)%1?1:0)} วัน`;
@@ -1917,7 +2124,7 @@ async function sendLeaveBalance(env,replyToken,emp){
       !Number(b.is_unlimited)?lineText(`ใช้แล้ว ${Number(b.used_days||0).toFixed(1).replace('.0','')} · รออนุมัติ ${Number(b.pending_days||0).toFixed(1).replace('.0','')} วัน`,'xxs',LINE_CI.muted):lineText('สิทธิ์ไม่จำกัดตามนโยบายบริษัท','xxs',LINE_CI.muted)
     ],'neutral');
   });
-  return replyLineMessages(env.LINE_CHANNEL_ACCESS_TOKEN,replyToken,[{type:'flex',altText:'สิทธิ์ลาคงเหลือ',contents:lineBubble({eyebrow:'LEAVE BALANCE',title:`สิทธิ์ลา ${profile.year}`,subtitle:emp.nickname||emp.first_name,body:rows})}]);
+  return replyLineMessages(accessToken,replyToken,[{type:'flex',altText:'สิทธิ์ลาคงเหลือ',contents:lineBubble({eyebrow:'LEAVE BALANCE',title:`สิทธิ์ลา ${profile.year}`,subtitle:emp.nickname||emp.first_name,body:rows})}]);
 }
 function buildDatePickerFlex(title,action,policyId,start=null){
   const data=`action=${action}&policy_id=${policyId}${start?`&start=${start}`:''}`;
@@ -2003,15 +2210,10 @@ async function replyLineMessages(accessToken,replyToken,messages){const response
 async function pushLineMessages(accessToken,to,messages){if(!accessToken||!to)return;const response=await fetch('https://api.line.me/v2/bot/message/push',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`},body:JSON.stringify({to,messages})});if(!response.ok)console.error(JSON.stringify({level:'error',event:'line_push_messages_failed',status:response.status,body:await response.text()}));}
 
 async function sendDailyHrBrief(env) {
-  if (!env.LINE_CHANNEL_ACCESS_TOKEN) {
-    console.log(JSON.stringify({ level: 'warn', event: 'daily_hr_brief_skipped', reason: 'LINE access token missing' }));
-    return;
-  }
-
   const clients = await env.DB.prepare('SELECT * FROM clients ORDER BY id').all();
   for (const client of clients.results || []) {
     const hrUsers = await env.DB.prepare(`
-      SELECT DISTINCT e.line_user_id
+      SELECT DISTINCT e.line_user_id,e.line_provider_scope
       FROM employees e
       LEFT JOIN departments d ON d.id=e.department_id
       LEFT JOIN positions p ON p.id=e.position_id
@@ -2055,7 +2257,8 @@ async function sendDailyHrBrief(env) {
 
     const text = lines.join('\n').slice(0, 4900);
     for (const hr of hrUsers.results) {
-      await pushLine(env.LINE_CHANNEL_ACCESS_TOKEN, hr.line_user_id, text);
+      const token=await getAccessTokenForProviderScope(env,Number(client.id),hr.line_provider_scope);
+      if(token) await pushLine(token, hr.line_user_id, text);
     }
   }
 }
@@ -2146,6 +2349,7 @@ async function ensureCoreSchema(db) {
   for (const [column,type] of employeeColumns) await ensureColumn(db,'employees',column,type);
   for (const [column,type] of attendanceColumns) await ensureColumn(db,'attendance',column,type);
   await ensureV050Schema(db);
+  await ensureV060Ready(db);
   console.log(JSON.stringify({ level: 'info', event: 'core_schema_repair_complete' }));
 }
 
