@@ -1424,7 +1424,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.3', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.2', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1607,7 +1607,7 @@ async function handleApi(request, env, url, auth, ctx) {
     if (!['owner','hr_admin','hr'].includes(String(auth.role||''))) return json({ error:'ไม่มีสิทธิ์จบการตั้งค่า' },403);
     await ensureV100P7Ready(env.DB);
     const google=await env.DB.prepare(`SELECT id FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
-    if(!google) return json({error:'กรุณาเชื่อม Google Workspace ก่อนเริ่มใช้งาน'},409);
+    if(!google) return json({error:'กรุณาเชื่อม Google ก่อนเริ่มใช้งาน'},409);
     await env.DB.prepare(`UPDATE company_onboarding SET current_step='complete',completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE client_id=?1`).bind(clientId).run();
     await ensureP7CompanyDefaults(env.DB,clientId,auth.user.id);
     const status=await getWebOnboardingStatus(env,auth);
@@ -1674,7 +1674,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.1', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.2', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -1756,7 +1756,7 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/integrations/google-workspace' && method === 'DELETE') {
-    if (!canManageIntegrations(auth.role)) return json({ error: 'เฉพาะ Owner หรือ HR Admin ที่ยกเลิก Google Workspace ได้' }, 403);
+    if (!canManageIntegrations(auth.role)) return json({ error: 'เฉพาะ Owner หรือ HR Admin ที่ยกเลิก Google ได้' }, 403);
     await ensureV063Ready(env.DB);
     await env.DB.prepare('DELETE FROM google_workspace_integrations WHERE client_id=?1').bind(clientId).run();
     await safeAudit(env.DB, clientId, 'user', String(auth.user.id), 'google_workspace.disconnect', 'google_workspace', String(clientId), null);
@@ -1764,10 +1764,10 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/integrations/google-workspace/sync' && method === 'POST') {
-    if (!canManageIntegrations(auth.role)) return json({ error: 'เฉพาะ Owner หรือ HR Admin ที่สั่ง Sync Google Workspace ได้' }, 403);
+    if (!canManageIntegrations(auth.role)) return json({ error: 'เฉพาะ Owner หรือ HR Admin ที่สั่ง Sync Google ได้' }, 403);
     await ensureV063Ready(env.DB);
     const row = await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
-    if (!row) return json({ error: 'ยังไม่ได้เชื่อม Google Workspace' }, 404);
+    if (!row) return json({ error: 'ยังไม่ได้เชื่อม Google' }, 404);
     try {
       const accessToken = await getWorkspaceGoogleAccessToken(env, row);
       const result = await syncWorkspaceSnapshotToSheet(env, clientId, row, accessToken);
@@ -1793,16 +1793,17 @@ async function handleApi(request, env, url, auth, ctx) {
     await ensureV060Ready(env.DB);
     const integration = await getWorkspaceLineIntegration(env, clientId, false);
     if (integration) {
-      // P7.3 Performance: return cached DB status immediately.
-      // Live LINE webhook verification remains available through the explicit Test button.
-      return json({ mode: 'dedicated', connected: true, integration: publicLineIntegration(integration, null, canManageIntegrations(auth.role)) });
+      let live = null;
+      try {
+        const creds = await decryptLineIntegrationCredentials(env, integration);
+        live = await getLineWebhookInfo(creds.access_token);
+        if (live) await env.DB.prepare('UPDATE line_integrations SET webhook_active=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2').bind(live.active ? 1 : 0, Number(integration.id)).run();
+      } catch {}
+      return json({ mode: 'dedicated', connected: true, integration: publicLineIntegration(integration, live, canManageIntegrations(auth.role)) });
     }
-    return json({
-      mode: 'nakna_default',
-      connected: false,
-      default_available: Boolean(env.LINE_CHANNEL_ACCESS_TOKEN && env.LINE_CHANNEL_SECRET),
-      bot: env.LINE_CHANNEL_ACCESS_TOKEN ? { basic_id: null, display_name: 'นากนะ' } : null
-    });
+    let defaultBot = null;
+    if (env.LINE_CHANNEL_ACCESS_TOKEN) { try { defaultBot = await getLineBotInfo(env.LINE_CHANNEL_ACCESS_TOKEN); } catch {} }
+    return json({ mode: 'nakna_default', connected: false, default_available: Boolean(env.LINE_CHANNEL_ACCESS_TOKEN && env.LINE_CHANNEL_SECRET), bot: defaultBot ? { basic_id: defaultBot.basicId || null, display_name: defaultBot.displayName || 'นากนะ' } : null });
   }
 
   if (path === '/api/integrations/line' && method === 'PUT') {
@@ -1952,7 +1953,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
   const hireCandidateMatch=path.match(/^\/api\/candidates\/(\d+)\/hire$/);
   if(hireCandidateMatch && method==='POST'){
-    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์รับพนักงาน'},403); const candidate=await env.DB.prepare('SELECT * FROM candidates WHERE id=?1 AND client_id=?2').bind(Number(hireCandidateMatch[1]),clientId).first(); if(!candidate)return json({error:'ไม่พบผู้สมัคร'},404); const body=await safeJson(request); const code=String(body.employee_code||`EMP-${String(Date.now()).slice(-6)}`); const start=body.start_date||dateInBangkok();
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์รับพนักงาน'},403); const candidate=await env.DB.prepare('SELECT * FROM candidates WHERE id=?1 AND client_id=?2').bind(Number(hireCandidateMatch[1]),clientId).first(); if(!candidate)return json({error:'ไม่พบผู้สมัคร'},404); const body=await safeJson(request); const code=String(body.employee_code||'').trim() || await generateEmployeeCode(env.DB,clientId); const start=body.start_date||dateInBangkok();
     await assertSeatCapacity(env.DB,clientId,1); const result=await env.DB.prepare(`INSERT INTO employees(client_id,employee_code,first_name,last_name,nickname,email,phone,start_date,probation_end_date,department_id,position_id,employment_type,status,people_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'active','probation')`).bind(clientId,code,candidate.first_name,candidate.last_name,candidate.nickname,candidate.email,candidate.phone,start,body.probation_end_date||null,body.department_id||null,body.position_id||null,body.employment_type||'full_time').run(); await env.DB.prepare(`UPDATE candidates SET stage='hired',updated_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(candidate.id)).run(); await autoAssignLearningForEmployee(env.DB,clientId,Number(result.meta.last_row_id),Number(auth.user.id)); return json({ok:true,employee_id:result.meta.last_row_id},201);
   }
 
@@ -1982,8 +1983,9 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/employees' && method === 'POST') {
     const body = await safeJson(request);
-    const required = ['employee_code', 'first_name', 'last_name', 'start_date'];
+    const required = ['first_name', 'last_name', 'start_date'];
     for (const key of required) if (!body[key]) return json({ error: `Missing ${key}` }, 400);
+    const employeeCode = String(body.employee_code || '').trim() || await generateEmployeeCode(env.DB, clientId);
     await assertSeatCapacity(env.DB,clientId,1);
 
     const result = await env.DB.prepare(`
@@ -1993,14 +1995,14 @@ async function handleApi(request, env, url, auth, ctx) {
         department_id, position_id, employment_type, status, people_status
       ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,'active',?15)
     `).bind(
-      clientId, body.employee_code, body.first_name, body.last_name, body.nickname || null,
+      clientId, employeeCode, body.first_name, body.last_name, body.nickname || null,
       body.email || null, body.phone || null, body.birth_date || null, body.start_date,
       body.probation_end_date || null, body.contract_end_date || null,
       body.department_id || null, body.position_id || null, body.employment_type || 'full_time',
       body.people_status || (body.probation_end_date ? 'probation' : 'employee')
     ).run();
 
-    await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.create', 'employee', String(result.meta.last_row_id), body);
+    await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.create', 'employee', String(result.meta.last_row_id), { ...body, employee_code: employeeCode });
     await autoAssignLearningForEmployee(env.DB, clientId, Number(result.meta.last_row_id), Number(auth.user.id));
     return json({ ok: true, id: result.meta.last_row_id }, 201);
   }
@@ -2446,7 +2448,7 @@ async function handleApi(request, env, url, auth, ctx) {
   if(payrollPublishMatch && method==='POST'){
     if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ Publish Payroll'},403); const id=Number(payrollPublishMatch[1]);
     const period=await env.DB.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(period.status!=='locked')return json({error:'ต้อง Lock Payroll ก่อน Publish'},409);
-    const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first(); if(!workspace?.drive_folder_id)return json({error:'กรุณาเชื่อม Google Workspace ก่อน Publish Payslip'},409);
+    const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first(); if(!workspace?.drive_folder_id)return json({error:'กรุณาเชื่อม Google ก่อน Publish Payslip'},409);
     await env.DB.prepare(`UPDATE payroll_periods SET status='published',published_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
     await env.DB.prepare(`UPDATE payroll_items SET status='published',updated_at=CURRENT_TIMESTAMP WHERE period_id=?1`).bind(id).run();
     await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.publish','payroll_period',String(id),null);
@@ -2517,7 +2519,7 @@ async function handleApi(request, env, url, auth, ctx) {
     await ensureV100P4Ready(env.DB); const moduleId=Number(moduleMediaMatch[1]);
     const module=await env.DB.prepare(`SELECT m.*,c.title AS course_title FROM learning_modules m JOIN learning_courses c ON c.id=m.course_id WHERE m.id=?1 AND m.client_id=?2`).bind(moduleId,clientId).first(); if(!module)return json({error:'ไม่พบบทเรียน'},404);
     const form=await request.formData(); const file=form.get('file'); if(!(file instanceof File))return json({error:'กรุณาเลือกไฟล์'},400); if(file.size>250*1024*1024)return json({error:'ไฟล์ใหญ่เกิน 250 MB'},413);
-    const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first(); if(!workspace?.drive_folder_id)return json({error:'กรุณาเชื่อม Google Workspace ก่อนอัปโหลดสื่อ'},409);
+    const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first(); if(!workspace?.drive_folder_id)return json({error:'กรุณาเชื่อม Google ก่อนอัปโหลดสื่อ'},409);
     const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const trainingRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Onboarding Training'); const courseFolder=await ensureDriveChildFolder(accessToken,trainingRoot,`Course-${module.course_id} - ${String(module.course_title).slice(0,60)}`); const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:courseFolder,fileName:file.name,contentType:file.type||'application/octet-stream',bytes:new Uint8Array(await file.arrayBuffer())});
     await env.DB.prepare(`UPDATE learning_modules SET drive_file_id=?1,drive_url=?2,file_name=?3,content_type=?4,updated_at=CURRENT_TIMESTAMP WHERE id=?5 AND client_id=?6`).bind(uploaded.id,uploaded.webViewLink||null,file.name,file.type||'application/octet-stream',moduleId,clientId).run();
     return json({ok:true,drive_file_id:uploaded.id,drive_url:uploaded.webViewLink||null});
@@ -3763,7 +3765,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.1',
+    version:'1.0-P7.2',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -3846,7 +3848,7 @@ function buildBusinessWebSetupFlex({businesses=[],linkedEmployee=null,setupUrl,d
   return {type:'flex',altText:'ตั้งค่าธุรกิจ Nakna HR บนเว็บ',contents:lineBubble({
     eyebrow:'NAKNA · BUSINESS SETUP',
     title:hasBusiness?'จัดการธุรกิจของคุณ':'เชื่อมธุรกิจกับนากนะ',
-    subtitle:'LINE → Web Setup → Google Workspace → HR Dashboard',
+    subtitle:'LINE → Web Setup → Google → HR Dashboard',
     status:hasBusiness?'Owner':'30-day Trial',statusTone:'success',body,footer
   })};
 }
@@ -4032,7 +4034,7 @@ function buildPayslipReadyFlex(employee,period,netPay,shareUrl){
 }
 
 async function publishPayrollPeriod(env,clientId,periodId){
-  await ensureV100P3Ready(env.DB); const db=env.DB; const detail=await getPayrollPeriodDetail(db,clientId,periodId); if(!detail.period)throw new Error('Payroll period not found'); const client=await getClient(db,clientId); const workspace=await db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(); if(!workspace)throw new Error('Google Workspace not connected');
+  await ensureV100P3Ready(env.DB); const db=env.DB; const detail=await getPayrollPeriodDetail(db,clientId,periodId); if(!detail.period)throw new Error('Payroll period not found'); const client=await getClient(db,clientId); const workspace=await db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(); if(!workspace)throw new Error('Google not connected');
   const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const fontBytes=await fetchNaknaPdfFont(env); const payrollRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Payroll'); const periodFolder=await ensureDriveChildFolder(accessToken,payrollRoot,detail.period.period_key); const lineCtx=await getEffectiveLineContextForClient(env,clientId); const canEmail=String(workspace.scopes||'').includes('gmail.send');
   for(const item of detail.items){
     try{
@@ -4053,7 +4055,7 @@ async function serveSharedPayrollDocument(env,token){
 }
 
 async function generateEmployeeCertificate(env,clientId,employeeId,type,userId,note){
-  const db=env.DB; const [client,employee,profile,workspace]=await Promise.all([getClient(db,clientId),db.prepare(`SELECT e.*,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.id=?1 AND e.client_id=?2`).bind(Number(employeeId),Number(clientId)).first(),db.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1').bind(Number(employeeId)).first(),db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first()]); if(!employee)throw httpError('ไม่พบพนักงาน',404); if(!workspace?.drive_folder_id)throw httpError('กรุณาเชื่อม Google Workspace ก่อนออกเอกสาร',409); const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const fontBytes=await fetchNaknaPdfFont(env); const pdf=await PDFDocument.create(); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(fontBytes,{subset:true}); const page=pdf.addPage([595.28,841.89]); const dark=rgb(18/255,60/255,74/255),teal=rgb(22/255,125/255,127/255),muted=rgb(107/255,120/255,122/255); const title=type==='salary_certificate'?'หนังสือรับรองเงินเดือน':'หนังสือรับรองการทำงาน'; page.drawText('NAKNA HR',{x:48,y:790,size:10,font,color:teal}); page.drawText(title,{x:48,y:748,size:22,font,color:dark}); page.drawText(client.name||'',{x:48,y:722,size:10,font,color:muted}); const name=`${employee.first_name} ${employee.last_name}`; const salary=Number(profile?.base_salary||0).toLocaleString('th-TH',{minimumFractionDigits:2}); const body=type==='salary_certificate'?`ขอรับรองว่า ${name} รหัสพนักงาน ${employee.employee_code} ปฏิบัติงานในตำแหน่ง ${employee.position_name||'-'} แผนก ${employee.department_name||'-'} และมีเงินเดือนประจำ ${salary} บาทต่อเดือน`:`ขอรับรองว่า ${name} รหัสพนักงาน ${employee.employee_code} ปฏิบัติงานกับ ${client.name} ตั้งแต่วันที่ ${employee.start_date||'-'} ในตำแหน่ง ${employee.position_name||'-'} แผนก ${employee.department_name||'-'}`; const lines=wrapTextSimple(body,78); let y=660; for(const line of lines){page.drawText(line,{x:58,y,size:11,font,color:dark});y-=24;} if(note){y-=15;for(const line of wrapTextSimple(`หมายเหตุ: ${note}`,75)){page.drawText(line,{x:58,y,size:9,font,color:muted});y-=20;}} page.drawText(`ออกเอกสารวันที่ ${dateInBangkok()}`,{x:58,y:140,size:9,font,color:muted}); page.drawText('เอกสารออกโดยระบบ Nakna HR',{x:58,y:118,size:8,font,color:muted}); const bytes=new Uint8Array(await pdf.save()); const docsRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Employee Documents'); const empFolder=await ensureDriveChildFolder(accessToken,docsRoot,`${employee.employee_code} - ${employee.nickname||employee.first_name}`); const fileName=`${type}-${employee.employee_code}-${dateInBangkok()}.pdf`; const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:empFolder,fileName,contentType:'application/pdf',bytes}); const result=await db.prepare(`INSERT INTO employee_documents (client_id,employee_id,document_type,title,file_name,drive_file_id,drive_url,content_type,document_date,visibility,note,created_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,'application/pdf',?8,'employee',?9,?10)`).bind(Number(clientId),Number(employeeId),type,title,fileName,uploaded.id,uploaded.webViewLink||null,dateInBangkok(),note||null,Number(userId)).run(); return {id:Number(result.meta.last_row_id),title,file_name:fileName,drive_url:uploaded.webViewLink||null};
+  const db=env.DB; const [client,employee,profile,workspace]=await Promise.all([getClient(db,clientId),db.prepare(`SELECT e.*,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.id=?1 AND e.client_id=?2`).bind(Number(employeeId),Number(clientId)).first(),db.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1').bind(Number(employeeId)).first(),db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first()]); if(!employee)throw httpError('ไม่พบพนักงาน',404); if(!workspace?.drive_folder_id)throw httpError('กรุณาเชื่อม Google ก่อนออกเอกสาร',409); const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const fontBytes=await fetchNaknaPdfFont(env); const pdf=await PDFDocument.create(); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(fontBytes,{subset:true}); const page=pdf.addPage([595.28,841.89]); const dark=rgb(18/255,60/255,74/255),teal=rgb(22/255,125/255,127/255),muted=rgb(107/255,120/255,122/255); const title=type==='salary_certificate'?'หนังสือรับรองเงินเดือน':'หนังสือรับรองการทำงาน'; page.drawText('NAKNA HR',{x:48,y:790,size:10,font,color:teal}); page.drawText(title,{x:48,y:748,size:22,font,color:dark}); page.drawText(client.name||'',{x:48,y:722,size:10,font,color:muted}); const name=`${employee.first_name} ${employee.last_name}`; const salary=Number(profile?.base_salary||0).toLocaleString('th-TH',{minimumFractionDigits:2}); const body=type==='salary_certificate'?`ขอรับรองว่า ${name} รหัสพนักงาน ${employee.employee_code} ปฏิบัติงานในตำแหน่ง ${employee.position_name||'-'} แผนก ${employee.department_name||'-'} และมีเงินเดือนประจำ ${salary} บาทต่อเดือน`:`ขอรับรองว่า ${name} รหัสพนักงาน ${employee.employee_code} ปฏิบัติงานกับ ${client.name} ตั้งแต่วันที่ ${employee.start_date||'-'} ในตำแหน่ง ${employee.position_name||'-'} แผนก ${employee.department_name||'-'}`; const lines=wrapTextSimple(body,78); let y=660; for(const line of lines){page.drawText(line,{x:58,y,size:11,font,color:dark});y-=24;} if(note){y-=15;for(const line of wrapTextSimple(`หมายเหตุ: ${note}`,75)){page.drawText(line,{x:58,y,size:9,font,color:muted});y-=20;}} page.drawText(`ออกเอกสารวันที่ ${dateInBangkok()}`,{x:58,y:140,size:9,font,color:muted}); page.drawText('เอกสารออกโดยระบบ Nakna HR',{x:58,y:118,size:8,font,color:muted}); const bytes=new Uint8Array(await pdf.save()); const docsRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Employee Documents'); const empFolder=await ensureDriveChildFolder(accessToken,docsRoot,`${employee.employee_code} - ${employee.nickname||employee.first_name}`); const fileName=`${type}-${employee.employee_code}-${dateInBangkok()}.pdf`; const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:empFolder,fileName,contentType:'application/pdf',bytes}); const result=await db.prepare(`INSERT INTO employee_documents (client_id,employee_id,document_type,title,file_name,drive_file_id,drive_url,content_type,document_date,visibility,note,created_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,'application/pdf',?8,'employee',?9,?10)`).bind(Number(clientId),Number(employeeId),type,title,fileName,uploaded.id,uploaded.webViewLink||null,dateInBangkok(),note||null,Number(userId)).run(); return {id:Number(result.meta.last_row_id),title,file_name:fileName,drive_url:uploaded.webViewLink||null};
 }
 
 function wrapTextSimple(text,maxChars){const words=String(text||'').split(/\s+/);const lines=[];let line='';for(const word of words){if((line+' '+word).trim().length>maxChars&&line){lines.push(line);line=word;}else line=(line+' '+word).trim();}if(line)lines.push(line);return lines;}
@@ -5807,8 +5809,8 @@ async function syncAllRecruitmentGmail(env){
 
 function safeRecruitmentGmailError(error){
   const text=String(error?.message||error||'');
-  if(text.includes('GOOGLE_WORKSPACE_REQUIRED'))return 'กรุณาเชื่อม Google Workspace ก่อน';
-  if(/401|invalid_grant|refresh/i.test(text))return 'สิทธิ์ Google หมดอายุ กรุณาเชื่อม Google Workspace ใหม่';
+  if(text.includes('GOOGLE_WORKSPACE_REQUIRED'))return 'กรุณาเชื่อม Google ก่อน';
+  if(/401|invalid_grant|refresh/i.test(text))return 'สิทธิ์ Google หมดอายุ กรุณาเชื่อม Google ใหม่';
   if(/gmail/i.test(text))return 'อ่าน Gmail ไม่สำเร็จ กรุณาตรวจ Gmail API และสิทธิ์ OAuth';
   return 'Sync Gmail ผู้สมัครไม่สำเร็จ กรุณาลองใหม่';
 }
@@ -6203,7 +6205,7 @@ async function syncWorkspaceSnapshotToSheet(env, clientId, integration, accessTo
 function columnLetter(count){ let n=Number(count)||1,s=''; while(n>0){n--;s=String.fromCharCode(65+(n%26))+s;n=Math.floor(n/26);} return s; }
 function publicGoogleWorkspaceIntegration(row){return {email:row.email,scopes:row.scopes,gmail_enabled:Boolean(Number(row.gmail_enabled)),drive_enabled:Boolean(Number(row.drive_enabled)),sheets_enabled:Boolean(Number(row.sheets_enabled)),drive_folder_id:row.drive_folder_id,leave_evidence_folder_id:row.leave_evidence_folder_id,spreadsheet_id:row.spreadsheet_id,drive_url:row.drive_folder_id?`https://drive.google.com/drive/folders/${row.drive_folder_id}`:null,spreadsheet_url:row.spreadsheet_id?`https://docs.google.com/spreadsheets/d/${row.spreadsheet_id}/edit`:null,last_sync_at:row.last_sync_at,last_error:row.last_error,connected_at:row.connected_at,updated_at:row.updated_at};}
 function safeGoogleWorkspaceErrorCode(error){const t=String(error?.message||error);if(/access_denied/i.test(t))return'access_denied';if(/refresh token/i.test(t))return'refresh_token';if(/Drive API|drive\/v3/i.test(t))return'drive_api';if(/sheets.googleapis/i.test(t))return'sheets_api';if(/gmail/i.test(t))return'gmail_api';return'connection_failed';}
-function safeGoogleWorkspaceError(error){const code=safeGoogleWorkspaceErrorCode(error);return ({drive_api:'เชื่อม Google Drive ไม่สำเร็จ กรุณาตรวจว่าเปิด Drive API แล้ว',sheets_api:'เชื่อม Google Sheets ไม่สำเร็จ กรุณาตรวจว่าเปิด Sheets API แล้ว',gmail_api:'เชื่อม Gmail ไม่สำเร็จ กรุณาตรวจว่าเปิด Gmail API แล้ว',refresh_token:'Google ไม่ได้ส่ง Refresh Token กรุณาเชื่อมใหม่',connection_failed:'เชื่อม Google Workspace ไม่สำเร็จ กรุณาลองใหม่'})[code]||'เชื่อม Google Workspace ไม่สำเร็จ';}
+function safeGoogleWorkspaceError(error){const code=safeGoogleWorkspaceErrorCode(error);return ({drive_api:'เชื่อม Google Drive ไม่สำเร็จ กรุณาตรวจว่าเปิด Drive API แล้ว',sheets_api:'เชื่อม Google Sheets ไม่สำเร็จ กรุณาตรวจว่าเปิด Sheets API แล้ว',gmail_api:'เชื่อม Gmail ไม่สำเร็จ กรุณาตรวจว่าเปิด Gmail API แล้ว',refresh_token:'Google ไม่ได้ส่ง Refresh Token กรุณาเชื่อมใหม่',connection_failed:'เชื่อม Google ไม่สำเร็จ กรุณาลองใหม่'})[code]||'เชื่อม Google ไม่สำเร็จ';}
 function googleWorkspaceErrorRedirect(request,env,code){return redirectResponse(`${appOrigin(request,env)}/?google_workspace_error=${encodeURIComponent(code)}`,[clearCookie('nakna_google_workspace_state')]);}
 
 async function startGmailConnection(request, env) {
