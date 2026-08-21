@@ -144,6 +144,7 @@ function bindEvents() {
     if (await ensureWorkspaceReady()) await loadAll();
   };
   $('#logoutBtn').onclick = logout;
+  $('#sidebarConnectionCard').onclick = () => showView('settings');
   $('#onboardingLogoutBtn').onclick = logout;
   $('#createCompanyBtn').onclick = createCompany;
   $('#onboardingGoogleBtn').onclick = connectGoogleWorkspace;
@@ -174,7 +175,9 @@ function bindEvents() {
   $('#googleWorkspaceConnectBtn').onclick = connectGoogleWorkspace;
   $('#googleWorkspaceSyncBtn').onclick = syncGoogleWorkspace;
   $('#googleWorkspaceDisconnectBtn').onclick = disconnectGoogleWorkspace;
-  $('#statusGoogleAction').onclick = connectGoogleWorkspace;
+  $('#statusGmailAction').onclick = connectGoogleWorkspace;
+  $('#statusDriveAction').onclick = connectGoogleWorkspace;
+  $('#statusSheetsAction').onclick = connectGoogleWorkspace;
   $('#lineIntegrationShortcut').onclick = openLineIntegrationModal;
   $('#statusLineAction').onclick = openLineIntegrationModal;
   $('#lineConfigureBtn').onclick = openLineIntegrationModal;
@@ -1786,16 +1789,92 @@ function renderGoogleWorkspace() {
   meta.classList.toggle('hidden',!connected);pills.classList.toggle('hidden',!connected);
   pills.innerHTML=connected?`<span class="service-pill">Gmail Read</span><span class="service-pill ${canSendGmail?'':'service-pill-warning'}">${canSendGmail?'Gmail Send ✓':'Gmail Send ต้องเพิ่มสิทธิ์'}</span><span class="service-pill">Drive</span><span class="service-pill">Sheets</span>`:'';
   meta.innerHTML=connected?`<span><b>บัญชี</b> ${escapeHtml(info.email||'—')}</span><span><b>Sync ล่าสุด</b> ${info.last_sync_at?escapeHtml(formatDateTime(info.last_sync_at)):'ยังไม่เคย Sync'}</span>${info.last_error?`<span class="integration-error"><b>ล่าสุด</b> ${escapeHtml(info.last_error)}</span>`:''}`:'';
+  renderConnectionSummary();
+}
+
+function renderConnectionSummary(){
+  const line=state.lineIntegration||{};
+  const google=state.googleWorkspace||{};
+  const info=google.integration||{};
+  const scopes=String(info.scopes||'');
+  const lineReady=Boolean((line.mode==='dedicated'&&line.connected)||line.default_available);
+  const gmailReady=Boolean(google.connected&&(Number(info.gmail_enabled)===1||info.gmail_enabled===true||scopes.includes('gmail.')));
+  const driveReady=Boolean(google.connected&&(Number(info.drive_enabled)===1||info.drive_enabled===true||info.drive_folder_id));
+  const sheetsReady=Boolean(google.connected&&(Number(info.sheets_enabled)===1||info.sheets_enabled===true||info.spreadsheet_id));
+  const services=[
+    ['sidebarServiceLine',lineReady,line.mode==='dedicated'?'LINE OA บริษัทเชื่อมแล้ว':line.default_available?'LINE นากนะพร้อมใช้งาน':'ยังไม่เชื่อม LINE'],
+    ['sidebarServiceGmail',gmailReady,gmailReady?'Gmail พร้อมใช้งาน':'Gmail ยังไม่พร้อม'],
+    ['sidebarServiceDrive',driveReady,driveReady?'Google Drive พร้อมใช้งาน':'Google Drive ยังไม่พร้อม'],
+    ['sidebarServiceSheets',sheetsReady,sheetsReady?'Google Sheets พร้อมใช้งาน':'Google Sheets ยังไม่พร้อม']
+  ];
+  const ready=services.filter(([,ok])=>ok).length;
+  const title=$('#sidebarConnectionTitle');
+  const text=$('#sidebarConnectionText');
+  const card=$('#sidebarConnectionCard');
+  if(title) title.textContent='การเชื่อมต่อระบบ';
+  if(text) text.textContent=ready===services.length?'พร้อมใช้งานทั้งหมด':`${ready}/${services.length} บริการพร้อมใช้งาน`;
+  if(card) card.dataset.status=ready===services.length?'ready':ready?'partial':'warning';
+  services.forEach(([id,ok,hint])=>{
+    const el=$(`#${id}`);
+    if(!el)return;
+    el.classList.toggle('is-connected',Boolean(ok));
+    el.classList.toggle('is-warning',!ok);
+    el.title=hint;
+  });
 }
 
 function renderSetupOverview(){
-  const profile=state.companyProfile||state.dashboard?.client||activeCompany()||{};const line=state.lineIntegration||{};const google=state.googleWorkspace||{};
-  const companyReady=companyProfileCompleted(profile);const lineReady=Boolean(line.mode==='dedicated'&&line.connected);const googleReady=Boolean(google.connected&&google.integration?.drive_folder_id&&google.integration?.spreadsheet_id);
-  const ready=[companyReady,lineReady,googleReady].filter(Boolean).length;$('#setupOverviewBadge').textContent=`${ready}/3 พร้อมใช้งาน`;$('#setupOverviewBadge').className=`badge ${ready===3?'badge-success':ready?'badge-soft':'badge-neutral'}`;$('#setupProgressBar').style.width=`${ready/3*100}%`;
-  $('#statusCompanyBadge').className=`badge ${companyReady?'badge-success':'badge-warning'}`;$('#statusCompanyBadge').textContent=companyReady?'พร้อมใช้งาน':'ควรตรวจ';$('#statusCompanyText').textContent=companyReady?`${profile.name} · ${profile.work_start}–${profile.work_end} · ${profile.timezone}`:'ใส่ชื่อบริษัท เวลาเข้างาน และเวลาสิ้นสุดงานให้ครบ';
-  const dedicated=line.mode==='dedicated'&&line.connected;$('#statusLineBadge').className=`badge ${dedicated?'badge-success':line.default_available?'badge-soft':'badge-warning'}`;$('#statusLineBadge').textContent=dedicated?'เชื่อมธุรกิจแล้ว':line.default_available?'ใช้นากนะกลาง':'ยังไม่เชื่อม';$('#statusLineText').textContent=dedicated?`${line.integration?.bot_display_name||'LINE OA บริษัท'} เชื่อมกับ Workspace แล้ว`:line.default_available?'ตอนนี้ใช้ LINE “นากนะ” กลางอยู่ เชื่อม OA บริษัทได้เมื่อพร้อม':'ยังไม่มี LINE สำหรับ Workspace นี้';$('#statusLineAction').disabled=!canManageGoogleWorkspace();$('#statusLineAction').textContent=dedicated?'แก้การเชื่อมต่อ':'ตั้งค่า LINE OA';
-  $('#statusGoogleBadge').className=`badge ${googleReady?'badge-success':'badge-neutral'}`;$('#statusGoogleBadge').textContent=googleReady?'เชื่อมแล้ว':'ยังไม่เชื่อม';$('#statusGoogleText').textContent=googleReady?`${google.integration?.email||'Google'} · Gmail ✓ Drive ✓ Sheets ✓`:'เชื่อมครั้งเดียวเพื่อเปิด Gmail, Drive และ HR Database Sheet';$('#statusGoogleAction').disabled=!canManageGoogleWorkspace();$('#statusGoogleAction').textContent=googleReady?'ดู Google Workspace':'เชื่อม Google Workspace';
-  $('#statusGoogleAction').onclick=googleReady?()=>document.querySelector('#googleWorkspaceSection')?.scrollIntoView({behavior:'smooth'}):connectGoogleWorkspace;
+  const profile=state.companyProfile||state.dashboard?.client||activeCompany()||{};
+  const line=state.lineIntegration||{};
+  const google=state.googleWorkspace||{};
+  const info=google.integration||{};
+  const scopes=String(info.scopes||'');
+  const companyReady=companyProfileCompleted(profile);
+  const dedicated=Boolean(line.mode==='dedicated'&&line.connected);
+  const lineReady=Boolean(dedicated||line.default_available);
+  const gmailReady=Boolean(google.connected&&(Number(info.gmail_enabled)===1||info.gmail_enabled===true||scopes.includes('gmail.')));
+  const driveReady=Boolean(google.connected&&(Number(info.drive_enabled)===1||info.drive_enabled===true||info.drive_folder_id));
+  const sheetsReady=Boolean(google.connected&&(Number(info.sheets_enabled)===1||info.sheets_enabled===true||info.spreadsheet_id));
+  const readiness=[companyReady,lineReady,gmailReady,driveReady,sheetsReady];
+  const ready=readiness.filter(Boolean).length;
+
+  $('#setupOverviewBadge').textContent=`${ready}/5 พร้อมใช้งาน`;
+  $('#setupOverviewBadge').className=`badge ${ready===5?'badge-success':ready?'badge-soft':'badge-neutral'}`;
+  $('#setupProgressBar').style.width=`${ready/5*100}%`;
+
+  $('#statusCompanyBadge').className=`badge ${companyReady?'badge-success':'badge-warning'}`;
+  $('#statusCompanyBadge').textContent=companyReady?'พร้อมใช้งาน':'ควรตรวจ';
+  $('#statusCompanyText').textContent=companyReady?`${profile.name} · ${profile.work_start}–${profile.work_end} · ${profile.timezone}`:'ใส่ชื่อบริษัท เวลาเข้างาน และเวลาสิ้นสุดงานให้ครบ';
+
+  $('#statusLineBadge').className=`badge ${dedicated?'badge-success':line.default_available?'badge-soft':'badge-warning'}`;
+  $('#statusLineBadge').textContent=dedicated?'เชื่อมแล้ว':line.default_available?'พร้อมใช้งาน':'ยังไม่เชื่อม';
+  $('#statusLineText').textContent=dedicated?`${line.integration?.bot_display_name||'LINE OA บริษัท'} · Webhook ${line.integration?.webhook_active?'พร้อม':'ต้องตรวจ'}`:line.default_available?'กำลังใช้ LINE “นากนะ” กลาง · พนักงานใช้งานได้':'ยังไม่มี LINE สำหรับ Workspace นี้';
+  $('#statusLineAction').disabled=!canManageGoogleWorkspace();
+  $('#statusLineAction').textContent=dedicated?'จัดการ LINE':'ตั้งค่า LINE OA';
+
+  const googleAction=google.connected?()=>document.querySelector('#googleWorkspaceSection')?.scrollIntoView({behavior:'smooth',block:'start'}):connectGoogleWorkspace;
+  const googleActionText=google.connected?'ดู Google Workspace':'เชื่อม Google';
+
+  $('#statusGmailBadge').className=`badge ${gmailReady?'badge-success':'badge-warning'}`;
+  $('#statusGmailBadge').textContent=gmailReady?'เชื่อมแล้ว':'ยังไม่พร้อม';
+  $('#statusGmailText').textContent=gmailReady?`${info.email||'Google Account'} · อ่าน/ส่งอีเมลตามสิทธิ์ที่อนุญาต`:'เชื่อม Google Workspace และอนุญาตสิทธิ์ Gmail เพื่อ Recruitment / Payslip';
+  $('#statusGmailAction').disabled=!canManageGoogleWorkspace();
+  $('#statusGmailAction').textContent=googleActionText;
+  $('#statusGmailAction').onclick=googleAction;
+
+  $('#statusDriveBadge').className=`badge ${driveReady?'badge-success':'badge-warning'}`;
+  $('#statusDriveBadge').textContent=driveReady?'เชื่อมแล้ว':'ยังไม่พร้อม';
+  $('#statusDriveText').textContent=driveReady?'โฟลเดอร์เอกสาร HR ถูกสร้างและพร้อมจัดเก็บไฟล์':'ยังไม่พบโฟลเดอร์ HR บน Google Drive';
+  $('#statusDriveAction').disabled=!canManageGoogleWorkspace();
+  $('#statusDriveAction').textContent=googleActionText;
+  $('#statusDriveAction').onclick=googleAction;
+
+  $('#statusSheetsBadge').className=`badge ${sheetsReady?'badge-success':'badge-warning'}`;
+  $('#statusSheetsBadge').textContent=sheetsReady?'เชื่อมแล้ว':'ยังไม่พร้อม';
+  $('#statusSheetsText').textContent=sheetsReady?'HR Database Sheet พร้อม Sync ข้อมูลจาก Workspace':'ยังไม่พบ Google Sheet ฐานข้อมูล HR';
+  $('#statusSheetsAction').disabled=!canManageGoogleWorkspace();
+  $('#statusSheetsAction').textContent=googleActionText;
+  $('#statusSheetsAction').onclick=googleAction;
 }
 
 function renderApproverAccess() {
@@ -1873,8 +1952,6 @@ function renderLineIntegration() {
 
   const canManage = ['owner','hr_admin'].includes(String(activeCompanyRole() || ''));
   if (dedicated) {
-    $('#sidebarLineTitle').textContent = info.bot_display_name || 'LINE OA บริษัท';
-    $('#sidebarLineText').textContent = info.webhook_active ? 'เชื่อมกับ Workspace แล้ว' : 'รอเปิด Use webhook';
     title.textContent = info.bot_display_name || 'LINE OA ของบริษัท';
     text.textContent = info.webhook_active
       ? 'เชื่อมกับ Workspace นี้แล้ว และ LINE เปิดใช้งาน Webhook อยู่'
@@ -1891,8 +1968,6 @@ function renderLineIntegration() {
     $('#lineTestBtn').classList.remove('hidden');
     $('#lineDisconnectBtn').classList.remove('hidden');
   } else {
-    $('#sidebarLineTitle').textContent = data.default_available ? 'LINE นากนะ' : 'ยังไม่เชื่อม LINE';
-    $('#sidebarLineText').textContent = data.default_available ? 'Nakna Default' : 'ตั้งค่าที่เมนูระบบ';
     title.textContent = data.bot?.display_name ? `ใช้ ${data.bot.display_name}` : 'LINE นากนะ';
     text.textContent = data.default_available
       ? 'ตอนนี้ Workspace ใช้ LINE “นากนะ” กลาง พนักงานใช้งานได้ทันที'
@@ -1907,6 +1982,7 @@ function renderLineIntegration() {
   }
   $('#lineConfigureBtn').classList.toggle('hidden', !canManage);
   if (!canManage) { $('#lineTestBtn').classList.add('hidden'); $('#lineDisconnectBtn').classList.add('hidden'); }
+  renderConnectionSummary();
 }
 
 function openLineIntegrationModal() {
