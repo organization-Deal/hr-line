@@ -1311,9 +1311,15 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P5', auth: 'google-oauth' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P6', auth: 'line-first+google' });
       }
 
+      if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
+        return await getPublicOnboardingConfig(env);
+      }
+      if (url.pathname === '/auth/line/start' && request.method === 'GET') {
+        return await finishLineAdminLogin(request, env);
+      }
       if (url.pathname === '/auth/google/start' && request.method === 'GET') {
         return await startGoogleLogin(request, env);
       }
@@ -1476,7 +1482,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePayrollDefaults(env.DB, clientId);
         await ensurePhase5Defaults(env.DB, clientId);
       }
-      return json({ ok: true, release: 'V1.0-P5', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready' });
+      return json({ ok: true, release: 'V1.0-P6', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -2823,6 +2829,21 @@ async function processLineEvent(event, env, lineCtx) {
 
   if (event.type === 'message' && event.message?.type === 'text') {
     const text = String(event.message.text || '').trim();
+
+    // LINE-first SaaS onboarding lives on Nakna's global Official Account.
+    // It is intentionally handled before employee linking so a brand-new owner
+    // can create a Workspace without already having a web account.
+    if (!lineCtx.clientId) {
+      const handledBusinessOnboarding = await handleLineBusinessOnboardingText({
+        text, event, env, lineCtx, lineUserId, accessToken, sessionKey,
+      });
+      if (handledBusinessOnboarding) return;
+    } else if (isBusinessConnectCommand(text)) {
+      return replyLineMessages(accessToken, event.replyToken, [
+        buildSimpleNoticeFlex('LINE นี้เชื่อมกับบริษัทอยู่แล้ว', 'ถ้าต้องการสร้างหรือเปิดธุรกิจในนากนะ ให้ใช้ LINE Official Account หลักของนากนะ แล้วพิมพ์ “เชื่อมธุรกิจ”', 'teal')
+      ]);
+    }
+
     const joinMatch = text.match(/^JOIN\s+([A-Za-z0-9_-]{20,})$/i);
     if (joinMatch) {
       const linked = await linkLineJoinToken(env.DB, accessToken, lineUserId, joinMatch[1], { providerScope, expectedClientId: lineCtx.clientId });
@@ -2837,7 +2858,7 @@ async function processLineEvent(event, env, lineCtx) {
     }
 
     const emp=await employee();
-    if(!emp) return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ยังไม่ได้เชื่อมบัญชีพนักงาน','เปิดลิงก์เชิญเข้าทีมที่ HR ส่งให้ แล้วกดเชื่อม LINE จากหน้านั้นได้เลย','warning')]);
+    if(!emp) return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ยังไม่ได้เชื่อมบัญชี','ถ้าคุณเป็นเจ้าของบริษัทหรือ HR ให้พิมพ์ “เชื่อมธุรกิจ”\nถ้าคุณเป็นพนักงาน ให้เปิดลิงก์เชิญเข้าทีมที่ HR ส่งให้','warning')]);
     const session=await getLineSession(env.DB,sessionKey);
 
     if(session?.action==='leave_reason'){
@@ -3301,6 +3322,255 @@ async function linkLineJoinToken(db, accessToken, lineUserId, token, { providerS
   ]);
   await safeAudit(db, Number(row.client_id), 'line', lineUserId, 'employee.line_link_invite', 'employee', String(row.employee_id), null);
   return { ok:true, name:row.nickname || row.first_name, company_name:row.company_name };
+}
+
+
+function isBusinessConnectCommand(text){
+  const normalized=String(text||'').trim().toLowerCase().replace(/\s+/g,' ');
+  return ['เชื่อมธุรกิจ','เชื่อม บริษัท','เชื่อมบริษัท','business','connect business','เปิด hr','เปิดhr'].includes(normalized);
+}
+
+function isCreateBusinessCommand(text){
+  const normalized=String(text||'').trim().toLowerCase().replace(/\s+/g,' ');
+  return ['สร้างธุรกิจ','สร้างบริษัท','สร้าง workspace','create business','create company'].includes(normalized);
+}
+
+async function ensureLineBusinessOnboardingReady(db){
+  if(!db) throw new Error('D1 binding DB is not available');
+  // CREATE IF NOT EXISTS keeps this safe and also repairs a partially-created
+  // auth schema before LINE tries to create an Owner account.
+  await db.exec(INIT_AUTH_SCHEMA_SQL);
+  await ensureColumn(db,'users','line_user_id','TEXT');
+  await ensureColumn(db,'users','line_provider_scope','TEXT');
+  await ensureColumn(db,'users','auth_provider',"TEXT NOT NULL DEFAULT 'google'");
+  try{await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_line_identity ON users(line_provider_scope,line_user_id) WHERE line_user_id IS NOT NULL`).run();}catch(error){console.warn(JSON.stringify({level:'warn',event:'line_identity_index_skip',message:String(error?.message||error)}));}
+  await db.prepare(`CREATE TABLE IF NOT EXISTS line_admin_login_tokens (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    client_id INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+  )`).run();
+  try{await db.prepare(`CREATE INDEX IF NOT EXISTS idx_line_admin_login_expiry ON line_admin_login_tokens(user_id,expires_at,used_at)`).run();}catch{}
+}
+
+async function findLineBusinessUser(db,providerScope,lineUserId){
+  await ensureLineBusinessOnboardingReady(db);
+  return db.prepare(`SELECT * FROM users WHERE line_user_id=?1 AND COALESCE(line_provider_scope,'default')=?2 AND status='active' LIMIT 1`)
+    .bind(String(lineUserId),String(providerScope||'default')).first();
+}
+
+async function ensureLineBusinessUser(env,lineCtx,lineUserId){
+  const providerScope=String(lineCtx?.providerScope||'default');
+  let user=await findLineBusinessUser(env.DB,providerScope,lineUserId);
+  if(user) return user;
+  const profile=await getLineProfile(lineCtx.accessToken,lineUserId).catch(()=>null);
+  const identityHash=await sha256Hex(`${providerScope}:${lineUserId}`);
+  const syntheticSub=`line:${identityHash}`;
+  const syntheticEmail=`line-${identityHash.slice(0,32)}@nakna.local`;
+  const displayName=String(profile?.displayName||'LINE Owner').trim()||'LINE Owner';
+  await env.DB.prepare(`INSERT INTO users (google_sub,email,name,picture_url,locale,status,line_user_id,line_provider_scope,auth_provider)
+    VALUES (?1,?2,?3,?4,'th','active',?5,?6,'line')
+    ON CONFLICT(google_sub) DO UPDATE SET name=excluded.name,picture_url=excluded.picture_url,status='active',line_user_id=excluded.line_user_id,line_provider_scope=excluded.line_provider_scope,auth_provider='line',updated_at=CURRENT_TIMESTAMP`)
+    .bind(syntheticSub,syntheticEmail,displayName,profile?.pictureUrl||null,String(lineUserId),providerScope).run();
+  user=await env.DB.prepare('SELECT * FROM users WHERE google_sub=?1').bind(syntheticSub).first();
+  if(!user?.id) throw new Error('LINE_OWNER_USER_CREATE_FAILED');
+  return user;
+}
+
+async function getLineBusinessMemberships(db,userId){
+  const rows=await db.prepare(`SELECT c.id,c.name,c.code,m.role,m.created_at FROM company_members m JOIN clients c ON c.id=m.client_id WHERE m.user_id=?1 AND m.status='active' ORDER BY m.id DESC`).bind(Number(userId)).all();
+  return rows.results||[];
+}
+
+async function findLinkedEmployeeByLine(db,providerScope,lineUserId){
+  return db.prepare(`SELECT e.id,e.client_id,e.employee_code,e.first_name,e.last_name,e.nickname,c.name AS company_name
+    FROM employees e JOIN clients c ON c.id=e.client_id
+    WHERE e.line_user_id=?1 AND COALESCE(e.line_provider_scope,'default')=?2 AND e.status='active'
+    ORDER BY e.id DESC LIMIT 1`)
+    .bind(String(lineUserId),String(providerScope||'default')).first();
+}
+
+async function createCompanyForLineOwner(env,user,name,lineUserId){
+  let code=companyCode(name);
+  for(let i=0;i<5;i++){
+    const exists=await env.DB.prepare('SELECT id FROM clients WHERE code=?1').bind(code).first();
+    if(!exists) break;
+    code=`${companyCode(name).slice(0,12)}-${randomToken(3).toUpperCase()}`;
+  }
+  const created=await env.DB.prepare(`INSERT INTO clients (name,code,timezone,work_start,work_end) VALUES (?1,?2,'Asia/Bangkok','09:00','18:00')`).bind(name,code).run();
+  const clientId=Number(created.meta.last_row_id);
+  await env.DB.prepare(`INSERT INTO company_members (client_id,user_id,role,status) VALUES (?1,?2,'owner','active')`).bind(clientId,Number(user.id)).run();
+  await safeAudit(env.DB,clientId,'line_owner',String(lineUserId),'company.create','client',String(clientId),{name,code,onboarding:'line'});
+  // Defaults are best-effort here. /api/bootstrap will repair any module that
+  // could not initialize during the webhook request.
+  try{
+    await ensureCoreSchema(env.DB);
+    await ensureDefaultLeavePolicies(env.DB,clientId);
+    await ensurePayrollDefaults(env.DB,clientId);
+    await ensurePhase5Defaults(env.DB,clientId);
+  }catch(error){
+    console.error(JSON.stringify({level:'error',event:'line_company_defaults_failed',client_id:clientId,message:String(error?.message||error)}));
+  }
+  return {id:clientId,name,code,role:'owner'};
+}
+
+async function issueLineAdminLoginLink(env,userId,clientId){
+  await ensureLineBusinessOnboardingReady(env.DB);
+  const token=randomToken(40);
+  const tokenHash=await sha256Hex(token);
+  const expiresAt=new Date(Date.now()+15*60*1000).toISOString();
+  await env.DB.prepare(`DELETE FROM line_admin_login_tokens WHERE user_id=?1 AND used_at IS NULL`).bind(Number(userId)).run();
+  await env.DB.prepare(`INSERT INTO line_admin_login_tokens (token_hash,user_id,client_id,expires_at) VALUES (?1,?2,?3,?4)`)
+    .bind(tokenHash,Number(userId),Number(clientId),expiresAt).run();
+  const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
+  return `${base}/auth/line/start?token=${encodeURIComponent(token)}`;
+}
+
+async function finishLineAdminLogin(request,env){
+  await ensureLineBusinessOnboardingReady(env.DB);
+  const url=new URL(request.url);
+  const token=String(url.searchParams.get('token')||'');
+  if(token.length<20) return redirectResponse(`${appOrigin(request,env)}/?auth_error=line_token`);
+  const tokenHash=await sha256Hex(token);
+  const row=await env.DB.prepare(`SELECT t.*,u.status AS user_status FROM line_admin_login_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=?1 AND t.used_at IS NULL`).bind(tokenHash).first();
+  if(!row||row.user_status!=='active'||new Date(row.expires_at).getTime()<=Date.now()){
+    if(row) await env.DB.prepare(`UPDATE line_admin_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(tokenHash).run();
+    return redirectResponse(`${appOrigin(request,env)}/?auth_error=line_token`);
+  }
+  const membership=await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(Number(row.user_id),Number(row.client_id)).first();
+  if(!membership) return redirectResponse(`${appOrigin(request,env)}/?auth_error=line_membership`);
+  const sessionToken=randomToken(40);
+  const sessionHash=await sha256Hex(sessionToken);
+  const sessionExpiresAt=new Date(Date.now()+30*24*60*60*1000).toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE line_admin_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(tokenHash),
+    env.DB.prepare(`INSERT INTO auth_sessions (token_hash,user_id,selected_client_id,expires_at) VALUES (?1,?2,?3,?4)`).bind(sessionHash,Number(row.user_id),Number(row.client_id),sessionExpiresAt),
+  ]);
+  const response=redirectResponse(`${appOrigin(request,env)}/?auth=line`,[sessionCookie(sessionToken),companyCookie(Number(row.client_id))]);
+  return response;
+}
+
+async function getPublicOnboardingConfig(env){
+  const ctx=defaultLineContext(env);
+  if(!ctx?.accessToken) return json({line_configured:false,command:'เชื่อมธุรกิจ',line_add_url:null,line_connect_url:null});
+  try{
+    const bot=await getLineBotInfo(ctx.accessToken);
+    const basicId=bot?.basicId||null;
+    return json({
+      line_configured:Boolean(basicId),
+      command:'เชื่อมธุรกิจ',
+      basic_id:basicId,
+      line_add_url:basicId?`https://line.me/R/ti/p/${encodeURIComponent(basicId)}`:null,
+      line_connect_url:basicId?`https://line.me/R/oaMessage/${encodeURIComponent(basicId)}/?${encodeURIComponent('เชื่อมธุรกิจ')}`:null,
+    });
+  }catch(error){
+    console.warn(JSON.stringify({level:'warn',event:'public_line_config_failed',message:String(error?.message||error)}));
+    return json({line_configured:false,command:'เชื่อมธุรกิจ',line_add_url:null,line_connect_url:null});
+  }
+}
+
+async function handleLineBusinessOnboardingText({text,event,env,lineCtx,lineUserId,accessToken,sessionKey}){
+  await ensureLineBusinessOnboardingReady(env.DB);
+  const lower=String(text||'').trim().toLowerCase();
+  const providerScope=String(lineCtx.providerScope||'default');
+  const session=await getLineSession(env.DB,sessionKey);
+  const existingBusinessUser=await findLineBusinessUser(env.DB,providerScope,lineUserId);
+  const existingBusinesses=existingBusinessUser?await getLineBusinessMemberships(env.DB,Number(existingBusinessUser.id)):[];
+  const linkedEmployee=await findLinkedEmployeeByLine(env.DB,providerScope,lineUserId).catch(()=>null);
+  const employeeOnly=Boolean(linkedEmployee&&!existingBusinesses.length);
+
+  if(session?.action==='business_create_name'){
+    if(employeeOnly){
+      await clearLineSession(env.DB,sessionKey);
+      await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('บัญชีนี้เป็นพนักงานอยู่แล้ว',`คุณเชื่อมเป็นพนักงานของ ${linkedEmployee.company_name||'บริษัท'} อยู่ จึงไม่ต้องสร้าง Workspace เอง\nถ้าจะเข้าใช้งาน ให้ใช้เมนูพนักงานหรือลิงก์จาก HR`,'teal')]);
+      return true;
+    }
+    if(['ยกเลิก','cancel','เลิก'].includes(lower)){
+      await clearLineSession(env.DB,sessionKey);
+      await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ยกเลิกแล้ว','พิมพ์ “เชื่อมธุรกิจ” เมื่อพร้อมเริ่มใหม่ได้เลย','neutral')]);
+      return true;
+    }
+    const companyName=String(text||'').trim().replace(/\s+/g,' ').slice(0,120);
+    if(companyName.length<2){
+      await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ขอชื่อบริษัทอีกนิด','พิมพ์ชื่อบริษัทอย่างน้อย 2 ตัวอักษร เช่น “Otterwork Co., Ltd.”','warning')]);
+      return true;
+    }
+    try{
+      const user=await ensureLineBusinessUser(env,lineCtx,lineUserId);
+      const company=await createCompanyForLineOwner(env,user,companyName,lineUserId);
+      const loginUrl=await issueLineAdminLoginLink(env,Number(user.id),Number(company.id));
+      await clearLineSession(env.DB,sessionKey);
+      await replyLineMessages(accessToken,event.replyToken,[buildBusinessReadyFlex(company,loginUrl,false)]);
+    }catch(error){
+      console.error(JSON.stringify({level:'error',event:'line_business_create_failed',message:String(error?.message||error)}));
+      await clearLineSession(env.DB,sessionKey);
+      await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('สร้างธุรกิจไม่สำเร็จ','ระบบมีปัญหาชั่วคราว กรุณาพิมพ์ “เชื่อมธุรกิจ” แล้วลองอีกครั้ง','error')]);
+    }
+    return true;
+  }
+
+  if(isBusinessConnectCommand(text)){
+    if(existingBusinessUser&&existingBusinesses.length){
+      const company=existingBusinesses[0];
+      const loginUrl=await issueLineAdminLoginLink(env,Number(existingBusinessUser.id),Number(company.id));
+      await replyLineMessages(accessToken,event.replyToken,[buildBusinessReadyFlex(company,loginUrl,true,existingBusinesses.length)]);
+      return true;
+    }
+    if(employeeOnly){
+      await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('คุณเชื่อมเป็นพนักงานแล้ว',`บัญชีนี้อยู่กับ ${linkedEmployee.company_name||'บริษัทของคุณ'} ในสถานะพนักงาน\nไม่ต้องสร้างธุรกิจใหม่ ให้ใช้ลิงก์/เมนูที่ HR ส่งให้`,'teal')]);
+      return true;
+    }
+    await replyLineMessages(accessToken,event.replyToken,[buildBusinessConnectStartFlex()]);
+    return true;
+  }
+
+  if(isCreateBusinessCommand(text)){
+    if(employeeOnly){
+      await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ไม่ต้องสร้างธุรกิจเอง',`บัญชีนี้เชื่อมเป็นพนักงานของ ${linkedEmployee.company_name||'บริษัท'} แล้ว\nWorkspace ต้องสร้างโดย Owner / HR`,'warning')]);
+      return true;
+    }
+    await setLineSession(env.DB,sessionKey,'business_create_name',{});
+    await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('สร้างธุรกิจใหม่','พิมพ์ “ชื่อบริษัท” ที่ต้องการใช้ในนากนะได้เลย\nเช่น Otterwork Co., Ltd.','teal')]);
+    return true;
+  }
+
+  if(['ฉันเป็นพนักงาน','เป็นพนักงาน','พนักงาน','employee'].includes(lower)){
+    await replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex(
+      'สำหรับพนักงาน',
+      'ไม่ต้องสร้างธุรกิจเองนะ ให้ HR ส่งลิงก์เชิญหรือรหัสเชื่อมบัญชีให้ แล้วเปิดลิงก์/พิมพ์รหัสนั้นใน LINE ได้เลย',
+      'teal'
+    )]);
+    return true;
+  }
+
+  return false;
+}
+
+function buildBusinessConnectStartFlex(){
+  return {type:'flex',altText:'เชื่อมธุรกิจกับนากนะ',contents:lineBubble({
+    eyebrow:'NAKNA · BUSINESS',title:'เชื่อมธุรกิจกับนากนะ',subtitle:'เริ่มจาก LINE แล้วค่อยเปิดระบบ HR',
+    body:[
+      lineInfoCard([lineInfoRow('1','สร้างธุรกิจ'),lineInfoRow('2','ระบบตั้งคุณเป็น Owner'),lineInfoRow('3','กดเปิด HR ได้ทันที')],'teal'),
+      lineText('ถ้าคุณเป็นพนักงาน ไม่ต้องสร้างธุรกิจ ให้ใช้ลิงก์เชิญเข้าทีมจาก HR แทน','xs',LINE_CI.muted)
+    ],
+    footer:[linePrimaryButton('สร้างธุรกิจใหม่',{type:'message',label:'สร้างธุรกิจใหม่',text:'สร้างธุรกิจ'}),lineSecondaryButton('ฉันเป็นพนักงาน',{type:'message',label:'ฉันเป็นพนักงาน',text:'ฉันเป็นพนักงาน'})]
+  })};
+}
+
+function buildBusinessReadyFlex(company,loginUrl,existing=false,totalCompanies=1){
+  return {type:'flex',altText:`${existing?'เปิด':'สร้าง'} ${company.name} ใน Nakna HR`,contents:lineBubble({
+    eyebrow:'NAKNA · HR WORKSPACE',title:existing?'ธุรกิจของคุณพร้อมใช้งาน':'สร้างธุรกิจเรียบร้อย 🎉',subtitle:company.name,status:'Owner',statusTone:'success',
+    body:[
+      lineInfoCard([lineInfoRow('บริษัท',company.name),lineInfoRow('สิทธิ์','Owner',LINE_CI.primary),lineInfoRow('Workspace',company.code||`#${company.id}`)],'teal'),
+      ...(totalCompanies>1?[lineText(`บัญชีนี้มี ${totalCompanies} ธุรกิจ · เข้าเว็บแล้วสลับบริษัทได้จากเมนูด้านซ้าย`,'xs',LINE_CI.muted)]:[]),
+      lineText('ลิงก์เปิดระบบมีอายุ 15 นาที และใช้ได้ครั้งเดียว เพื่อความปลอดภัย','xxs',LINE_CI.muted)
+    ],
+    footer:[linePrimaryButton('เปิดระบบ HR',{type:'uri',label:'เปิดระบบ HR',uri:loginUrl}),lineSecondaryButton('สร้างธุรกิจเพิ่ม',{type:'message',label:'สร้างธุรกิจเพิ่ม',text:'สร้างธุรกิจ'})]
+  })};
 }
 
 function canManagePayroll(role){ return ['owner','hr_admin','hr'].includes(String(role||'')); }
@@ -5540,7 +5810,8 @@ async function createCompanyForUser(db, auth, name) {
 }
 
 function publicUser(user) {
-  return { id: user.id, email: user.email, name: user.name, picture_url: user.picture_url, locale: user.locale };
+  const email=String(user.email||'');
+  return { id:user.id, email:email.endsWith('@nakna.local')?null:email, name:user.name, picture_url:user.picture_url, locale:user.locale };
 }
 
 function publicCompanyProfile(client){return {id:client.id,name:client.name,code:client.code,timezone:client.timezone,work_start:client.work_start,work_end:client.work_end,late_grace_minutes:Number(client.late_grace_minutes||0)};}
