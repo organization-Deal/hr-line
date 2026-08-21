@@ -1424,7 +1424,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.1', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.3', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1793,17 +1793,16 @@ async function handleApi(request, env, url, auth, ctx) {
     await ensureV060Ready(env.DB);
     const integration = await getWorkspaceLineIntegration(env, clientId, false);
     if (integration) {
-      let live = null;
-      try {
-        const creds = await decryptLineIntegrationCredentials(env, integration);
-        live = await getLineWebhookInfo(creds.access_token);
-        if (live) await env.DB.prepare('UPDATE line_integrations SET webhook_active=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2').bind(live.active ? 1 : 0, Number(integration.id)).run();
-      } catch {}
-      return json({ mode: 'dedicated', connected: true, integration: publicLineIntegration(integration, live, canManageIntegrations(auth.role)) });
+      // P7.3 Performance: return cached DB status immediately.
+      // Live LINE webhook verification remains available through the explicit Test button.
+      return json({ mode: 'dedicated', connected: true, integration: publicLineIntegration(integration, null, canManageIntegrations(auth.role)) });
     }
-    let defaultBot = null;
-    if (env.LINE_CHANNEL_ACCESS_TOKEN) { try { defaultBot = await getLineBotInfo(env.LINE_CHANNEL_ACCESS_TOKEN); } catch {} }
-    return json({ mode: 'nakna_default', connected: false, default_available: Boolean(env.LINE_CHANNEL_ACCESS_TOKEN && env.LINE_CHANNEL_SECRET), bot: defaultBot ? { basic_id: defaultBot.basicId || null, display_name: defaultBot.displayName || 'นากนะ' } : null });
+    return json({
+      mode: 'nakna_default',
+      connected: false,
+      default_available: Boolean(env.LINE_CHANNEL_ACCESS_TOKEN && env.LINE_CHANNEL_SECRET),
+      bot: env.LINE_CHANNEL_ACCESS_TOKEN ? { basic_id: null, display_name: 'นากนะ' } : null
+    });
   }
 
   if (path === '/api/integrations/line' && method === 'PUT') {
