@@ -473,7 +473,7 @@ function handleReturnMessage() {
 
 async function ensureWorkspaceReady() {
   try {
-    await api('/api/bootstrap', { timeoutMs: 30000 });
+    await api('/api/bootstrap', { timeoutMs: 45000 });
     return true;
   } catch (error) {
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
