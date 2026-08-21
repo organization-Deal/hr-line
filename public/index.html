@@ -111,22 +111,25 @@
         </button>
         <button class="nav-item" data-view="attendance"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>เวลาเข้างาน</span></button>
         <button class="nav-item" data-view="leave"><svg viewBox="0 0 24 24"><path d="M6 4v3M18 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12H4V7a1 1 0 0 1 1-1Z"/></svg><span>การลา</span></button>
-        <button class="nav-item" data-view="requests"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H8l-3 3V5Z"/><path d="M8 9h8M8 12h5"/></svg><span>คำขอ HR</span></button>
+        <button class="nav-item" data-view="requests"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H8l-3 3V5Z"/><path d="M8 9h8M8 12h5"/></svg><span>Employee Service</span></button>
 
         <p class="nav-label">คนและทีม</p>
         <button class="nav-item" data-view="employees"><svg viewBox="0 0 24 24"><path d="M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 10A3.5 3.5 0 1 0 9.5 3a3.5 3.5 0 0 0 0 7ZM18 8v6M21 11h-6"/></svg><span>พนักงาน</span></button>
         <button class="nav-item" data-view="recruitment"><svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM3 21v-2a6 6 0 0 1 6-6h2M16 11l2 2 4-4M15 21h6"/></svg><span>Recruitment</span></button>
-        <button class="nav-item" data-view="performance"><svg viewBox="0 0 24 24"><path d="m4 18 5-5 4 3 7-9"/><path d="M15 7h5v5"/></svg><span>Performance</span><i class="soon-dot"></i></button>
+        <button class="nav-item" data-view="performance"><svg viewBox="0 0 24 24"><path d="m4 18 5-5 4 3 7-9"/><path d="M15 7h5v5"/></svg><span>Learning & KPI</span></button>
+        <button class="nav-item" data-view="engagement"><svg viewBox="0 0 24 24"><path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 3Z"/></svg><span>แต้ม & ของรางวัล</span></button>
+        <button class="nav-item" data-view="analytics"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>People Analytics</span></button>
 
         <p class="nav-label">บริหารจัดการ</p>
         <button class="nav-item" data-view="payroll"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M16 15h2"/></svg><span>Payroll</span><i class="soon-dot"></i></button>
         <button class="nav-item" data-view="documents"><svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg><span>เอกสาร</span><i class="soon-dot"></i></button>
         <button class="nav-item" data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg><span>ตั้งค่า</span><i class="soon-dot"></i></button>
+        <button id="saasAdminNav" class="nav-item hidden" data-view="saas-admin"><svg viewBox="0 0 24 24"><path d="M4 20V8l8-5 8 5v12M8 20v-6h8v6M8 9h.01M12 9h.01M16 9h.01"/></svg><span>Nakna Admin</span></button>
       </nav>
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V0.6.1</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P5</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -223,7 +226,7 @@
           <div class="search-box"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="employeeSearch" type="search" placeholder="ค้นหาชื่อ รหัสพนักงาน แผนก หรือ LINE" /></div>
           <div class="toolbar-meta"><span id="employeeCountText">0 คน</span></div>
         </div>
-        <div class="table-card"><table><thead><tr><th>พนักงาน</th><th>แผนก</th><th>Work Location</th><th>ผู้อนุมัติลา</th><th>LINE</th><th>สิทธิ์ลา</th></tr></thead><tbody id="employeesBody"></tbody></table></div>
+        <div class="table-card"><table><thead><tr><th>พนักงาน</th><th>แผนก / หัวหน้า</th><th>Work Location</th><th>ผู้อนุมัติลา</th><th>LINE</th><th>จัดการ</th></tr></thead><tbody id="employeesBody"></tbody></table></div>
       </section>
 
       <section id="view-recruitment" class="view">
@@ -264,28 +267,109 @@
 
       <section id="view-requests" class="view">
         <div class="page-intro">
-          <div><p class="kicker">HR INBOX</p><h1>คำขอ HR</h1><p>รวมเรื่องที่พนักงานขอความช่วยเหลือไว้ที่เดียว ไม่ตกหล่นในแชต</p></div>
-          <span class="badge badge-warning" id="requestCountBadge">0 รายการ</span>
+          <div><p class="kicker">EMPLOYEE SERVICE</p><h1>Employee Service</h1><p>เรื่องส่วนตัวถึง HR, ประกาศบริษัท และประสบการณ์พนักงานบน LINE อยู่ที่เดียว</p></div>
+          <div class="page-actions"><span class="badge badge-warning" id="requestCountBadge">0 เรื่องเปิด</span><button id="createBroadcastBtn" class="primary-btn" type="button">+ ส่งประกาศ</button></div>
         </div>
-        <div id="requestsList" class="request-grid"></div>
+        <div class="service-summary-grid">
+          <article class="service-summary-card"><span>🔒</span><div><small>เรื่องส่วนตัวถึง HR</small><strong id="hrCaseOpenCount">0</strong><p>เห็นเฉพาะ Owner / HR Admin / HR</p></div></article>
+          <article class="service-summary-card"><span>📣</span><div><small>ประกาศที่ส่งแล้ว</small><strong id="broadcastTotalCount">0</strong><p>Broadcast เข้า LINE พนักงาน</p></div></article>
+          <article class="service-summary-card"><span>▦</span><div><small>LINE Rich Menu</small><strong id="richMenuStatusText">ยังไม่ตั้ง</strong><p>6 เมนูหลักสำหรับพนักงาน</p></div></article>
+        </div>
+        <div class="service-grid">
+          <article class="panel service-cases-panel">
+            <div class="panel-head"><div><p class="kicker">PRIVATE HR INBOX</p><h3>เรื่องส่วนตัวถึง HR</h3><p class="panel-subtitle">พนักงานแจ้งจาก LINE และข้อมูลส่วนนี้ไม่แสดงให้ Manager</p></div><span class="badge badge-coral">Confidential</span></div>
+            <div id="hrCasesList" class="hr-case-list"></div>
+          </article>
+          <article class="panel service-tools-panel">
+            <div class="panel-head"><div><p class="kicker">LINE EXPERIENCE</p><h3>เครื่องมือพนักงาน</h3></div></div>
+            <div class="rich-menu-preview"><img src="/richmenu-nakna.png" alt="Nakna LINE Rich Menu preview" /><div><strong>Rich Menu พนักงาน</strong><p>เช็กอิน · เช็กเอาต์ · ขอลา · สิทธิ์ลา · วันหยุด · แจ้ง HR</p></div></div>
+            <div class="service-tool-actions"><button id="setupRichMenuBtn" class="primary-btn" type="button">ตั้ง Rich Menu ให้ LINE บริษัท</button><button id="removeRichMenuBtn" class="text-btn danger-text hidden" type="button">ลบ Rich Menu</button></div>
+            <div class="panel-head service-broadcast-head"><div><p class="kicker">BROADCAST HISTORY</p><h3>ประกาศล่าสุด</h3></div></div>
+            <div id="broadcastList" class="broadcast-list"></div>
+          </article>
+        </div>
+        <article class="panel legacy-request-panel"><div class="panel-head"><div><p class="kicker">OTHER REQUESTS</p><h3>คำขอ HR เดิม</h3></div></div><div id="requestsList" class="request-grid"></div></article>
       </section>
 
-      <section id="view-payroll" class="view future-view">
-        <div class="module-empty"><div class="module-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M16 15h2"/></svg></div><span class="badge badge-soft">Next module</span><h1>Payroll</h1><p>พื้นที่สำหรับตรวจ Attendance, OT, เงินเพิ่ม/หัก และเตรียมเงินเดือนก่อน Lock รอบจ่าย</p><button class="secondary-btn">ดู Roadmap</button></div>
+      <section id="view-payroll" class="view">
+        <div class="page-intro"><div><p class="kicker">THAILAND PAYROLL</p><h1>Payroll</h1><p>คำนวณเงินเดือนจาก Attendance + รายการเพิ่ม/หัก ตรวจภาษีและประกันสังคมก่อน Lock แล้วออก Payslip อัตโนมัติ</p></div><div class="page-actions"><button id="payrollSettingsBtn" class="secondary-btn" type="button">ตั้งค่า Payroll</button><button id="createPayrollPeriodBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>สร้างรอบเงินเดือน</button></div></div>
+        <div id="payrollSummary" class="payroll-summary"></div>
+        <div class="payroll-layout"><article class="panel payroll-period-panel"><div class="panel-head"><div><p class="kicker">PAY PERIODS</p><h3>รอบเงินเดือน</h3></div><span id="payrollReadyBadge" class="badge badge-soft">กำลังโหลด</span></div><div id="payrollPeriods" class="payroll-period-list"></div></article><article class="panel payroll-detail-panel"><div id="payrollDetail" class="payroll-detail-empty"><div class="module-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M16 15h2"/></svg></div><h3>เลือกรอบเงินเดือน</h3><p>เลือกเดือนด้านซ้ายเพื่อดูยอดรวม ตรวจรายคน เพิ่ม Commission / OT / Incentive และ Lock รอบ</p></div></article></div>
       </section>
-      <section id="view-documents" class="view future-view">
-        <div class="module-empty"><div class="module-icon"><svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg></div><span class="badge badge-soft">Next module</span><h1>เอกสาร HR</h1><p>สร้างหนังสือรับรอง สัญญา และเอกสารพนักงานจากข้อมูลในระบบโดยไม่ต้องกรอกซ้ำ</p><button class="secondary-btn">ดู Roadmap</button></div>
+      <section id="view-documents" class="view">
+        <div class="page-intro"><div><p class="kicker">EMPLOYEE DOCUMENTS</p><h1>เอกสาร HR</h1><p>Payslip และเอกสารพนักงานเก็บใน Google Drive ของบริษัท พร้อมประวัติการส่ง Mail / LINE</p></div><button id="generateDocumentBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>ออกเอกสาร</button></div>
+        <div id="documentSummary" class="document-summary"></div><div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">MONTHLY PAYSLIPS</p><h3>สลิปเงินเดือน</h3></div></div><div id="payslipDocumentList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">HR DOCUMENTS</p><h3>เอกสารพนักงาน</h3></div></div><div id="employeeDocumentList" class="document-list"></div></article></div>
       </section>
-      <section id="view-performance" class="view future-view">
-        <div class="module-empty"><div class="module-icon"><svg viewBox="0 0 24 24"><path d="m4 18 5-5 4 3 7-9"/><path d="M15 7h5v5"/></svg></div><span class="badge badge-soft">Next module</span><h1>Performance</h1><p>1:1, Probation Review, เป้าหมาย และ Timeline ผลงานที่ Manager กับ HR ดูร่วมกันได้</p><button class="secondary-btn">ดู Roadmap</button></div>
+      <section id="view-performance" class="view">
+        <div class="page-intro"><div><p class="kicker">GROWTH OS</p><h1>Learning & Performance</h1><p>Onboarding วิดีโอจาก Google Drive · Quiz · KPI · 1:1 · Probation Review ใน Timeline เดียว</p></div><div class="page-actions"><button id="createCourseBtn" class="primary-btn" type="button">+ สร้างคอร์ส</button><button id="createKpiBtn" class="secondary-btn" type="button">+ KPI</button><button id="createOneOnOneBtn" class="secondary-btn" type="button">+ 1:1</button><button id="createProbationReviewBtn" class="secondary-btn" type="button">ประเมิน Probation</button></div></div>
+        <div id="performanceSummary" class="performance-summary"></div>
+        <div class="growth-grid">
+          <article class="panel growth-learning-panel"><div class="panel-head"><div><p class="kicker">ONBOARDING / LEARNING</p><h3>หลักสูตรของบริษัท</h3></div><span id="learningProgressBadge" class="badge badge-soft">0 คอร์ส</span></div><div id="learningCourseList" class="learning-course-list"></div></article>
+          <article class="panel growth-kpi-panel"><div class="panel-head"><div><p class="kicker">KPI / GOALS</p><h3>เป้าหมายและการอัปเดต</h3></div><button id="createPerformanceCycleBtn" class="text-btn" type="button">+ รอบประเมิน</button></div><div id="kpiGoalList" class="kpi-goal-list"></div></article>
+          <article class="panel growth-one-panel"><div class="panel-head"><div><p class="kicker">1:1</p><h3>คุยกับทีม</h3></div></div><div id="oneOnOneList" class="one-on-one-list"></div></article>
+          <article class="panel growth-probation-panel"><div class="panel-head"><div><p class="kicker">PROBATION</p><h3>การทดลองงาน</h3></div><span id="probationDueBadge" class="badge badge-warning">0 คน</span></div><div id="probationReviewList" class="probation-review-list"></div></article>
+        </div>
       </section>
+      <section id="view-engagement" class="view">
+        <div class="page-intro"><div><p class="kicker">ENGAGEMENT</p><h1>แต้ม & ของรางวัล</h1><p>เปลี่ยนพฤติกรรมที่บริษัทอยากเห็นให้เป็นแต้ม รางวัล และ Incentive ที่ต่อเข้า Payroll ได้</p></div><div class="page-actions"><button id="runPointRulesBtn" class="secondary-btn" type="button">รันกติกาตอนนี้</button><button id="manualAwardBtn" class="primary-btn" type="button">+ ให้แต้ม</button></div></div>
+        <div id="engagementSummary" class="engagement-summary"></div>
+        <div class="engagement-grid">
+          <article class="panel"><div class="panel-head"><div><p class="kicker">POINT RULES</p><h3>กติกาการได้แต้ม</h3><p class="panel-subtitle">ปิดไว้เป็นค่าเริ่มต้น HR เลือกเปิดเฉพาะกติกาที่บริษัทต้องการ</p></div><button id="createPointRuleBtn" class="text-btn" type="button">+ กติกา</button></div><div id="pointRulesList" class="phase5-list"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="kicker">LEADERBOARD</p><h3>คนที่มีแต้มสูงสุด</h3></div><span class="badge badge-soft">Live</span></div><div id="leaderboardList" class="leaderboard-list"></div></article>
+          <article class="panel engagement-reward-panel"><div class="panel-head"><div><p class="kicker">REWARD CATALOG</p><h3>ของรางวัล</h3></div><button id="createRewardBtn" class="text-btn" type="button">+ ของรางวัล</button></div><div id="rewardCatalogList" class="reward-catalog-list"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="kicker">REDEMPTION QUEUE</p><h3>คำขอแลกรางวัล</h3></div><span id="redemptionQueueBadge" class="badge badge-warning">0 รอจัดการ</span></div><div id="redemptionList" class="phase5-list"></div></article>
+        </div>
+      </section>
+
+      <section id="view-analytics" class="view">
+        <div class="page-intro"><div><p class="kicker">PEOPLE INTELLIGENCE</p><h1>People Analytics</h1><p>เห็นสุขภาพทีมในภาพเดียว ทั้ง Headcount, Turnover, การมาสาย, การลา, Recruitment และช่วงเวลาสำคัญของคน</p></div><span id="analyticsUpdatedBadge" class="badge badge-soft">ข้อมูลล่าสุด</span></div>
+        <div id="analyticsSummary" class="analytics-summary"></div>
+        <div class="analytics-grid">
+          <article class="panel analytics-trend-panel"><div class="panel-head"><div><p class="kicker">6 MONTH TREND</p><h3>การเปลี่ยนแปลงกำลังคน</h3></div></div><div id="headcountTrend" class="headcount-trend"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="kicker">PEOPLE MOMENTS</p><h3>ช่วงเวลาที่ HR ควรใส่ใจ</h3></div></div><div id="peopleMomentsList" class="phase5-list"></div></article>
+          <article class="panel analytics-department-panel"><div class="panel-head"><div><p class="kicker">DEPARTMENT HEALTH</p><h3>สุขภาพแต่ละทีม</h3></div></div><div id="departmentAnalytics" class="department-analytics"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="kicker">RECRUITMENT</p><h3>Pipeline ผู้สมัคร</h3></div></div><div id="recruitmentAnalytics" class="phase5-list"></div></article>
+        </div>
+      </section>
+
+      <section id="view-saas-admin" class="view">
+        <div class="page-intro"><div><p class="kicker">OTTERWORK / NAKNA</p><h1>SaaS Admin Console</h1><p>ดูบริษัทที่ใช้งาน Trial, Active Seats, Subscription, Invoice และตั้งราคาแพ็กเกจจากศูนย์กลาง</p></div><span class="badge badge-coral">Internal only</span></div>
+        <div id="saasAdminSummary" class="analytics-summary"></div>
+        <div class="admin-grid">
+          <article class="panel"><div class="panel-head"><div><p class="kicker">PLANS</p><h3>แพ็กเกจและราคา</h3></div></div><div id="saasPlansList" class="phase5-list"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="kicker">CUSTOMERS</p><h3>Workspace ทั้งหมด</h3></div></div><div id="saasCompaniesList" class="phase5-list"></div></article>
+          <article class="panel admin-invoice-panel"><div class="panel-head"><div><p class="kicker">BILLING</p><h3>Invoices</h3></div></div><div id="saasInvoicesList" class="phase5-list"></div></article>
+        </div>
+      </section>
+
       <section id="view-settings" class="view">
         <div class="settings-preview">
           <div class="page-intro"><div><p class="kicker">SYSTEM</p><h1>ตั้งค่า</h1><p>โครงสร้างบริษัท เวลาเข้างาน LINE และสิทธิ์การใช้งาน</p></div></div>
           <div class="settings-grid">
-            <article class="setting-card"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h6M9 14h6"/></svg></div><div><strong>ข้อมูลบริษัท</strong><p>ชื่อบริษัท สาขา วันทำงาน และเวลาเริ่มงาน</p></div><span>→</span></article>
-            <article id="lineIntegrationShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H8l-3 3V5Z"/></svg></div><div><strong>LINE Official Account</strong><p>เชื่อม LINE OA ของบริษัทเข้ากับ Workspace</p></div><span>→</span></article>
+            <article id="companyProfileShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h6M9 14h6"/></svg></div><div><strong>ข้อมูลบริษัท</strong><p>ชื่อบริษัท เวลาเข้างาน และค่าพื้นฐาน</p></div><span>→</span></article>
+            <article id="lineIntegrationShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H8l-3 3V5Z"/></svg></div><div><strong>LINE Official Account</strong><p>เชื่อมธุรกิจใน LINE เข้ากับ Workspace</p></div><span>→</span></article>
+            <article id="googleWorkspaceShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6M8 18v2M16 18v2"/></svg></div><div><strong>Google Workspace</strong><p>เชื่อม Gmail + Drive + Google Sheets</p></div><span>→</span></article>
             <article id="approverAccessShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.5 8.2 8 9 4.5-.8 8-4 8-9V7l-8-4Z"/><path d="m9 12 2 2 4-4"/></svg></div><div><strong>สิทธิ์ผู้อนุมัติ</strong><p>กำหนดว่าใครอนุมัติลา OT เวลา และคำขอ HR ได้</p></div><span>→</span></article>
+          </div>
+
+          <div class="setup-overview-section">
+            <div class="page-intro compact"><div><p class="kicker">WORKSPACE STATUS</p><h2>สถานะการตั้งค่าระบบ</h2><p>เห็นทันทีว่าบริษัทกรอกข้อมูล เชื่อม LINE และเชื่อม Google Workspace พร้อมหรือยัง</p></div><span id="setupOverviewBadge" class="badge badge-soft">0/3 พร้อมใช้งาน</span></div>
+            <div class="setup-progress"><div id="setupProgressBar" class="setup-progress-bar"></div></div>
+            <div class="setup-status-grid">
+              <article class="status-card"><div class="status-card-head"><div class="status-icon">🏢</div><span id="statusCompanyBadge" class="badge badge-neutral">รอตั้งค่า</span></div><strong>รายละเอียดบริษัท</strong><p id="statusCompanyText">กำลังโหลดข้อมูลบริษัท…</p><button id="statusCompanyAction" class="secondary-btn" type="button">แก้ข้อมูลบริษัท</button></article>
+              <article class="status-card"><div class="status-card-head"><div class="status-icon line-status-icon">LINE</div><span id="statusLineBadge" class="badge badge-neutral">รอตั้งค่า</span></div><strong>เชื่อมธุรกิจใน LINE</strong><p id="statusLineText">กำลังตรวจสอบ LINE Official Account…</p><button id="statusLineAction" class="secondary-btn" type="button">ตั้งค่า LINE OA</button></article>
+              <article class="status-card"><div class="status-card-head"><div class="status-icon google-status-icon">G</div><span id="statusGoogleBadge" class="badge badge-neutral">รอตั้งค่า</span></div><strong>Google Workspace</strong><p id="statusGoogleText">กำลังตรวจสอบ Gmail, Drive และ Sheets…</p><button id="statusGoogleAction" class="secondary-btn" type="button">เชื่อม Google Workspace</button></article>
+            </div>
+          </div>
+
+          <div id="subscriptionSection" class="subscription-section">
+            <div class="page-intro compact"><div><p class="kicker">SUBSCRIPTION</p><h2>Trial & Active Employee Seats</h2><p>ทดลองใช้ 30 วัน และนับจำนวน Active Employee Seat ของ Workspace เพื่อรองรับการคิดค่าบริการตามจำนวนคน</p></div><span id="subscriptionBadge" class="badge badge-soft">กำลังโหลด</span></div>
+            <article class="subscription-card">
+              <div class="subscription-main"><span id="subscriptionPlanKicker">FREE TRIAL</span><strong id="subscriptionPlanName">Free Trial</strong><p id="subscriptionText">กำลังตรวจสอบสถานะ…</p></div>
+              <div class="seat-meter"><div><span>Active Employee Seats</span><strong id="subscriptionSeats">0</strong></div><div class="seat-track"><i id="subscriptionSeatBar"></i></div><small id="subscriptionSeatHint">นับเฉพาะ Probation / Employee / Leave of absence</small></div>
+              <div class="subscription-actions"><button id="subscriptionPlanBtn" class="secondary-btn" type="button">ดูแพ็กเกจ</button><button id="generateInvoiceBtn" class="text-btn hidden" type="button">สร้าง Invoice</button></div>
+            </article>
+            <div id="subscriptionInvoiceList" class="subscription-invoices"></div>
           </div>
 
           <div class="company-line-section">
@@ -307,6 +391,46 @@
             <p class="settings-hint">ถ้ายังไม่เชื่อม OA ของบริษัท ระบบจะใช้ LINE “นากนะ” กลางเป็นค่าเริ่มต้น พอเชื่อม OA ของบริษัทแล้ว Invite ใหม่และข้อความ HR จะวิ่งผ่าน OA ของบริษัทนั้นอัตโนมัติ</p>
           </div>
 
+          <div id="googleWorkspaceSection" class="google-workspace-section">
+            <div class="page-intro compact"><div><p class="kicker">COMPANY DATA</p><h2>Google Workspace</h2><p>เชื่อมบัญชี Google ของบริษัทครั้งเดียว เพื่อใช้ Gmail, เก็บเอกสารใน Drive และสร้าง HR Database ใน Google Sheets</p></div></div>
+            <article class="integration-card workspace-google-card">
+              <div class="integration-logo google-workspace-logo">G</div>
+              <div class="integration-copy"><strong id="googleWorkspaceTitle">Google Workspace</strong><p id="googleWorkspaceText">ยังไม่ได้เชื่อม Google ของบริษัท</p><div id="googleWorkspaceMeta" class="integration-meta hidden"></div><div id="googleServicePills" class="service-pill-row hidden"><span class="service-pill">Gmail</span><span class="service-pill">Drive</span><span class="service-pill">Sheets</span></div></div>
+              <span id="googleWorkspaceBadge" class="badge badge-neutral">ยังไม่เชื่อม</span>
+              <button id="googleWorkspaceConnectBtn" class="secondary-btn" type="button">เชื่อม Google Workspace</button>
+              <button id="googleWorkspaceSyncBtn" class="secondary-btn hidden" type="button">Sync ตอนนี้</button>
+              <a id="googleWorkspaceDriveBtn" class="secondary-btn hidden" target="_blank" rel="noopener">เปิด Drive</a>
+              <a id="googleWorkspaceSheetBtn" class="secondary-btn hidden" target="_blank" rel="noopener">เปิด HR Sheet</a>
+              <button id="googleWorkspaceDisconnectBtn" class="text-btn danger-text hidden" type="button">ยกเลิก</button>
+            </article>
+            <p class="settings-hint">เมื่อเชื่อมครั้งแรก นากนะจะสร้างโฟลเดอร์เอกสาร HR และ Google Sheet ฐานข้อมูลของ Workspace นี้ให้อัตโนมัติ พร้อม Sync snapshot จากระบบปัจจุบันเข้า Sheet</p>
+          </div>
+
+          <div id="organizationSection" class="people-core-section">
+            <div class="page-intro compact">
+              <div><p class="kicker">ORGANIZATION</p><h2>โครงสร้างองค์กร</h2><p>สร้างแผนก แผนกย่อย ตำแหน่ง และกำหนดหัวหน้า เพื่อให้งานอนุมัติและตารางงานรู้ว่าใครขึ้นกับใคร</p></div>
+              <div class="section-action-group"><button id="addPositionBtn" class="secondary-btn" type="button">+ ตำแหน่ง</button><button id="addDepartmentBtn" class="primary-btn" type="button">+ แผนก</button></div>
+            </div>
+            <div id="organizationChart" class="organization-chart"></div>
+          </div>
+
+          <div id="workScheduleSection" class="people-core-section">
+            <div class="page-intro compact">
+              <div><p class="kicker">WORK SCHEDULE</p><h2>เวลาทำงาน</h2><p>ค่าเวลาจะไล่ลำดับจาก รายคน → แผนก → บริษัท เพื่อรองรับทีมที่เข้าไม่พร้อมกัน</p></div>
+              <button id="addScheduleBtn" class="primary-btn" type="button">+ ตั้งเวลาทำงาน</button>
+            </div>
+            <div id="workScheduleList" class="work-schedule-list"></div>
+          </div>
+
+          <div id="holidaySection" class="people-core-section">
+            <div class="page-intro compact">
+              <div><p class="kicker">COMPANY HOLIDAYS</p><h2>วันหยุดบริษัท</h2><p>HR กำหนดปฏิทินวันหยุดประจำปีไว้ให้พนักงานใช้เป็นข้อมูลกลางเดียวกัน</p></div>
+              <div class="section-action-group"><span id="holidayCountBadge" class="badge badge-soft">0 วัน</span><button id="addHolidayBtn" class="primary-btn" type="button">+ วันหยุด</button></div>
+            </div>
+            <div id="holidayCompliance" class="holiday-compliance warn"></div>
+            <div id="holidayList" class="holiday-list"></div>
+          </div>
+
           <div id="approverAccessSection" class="approver-access-section">
             <div class="page-intro compact">
               <div><p class="kicker">APPROVER ACCESS</p><h2>สิทธิ์ผู้อนุมัติ</h2><p>แนวเดียวกับระบบรับจ่าย: เลือกบทบาท → เลือกพนักงาน → เปิดสิทธิ์ที่ต้องใช้ แล้วระบบจะตรวจสิทธิ์ก่อนอนุมัติจริง</p></div>
@@ -316,6 +440,11 @@
               <div><strong>ผู้อนุมัติ</strong><span>เหมาะกับหัวหน้าทีม/Manager</span></div><div><strong>LINE-first</strong><span>อนุมัติจาก LINE ได้เมื่อเชื่อมบัญชีแล้ว</span></div><div><strong>แยกสิทธิ์</strong><span>เปิดเฉพาะงานที่ต้องอนุมัติ ไม่เห็นข้อมูลเกินจำเป็น</span></div>
             </div>
             <div id="approverAccessList" class="approver-access-list"></div>
+          </div>
+
+          <div class="leave-access-section">
+            <div class="page-intro compact"><div><p class="kicker">LEAVE ACCESS</p><h2>สิทธิ์ลาระหว่างทดลองงาน</h2><p>ตั้งค่าเริ่มต้นของบริษัท แล้ว HR สามารถ Override รายคนจากหน้า Employee Leave Profile ได้</p></div></div>
+            <article class="policy-toggle-card"><div><strong>ล็อกสิทธิ์ลาก่อนผ่านทดลองงาน</strong><p>ประเภทลาที่เปิด “ใช้ได้ระหว่างทดลองงาน” จะยังขอได้ตามปกติ</p></div><label class="switch"><input id="probationLeaveLockToggle" type="checkbox" checked><span></span></label></article>
           </div>
 
           <div class="leave-policy-section">
@@ -332,19 +461,10 @@
               <div><p class="kicker">ATTENDANCE LOCATION</p><h2>Work Location</h2><p>สร้างจุดที่อนุญาตให้เช็กอินได้ แล้วเลือกจุดให้พนักงานตั้งแต่ตอนส่งลิงก์เชิญ</p></div>
               <button id="addWorkLocationBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่ม Location</button>
             </div>
+            <div class="attendance-policy-card"><div><strong>Check-out นอกพื้นที่</strong><p>เปิดได้ถ้าบริษัทอนุญาตให้พนักงานออกงานนอก Location โดยระบบจะบันทึกพิกัดและติดสถานะ “นอกพื้นที่” ไว้ตรวจสอบ</p></div><label class="switch"><input id="attendancePolicyToggle" type="checkbox"/><span></span></label></div>
             <div id="workLocationList" class="work-location-list"></div>
           </div>
 
-          <div class="integration-section">
-            <div class="page-intro compact"><div><p class="kicker">PERSONAL INTEGRATIONS</p><h2>การเชื่อมต่อของฉัน</h2><p>แต่ละคนเชื่อมบัญชีของตัวเองได้ สิทธิ์ Gmail ไม่ผูกกับการเข้าสู่ระบบ</p></div></div>
-            <article class="integration-card">
-              <div class="integration-logo google-mail-logo">M</div>
-              <div class="integration-copy"><strong>Gmail</strong><p id="gmailConnectionText">ยังไม่ได้เชื่อม Gmail</p></div>
-              <span id="gmailConnectionBadge" class="badge badge-neutral">ยังไม่เชื่อม</span>
-              <button id="gmailConnectBtn" class="secondary-btn" type="button">เชื่อม Gmail</button>
-              <button id="gmailDisconnectBtn" class="text-btn danger-text hidden" type="button">ยกเลิกการเชื่อม</button>
-            </article>
-          </div>
         </div>
       </section>
     </main>
@@ -399,6 +519,72 @@
     </form>
   </dialog>
 
+  <dialog id="companyProfileModal" class="company-profile-modal">
+    <form method="dialog" id="companyProfileForm">
+      <div class="modal-head"><div><p class="kicker">COMPANY PROFILE</p><h3>ข้อมูลบริษัท</h3><p>กำหนดค่าพื้นฐานที่ใช้กับ Attendance และข้อมูลบริษัทใน Workspace</p></div><button class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <div class="modal-fields"><div class="field full"><label>ชื่อบริษัท <em>*</em></label><input id="companyProfileName" /></div><div class="field"><label>เวลาเริ่มงาน</label><input id="companyProfileWorkStart" type="time" /></div><div class="field"><label>เวลาเลิกงาน</label><input id="companyProfileWorkEnd" type="time" /></div><div class="field"><label>Grace period สาย</label><div class="input-suffix"><input id="companyProfileLateGrace" type="number" min="0" max="180" /><span>นาที</span></div></div><div class="field"><label>Timezone</label><input id="companyProfileTimezone" placeholder="Asia/Bangkok" /></div></div>
+      <div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="companyProfileSaveBtn" class="primary-btn">บันทึกข้อมูลบริษัท</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="departmentModal">
+    <form method="dialog">
+      <div class="modal-head"><div><p class="kicker">ORGANIZATION</p><h3 id="departmentModalTitle">เพิ่มแผนก</h3><p>กำหนดหัวหน้าและแผนกแม่เพื่อสร้าง Organization Chart</p></div><button class="close-btn" value="cancel">×</button></div>
+      <input id="departmentId" type="hidden"/>
+      <div class="modal-fields"><div class="field full"><label>ชื่อแผนก <em>*</em></label><input id="departmentName"/></div><div class="field"><label>Code</label><input id="departmentCode" placeholder="เช่น MKT"/></div><div class="field"><label>แผนกแม่</label><select id="departmentParent"></select></div><div class="field full"><label>หัวหน้าแผนก</label><select id="departmentManager"></select></div></div>
+      <div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="departmentSaveBtn" class="primary-btn">บันทึกแผนก</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="positionModal">
+    <form method="dialog"><div class="modal-head"><div><p class="kicker">POSITION</p><h3>เพิ่มตำแหน่ง</h3><p>ผูกตำแหน่งกับแผนกเพื่อใช้ตอน Invite และจัด People Database</p></div><button class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>ชื่อตำแหน่ง <em>*</em></label><input id="positionName"/></div><div class="field full"><label>แผนก</label><select id="positionDepartment"></select></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="positionSaveBtn" class="primary-btn">เพิ่มตำแหน่ง</button></div></form>
+  </dialog>
+
+  <dialog id="scheduleModal">
+    <form method="dialog"><div class="modal-head"><div><p class="kicker">WORK SCHEDULE</p><h3>ตั้งเวลาทำงาน</h3><p>ตั้งให้ทั้งบริษัท แผนก หรือรายคนได้ รายคนจะมีลำดับความสำคัญสูงสุด</p></div><button class="close-btn" value="cancel">×</button></div>
+      <div class="modal-fields"><div class="field"><label>ระดับ</label><select id="scheduleScopeType"><option value="company">ทั้งบริษัท</option><option value="department">รายแผนก</option><option value="employee">รายคน</option></select></div><div class="field"><label>ใช้กับ</label><select id="scheduleScopeId"></select></div><div class="field"><label>เวลาเริ่ม</label><input id="scheduleStart" type="time"/></div><div class="field"><label>เวลาเลิก</label><input id="scheduleEnd" type="time"/></div><div class="field"><label>สายได้</label><div class="input-suffix"><input id="scheduleGrace" type="number" min="0" max="180"/><span>นาที</span></div></div><div class="field option-stack"><label class="toggle-line"><input id="scheduleIsWorkday" type="checkbox" checked/> เป็นวันทำงาน</label></div><div class="field full"><label>วันที่ต้องการใช้กติกานี้</label><div id="scheduleWeekdays" class="weekday-picker"><label><input type="checkbox" value="1"/>จ</label><label><input type="checkbox" value="2"/>อ</label><label><input type="checkbox" value="3"/>พ</label><label><input type="checkbox" value="4"/>พฤ</label><label><input type="checkbox" value="5"/>ศ</label><label><input type="checkbox" value="6"/>ส</label><label><input type="checkbox" value="7"/>อา</label></div></div></div>
+      <div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="scheduleSaveBtn" class="primary-btn">บันทึกตารางงาน</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="holidayModal">
+    <form method="dialog"><div class="modal-head"><div><p class="kicker">COMPANY HOLIDAY</p><h3>เพิ่มวันหยุดบริษัท</h3><p>เพิ่มวันหยุดลงปฏิทินกลางของ Workspace</p></div><button class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field"><label>วันที่ <em>*</em></label><input id="holidayDate" type="date"/></div><div class="field"><label>ประเภท</label><select id="holidayType"><option value="traditional">วันหยุดตามประเพณี</option><option value="company">วันหยุดบริษัท</option><option value="special">วันหยุดพิเศษ</option></select></div><div class="field full"><label>ชื่อวันหยุด <em>*</em></label><input id="holidayName" placeholder="เช่น วันขึ้นปีใหม่"/></div><div class="field full option-stack"><label class="toggle-line"><input id="holidayPaid" type="checkbox" checked/> วันหยุดที่ได้รับค่าจ้าง</label></div><div class="field full"><label>หมายเหตุ</label><textarea id="holidayNotes" rows="3"></textarea></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="holidaySaveBtn" class="primary-btn">เพิ่มวันหยุด</button></div></form>
+  </dialog>
+
+  <dialog id="peopleProfileModal">
+    <form method="dialog"><div class="modal-head"><div><p class="kicker">PEOPLE PROFILE</p><h3 id="peopleProfileTitle">จัดการพนักงาน</h3><p>กำหนดสถานะ หัวหน้า แผนก และช่วงทดลองงานโดยไม่ลบประวัติเดิม</p></div><button class="close-btn" value="cancel">×</button></div><input id="peopleProfileEmployeeId" type="hidden"/><div class="modal-fields"><div class="field"><label>สถานะ</label><select id="peopleProfileStatus"><option value="probation">ทดลองงาน</option><option value="employee">พนักงาน</option><option value="leave_of_absence">พักงาน</option><option value="resigned">ลาออก</option><option value="terminated">เลิกจ้าง</option><option value="alumni">อดีตพนักงาน</option><option value="inactive">Inactive</option></select></div><div class="field"><label>หัวหน้าโดยตรง</label><select id="peopleProfileManager"></select></div><div class="field"><label>แผนก</label><select id="peopleProfileDepartment"></select></div><div class="field"><label>ตำแหน่ง</label><select id="peopleProfilePosition"></select></div><div class="field"><label>ครบ Probation</label><input id="peopleProfileProbationEnd" type="date"/></div><div class="field"><label>วันที่ผ่านโปร</label><input id="peopleProfileConfirmedAt" type="date"/></div><div class="field"><label>วันสิ้นสุดการทำงาน</label><input id="peopleProfileEndDate" type="date"/></div><div class="field"><label>เหตุผล</label><input id="peopleProfileEndReason"/></div><div class="field full"><label>Work Location ที่อนุญาต</label><div id="peopleProfileLocations" class="location-check-grid"></div><small>ถ้าไม่เลือก ระบบจะใช้ทุก Work Location ของบริษัท</small></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="peopleProfileSaveBtn" class="primary-btn">บันทึก People Profile</button></div></form>
+  </dialog>
+
+  <dialog id="payrollSettingsModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PAYROLL SETTINGS</p><h3>ตั้งค่า Payroll</h3><p>ค่าเริ่มต้นจะไม่หักขาด/สายอัตโนมัติ จนกว่า HR จะเปิดเอง</p></div><button class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="modal-fields"><div class="field"><label>วันที่จ่ายเงินเดือน</label><input id="payrollPayDay" type="number" min="1" max="31" /></div><div class="field"><label>ตัวหารค่าจ้างรายวัน</label><input id="payrollDailyDivisor" type="number" min="1" step="0.01" /></div><label class="toggle-line full"><input id="payrollSsoEnabled" type="checkbox" /> คำนวณประกันสังคม</label><label class="toggle-line full"><input id="payrollTaxEnabled" type="checkbox" /> ประมาณการภาษีหัก ณ ที่จ่าย</label><label class="toggle-line full"><input id="payrollAbsenceDeduction" type="checkbox" /> หักวันขาดงานอัตโนมัติ</label><label class="toggle-line full"><input id="payrollLateDeduction" type="checkbox" /> หักมาสายอัตโนมัติ</label><div class="field full"><label>หักมาสายต่อนาที</label><input id="payrollLatePerMinute" type="number" min="0" step="0.01" /></div></div><div class="legal-callout"><strong>กติกาไทยแบบ Versioned</strong><span>Payroll ต้อง Preview → ตรวจ → Lock ก่อน Publish ทุกครั้ง</span></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollSettingsSaveBtn" type="button" class="primary-btn">บันทึก</button></div></form></dialog>
+
+  <dialog id="payrollProfileModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">SALARY PROFILE</p><h3 id="payrollProfileTitle">ข้อมูลเงินเดือนพนักงาน</h3><p>ข้อมูลส่วนนี้ควรจำกัดสิทธิ์เฉพาะ HR/Payroll</p></div><button class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><input id="payrollProfileEmployeeId" type="hidden" /><div class="modal-fields"><div class="field"><label>เงินเดือนฐาน</label><input id="payrollBaseSalary" type="number" min="0" step="0.01" /></div><div class="field"><label>วันที่มีผล</label><input id="payrollEffectiveFrom" type="date" /></div><label class="toggle-line"><input id="employeeSsoEnabled" type="checkbox" /> ประกันสังคม</label><label class="toggle-line"><input id="employeeTaxEnabled" type="checkbox" /> หักภาษี</label><div class="field"><label>ค่าลดหย่อนส่วนตัว/ปี</label><input id="employeePersonalAllowance" type="number" min="0" /></div><div class="field"><label>ค่าลดหย่อนอื่น/ปี</label><input id="employeeExtraDeductions" type="number" min="0" /></div><div class="field"><label>ภาษีต่อเดือน Override</label><input id="employeeTaxOverride" type="number" min="0" step="0.01" placeholder="เว้นว่าง = คำนวณให้" /></div><div class="field"><label>ธนาคาร</label><input id="employeeBankName" /></div><div class="field"><label>ชื่อบัญชี</label><input id="employeeBankAccountName" /></div><div class="field"><label>เลขบัญชี</label><input id="employeeBankAccountNo" /></div><div class="field full"><label>หมายเหตุ Payroll</label><textarea id="employeePayrollNote" rows="3"></textarea></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollProfileSaveBtn" type="button" class="primary-btn">บันทึกข้อมูลเงินเดือน</button></div></form></dialog>
+
+  <dialog id="payrollPeriodModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">NEW PAY PERIOD</p><h3>สร้างรอบเงินเดือน</h3><p>ระบบจะ Preview จากเงินเดือนฐาน + Attendance + Leave ทันที</p></div><button class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="modal-fields"><div class="field"><label>เดือน</label><input id="payrollPeriodKey" type="month" /></div><div class="field"><label>วันที่จ่าย</label><input id="payrollPayDate" type="date" /></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollPeriodCreateBtn" type="button" class="primary-btn">สร้างและคำนวณ Preview</button></div></form></dialog>
+
+  <dialog id="payrollAdjustmentModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PAYROLL ADJUSTMENT</p><h3>เพิ่มเงิน / รายการหัก</h3><p>OT, Commission, Incentive, Allowance, Bonus หรือรายการหักอื่น</p></div><button class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><input id="payrollAdjustmentPeriodId" type="hidden" /><div class="modal-fields"><div class="field full"><label>พนักงาน</label><select id="payrollAdjustmentEmployee"></select></div><div class="field"><label>ประเภท</label><select id="payrollAdjustmentType"><option value="earning">เงินเพิ่ม</option><option value="deduction">รายการหัก</option></select></div><div class="field"><label>หมวด</label><select id="payrollAdjustmentCategory"><option value="overtime">OT</option><option value="commission">Commission</option><option value="incentive">Incentive</option><option value="allowance">Allowance</option><option value="bonus">Bonus</option><option value="other">อื่น ๆ</option></select></div><div class="field"><label>จำนวนเงิน</label><input id="payrollAdjustmentAmount" type="number" min="0" step="0.01" /></div><div class="field full"><label>รายละเอียด</label><input id="payrollAdjustmentNote" /></div><label class="toggle-line"><input id="payrollAdjustmentTaxable" type="checkbox" checked /> นับเป็นรายได้ที่ใช้ประมาณการภาษี</label><label class="toggle-line"><input id="payrollAdjustmentSso" type="checkbox" /> นับเป็นฐานประกันสังคม</label></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollAdjustmentSaveBtn" type="button" class="primary-btn">เพิ่มและคำนวณใหม่</button></div></form></dialog>
+
+  <dialog id="documentGenerateModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">GENERATE DOCUMENT</p><h3>ออกเอกสารพนักงาน</h3><p>สร้าง PDF และเก็บใน Google Drive ของบริษัทอัตโนมัติ</p></div><button class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="modal-fields"><div class="field full"><label>พนักงาน</label><select id="documentEmployee"></select></div><div class="field full"><label>ประเภทเอกสาร</label><select id="documentType"><option value="employment_certificate">หนังสือรับรองการทำงาน</option><option value="salary_certificate">หนังสือรับรองเงินเดือน</option></select></div><div class="field full"><label>หมายเหตุเพิ่มเติม</label><textarea id="documentNote" rows="3"></textarea></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="documentGenerateSaveBtn" type="button" class="primary-btn">สร้าง PDF ลง Drive</button></div></form></dialog>
+
+  <dialog id="courseModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">COURSE BUILDER</p><h3>สร้างหลักสูตร Onboarding</h3><p>สร้างคอร์สก่อน แล้วค่อยเพิ่มวิดีโอ เอกสาร เนื้อหา หรือ Quiz</p></div><button class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>ชื่อหลักสูตร</label><input id="courseTitle" placeholder="เช่น Welcome to DEAL / Product 101" /></div><div class="field full"><label>คำอธิบาย</label><textarea id="courseDescription" rows="3"></textarea></div><div class="field"><label>กลุ่มเริ่มต้น</label><select id="courseAudience"><option value="manual">เลือกทีหลัง</option><option value="all">พนักงานทั้งหมด</option><option value="probation">พนักงานทดลองงาน</option><option value="department">รายแผนก</option></select></div><div class="field"><label>คะแนนผ่าน Quiz</label><input id="coursePassingScore" type="number" min="0" max="100" value="80" /></div><div class="field"><label>เวลาโดยประมาณ</label><div class="input-suffix"><input id="courseEstimatedMinutes" type="number" min="0" value="30" /><span>นาที</span></div></div><label class="toggle-line"><input id="courseRequired" type="checkbox" checked /> บังคับเรียน</label></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="courseSaveBtn" type="button" class="primary-btn">สร้างคอร์ส</button></div></form></dialog>
+
+  <dialog id="moduleModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">COURSE CONTENT</p><h3>เพิ่มบทเรียน</h3><p>วิดีโอและเอกสารจะเก็บใน Google Drive ของบริษัทโดยตรง</p></div><button class="close-btn" value="cancel">×</button></div><input id="moduleCourseId" type="hidden"/><div class="modal-fields"><div class="field"><label>ประเภท</label><select id="moduleType"><option value="video">วิดีโอ</option><option value="document">เอกสาร</option><option value="text">บทความ</option><option value="link">ลิงก์</option><option value="quiz">Quiz</option></select></div><div class="field"><label>ชื่อบทเรียน</label><input id="moduleTitle" /></div><div class="field full"><label>รายละเอียด</label><textarea id="moduleDescription" rows="2"></textarea></div><div class="field full" id="moduleTextField"><label>เนื้อหา</label><textarea id="moduleContentText" rows="5"></textarea></div><div class="field full" id="moduleLinkField"><label>URL</label><input id="moduleExternalUrl" placeholder="https://..." /></div><div class="field full" id="moduleFileField"><label>ไฟล์วิดีโอ / เอกสาร</label><input id="moduleFile" type="file" accept="video/*,.pdf,.ppt,.pptx,.doc,.docx"/><small>อัปโหลดเข้า Google Drive อัตโนมัติ · สูงสุด 250 MB ต่อไฟล์ใน Phase นี้</small></div><label class="toggle-line"><input id="moduleRequired" type="checkbox" checked/> ต้องเรียนให้จบ</label></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="moduleSaveBtn" type="button" class="primary-btn">เพิ่มบทเรียน</button></div></form></dialog>
+
+  <dialog id="quizQuestionModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">QUIZ BUILDER</p><h3>เพิ่มคำถาม</h3><p>Phase 4 รองรับ Single choice แบบตรวจคะแนนอัตโนมัติ</p></div><button class="close-btn" value="cancel">×</button></div><input id="quizModuleId" type="hidden"/><div class="modal-fields"><div class="field full"><label>คำถาม</label><textarea id="quizQuestionText" rows="3"></textarea></div><div class="field full"><label>ตัวเลือก (1 บรรทัด = 1 ตัวเลือก)</label><textarea id="quizOptions" rows="5" placeholder="ตัวเลือก A
+ตัวเลือก B
+ตัวเลือก C"></textarea></div><div class="field"><label>ข้อที่ถูก</label><input id="quizCorrectIndex" type="number" min="1" value="1"/></div><div class="field"><label>คะแนน</label><input id="quizPoints" type="number" min="0.1" step="0.5" value="1"/></div><div class="field full"><label>คำอธิบายหลังตอบ</label><input id="quizExplanation" /></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="quizQuestionSaveBtn" type="button" class="primary-btn">เพิ่มคำถาม</button></div></form></dialog>
+
+  <dialog id="courseAssignModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">ASSIGN COURSE</p><h3 id="courseAssignTitle">มอบหมายหลักสูตร</h3><p>เลือกทั้งบริษัท พนักงานทดลองงาน แผนก หรือรายคนได้</p></div><button class="close-btn" value="cancel">×</button></div><input id="assignCourseId" type="hidden"/><div class="modal-fields"><div class="field"><label>กลุ่ม</label><select id="assignAudience"><option value="all">พนักงานทั้งหมด</option><option value="probation">พนักงานทดลองงาน</option><option value="department">รายแผนก</option><option value="employees">เลือกรายคน</option></select></div><div class="field"><label>กำหนดส่ง</label><input id="assignDueDate" type="date"/></div><div class="field full" id="assignDepartmentField"><label>แผนก</label><select id="assignDepartment"></select></div><div class="field full hidden" id="assignEmployeesField"><label>พนักงาน</label><div id="assignEmployeeChecks" class="location-check-grid"></div></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="courseAssignSaveBtn" type="button" class="primary-btn">Publish & Assign</button></div></form></dialog>
+
+  <dialog id="kpiModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">KPI GOAL</p><h3>สร้าง KPI</h3><p>กำหนดให้พนักงานอัปเดตรายวัน รายสัปดาห์ หรือรายเดือนผ่าน Employee Portal</p></div><button class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>พนักงาน</label><select id="kpiEmployee"></select></div><div class="field full"><label>ชื่อ KPI</label><input id="kpiTitle" placeholder="เช่น Leads ใหม่ / ยอดขาย / งานส่งตรงเวลา"/></div><div class="field full"><label>รายละเอียด</label><textarea id="kpiDescription" rows="2"></textarea></div><div class="field"><label>รูปแบบ</label><select id="kpiMetricType"><option value="number">ตัวเลข</option><option value="percent">เปอร์เซ็นต์</option><option value="currency">เงินบาท</option><option value="text">อัปเดตข้อความ</option></select></div><div class="field"><label>เป้าหมาย</label><input id="kpiTargetValue" type="number" step="0.01"/></div><div class="field"><label>หน่วย</label><input id="kpiUnit" placeholder="งาน / lead / บาท"/></div><div class="field"><label>อัปเดต</label><select id="kpiFrequency"><option value="daily">ทุกวัน</option><option value="weekly">ทุกสัปดาห์</option><option value="monthly" selected>ทุกเดือน</option><option value="once">ครั้งเดียว</option></select></div><div class="field"><label>น้ำหนัก</label><div class="input-suffix"><input id="kpiWeight" type="number" min="0" max="100" value="0"/><span>%</span></div></div><div class="field"><label>รอบประเมิน</label><select id="kpiCycle"></select></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="kpiSaveBtn" type="button" class="primary-btn">สร้าง KPI</button></div></form></dialog>
+
+  <dialog id="kpiUpdateModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">KPI UPDATE</p><h3 id="kpiUpdateTitle">อัปเดต KPI</h3></div><button class="close-btn" value="cancel">×</button></div><input id="kpiUpdateGoalId" type="hidden"/><div class="modal-fields"><div class="field"><label>ค่าปัจจุบัน</label><input id="kpiActualValue" type="number" step="0.01"/></div><div class="field"><label>Progress Override</label><div class="input-suffix"><input id="kpiProgressPct" type="number" min="0" max="100"/><span>%</span></div></div><div class="field full"><label>อัปเดตข้อความ / Note</label><textarea id="kpiUpdateNote" rows="3"></textarea></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="kpiUpdateSaveBtn" type="button" class="primary-btn">บันทึกอัปเดต</button></div></form></dialog>
+
+  <dialog id="performanceCycleModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PERFORMANCE CYCLE</p><h3>สร้างรอบประเมิน</h3></div><button class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>ชื่อรอบ</label><input id="cycleName" placeholder="Q3 2026 / August Monthly"/></div><div class="field"><label>ประเภท</label><select id="cycleType"><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option><option value="probation">Probation</option><option value="custom">Custom</option></select></div><div class="field"><label>เริ่ม</label><input id="cycleStart" type="date"/></div><div class="field"><label>จบ</label><input id="cycleEnd" type="date"/></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="cycleSaveBtn" type="button" class="primary-btn">สร้างรอบ</button></div></form></dialog>
+
+  <dialog id="oneOnOneModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">1:1</p><h3>บันทึก 1:1</h3><p>เก็บสิ่งที่คุย Action item และวัน Follow-up</p></div><button class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>พนักงาน</label><select id="oneEmployee"></select></div><div class="field"><label>นัดหมาย</label><input id="oneScheduledAt" type="datetime-local"/></div><div class="field"><label>สถานะ</label><select id="oneStatus"><option value="scheduled">นัดไว้</option><option value="completed">คุยแล้ว</option><option value="cancelled">ยกเลิก</option><option value="missed">ไม่ได้คุย</option></select></div><div class="field full"><label>Manager Notes</label><textarea id="oneManagerNotes" rows="3"></textarea></div><div class="field full"><label>Action Items</label><textarea id="oneActionItems" rows="3"></textarea></div><div class="field"><label>Follow-up</label><input id="oneFollowup" type="datetime-local"/></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="oneSaveBtn" type="button" class="primary-btn">บันทึก 1:1</button></div></form></dialog>
+
+  <dialog id="probationReviewModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PROBATION REVIEW</p><h3>ประเมินทดลองงาน</h3><p>ผ่าน / ต่อโปร / ไม่ผ่าน พร้อมบันทึกเหตุผลและจุดพัฒนา</p></div><button class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>พนักงาน</label><select id="reviewEmployee"></select></div><div class="field"><label>วันที่ประเมิน</label><input id="reviewDate" type="date"/></div><div class="field"><label>ผล</label><select id="reviewStatus"><option value="submitted">ส่งประเมิน</option><option value="passed">ผ่านทดลองงาน</option><option value="extended">ต่อทดลองงาน</option><option value="not_passed">ไม่ผ่าน</option></select></div><div class="field"><label>คะแนน</label><input id="reviewScore" type="number" min="0" max="100"/></div><div class="field"><label>ต่อโปรถึง</label><input id="reviewExtensionEnd" type="date"/></div><div class="field full"><label>จุดแข็ง</label><textarea id="reviewStrengths" rows="2"></textarea></div><div class="field full"><label>สิ่งที่ต้องพัฒนา</label><textarea id="reviewImprovements" rows="2"></textarea></div><div class="field full"><label>Manager Comment</label><textarea id="reviewManagerComment" rows="2"></textarea></div><div class="field full"><label>HR Comment</label><textarea id="reviewHrComment" rows="2"></textarea></div></div><div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button id="reviewSaveBtn" type="button" class="primary-btn">บันทึกผลประเมิน</button></div></form></dialog>
+
   <dialog id="lineIntegrationModal" class="line-integration-modal">
     <form method="dialog" id="lineIntegrationForm">
       <div class="modal-head">
@@ -444,6 +630,7 @@
       <div class="leave-profile-head">
         <div class="field"><label>ปีสิทธิ์</label><select id="leaveProfileYear"></select></div>
         <div class="field"><label>ผู้อนุมัติเรื่องลา</label><select id="leaveApproverSelect"><option value="">ยังไม่กำหนด</option></select></div>
+        <div class="field"><label>สิทธิ์การลา</label><select id="leaveAccessOverride"><option value="">ตามนโยบายบริษัท</option><option value="1">เปิดสิทธิ์ลาให้คนนี้</option><option value="0">ล็อกสิทธิ์ลาคนนี้</option></select></div>
       </div>
       <div id="leaveEntitlementRows" class="entitlement-list"></div>
       <div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="leaveProfileSaveBtn" class="primary-btn">บันทึกสิทธิ์ลา</button></div>
@@ -481,10 +668,23 @@
         <div class="field"><label>สิทธิ์เริ่มต้นต่อปี</label><div class="input-suffix"><input id="leavePolicyDays" type="number" min="0" step="0.5" value="0" /><span>วัน</span></div></div>
         <div class="field"><label>แจ้งล่วงหน้าอย่างน้อย</label><div class="input-suffix"><input id="leavePolicyNotice" type="number" min="0" value="0" /><span>วัน</span></div></div>
         <div class="field"><label>บังคับหลักฐานเมื่อลา ≥</label><div class="input-suffix"><input id="leavePolicyEvidence" type="number" min="0" step="0.5" placeholder="ไม่บังคับ" /><span>วัน</span></div></div>
-        <div class="field option-stack"><label class="toggle-line"><input id="leavePolicyUnlimited" type="checkbox" /><span>ไม่จำกัดจำนวนวัน</span></label><label class="toggle-line"><input id="leavePolicyReason" type="checkbox" checked /><span>บังคับระบุเหตุผล</span></label><label class="toggle-line"><input id="leavePolicyNegative" type="checkbox" /><span>อนุญาตให้สิทธิ์ติดลบ</span></label></div>
+        <div class="field option-stack"><label class="toggle-line"><input id="leavePolicyUnlimited" type="checkbox" /><span>ไม่จำกัดจำนวนวัน</span></label><label class="toggle-line"><input id="leavePolicyReason" type="checkbox" checked /><span>บังคับระบุเหตุผล</span></label><label class="toggle-line"><input id="leavePolicyNegative" type="checkbox" /><span>อนุญาตให้สิทธิ์ติดลบ</span></label><label class="toggle-line"><input id="leavePolicyProbation" type="checkbox" /><span>ใช้สิทธิ์นี้ได้ระหว่างทดลองงาน</span></label></div>
       </div>
       <div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="leavePolicySaveBtn" class="primary-btn">บันทึก Policy</button></div>
     </form>
+  </dialog>
+
+  <dialog id="broadcastModal" class="broadcast-modal">
+    <form method="dialog"><div class="modal-head"><div><p class="kicker">BROADCAST</p><h3>ส่งประกาศถึงพนักงาน</h3><p>ส่ง Flex Card ผ่าน LINE OA ของ Workspace ไปยังกลุ่มที่เลือก</p></div><button class="close-btn" value="cancel">×</button></div>
+      <div class="modal-fields"><div class="field full"><label>หัวข้อ <em>*</em></label><input id="broadcastTitle" placeholder="เช่น แจ้งเปลี่ยนเวลาประชุมประจำสัปดาห์" /></div><div class="field full"><label>ข้อความ <em>*</em></label><textarea id="broadcastMessage" rows="6" placeholder="รายละเอียดประกาศ"></textarea></div><div class="field"><label>ส่งถึง</label><select id="broadcastAudience"><option value="all">พนักงานทั้งหมด</option><option value="department">เฉพาะแผนก</option><option value="employees">เลือกพนักงาน</option></select></div><div class="field" id="broadcastDepartmentField"><label>แผนก</label><select id="broadcastDepartment"></select></div><div class="field full hidden" id="broadcastEmployeesField"><label>พนักงาน</label><div id="broadcastEmployeeChecks" class="location-check-grid"></div></div></div>
+      <div class="modal-actions"><button value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="broadcastSendBtn" class="primary-btn">ส่งประกาศตอนนี้</button></div></form>
+  </dialog>
+
+  <dialog id="hrCaseModal" class="hr-case-modal">
+    <form method="dialog"><div class="modal-head"><div><p class="kicker">PRIVATE HR CASE</p><h3 id="hrCaseModalTitle">เรื่องส่วนตัวถึง HR</h3><p id="hrCaseModalSub">ข้อมูลนี้จำกัดเฉพาะ HR</p></div><button class="close-btn" value="cancel">×</button></div>
+      <div id="hrCaseDetail" class="hr-case-detail"></div>
+      <div class="modal-fields"><div class="field"><label>สถานะ</label><select id="hrCaseStatus"><option value="open">รับเรื่องแล้ว</option><option value="in_progress">กำลังดำเนินการ</option><option value="waiting_employee">รอพนักงาน</option><option value="resolved">แก้ไขแล้ว</option><option value="closed">ปิดเรื่อง</option></select></div><div class="field"><label>ความสำคัญ</label><select id="hrCasePriority"><option value="low">ต่ำ</option><option value="normal">ปกติ</option><option value="high">สูง</option><option value="urgent">ด่วน</option></select></div><div class="field full"><label>โน้ตภายใน HR</label><textarea id="hrCaseNote" rows="3" placeholder="พนักงานจะไม่เห็นข้อความนี้"></textarea></div><div class="field full"><label>ตอบกลับพนักงานทาง LINE</label><textarea id="hrCaseReply" rows="3" placeholder="เว้นว่างได้ หากยังไม่ต้องตอบ"></textarea></div></div>
+      <div class="modal-actions"><button value="cancel" class="secondary-btn">ปิด</button><button type="button" id="hrCaseSaveBtn" class="primary-btn">บันทึกและตอบกลับ</button></div></form>
   </dialog>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
