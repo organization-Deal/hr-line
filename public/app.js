@@ -120,6 +120,9 @@ async function api(path, options = {}) {
 }
 
 async function boot() {
+  closeAllDialogs();
+  document.body?.classList.add('nakna-ready');
+  showBootSplash();
   bindEvents();
   renderLoadingState();
   loadPublicOnboarding();
@@ -129,8 +132,10 @@ async function boot() {
     if (!ready) return;
     const onboardingReady = await maybeRunOnboarding({ forceNewBusiness: returnState.forceNewBusiness });
     if (!onboardingReady) return;
+    showAppShell();
     if (await ensureWorkspaceReady()) await loadAll({ silent: true });
   } catch (error) {
+    showAppShell();
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
       renderLoadProblem([{ label: 'เริ่มระบบ', message: error.message }]);
     }
@@ -144,7 +149,6 @@ function bindEvents() {
     if (await ensureWorkspaceReady()) await loadAll();
   };
   $('#logoutBtn').onclick = logout;
-  $('#sidebarConnectionCard').onclick = () => showView('settings');
   $('#onboardingLogoutBtn').onclick = logout;
   $('#createCompanyBtn').onclick = createCompany;
   $('#onboardingGoogleBtn').onclick = connectGoogleWorkspace;
@@ -168,6 +172,17 @@ function bindEvents() {
     $('#companyMenu').classList.add('hidden');
     $('#companySwitcher').setAttribute('aria-expanded', 'false');
   });
+
+  // Close dialog buttons in capture phase so required-field validation can never trap Cancel/X.
+  document.addEventListener('click', event => {
+    const cancel = event.target.closest('dialog button[value="cancel"], dialog .close-btn, dialog [data-dialog-close]');
+    if (!cancel) return;
+    const dialog = cancel.closest('dialog');
+    if (!dialog) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (dialog.open) dialog.close('cancel');
+  }, true);
   $('#companyProfileShortcut').onclick = openCompanyProfileModal;
   $('#statusCompanyAction').onclick = openCompanyProfileModal;
   $('#companyProfileSaveBtn').onclick = saveCompanyProfile;
@@ -175,9 +190,7 @@ function bindEvents() {
   $('#googleWorkspaceConnectBtn').onclick = connectGoogleWorkspace;
   $('#googleWorkspaceSyncBtn').onclick = syncGoogleWorkspace;
   $('#googleWorkspaceDisconnectBtn').onclick = disconnectGoogleWorkspace;
-  $('#statusGmailAction').onclick = connectGoogleWorkspace;
-  $('#statusDriveAction').onclick = connectGoogleWorkspace;
-  $('#statusSheetsAction').onclick = connectGoogleWorkspace;
+  $('#statusGoogleAction').onclick = connectGoogleWorkspace;
   $('#lineIntegrationShortcut').onclick = openLineIntegrationModal;
   $('#statusLineAction').onclick = openLineIntegrationModal;
   $('#lineConfigureBtn').onclick = openLineIntegrationModal;
@@ -302,16 +315,39 @@ async function loadSessionOnly({ forceNewBusiness = false } = {}) {
   }
 }
 
+function showBootSplash() {
+  $('#bootSplash')?.classList.remove('hidden');
+  $('#login')?.classList.add('hidden');
+  $('#onboarding')?.classList.add('hidden');
+  $('#appShell')?.classList.add('hidden');
+}
+function hideBootSplash() { $('#bootSplash')?.classList.add('hidden'); }
 function showLogin() {
+  hideBootSplash();
   $('#login').classList.remove('hidden');
   $('#onboarding').classList.add('hidden');
+  $('#appShell')?.classList.add('hidden');
 }
 function hideLogin() { $('#login').classList.add('hidden'); }
+function showAppShell() {
+  hideBootSplash();
+  $('#login')?.classList.add('hidden');
+  $('#onboarding')?.classList.add('hidden');
+  $('#appShell')?.classList.remove('hidden');
+}
+function closeAllDialogs() {
+  document.querySelectorAll('dialog[open]').forEach(dialog => {
+    try { dialog.close('reset'); } catch { dialog.removeAttribute('open'); }
+  });
+}
+window.addEventListener('pageshow', event => { if (event.persisted) closeAllDialogs(); });
 function showLoginError(message) { $('#loginError').textContent = message === 'AUTH_REQUIRED' ? '' : message; }
 function closeMobileNav() { document.body.classList.remove('mobile-nav-open'); }
 
 function showOnboarding({ step = 'company', forceNewBusiness = false } = {}) {
+  hideBootSplash();
   hideLogin();
+  $('#appShell')?.classList.add('hidden');
   const me = state.me || {};
   $('#onboarding').classList.remove('hidden');
   const name = me.user?.name || me.user?.email || '';
@@ -379,12 +415,12 @@ function renderOnboardingStatus() {
   const gState = $('#onboardingGoogleState');
   if (google.connected) {
     gState.classList.add('connected');
-    gState.innerHTML = `<span class="state-dot"></span><div><strong>เชื่อม Google Workspace แล้ว</strong><p>${escapeHtml(google.email || 'Google Account')} · Drive + Sheets พร้อมใช้งาน</p></div>`;
+    gState.innerHTML = `<span class="state-dot"></span><div><strong>เชื่อม Google แล้ว</strong><p>${escapeHtml(google.email || 'Google Account')} · Drive + Sheets พร้อมใช้งาน</p></div>`;
     $('#onboardingGoogleBtn').classList.add('hidden');
     $('#onboardingGoogleNextBtn').classList.remove('hidden');
   } else {
     gState.classList.remove('connected');
-    gState.innerHTML = `<span class="state-dot"></span><div><strong>ยังไม่ได้เชื่อม Google Workspace</strong><p>กดเชื่อมเพื่ออนุญาต Gmail, Drive และ Sheets</p></div>`;
+    gState.innerHTML = `<span class="state-dot"></span><div><strong>ยังไม่ได้เชื่อม Google</strong><p>กดเชื่อมเพื่ออนุญาต Gmail, Drive และ Sheets</p></div>`;
     $('#onboardingGoogleBtn').classList.remove('hidden');
     $('#onboardingGoogleNextBtn').classList.add('hidden');
   }
@@ -433,7 +469,7 @@ async function createCompany() {
     state.onboardingStatus = result.onboarding || await api('/api/onboarding/status');
     showOnboarding({ step: 'google_workspace' });
     renderOnboardingStatus();
-    toast('สร้างธุรกิจแล้ว · ต่อไปเชื่อม Google Workspace');
+    toast('สร้างธุรกิจแล้ว · ต่อไปเชื่อม Google');
   } catch (error) {
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) onboardingError(error.message);
   } finally {
@@ -487,6 +523,7 @@ async function completeOnboarding() {
     const result = await api('/api/onboarding/complete', { method: 'POST', body: '{}' });
     state.onboardingStatus = result.onboarding;
     hideOnboarding();
+    showAppShell();
     if (await ensureWorkspaceReady()) await loadAll({ silent: true });
     toast('Workspace พร้อมใช้งาน · Free Trial เริ่มแล้ว');
   } catch (error) {
@@ -509,6 +546,7 @@ async function claimLegacyCompany() {
       state.onboardingStatus = await api('/api/onboarding/status');
       if (state.onboardingStatus?.completed) {
         hideOnboarding();
+        showAppShell();
         if (await ensureWorkspaceReady()) await loadAll({ silent: true });
       } else {
         showOnboarding({ step: state.onboardingStatus?.current_step || 'google_workspace' });
@@ -539,7 +577,10 @@ async function switchCompany(clientId) {
     const ready = await loadSessionOnly();
     if (ready) {
       const onboardingReady = await maybeRunOnboarding();
-      if (onboardingReady && await ensureWorkspaceReady()) await loadAll({ silent: true });
+      if (onboardingReady) {
+        showAppShell();
+        if (await ensureWorkspaceReady()) await loadAll({ silent: true });
+      }
     }
     toast('เปลี่ยนบริษัทเรียบร้อยแล้ว');
   } catch (error) {
@@ -626,15 +667,15 @@ async function saveCompanyProfile() {
 }
 
 function connectGoogleWorkspace() {
-  if (!canManageGoogleWorkspace()) return toast('เฉพาะ Owner หรือ HR Admin ที่เชื่อม Google Workspace ได้', true);
+  if (!canManageGoogleWorkspace()) return toast('เฉพาะ Owner หรือ HR Admin ที่เชื่อม Google ได้', true);
   window.location.href='/integrations/google-workspace/start';
 }
 
 async function disconnectGoogleWorkspace() {
   if(!state.googleWorkspace?.connected)return;
-  if(!confirm('ยกเลิกการเชื่อม Google Workspace? ไฟล์และ Sheet ที่สร้างไว้ใน Google Drive จะไม่ถูกลบ'))return;
+  if(!confirm('ยกเลิกการเชื่อม Google? ไฟล์และ Sheet ที่สร้างไว้ใน Google Drive จะไม่ถูกลบ'))return;
   const button=$('#googleWorkspaceDisconnectBtn');button.disabled=true;
-  try{await api('/api/integrations/google-workspace',{method:'DELETE'});state.googleWorkspace={connected:false,integration:null};renderSettings();toast('ยกเลิกการเชื่อม Google Workspace แล้ว');}
+  try{await api('/api/integrations/google-workspace',{method:'DELETE'});state.googleWorkspace={connected:false,integration:null};renderSettings();toast('ยกเลิกการเชื่อม Google แล้ว');}
   catch(error){toast(error.message,true);}finally{button.disabled=false;}
 }
 
@@ -644,12 +685,13 @@ async function syncGoogleWorkspace() {
   catch(error){toast(error.message,true);}finally{button.disabled=false;button.textContent='Sync ตอนนี้';}
 }
 
-function googleWorkspaceErrorText(code){return ({permission:'บัญชีนี้ไม่มีสิทธิ์เชื่อม Google Workspace',state:'เซสชัน Google หมดอายุ กรุณาเชื่อมใหม่',expired:'คำขอเชื่อมต่อหมดอายุ กรุณาเชื่อมใหม่',refresh_token:'Google ไม่ได้ส่ง Refresh Token กรุณาเชื่อมใหม่',drive_api:'เชื่อม Drive ไม่สำเร็จ กรุณาเปิด Google Drive API',sheets_api:'เชื่อม Sheets ไม่สำเร็จ กรุณาเปิด Google Sheets API',gmail_api:'เชื่อม Gmail ไม่สำเร็จ กรุณาเปิด Gmail API',connection_failed:'เชื่อม Google Workspace ไม่สำเร็จ กรุณาลองใหม่'})[code]||'เชื่อม Google Workspace ไม่สำเร็จ';}
+function googleWorkspaceErrorText(code){return ({permission:'บัญชีนี้ไม่มีสิทธิ์เชื่อม Google',state:'เซสชัน Google หมดอายุ กรุณาเชื่อมใหม่',expired:'คำขอเชื่อมต่อหมดอายุ กรุณาเชื่อมใหม่',refresh_token:'Google ไม่ได้ส่ง Refresh Token กรุณาเชื่อมใหม่',drive_api:'เชื่อม Drive ไม่สำเร็จ กรุณาเปิด Google Drive API',sheets_api:'เชื่อม Sheets ไม่สำเร็จ กรุณาเปิด Google Sheets API',gmail_api:'เชื่อม Gmail ไม่สำเร็จ กรุณาเปิด Gmail API',connection_failed:'เชื่อม Google ไม่สำเร็จ กรุณาลองใหม่'})[code]||'เชื่อม Google ไม่สำเร็จ';}
 
 function handleReturnMessage() {
   const url = new URL(window.location.href);
   const forceNewBusiness = url.searchParams.get('setup') === 'new';
-  if (url.searchParams.get('google_workspace') === 'connected') toast('เชื่อม Gmail + Drive + Google Sheets เรียบร้อยแล้ว');
+  const googleConnected = url.searchParams.get('google_workspace') === 'connected';
+  if (googleConnected) toast('เชื่อม Gmail + Drive + Google Sheets เรียบร้อยแล้ว');
   if (url.searchParams.get('auth') === 'success') toast('เข้าสู่ระบบด้วย Google เรียบร้อยแล้ว');
   if (url.searchParams.get('auth') === 'line') toast(forceNewBusiness ? 'ยืนยัน LINE แล้ว · ตั้งค่าธุรกิจต่อบนเว็บได้เลย' : 'เข้าสู่ระบบผ่าน LINE เรียบร้อยแล้ว');
   if (url.searchParams.has('auth_error')) {
@@ -667,7 +709,7 @@ function handleReturnMessage() {
     const query = url.searchParams.toString();
     history.replaceState({}, '', `${url.pathname}${query ? `?${query}` : ''}${url.hash}`);
   }
-  return { forceNewBusiness, googleConnected: url.searchParams.get('google_workspace') === 'connected' };
+  return { forceNewBusiness, googleConnected };
 }
 
 async function ensureWorkspaceReady() {
@@ -681,6 +723,20 @@ async function ensureWorkspaceReady() {
     }
     return false;
   }
+}
+
+async function runLoadPool(tasks, limit = 6) {
+  const results = new Array(tasks.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= tasks.length) return;
+      results[index] = await tasks[index]();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
 }
 
 async function loadAll({ silent = false } = {}) {
@@ -700,35 +756,35 @@ async function loadAll({ silent = false } = {}) {
     const isHr=['owner','hr_admin','hr'].includes(role);
     const canReadBroadcasts=['owner','hr_admin','hr','manager'].includes(role);
     const canViewPeople=['owner','hr_admin','hr','manager','viewer'].includes(role);
-    const [dashboard, companyProfile, peopleCore, employees, candidates, attendance, leaves, requests, employeeService, hrCases, broadcasts, payroll, documents, learning, performance, engagement, analytics, subscription, googleWorkspace, lineIntegration, invites, lookups, workLocations, leavePolicies, approverAccess, recruitmentGmail, benefits] = await Promise.all([
-      safeLoad('ภาพรวม', api('/api/dashboard'), () => state.dashboard || emptyDashboard()),
-      safeLoad('ข้อมูลบริษัท', api('/api/company-profile'), () => ({company:state.companyProfile || activeCompany() || {}})),
-      safeLoad('โครงสร้างองค์กร', api('/api/people-core'), () => state.peopleCore || { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} }),
-      safeLoad('พนักงาน', api('/api/employees'), () => ({data:state.employees || []})),
-      safeLoad('Recruitment', api('/api/candidates'), () => ({data:state.candidates || []})),
-      safeLoad('เวลาเข้างาน', api('/api/attendance/today'), () => ({data:state.attendance || []})),
-      safeLoad('การลา', api('/api/leaves'), () => ({data:state.leaves || []})),
-      safeLoad('Employee Service', api('/api/requests'), () => ({data:state.requests || []})),
-      safeLoad('Employee Service Center', api('/api/employee-service'), () => state.employeeService || {}),
-      isHr ? safeLoad('HR Cases', api('/api/hr-cases'), () => ({data:state.hrCases || []})) : Promise.resolve({data:[]}),
-      canReadBroadcasts ? safeLoad('ประกาศ', api('/api/broadcasts'), () => ({data:state.broadcasts || []})) : Promise.resolve({data:[]}),
-      isHr ? safeLoad('Payroll', api('/api/payroll/overview'), () => state.payroll) : Promise.resolve(null),
-      isHr ? safeLoad('เอกสาร', api('/api/documents'), () => state.documents || {data:[],payslips:[]}) : Promise.resolve({data:[],payslips:[]}),
-      canReadBroadcasts ? safeLoad('Learning', api('/api/learning/overview'), () => state.learning || {courses:[],assignments:[],summary:{}}) : Promise.resolve({courses:[],assignments:[],summary:{}}),
-      canReadBroadcasts ? safeLoad('Performance', api('/api/performance/overview'), () => state.performance || {cycles:[],goals:[],one_on_ones:[],probation_reviews:[],probation_due:[],summary:{}}) : Promise.resolve({cycles:[],goals:[],one_on_ones:[],probation_reviews:[],probation_due:[],summary:{}}),
-      canViewPeople ? safeLoad('Engagement', api('/api/engagement/overview'), () => state.engagement || {rules:[],rewards:[],redemptions:[],leaderboard:[],recent_transactions:[],summary:{}}) : Promise.resolve({rules:[],rewards:[],redemptions:[],leaderboard:[],recent_transactions:[],summary:{}}),
-      canViewPeople ? safeLoad('People Analytics', api('/api/analytics/overview'), () => state.analytics || {summary:{},headcount_trend:[],departments:[],recruitment:{},moments:[]}) : Promise.resolve({summary:{},headcount_trend:[],departments:[],recruitment:{},moments:[]}),
-      safeLoad('Subscription', api('/api/subscription'), () => state.subscription),
-      safeLoad('Google Workspace', api('/api/integrations/google-workspace'), () => state.googleWorkspace || {connected:false,integration:null}),
-      safeLoad('LINE Integration', api('/api/integrations/line'), () => state.lineIntegration || {connected:false,integration:null}),
-      safeLoad('ลิงก์เชิญ', api('/api/invites'), () => ({data:state.invites || []})),
-      safeLoad('ข้อมูลตัวเลือก', api('/api/lookups'), () => state.lookups || {departments:[],positions:[],locations:[]}),
-      safeLoad('สถานที่ทำงาน', api('/api/work-locations'), () => ({data:state.workLocations || []})),
-      safeLoad('สิทธิ์ลา', api('/api/leave-policies'), () => ({data:state.leavePolicies || []})),
-      isHr ? safeLoad('สิทธิ์ผู้อนุมัติ', api('/api/approver-access'), () => ({data:state.approverAccess || [],catalog:state.approverPermissionCatalog || []})) : Promise.resolve({data:[],catalog:[]}),
-      isHr ? safeLoad('Gmail ผู้สมัคร', api('/api/recruitment/gmail/status'), () => state.recruitmentGmail || {connected:false,enabled:false}) : Promise.resolve({connected:false,enabled:false}),
-      isHr ? safeLoad('สวัสดิการ', api('/api/benefits'), () => state.benefits || {data:[],enrollments:[]}) : Promise.resolve({data:[],enrollments:[]}),
-    ]);
+    const [dashboard, companyProfile, peopleCore, employees, candidates, attendance, leaves, requests, employeeService, hrCases, broadcasts, payroll, documents, learning, performance, engagement, analytics, subscription, googleWorkspace, lineIntegration, invites, lookups, workLocations, leavePolicies, approverAccess, recruitmentGmail, benefits] = await runLoadPool([
+      () => safeLoad('ภาพรวม', api('/api/dashboard'), () => state.dashboard || emptyDashboard()),
+      () => safeLoad('ข้อมูลบริษัท', api('/api/company-profile'), () => ({company:state.companyProfile || activeCompany() || {}})),
+      () => safeLoad('โครงสร้างองค์กร', api('/api/people-core'), () => state.peopleCore || { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} }),
+      () => safeLoad('พนักงาน', api('/api/employees'), () => ({data:state.employees || []})),
+      () => safeLoad('Recruitment', api('/api/candidates'), () => ({data:state.candidates || []})),
+      () => safeLoad('เวลาเข้างาน', api('/api/attendance/today'), () => ({data:state.attendance || []})),
+      () => safeLoad('การลา', api('/api/leaves'), () => ({data:state.leaves || []})),
+      () => safeLoad('Employee Service', api('/api/requests'), () => ({data:state.requests || []})),
+      () => safeLoad('Employee Service Center', api('/api/employee-service'), () => state.employeeService || {}),
+      () => isHr ? safeLoad('HR Cases', api('/api/hr-cases'), () => ({data:state.hrCases || []})) : Promise.resolve({data:[]}),
+      () => canReadBroadcasts ? safeLoad('ประกาศ', api('/api/broadcasts'), () => ({data:state.broadcasts || []})) : Promise.resolve({data:[]}),
+      () => isHr ? safeLoad('Payroll', api('/api/payroll/overview'), () => state.payroll) : Promise.resolve(null),
+      () => isHr ? safeLoad('เอกสาร', api('/api/documents'), () => state.documents || {data:[],payslips:[]}) : Promise.resolve({data:[],payslips:[]}),
+      () => canReadBroadcasts ? safeLoad('Learning', api('/api/learning/overview'), () => state.learning || {courses:[],assignments:[],summary:{}}) : Promise.resolve({courses:[],assignments:[],summary:{}}),
+      () => canReadBroadcasts ? safeLoad('Performance', api('/api/performance/overview'), () => state.performance || {cycles:[],goals:[],one_on_ones:[],probation_reviews:[],probation_due:[],summary:{}}) : Promise.resolve({cycles:[],goals:[],one_on_ones:[],probation_reviews:[],probation_due:[],summary:{}}),
+      () => canViewPeople ? safeLoad('Engagement', api('/api/engagement/overview'), () => state.engagement || {rules:[],rewards:[],redemptions:[],leaderboard:[],recent_transactions:[],summary:{}}) : Promise.resolve({rules:[],rewards:[],redemptions:[],leaderboard:[],recent_transactions:[],summary:{}}),
+      () => canViewPeople ? safeLoad('People Analytics', api('/api/analytics/overview'), () => state.analytics || {summary:{},headcount_trend:[],departments:[],recruitment:{},moments:[]}) : Promise.resolve({summary:{},headcount_trend:[],departments:[],recruitment:{},moments:[]}),
+      () => safeLoad('Subscription', api('/api/subscription'), () => state.subscription),
+      () => safeLoad('Google', api('/api/integrations/google-workspace'), () => state.googleWorkspace || {connected:false,integration:null}),
+      () => safeLoad('LINE Integration', api('/api/integrations/line'), () => state.lineIntegration || {connected:false,integration:null}),
+      () => safeLoad('ลิงก์เชิญ', api('/api/invites'), () => ({data:state.invites || []})),
+      () => safeLoad('ข้อมูลตัวเลือก', api('/api/lookups'), () => state.lookups || {departments:[],positions:[],locations:[]}),
+      () => safeLoad('สถานที่ทำงาน', api('/api/work-locations'), () => ({data:state.workLocations || []})),
+      () => safeLoad('สิทธิ์ลา', api('/api/leave-policies'), () => ({data:state.leavePolicies || []})),
+      () => isHr ? safeLoad('สิทธิ์ผู้อนุมัติ', api('/api/approver-access'), () => ({data:state.approverAccess || [],catalog:state.approverPermissionCatalog || []})) : Promise.resolve({data:[],catalog:[]}),
+      () => isHr ? safeLoad('Gmail ผู้สมัคร', api('/api/recruitment/gmail/status'), () => state.recruitmentGmail || {connected:false,enabled:false}) : Promise.resolve({connected:false,enabled:false}),
+      () => isHr ? safeLoad('สวัสดิการ', api('/api/benefits'), () => state.benefits || {data:[],enrollments:[]}) : Promise.resolve({data:[],enrollments:[]}),
+    ], 6);
 
     state.dashboard = dashboard || emptyDashboard();
     state.companyProfile = companyProfile?.company || companyProfile || state.companyProfile || activeCompany() || {};
@@ -1148,7 +1204,7 @@ window.moveCandidate = async (id, stage) => {
 
 window.hireCandidate = id => {
   const candidate=state.candidates.find(c=>Number(c.id)===Number(id)); if(!candidate)return;
-  openModal('HIRE','รับเข้าทำงาน',`เปลี่ยน ${candidate.nickname||candidate.first_name} จาก Candidate เป็นพนักงานทดลองงาน`,[['employee_code','รหัสพนักงาน','text',true],['start_date','วันเริ่มงาน','date',true],['probation_end_date','วันครบ Probation','date']],async data=>{await api(`/api/candidates/${id}/hire`,{method:'POST',body:JSON.stringify(data)});await loadAll({silent:true});toast('สร้างพนักงานทดลองงานแล้ว');});
+  openModal('HIRE','รับเข้าทำงาน',`เปลี่ยน ${candidate.nickname||candidate.first_name} จาก Candidate เป็นพนักงานทดลองงาน`,[['employee_code','รหัสพนักงาน (ไม่กรอก = สร้างอัตโนมัติ)','text'],['start_date','วันเริ่มงาน','date',true],['probation_end_date','วันครบ Probation','date']],async data=>{await api(`/api/candidates/${id}/hire`,{method:'POST',body:JSON.stringify(data)});await loadAll({silent:true});toast('สร้างพนักงานทดลองงานแล้ว');}); const start=$('#field-start_date'); if(start&&!start.value) start.value=localDateKey(new Date());
 };
 
 
@@ -1159,7 +1215,7 @@ function renderRecruitmentGmail() {
   const connected = Boolean(d.connected);
   $('#recruitmentGmailBadge').className = `badge ${connected && d.enabled !== false ? 'badge-success' : connected ? 'badge-neutral' : 'badge-warning'}`;
   $('#recruitmentGmailBadge').textContent = !connected ? 'ยังไม่เชื่อม Google' : d.enabled === false ? 'ปิด Auto Sync' : 'Auto Sync';
-  $('#recruitmentGmailEmail').textContent = connected ? (d.email || 'Google Workspace connected') : 'เชื่อม Google Workspace เพื่ออ่านอีเมลสมัครงาน';
+  $('#recruitmentGmailEmail').textContent = connected ? (d.email || 'Google connected') : 'เชื่อม Google เพื่ออ่านอีเมลสมัครงาน';
   $('#recruitmentGmailQueryText').textContent = d.query || 'ยังไม่ได้ตั้ง Query';
   $('#recruitmentGmailLastSync').textContent = d.last_sync_at ? `Sync ล่าสุด ${formatDateTime(d.last_sync_at)}` : 'ยังไม่เคย Sync';
   $('#recruitmentGmailImported').textContent = `${Number(d.imported_messages || 0).toLocaleString('th-TH')} อีเมล`;
@@ -1392,6 +1448,30 @@ window.openLeaveDetail = async id => {
   } catch(error){ toast(error.message,true); }
 };
 
+window.uploadLeaveEvidence = async requestId => {
+  const input = $('#leaveEvidenceFile');
+  const file = input?.files?.[0];
+  if (!file) return toast('กรุณาเลือกไฟล์หลักฐานก่อน', true);
+  if (Number(file.size || 0) > 10 * 1024 * 1024) return toast('ไฟล์ใหญ่เกิน 10 MB', true);
+  const button = document.activeElement instanceof HTMLButtonElement ? document.activeElement : null;
+  if (button) { button.disabled = true; button.textContent = 'กำลังอัปโหลด…'; }
+  try {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const response = await fetch(`/api/leaves/${Number(requestId)}/evidence`, { method: 'POST', body: form, credentials: 'same-origin' });
+    let data = {}; try { data = await response.json(); } catch {}
+    if (response.status === 401) { showLogin(); throw new Error('กรุณาเข้าสู่ระบบใหม่'); }
+    if (!response.ok) throw new Error(data.error || `อัปโหลดไม่สำเร็จ (${response.status})`);
+    toast('อัปโหลดหลักฐานแล้ว');
+    await window.openLeaveDetail(Number(requestId));
+    await loadAll({ silent: true });
+  } catch (error) {
+    toast(error.message || 'อัปโหลดหลักฐานไม่สำเร็จ', true);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = 'อัปโหลดหลักฐาน'; }
+  }
+};
+
 function renderRequests() {
   $('#requestCountBadge').textContent = `${state.requests.length} รายการ`;
   $('#requestsList').innerHTML = state.requests.length
@@ -1603,8 +1683,8 @@ async function saveWorkLocation() {
 }
 
 function openEmployeeModal() {
-  openModal('EMPLOYEE', 'เพิ่มพนักงานใหม่', 'ข้อมูลนี้จะถูกใช้สร้าง Employee Profile และเชื่อม LINE ภายหลัง', [
-    ['employee_code', 'รหัสพนักงาน', 'text', true],
+  openModal('EMPLOYEE', 'เพิ่มพนักงานใหม่', 'กรอกเฉพาะข้อมูลที่มีตอนนี้ได้ รหัสพนักงานระบบสร้างให้อัตโนมัติ และค่อยเติมข้อมูลอื่นภายหลังได้', [
+    ['employee_code', 'รหัสพนักงาน (ไม่กรอก = สร้างอัตโนมัติ)', 'text'],
     ['nickname', 'ชื่อเล่น', 'text'],
     ['first_name', 'ชื่อ', 'text', true],
     ['last_name', 'นามสกุล', 'text', true],
@@ -1618,6 +1698,10 @@ function openEmployeeModal() {
     await api('/api/employees', { method: 'POST', body: JSON.stringify(data) });
     await loadAll({ silent: true });
   });
+  const code = $('#field-employee_code');
+  if (code) code.placeholder = 'เช่น NK-0001 · เว้นว่างได้';
+  const start = $('#field-start_date');
+  if (start && !start.value) start.value = localDateKey(new Date());
 }
 
 function openCandidateModal() {
@@ -1642,6 +1726,8 @@ function openModal(eyebrow, title, subtitle, fields, onSave) {
   $('#modalSubtitle').textContent = subtitle;
   $('#modalFields').className = 'modal-fields';
   $('#modalForm').reset();
+  $('#modalSave').disabled = false;
+  $('#modalSave').textContent = 'บันทึกข้อมูล';
 
   $('#modalFields').innerHTML = fields.map(([name, label, type, required]) => `
     <div class="field">
@@ -1773,12 +1859,12 @@ function renderGoogleWorkspace() {
   const canManage=canManageGoogleWorkspace();
   const canSendGmail=String(info.scopes||'').includes('gmail.send');
   const needsPayrollMail=connected&&!canSendGmail;
-  $('#googleWorkspaceTitle').textContent=connected?`Google Workspace · ${info.email||''}`:'Google Workspace';
+  $('#googleWorkspaceTitle').textContent=connected?`Google · ${info.email||''}`:'Google';
   $('#googleWorkspaceText').textContent=connected?(needsPayrollMail?'Drive/Sheets พร้อมแล้ว · เพิ่มสิทธิ์ Gmail Send เพื่อส่ง Payslip ทางอีเมล':'Gmail, Drive, HR Database Sheet และ Payslip Email พร้อมใช้งาน'):'เชื่อมบัญชี Google ของบริษัทเพื่อใช้ Gmail, Drive และ Google Sheets';
   $('#googleWorkspaceBadge').className=`badge ${connected?'badge-success':'badge-neutral'}`;
   $('#googleWorkspaceBadge').textContent=connected?'เชื่อมแล้ว':'ยังไม่เชื่อม';
   $('#googleWorkspaceConnectBtn').classList.toggle('hidden',(connected&&!needsPayrollMail)||!canManage);
-  $('#googleWorkspaceConnectBtn').textContent=needsPayrollMail?'เพิ่มสิทธิ์ส่ง Gmail':'เชื่อม Google Workspace';
+  $('#googleWorkspaceConnectBtn').textContent=needsPayrollMail?'เพิ่มสิทธิ์ส่ง Gmail':'เชื่อม Google';
   $('#googleWorkspaceSyncBtn').classList.toggle('hidden',!connected||!canManage);
   $('#googleWorkspaceDisconnectBtn').classList.toggle('hidden',!connected||!canManage);
   $('#googleWorkspaceDriveBtn').classList.toggle('hidden',!connected||!info.drive_url);
@@ -1789,92 +1875,16 @@ function renderGoogleWorkspace() {
   meta.classList.toggle('hidden',!connected);pills.classList.toggle('hidden',!connected);
   pills.innerHTML=connected?`<span class="service-pill">Gmail Read</span><span class="service-pill ${canSendGmail?'':'service-pill-warning'}">${canSendGmail?'Gmail Send ✓':'Gmail Send ต้องเพิ่มสิทธิ์'}</span><span class="service-pill">Drive</span><span class="service-pill">Sheets</span>`:'';
   meta.innerHTML=connected?`<span><b>บัญชี</b> ${escapeHtml(info.email||'—')}</span><span><b>Sync ล่าสุด</b> ${info.last_sync_at?escapeHtml(formatDateTime(info.last_sync_at)):'ยังไม่เคย Sync'}</span>${info.last_error?`<span class="integration-error"><b>ล่าสุด</b> ${escapeHtml(info.last_error)}</span>`:''}`:'';
-  renderConnectionSummary();
-}
-
-function renderConnectionSummary(){
-  const line=state.lineIntegration||{};
-  const google=state.googleWorkspace||{};
-  const info=google.integration||{};
-  const scopes=String(info.scopes||'');
-  const lineReady=Boolean((line.mode==='dedicated'&&line.connected)||line.default_available);
-  const gmailReady=Boolean(google.connected&&(Number(info.gmail_enabled)===1||info.gmail_enabled===true||scopes.includes('gmail.')));
-  const driveReady=Boolean(google.connected&&(Number(info.drive_enabled)===1||info.drive_enabled===true||info.drive_folder_id));
-  const sheetsReady=Boolean(google.connected&&(Number(info.sheets_enabled)===1||info.sheets_enabled===true||info.spreadsheet_id));
-  const services=[
-    ['sidebarServiceLine',lineReady,line.mode==='dedicated'?'LINE OA บริษัทเชื่อมแล้ว':line.default_available?'LINE นากนะพร้อมใช้งาน':'ยังไม่เชื่อม LINE'],
-    ['sidebarServiceGmail',gmailReady,gmailReady?'Gmail พร้อมใช้งาน':'Gmail ยังไม่พร้อม'],
-    ['sidebarServiceDrive',driveReady,driveReady?'Google Drive พร้อมใช้งาน':'Google Drive ยังไม่พร้อม'],
-    ['sidebarServiceSheets',sheetsReady,sheetsReady?'Google Sheets พร้อมใช้งาน':'Google Sheets ยังไม่พร้อม']
-  ];
-  const ready=services.filter(([,ok])=>ok).length;
-  const title=$('#sidebarConnectionTitle');
-  const text=$('#sidebarConnectionText');
-  const card=$('#sidebarConnectionCard');
-  if(title) title.textContent='การเชื่อมต่อระบบ';
-  if(text) text.textContent=ready===services.length?'พร้อมใช้งานทั้งหมด':`${ready}/${services.length} บริการพร้อมใช้งาน`;
-  if(card) card.dataset.status=ready===services.length?'ready':ready?'partial':'warning';
-  services.forEach(([id,ok,hint])=>{
-    const el=$(`#${id}`);
-    if(!el)return;
-    el.classList.toggle('is-connected',Boolean(ok));
-    el.classList.toggle('is-warning',!ok);
-    el.title=hint;
-  });
 }
 
 function renderSetupOverview(){
-  const profile=state.companyProfile||state.dashboard?.client||activeCompany()||{};
-  const line=state.lineIntegration||{};
-  const google=state.googleWorkspace||{};
-  const info=google.integration||{};
-  const scopes=String(info.scopes||'');
-  const companyReady=companyProfileCompleted(profile);
-  const dedicated=Boolean(line.mode==='dedicated'&&line.connected);
-  const lineReady=Boolean(dedicated||line.default_available);
-  const gmailReady=Boolean(google.connected&&(Number(info.gmail_enabled)===1||info.gmail_enabled===true||scopes.includes('gmail.')));
-  const driveReady=Boolean(google.connected&&(Number(info.drive_enabled)===1||info.drive_enabled===true||info.drive_folder_id));
-  const sheetsReady=Boolean(google.connected&&(Number(info.sheets_enabled)===1||info.sheets_enabled===true||info.spreadsheet_id));
-  const readiness=[companyReady,lineReady,gmailReady,driveReady,sheetsReady];
-  const ready=readiness.filter(Boolean).length;
-
-  $('#setupOverviewBadge').textContent=`${ready}/5 พร้อมใช้งาน`;
-  $('#setupOverviewBadge').className=`badge ${ready===5?'badge-success':ready?'badge-soft':'badge-neutral'}`;
-  $('#setupProgressBar').style.width=`${ready/5*100}%`;
-
-  $('#statusCompanyBadge').className=`badge ${companyReady?'badge-success':'badge-warning'}`;
-  $('#statusCompanyBadge').textContent=companyReady?'พร้อมใช้งาน':'ควรตรวจ';
-  $('#statusCompanyText').textContent=companyReady?`${profile.name} · ${profile.work_start}–${profile.work_end} · ${profile.timezone}`:'ใส่ชื่อบริษัท เวลาเข้างาน และเวลาสิ้นสุดงานให้ครบ';
-
-  $('#statusLineBadge').className=`badge ${dedicated?'badge-success':line.default_available?'badge-soft':'badge-warning'}`;
-  $('#statusLineBadge').textContent=dedicated?'เชื่อมแล้ว':line.default_available?'พร้อมใช้งาน':'ยังไม่เชื่อม';
-  $('#statusLineText').textContent=dedicated?`${line.integration?.bot_display_name||'LINE OA บริษัท'} · Webhook ${line.integration?.webhook_active?'พร้อม':'ต้องตรวจ'}`:line.default_available?'กำลังใช้ LINE “นากนะ” กลาง · พนักงานใช้งานได้':'ยังไม่มี LINE สำหรับ Workspace นี้';
-  $('#statusLineAction').disabled=!canManageGoogleWorkspace();
-  $('#statusLineAction').textContent=dedicated?'จัดการ LINE':'ตั้งค่า LINE OA';
-
-  const googleAction=google.connected?()=>document.querySelector('#googleWorkspaceSection')?.scrollIntoView({behavior:'smooth',block:'start'}):connectGoogleWorkspace;
-  const googleActionText=google.connected?'ดู Google Workspace':'เชื่อม Google';
-
-  $('#statusGmailBadge').className=`badge ${gmailReady?'badge-success':'badge-warning'}`;
-  $('#statusGmailBadge').textContent=gmailReady?'เชื่อมแล้ว':'ยังไม่พร้อม';
-  $('#statusGmailText').textContent=gmailReady?`${info.email||'Google Account'} · อ่าน/ส่งอีเมลตามสิทธิ์ที่อนุญาต`:'เชื่อม Google Workspace และอนุญาตสิทธิ์ Gmail เพื่อ Recruitment / Payslip';
-  $('#statusGmailAction').disabled=!canManageGoogleWorkspace();
-  $('#statusGmailAction').textContent=googleActionText;
-  $('#statusGmailAction').onclick=googleAction;
-
-  $('#statusDriveBadge').className=`badge ${driveReady?'badge-success':'badge-warning'}`;
-  $('#statusDriveBadge').textContent=driveReady?'เชื่อมแล้ว':'ยังไม่พร้อม';
-  $('#statusDriveText').textContent=driveReady?'โฟลเดอร์เอกสาร HR ถูกสร้างและพร้อมจัดเก็บไฟล์':'ยังไม่พบโฟลเดอร์ HR บน Google Drive';
-  $('#statusDriveAction').disabled=!canManageGoogleWorkspace();
-  $('#statusDriveAction').textContent=googleActionText;
-  $('#statusDriveAction').onclick=googleAction;
-
-  $('#statusSheetsBadge').className=`badge ${sheetsReady?'badge-success':'badge-warning'}`;
-  $('#statusSheetsBadge').textContent=sheetsReady?'เชื่อมแล้ว':'ยังไม่พร้อม';
-  $('#statusSheetsText').textContent=sheetsReady?'HR Database Sheet พร้อม Sync ข้อมูลจาก Workspace':'ยังไม่พบ Google Sheet ฐานข้อมูล HR';
-  $('#statusSheetsAction').disabled=!canManageGoogleWorkspace();
-  $('#statusSheetsAction').textContent=googleActionText;
-  $('#statusSheetsAction').onclick=googleAction;
+  const profile=state.companyProfile||state.dashboard?.client||activeCompany()||{};const line=state.lineIntegration||{};const google=state.googleWorkspace||{};
+  const companyReady=companyProfileCompleted(profile);const lineReady=Boolean(line.mode==='dedicated'&&line.connected);const googleReady=Boolean(google.connected&&google.integration?.drive_folder_id&&google.integration?.spreadsheet_id);
+  const ready=[companyReady,lineReady,googleReady].filter(Boolean).length;$('#setupOverviewBadge').textContent=`${ready}/3 พร้อมใช้งาน`;$('#setupOverviewBadge').className=`badge ${ready===3?'badge-success':ready?'badge-soft':'badge-neutral'}`;$('#setupProgressBar').style.width=`${ready/3*100}%`;
+  $('#statusCompanyBadge').className=`badge ${companyReady?'badge-success':'badge-warning'}`;$('#statusCompanyBadge').textContent=companyReady?'พร้อมใช้งาน':'ควรตรวจ';$('#statusCompanyText').textContent=companyReady?`${profile.name} · ${profile.work_start}–${profile.work_end} · ${profile.timezone}`:'ใส่ชื่อบริษัท เวลาเข้างาน และเวลาสิ้นสุดงานให้ครบ';
+  const dedicated=line.mode==='dedicated'&&line.connected;$('#statusLineBadge').className=`badge ${dedicated?'badge-success':line.default_available?'badge-soft':'badge-warning'}`;$('#statusLineBadge').textContent=dedicated?'เชื่อมธุรกิจแล้ว':line.default_available?'ใช้นากนะกลาง':'ยังไม่เชื่อม';$('#statusLineText').textContent=dedicated?`${line.integration?.bot_display_name||'LINE OA บริษัท'} เชื่อมกับ Workspace แล้ว`:line.default_available?'ตอนนี้ใช้ LINE “นากนะ” กลางอยู่ เชื่อม OA บริษัทได้เมื่อพร้อม':'ยังไม่มี LINE สำหรับ Workspace นี้';$('#statusLineAction').disabled=!canManageGoogleWorkspace();$('#statusLineAction').textContent=dedicated?'แก้การเชื่อมต่อ':'ตั้งค่า LINE OA';
+  $('#statusGoogleBadge').className=`badge ${googleReady?'badge-success':'badge-neutral'}`;$('#statusGoogleBadge').textContent=googleReady?'เชื่อมแล้ว':'ยังไม่เชื่อม';$('#statusGoogleText').textContent=googleReady?`${google.integration?.email||'Google'} · Gmail ✓ Drive ✓ Sheets ✓`:'เชื่อมครั้งเดียวเพื่อเปิด Gmail, Drive และ HR Database Sheet';$('#statusGoogleAction').disabled=!canManageGoogleWorkspace();$('#statusGoogleAction').textContent=googleReady?'ดู Google':'เชื่อม Google';
+  $('#statusGoogleAction').onclick=googleReady?()=>document.querySelector('#googleWorkspaceSection')?.scrollIntoView({behavior:'smooth'}):connectGoogleWorkspace;
 }
 
 function renderApproverAccess() {
@@ -1952,6 +1962,8 @@ function renderLineIntegration() {
 
   const canManage = ['owner','hr_admin'].includes(String(activeCompanyRole() || ''));
   if (dedicated) {
+    $('#sidebarLineTitle').textContent = info.bot_display_name || 'LINE OA บริษัท';
+    $('#sidebarLineText').textContent = info.webhook_active ? 'เชื่อมกับ Workspace แล้ว' : 'รอเปิด Use webhook';
     title.textContent = info.bot_display_name || 'LINE OA ของบริษัท';
     text.textContent = info.webhook_active
       ? 'เชื่อมกับ Workspace นี้แล้ว และ LINE เปิดใช้งาน Webhook อยู่'
@@ -1968,6 +1980,8 @@ function renderLineIntegration() {
     $('#lineTestBtn').classList.remove('hidden');
     $('#lineDisconnectBtn').classList.remove('hidden');
   } else {
+    $('#sidebarLineTitle').textContent = data.default_available ? 'LINE นากนะ' : 'ยังไม่เชื่อม LINE';
+    $('#sidebarLineText').textContent = data.default_available ? 'Nakna Default' : 'ตั้งค่าที่เมนูระบบ';
     title.textContent = data.bot?.display_name ? `ใช้ ${data.bot.display_name}` : 'LINE นากนะ';
     text.textContent = data.default_available
       ? 'ตอนนี้ Workspace ใช้ LINE “นากนะ” กลาง พนักงานใช้งานได้ทันที'
@@ -1982,7 +1996,6 @@ function renderLineIntegration() {
   }
   $('#lineConfigureBtn').classList.toggle('hidden', !canManage);
   if (!canManage) { $('#lineTestBtn').classList.add('hidden'); $('#lineDisconnectBtn').classList.add('hidden'); }
-  renderConnectionSummary();
 }
 
 function openLineIntegrationModal() {
