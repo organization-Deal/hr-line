@@ -3,17 +3,13 @@
   "name": "hr-line",
   "main": "src/index.js",
   "compatibility_date": "2026-08-20",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
+  "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
   },
   "triggers": {
-    "crons": [
-      "0 1 * * *"
-    ]
+    "crons": ["0 1 * * *"]
   },
   "assets": {
     "directory": "./public",
@@ -22,13 +18,13 @@
       "/auth/*",
       "/integrations/*",
       "/webhooks/*",
-      "/evidence/*"
+      "/evidence/*",
+      "/payslip/*",
+      "/learn/*"
     ]
   },
   "d1_databases": [
-    {
-      "binding": "DB"
-    }
+    { "binding": "DB" }
   ],
   "r2_buckets": [
     {

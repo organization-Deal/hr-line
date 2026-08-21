@@ -1,14 +1,11 @@
-# Google OAuth Web Application credentials
-GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
-
-# Random secret used only to encrypt stored Gmail OAuth tokens.
-# Example: generate a long random value (32+ chars).
-GOOGLE_TOKEN_ENCRYPTION_KEY=replace-with-a-long-random-secret
-
-# Optional. Leave blank in local dev to use the current request origin.
-# APP_ORIGIN=https://hr-line.organization-23c.workers.dev
-
-# LINE (add later when the LINE Bot is ready)
+# Nakna HR V1.0-P5 — local development variables
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_TOKEN_ENCRYPTION_KEY=
 LINE_CHANNEL_SECRET=
 LINE_CHANNEL_ACCESS_TOKEN=
+# Optional dedicated encryption key for tenant integration credentials
+NAKNA_INTEGRATION_ENCRYPTION_KEY=
+
+# Internal SaaS Admin Console (comma-separated Google login emails)
+NAKNA_ADMIN_EMAILS=
