@@ -40,6 +40,9 @@ const state = {
   currentView: 'dashboard',
 };
 
+let fullHydrationPromise = null;
+let fullHydrationTimer = null;
+
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 
@@ -129,7 +132,11 @@ async function boot() {
     if (!ready) return;
     const onboardingReady = await maybeRunOnboarding({ forceNewBusiness: returnState.forceNewBusiness });
     if (!onboardingReady) return;
-    if (await ensureWorkspaceReady()) await loadAll({ silent: true });
+
+    // P7.3 Performance: show the dashboard from ONE API first.
+    // The old flow waited for schema bootstrap + 20+ APIs before rendering anything.
+    await loadDashboardFirst();
+    scheduleFullHydration(250);
   } catch (error) {
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
       renderLoadProblem([{ label: 'เริ่มระบบ', message: error.message }]);
@@ -141,7 +148,7 @@ function bindEvents() {
   $('#lineBusinessBtn').onclick = openLineBusinessOnboarding;
   $('#googleLoginBtn').onclick = () => { window.location.href = '/auth/google/start'; };
   $('#retryDataLoadBtn').onclick = async () => {
-    if (await ensureWorkspaceReady()) await loadAll();
+    await loadAll();
   };
   $('#logoutBtn').onclick = logout;
   $('#sidebarConnectionCard').onclick = () => showView('settings');
@@ -487,7 +494,7 @@ async function completeOnboarding() {
     const result = await api('/api/onboarding/complete', { method: 'POST', body: '{}' });
     state.onboardingStatus = result.onboarding;
     hideOnboarding();
-    if (await ensureWorkspaceReady()) await loadAll({ silent: true });
+    await loadDashboardFirst(); scheduleFullHydration(0);
     toast('Workspace พร้อมใช้งาน · Free Trial เริ่มแล้ว');
   } catch (error) {
     onboardingError(error.message);
@@ -509,7 +516,7 @@ async function claimLegacyCompany() {
       state.onboardingStatus = await api('/api/onboarding/status');
       if (state.onboardingStatus?.completed) {
         hideOnboarding();
-        if (await ensureWorkspaceReady()) await loadAll({ silent: true });
+        await loadDashboardFirst(); scheduleFullHydration(0);
       } else {
         showOnboarding({ step: state.onboardingStatus?.current_step || 'google_workspace' });
         renderOnboardingStatus();
@@ -539,7 +546,7 @@ async function switchCompany(clientId) {
     const ready = await loadSessionOnly();
     if (ready) {
       const onboardingReady = await maybeRunOnboarding();
-      if (onboardingReady && await ensureWorkspaceReady()) await loadAll({ silent: true });
+      if (onboardingReady) { await loadDashboardFirst(); scheduleFullHydration(0); }
     }
     toast('เปลี่ยนบริษัทเรียบร้อยแล้ว');
   } catch (error) {
@@ -670,6 +677,40 @@ function handleReturnMessage() {
   return { forceNewBusiness, googleConnected: url.searchParams.get('google_workspace') === 'connected' };
 }
 
+async function loadDashboardFirst() {
+  setLoading(true);
+  try {
+    const dashboard = await api('/api/dashboard', { timeoutMs: 12000 });
+    state.dashboard = dashboard || emptyDashboard();
+    renderDashboard();
+    renderIdentity();
+    $('#todayText').textContent = formatDate(state.dashboard.today);
+    $('#sidebarCompany').textContent = state.dashboard.client?.name || activeCompany()?.name || 'บริษัทของคุณ';
+    renderLoadProblem([]);
+    return true;
+  } catch (error) {
+    if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
+      renderFallbackShell();
+      renderLoadProblem([{ label: 'Dashboard', message: error.message }]);
+    }
+    return false;
+  } finally {
+    setLoading(false);
+  }
+}
+
+function scheduleFullHydration(delay = 350) {
+  if (fullHydrationTimer) clearTimeout(fullHydrationTimer);
+  const run = () => {
+    fullHydrationTimer = null;
+    if (fullHydrationPromise) return;
+    fullHydrationPromise = loadAll({ silent: true, background: true })
+      .catch(() => {})
+      .finally(() => { fullHydrationPromise = null; });
+  };
+  fullHydrationTimer = setTimeout(run, Math.max(0, Number(delay) || 0));
+}
+
 async function ensureWorkspaceReady() {
   try {
     await api('/api/bootstrap', { timeoutMs: 45000 });
@@ -683,8 +724,8 @@ async function ensureWorkspaceReady() {
   }
 }
 
-async function loadAll({ silent = false } = {}) {
-  setLoading(true);
+async function loadAll({ silent = false, background = false } = {}) {
+  if (!background) setLoading(true);
   const errors = [];
   const safeLoad = async (label, promise, fallback) => {
     try { return await promise; }
@@ -764,9 +805,10 @@ async function loadAll({ silent = false } = {}) {
     state.recruitmentGmail = recruitmentGmail || {connected:false,enabled:false};
     state.benefits = benefits || {data:[],enrollments:[]};
 
-    renderAll();
+    renderDashboard();
     renderIdentity();
-    renderSettings();
+    renderConnectionSummary();
+    renderCurrentView();
     renderLoadProblem(errors);
     if (!silent && !errors.length) toast('อัปเดตข้อมูลล่าสุดแล้ว');
     if (!silent && errors.length) toast(`โหลดได้บางส่วน · มี ${errors.length} จุดที่ต้องลองใหม่`, true);
@@ -776,7 +818,7 @@ async function loadAll({ silent = false } = {}) {
       renderLoadProblem([{ label: 'ระบบ HR', message: error.message }]);
     }
   } finally {
-    setLoading(false);
+    if (!background) setLoading(false);
   }
 }
 
@@ -859,6 +901,32 @@ function renderLoadingState() {
   $('#birthdayList').innerHTML = Array.from({ length: 3 }, () => '<div class="loading-row skeleton"></div>').join('');
   $('#recruitmentPipeline').innerHTML = Array.from({ length: 6 }, () => '<div class="pipe-item"><div class="skeleton" style="height:25px;width:35px"></div><div class="skeleton" style="height:8px;width:60px;margin-top:7px"></div></div>').join('');
   $('#upcomingList').innerHTML = Array.from({ length: 3 }, () => '<div class="loading-row skeleton"></div>').join('');
+}
+
+function renderCurrentView(name = state.currentView) {
+  switch (name) {
+    case 'dashboard': renderDashboard(); break;
+    case 'employees': renderEmployees($('#employeeSearch')?.value || ''); break;
+    case 'recruitment': renderCandidates(); renderRecruitmentGmail(); break;
+    case 'benefits': renderBenefits(); break;
+    case 'attendance': renderAttendance(); break;
+    case 'leave': renderLeaves(); renderLeavePolicies(); break;
+    case 'requests': renderRequests(); renderEmployeeService(); break;
+    case 'payroll': renderPayroll(); break;
+    case 'documents': renderDocuments(); break;
+    case 'performance': renderGrowth(); break;
+    case 'engagement': renderEngagement(); break;
+    case 'analytics': renderAnalytics(); break;
+    case 'saas-admin': renderSaasAdmin(); break;
+    case 'settings':
+      renderInviteCenter();
+      renderWorkLocations();
+      renderPeopleCore();
+      renderLeavePolicies();
+      renderSubscription();
+      renderSettings();
+      break;
+  }
 }
 
 function renderAll() {
@@ -1496,6 +1564,7 @@ function showView(name) {
 
   target.classList.add('active');
   document.querySelector(`[data-view="${name}"]`)?.classList.add('active');
+  renderCurrentView(name);
 
   const [title, kicker] = viewMeta[name] || [name, 'NAKNA HR'];
   $('#pageTitle').textContent = title;
