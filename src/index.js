@@ -4,6 +4,8 @@ const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
+const AUTH_CACHE = new Map();
+const AUTH_CACHE_TTL_MS = 15 * 1000;
 
 const INIT_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1424,7 +1426,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.3', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.4', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1674,7 +1676,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.3', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.4', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -5566,41 +5568,72 @@ async function authorizeUser(request, env, { requireCompany = true } = {}) {
   const rawToken = getCookie(request, 'nakna_session');
   if (!rawToken) return { ok: false, status: 401, error: 'AUTH_REQUIRED' };
   const sessionHash = await sha256Hex(rawToken);
+  const cookieClientId = Number(getCookie(request, 'nakna_company') || 0) || null;
+  const setupMode = getCookie(request, 'nakna_setup_mode') === 'new';
+  const cacheKey = `${sessionHash}:${setupMode ? 'setup' : (cookieClientId || 'auto')}`;
+  const cached = AUTH_CACHE.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    if (requireCompany && !cached.auth.clientId) return { ok: false, status: 409, error: 'COMPANY_REQUIRED' };
+    return { ...cached.auth, ok: true };
+  }
+  if (cached) AUTH_CACHE.delete(cacheKey);
+
+  // Normal requests used to perform: session read -> membership read ->
+  // last_seen write. A dashboard fires many API calls, so that turned one page
+  // load into dozens of D1 round trips/writes. Resolve the selected membership
+  // in the session query, cache it briefly per Worker isolate, and only touch
+  // last_seen periodically.
   const session = await env.DB.prepare(`
-    SELECT s.token_hash, s.user_id, s.selected_client_id, s.expires_at,
-           u.google_sub, u.email, u.name, u.picture_url, u.locale, u.status
-    FROM auth_sessions s JOIN users u ON u.id=s.user_id
+    SELECT s.token_hash, s.user_id, s.selected_client_id, s.expires_at, s.last_seen_at,
+           u.google_sub, u.email, u.name, u.picture_url, u.locale, u.status,
+           cm.role AS selected_role, cm.status AS selected_member_status
+    FROM auth_sessions s
+    JOIN users u ON u.id=s.user_id
+    LEFT JOIN company_members cm
+      ON cm.user_id=s.user_id
+     AND cm.client_id=COALESCE(s.selected_client_id, ?2)
     WHERE s.token_hash=?1
-  `).bind(sessionHash).first();
+  `).bind(sessionHash, cookieClientId).first();
+
   if (!session || session.status !== 'active' || new Date(session.expires_at).getTime() <= Date.now()) {
     if (session) await env.DB.prepare('DELETE FROM auth_sessions WHERE token_hash=?1').bind(sessionHash).run();
+    AUTH_CACHE.delete(cacheKey);
     return { ok: false, status: 401, error: 'AUTH_REQUIRED' };
   }
 
-  const setupMode = getCookie(request, 'nakna_setup_mode') === 'new';
-  // When LINE explicitly opened Business Setup, do not silently fall back to an
-  // old company membership. The customer must stay in the setup wizard until
-  // they create/select the new workspace.
-  let clientId = setupMode ? null : (Number(session.selected_client_id || getCookie(request, 'nakna_company') || 0) || null);
+  let clientId = setupMode ? null : (Number(session.selected_client_id || cookieClientId || 0) || null);
   let role = null;
-  if (clientId) {
-    const member = await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(Number(session.user_id), clientId).first();
+
+  if (clientId && session.selected_member_status === 'active' && session.selected_role) {
+    role = session.selected_role;
+  } else if (clientId) {
+    const member = await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`)
+      .bind(Number(session.user_id), clientId).first();
     if (!member) clientId = null;
     else role = member.role;
   }
+
   if (!clientId && !setupMode) {
-    const first = await env.DB.prepare(`SELECT client_id, role FROM company_members WHERE user_id=?1 AND status='active' ORDER BY id LIMIT 1`).bind(Number(session.user_id)).first();
+    const first = await env.DB.prepare(`SELECT client_id, role FROM company_members WHERE user_id=?1 AND status='active' ORDER BY id LIMIT 1`)
+      .bind(Number(session.user_id)).first();
     if (first) {
       clientId = Number(first.client_id);
       role = first.role;
-      await env.DB.prepare('UPDATE auth_sessions SET selected_client_id=?1 WHERE token_hash=?2').bind(clientId, sessionHash).run();
+      await env.DB.prepare('UPDATE auth_sessions SET selected_client_id=?1, last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=?2')
+        .bind(clientId, sessionHash).run();
     }
   }
+
   if (requireCompany && !clientId) return { ok: false, status: 409, error: 'COMPANY_REQUIRED' };
 
-  await env.DB.prepare('UPDATE auth_sessions SET last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=?1').bind(sessionHash).run();
-  return {
-    ok: true,
+  const lastSeen = Date.parse(String(session.last_seen_at || ''));
+  if (!Number.isFinite(lastSeen) || Date.now() - lastSeen > 5 * 60 * 1000) {
+    try {
+      await env.DB.prepare('UPDATE auth_sessions SET last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=?1').bind(sessionHash).run();
+    } catch {}
+  }
+
+  const auth = {
     sessionHash,
     clientId,
     role,
@@ -5614,6 +5647,15 @@ async function authorizeUser(request, env, { requireCompany = true } = {}) {
       locale: session.locale,
     },
   };
+  AUTH_CACHE.set(cacheKey, { expiresAt: Date.now() + AUTH_CACHE_TTL_MS, auth });
+  if (AUTH_CACHE.size > 200) {
+    const now = Date.now();
+    for (const [key, value] of AUTH_CACHE) {
+      if (value.expiresAt <= now) AUTH_CACHE.delete(key);
+      if (AUTH_CACHE.size <= 120) break;
+    }
+  }
+  return { ...auth, ok: true };
 }
 
 async function startGoogleLogin(request, env) {
