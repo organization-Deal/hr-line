@@ -1424,7 +1424,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.2', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.3', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1449,7 +1449,7 @@ export default {
         return await startGoogleWorkspaceConnection(request, env);
       }
       if (url.pathname === '/integrations/google-workspace/callback' && request.method === 'GET') {
-        return await finishGoogleWorkspaceConnection(request, env);
+        return await finishGoogleWorkspaceConnection(request, env, ctx);
       }
       // Legacy personal Gmail flow is kept for existing test users.
       if (url.pathname === '/integrations/gmail/start' && request.method === 'GET') {
@@ -1674,7 +1674,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.2', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.3', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -1747,6 +1747,17 @@ async function handleApi(request, env, url, auth, ctx) {
     await safeAudit(env.DB, clientId, 'user', String(auth.user.id), 'company.profile.update', 'client', String(clientId), { name, timezone, work_start: workStart, work_end: workEnd, late_grace_minutes: lateGrace });
     const client = await getClient(env.DB, clientId);
     return json({ ok: true, company: publicCompanyProfile(client) });
+  }
+
+  if (path === '/api/integrations/google-workspace/mobile-handoff' && method === 'POST') {
+    if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
+    if (!canManageIntegrations(auth.role)) return json({ error: 'เฉพาะ Owner หรือ HR Admin ที่เชื่อม Google ได้' }, 403);
+    await ensureV100P7Ready(env.DB);
+    const token=randomToken(40), tokenHash=await sha256Hex(token), expiresAt=new Date(Date.now()+10*60*1000).toISOString();
+    await env.DB.prepare(`DELETE FROM line_web_login_tokens WHERE user_id=?1 AND purpose='google_oauth_handoff' AND used_at IS NULL`).bind(Number(auth.user.id)).run();
+    await env.DB.prepare(`INSERT INTO line_web_login_tokens (token_hash,user_id,client_id,purpose,expires_at) VALUES (?1,?2,?3,'google_oauth_handoff',?4)`).bind(tokenHash,Number(auth.user.id),clientId,expiresAt).run();
+    const base=String(env.APP_BASE_URL||appOrigin(request,env)).replace(/\/$/,'');
+    return json({ok:true,url:`${base}/auth/line/start?token=${encodeURIComponent(token)}&openExternalBrowser=1`,expires_at:expiresAt});
   }
 
   if (path === '/api/integrations/google-workspace' && method === 'GET') {
@@ -3727,19 +3738,15 @@ async function finishLineWebLogin(request,env){
     env.DB.prepare(`UPDATE line_web_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(tokenHash),
     env.DB.prepare(`INSERT INTO auth_sessions (token_hash,user_id,selected_client_id,expires_at) VALUES (?1,?2,?3,?4)`).bind(sessionHash,Number(row.user_id),selectedClientId,sessionExpiresAt),
   ]);
-  const isBusinessSetup=String(row.purpose||'')==='business_setup';
+  const purpose=String(row.purpose||'');
+  const isBusinessSetup=purpose==='business_setup';
+  const isGoogleHandoff=purpose==='google_oauth_handoff';
   const cookies=[sessionCookie(sessionToken)];
-  if(isBusinessSetup){
-    // A setup link must NEVER inherit the previously selected company.
-    // This is important when the same LINE account is already an employee/owner elsewhere.
-    cookies.push(clearCookie('nakna_company'));
-    cookies.push(setupModeCookie('new'));
-  }else{
-    cookies.push(clearCookie('nakna_setup_mode'));
-    if(selectedClientId) cookies.push(companyCookie(selectedClientId));
-  }
+  if(isBusinessSetup){cookies.push(clearCookie('nakna_company'));cookies.push(setupModeCookie('new'));}
+  else{cookies.push(clearCookie('nakna_setup_mode'));if(selectedClientId)cookies.push(companyCookie(selectedClientId));}
+  if(isGoogleHandoff)return redirectResponse(`${appOrigin(request,env)}/integrations/google-workspace/start?handoff=1`,cookies);
   const setup=isBusinessSetup?'&setup=new':'';
-  return redirectResponse(`${appOrigin(request,env)}/?auth=line${setup}&fresh=p71`,cookies);
+  return redirectResponse(`${appOrigin(request,env)}/?auth=line${setup}&fresh=p73`,cookies);
 }
 
 async function getPublicOnboardingConfig(env){
@@ -3765,7 +3772,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.2',
+    version:'1.0-P7.3',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -5851,7 +5858,7 @@ async function startGoogleWorkspaceConnection(request, env) {
   return redirectResponse(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, [oauthStateCookie('nakna_google_workspace_state', state, 600)]);
 }
 
-async function finishGoogleWorkspaceConnection(request, env) {
+async function finishGoogleWorkspaceConnection(request, env, ctx) {
   assertGoogleConfig(env);
   const key = integrationEncryptionKey(env);
   if (!key) return googleWorkspaceErrorRedirect(request, env, 'config');
@@ -5898,12 +5905,15 @@ async function finishGoogleWorkspaceConnection(request, env) {
         drive_folder_id=excluded.drive_folder_id,leave_evidence_folder_id=excluded.leave_evidence_folder_id,spreadsheet_id=excluded.spreadsheet_id,status='connected',last_error=NULL,updated_at=CURRENT_TIMESTAMP
     `).bind(Number(auth.clientId),Number(auth.user.id),profile.sub||null,profile.email||auth.user.email,encrypted,tokens.scope||'',resources.drive_folder_id,resources.leave_evidence_folder_id,resources.spreadsheet_id).run();
     const row = await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1`).bind(Number(auth.clientId)).first();
-    try {
-      await syncWorkspaceSnapshotToSheet(env, Number(auth.clientId), row, tokens.access_token);
-      await env.DB.prepare(`UPDATE google_workspace_integrations SET last_sync_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(row.id)).run();
-    } catch (syncError) {
-      await env.DB.prepare(`UPDATE google_workspace_integrations SET last_error=?1 WHERE id=?2`).bind(String(syncError?.message||syncError).slice(0,300),Number(row.id)).run();
-    }
+    const initialSync = (async () => {
+      try {
+        await syncWorkspaceSnapshotToSheet(env, Number(auth.clientId), row, tokens.access_token);
+        await env.DB.prepare(`UPDATE google_workspace_integrations SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL WHERE id=?1`).bind(Number(row.id)).run();
+      } catch (syncError) {
+        await env.DB.prepare(`UPDATE google_workspace_integrations SET last_error=?1 WHERE id=?2`).bind(String(syncError?.message||syncError).slice(0,300),Number(row.id)).run();
+      }
+    })();
+    if (ctx?.waitUntil) ctx.waitUntil(initialSync); else await initialSync;
     await safeAudit(env.DB, Number(auth.clientId), 'user', String(auth.user.id), 'google_workspace.connect', 'google_workspace', String(row.id), { email: profile.email, drive_folder_id: resources.drive_folder_id, spreadsheet_id: resources.spreadsheet_id });
     await ensureP7CompanyDefaults(env.DB,Number(auth.clientId),Number(auth.user.id));
     await env.DB.prepare(`UPDATE company_onboarding SET current_step='recruitment_gmail',updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND completed_at IS NULL`).bind(Number(auth.clientId)).run().catch(()=>{});
