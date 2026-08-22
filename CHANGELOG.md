@@ -100,3 +100,10 @@
 - Prefill new employee start date with today.
 - Add reproducible static audit script (`npm run audit`).
 - No database migration required.
+
+## V1.0-P7.3 — Mobile Setup & Google OAuth Handoff
+- Mobile Business Setup uses full-height scrolling instead of centered nested scroll cards.
+- LINE mobile detects in-app browser and hands Google OAuth to Safari/Chrome with a one-time 10-minute token.
+- Returning from the external browser refreshes Google connection state automatically.
+- Boot screen shows a retry action after 7 seconds instead of appearing stuck forever.
+- No database migration required.

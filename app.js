@@ -43,6 +43,13 @@ const state = {
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 
+let bootWatchdog = null;
+let onboardingRefreshInFlight = false;
+function isLineInAppBrowser(){const ua=String(navigator.userAgent||'');return /(?:^|[;\s])Line\/[0-9]|LIFF/i.test(ua);}
+function setBootStatus(message,showRetry=false){const text=$('#bootStatusText');if(text)text.textContent=message;$('#bootRetryBtn')?.classList.toggle('hidden',!showRetry);}
+function startBootWatchdog(){clearTimeout(bootWatchdog);setBootStatus('กำลังเปิดระบบ HR…',false);bootWatchdog=setTimeout(()=>{if(!$('#bootSplash')?.classList.contains('hidden'))setBootStatus('เครือข่ายตอบช้ากว่าปกติ',true);},7000);}
+function stopBootWatchdog(){clearTimeout(bootWatchdog);bootWatchdog=null;}
+
 const stageLabels = {
   new: 'ผู้สมัครใหม่',
   screening: 'คัดกรอง',
@@ -123,6 +130,7 @@ async function boot() {
   closeAllDialogs();
   document.body?.classList.add('nakna-ready');
   showBootSplash();
+  startBootWatchdog();
   bindEvents();
   renderLoadingState();
   loadPublicOnboarding();
@@ -144,6 +152,7 @@ async function boot() {
 
 function bindEvents() {
   $('#lineBusinessBtn').onclick = openLineBusinessOnboarding;
+  $('#bootRetryBtn').onclick = () => window.location.reload();
   $('#googleLoginBtn').onclick = () => { window.location.href = '/auth/google/start'; };
   $('#retryDataLoadBtn').onclick = async () => {
     if (await ensureWorkspaceReady()) await loadAll();
@@ -321,7 +330,7 @@ function showBootSplash() {
   $('#onboarding')?.classList.add('hidden');
   $('#appShell')?.classList.add('hidden');
 }
-function hideBootSplash() { $('#bootSplash')?.classList.add('hidden'); }
+function hideBootSplash() { stopBootWatchdog(); $('#bootSplash')?.classList.add('hidden'); }
 function showLogin() {
   hideBootSplash();
   $('#login').classList.remove('hidden');
@@ -340,7 +349,8 @@ function closeAllDialogs() {
     try { dialog.close('reset'); } catch { dialog.removeAttribute('open'); }
   });
 }
-window.addEventListener('pageshow', event => { if (event.persisted) closeAllDialogs(); });
+window.addEventListener('pageshow',event=>{if(event.persisted)closeAllDialogs();refreshOnboardingAfterExternalOAuth();});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshOnboardingAfterExternalOAuth();});
 function showLoginError(message) { $('#loginError').textContent = message === 'AUTH_REQUIRED' ? '' : message; }
 function closeMobileNav() { document.body.classList.remove('mobile-nav-open'); }
 
@@ -417,11 +427,13 @@ function renderOnboardingStatus() {
     gState.classList.add('connected');
     gState.innerHTML = `<span class="state-dot"></span><div><strong>เชื่อม Google แล้ว</strong><p>${escapeHtml(google.email || 'Google Account')} · Drive + Sheets พร้อมใช้งาน</p></div>`;
     $('#onboardingGoogleBtn').classList.add('hidden');
+    $('#googleMobileHandoff')?.classList.add('hidden');
     $('#onboardingGoogleNextBtn').classList.remove('hidden');
   } else {
     gState.classList.remove('connected');
     gState.innerHTML = `<span class="state-dot"></span><div><strong>ยังไม่ได้เชื่อม Google</strong><p>กดเชื่อมเพื่ออนุญาต Gmail, Drive และ Sheets</p></div>`;
     $('#onboardingGoogleBtn').classList.remove('hidden');
+    if(!isLineInAppBrowser())$('#googleMobileHandoff')?.classList.add('hidden');
     $('#onboardingGoogleNextBtn').classList.add('hidden');
   }
 
@@ -666,9 +678,22 @@ async function saveCompanyProfile() {
   catch(error){toast(error.message,true);}finally{button.disabled=false;button.textContent='บันทึกข้อมูลบริษัท';}
 }
 
-function connectGoogleWorkspace() {
-  if (!canManageGoogleWorkspace()) return toast('เฉพาะ Owner หรือ HR Admin ที่เชื่อม Google ได้', true);
-  window.location.href='/integrations/google-workspace/start';
+async function connectGoogleWorkspace(){
+  if(!canManageGoogleWorkspace())return toast('เฉพาะ Owner หรือ HR Admin ที่เชื่อม Google ได้',true);
+  if(!isLineInAppBrowser()){window.location.href='/integrations/google-workspace/start';return;}
+  const button=$('#onboardingGoogleBtn');const handoff=$('#googleMobileHandoff');const externalBtn=$('#googleExternalBrowserBtn');
+  if(button){button.disabled=true;button.textContent='กำลังเปิด Safari / Chrome…';}
+  try{
+    const result=await api('/api/integrations/google-workspace/mobile-handoff',{method:'POST',body:'{}',timeoutMs:12000});
+    if(!result?.url)throw new Error('สร้างลิงก์เชื่อม Google ไม่สำเร็จ');
+    if(externalBtn)externalBtn.href=result.url;handoff?.classList.remove('hidden');
+    window.location.href=result.url;
+  }catch(error){toast(error.message||'เปิด Google ไม่สำเร็จ กรุณาลองใหม่',true);handoff?.classList.add('hidden');}
+  finally{if(button){button.disabled=false;button.textContent='เชื่อม Google';}}
+}
+async function refreshOnboardingAfterExternalOAuth(){
+  if(document.hidden||onboardingRefreshInFlight||$('#onboarding')?.classList.contains('hidden'))return;onboardingRefreshInFlight=true;
+  try{state.onboardingStatus=await api('/api/onboarding/status',{timeoutMs:12000});renderOnboardingStatus();if(state.onboardingStatus?.google?.connected&&$('#onboarding')?.dataset.step==='google_workspace'){setOnboardingStep('recruitment_gmail');toast('เชื่อม Google เรียบร้อยแล้ว');}}catch{}finally{onboardingRefreshInFlight=false;}
 }
 
 async function disconnectGoogleWorkspace() {
