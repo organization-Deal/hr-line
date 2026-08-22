@@ -1261,3 +1261,6 @@ html.js body:not(.nakna-ready) dialog { display: none !important; }
   .work-location-card{grid-template-columns:38px minmax(0,1fr) auto}
   .work-location-pin{width:38px;height:38px;border-radius:11px;font-size:17px}
 }
+
+/* P7.7 — Settings opens directly into category detail; overview hub retired */
+#settingsHome{display:none!important}
