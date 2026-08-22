@@ -245,6 +245,32 @@ svg {
 .nav-item:hover { background: #F2F6F4; color: var(--primary-dark); }
 .nav-item.active { background: var(--primary-soft); color: var(--primary); }
 .nav-item.active > span { font-weight: 600; }
+.settings-nav-section {
+  display: grid;
+  gap: 6px;
+  margin: 4px 4px 8px 34px;
+  padding: 10px;
+  border-left: 1px solid rgba(23,139,139,.16);
+}
+.settings-nav-section.hidden { display: none !important; }
+.nav-subitem {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  color: #5f7072;
+  transition: background .15s ease, color .15s ease, transform .15s ease;
+}
+.nav-subitem span { font-size: 11.5px; font-weight: 600; color: #29454a; }
+.nav-subitem small { display: block; font-size: 9.5px; line-height: 1.45; color: #839194; }
+.nav-subitem:hover { background: #f2f7f5; }
+.nav-subitem.active { background: rgba(23,139,139,.10); color: var(--primary); }
+.nav-subitem.active span { color: var(--primary); }
+.nav-subitem.active small { color: #5f8b89; }
 .nav-alert {
   min-width: 21px;
   height: 20px;
@@ -996,27 +1022,118 @@ body.mobile-nav-open .mobile-nav-backdrop { display:block; }
 /* P7.3 · mobile setup + stable Google handoff */
 html.js body:not(.nakna-ready) dialog { display: none !important; }
 .boot-splash {
-  position: fixed; inset: 0; z-index: 5000; display: grid; place-items: center;
-  background: #f4f8f6;
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 22% 18%, rgba(23,139,139,.16), transparent 26%),
+    radial-gradient(circle at 78% 82%, rgba(18,60,74,.12), transparent 24%),
+    linear-gradient(180deg, #f4f8f6 0%, #eef5f3 100%);
 }
 .boot-splash.hidden { display: none !important; }
-.boot-card {
-  display: flex; align-items: center; gap: 14px; min-width: 270px;
-  padding: 18px 20px; border: 1px solid rgba(15,86,87,.12); border-radius: 20px;
-  background: rgba(255,255,255,.96); box-shadow: 0 18px 50px rgba(26,58,61,.10);
+.boot-orb {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(6px);
+  opacity: .85;
 }
-.boot-card > div:nth-child(2) { display: grid; gap: 2px; flex: 1; }
-.boot-card strong { color: #123c4a; font-size: 16px; }
+.boot-orb.orb-a {
+  width: 240px;
+  height: 240px;
+  top: 12%;
+  left: -60px;
+  background: radial-gradient(circle, rgba(24,138,139,.18) 0%, rgba(24,138,139,0) 72%);
+}
+.boot-orb.orb-b {
+  width: 280px;
+  height: 280px;
+  right: -70px;
+  bottom: 10%;
+  background: radial-gradient(circle, rgba(18,60,74,.14) 0%, rgba(18,60,74,0) 70%);
+}
+.boot-card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 14px;
+  min-width: 320px;
+  width: min(430px, calc(100vw - 48px));
+  padding: 24px 22px;
+  border: 1px solid rgba(15,86,87,.10);
+  border-radius: 28px;
+  background: rgba(255,255,255,.9);
+  box-shadow: 0 24px 70px rgba(14,43,48,.10);
+  backdrop-filter: blur(18px);
+}
+.boot-brand-row { display: grid; grid-template-columns: 52px minmax(0,1fr) 24px; gap: 14px; align-items: center; }
+.boot-copy { display: grid; gap: 4px; min-width: 0; }
+.boot-card strong { color: #123c4a; font-size: 20px; line-height: 1.1; }
 .boot-card span { color: #738184; font-size: 12px; }
 .boot-brand-mark {
-  width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center;
-  background: #178b8b; color: #fff; font-size: 20px; font-weight: 700;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, #18908f 0%, #137879 100%);
+  color: #fff;
+  font-size: 24px;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 12px 28px rgba(23,139,139,.18);
 }
 .boot-spinner {
-  width: 20px; height: 20px; border-radius: 50%; border: 2px solid #dce9e5;
-  border-top-color: #178b8b; animation: nakna-spin .75s linear infinite;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #dce9e5;
+  border-top-color: #178b8b;
+  animation: nakna-spin .75s linear infinite;
+}
+.boot-progress {
+  width: 100%;
+  height: 9px;
+  border-radius: 999px;
+  background: #edf4f1;
+  overflow: hidden;
+}
+.boot-progress i {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #17908f 0%, #53c4bf 100%);
+  animation: nakna-loader 1.35s ease-in-out infinite;
+}
+.boot-pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.boot-pill-row span {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f2f7f5;
+  color: #426064;
+  font-size: 11px;
+  font-weight: 600;
+}
+.boot-footnote { color: #728184; font-size: 11px; line-height: 1.55; }
+.boot-retry-btn {
+  justify-self: start;
+  border: 0;
+  border-radius: 12px;
+  padding: 9px 14px;
+  background: #e9f5f2;
+  color: #0b7778;
+  font-weight: 700;
+  font-size: 12px;
+  white-space: nowrap;
 }
 @keyframes nakna-spin { to { transform: rotate(360deg); } }
+@keyframes nakna-loader {
+  0% { transform: translateX(-30%); }
+  50% { transform: translateX(110%); }
+  100% { transform: translateX(-30%); }
+}
 
 
 
@@ -1038,6 +1155,7 @@ html.js body:not(.nakna-ready) dialog { display: none !important; }
   .setup-connection-state{align-items:flex-start;padding:13px 14px;margin:14px 0;border-radius:14px}.setup-connection-state strong{font-size:13px}.setup-connection-state p{font-size:10.5px;line-height:1.5}.wide-btn{min-height:50px;border-radius:14px;font-size:14px}
   .setup-form-grid{grid-template-columns:1fr;gap:11px;margin:15px 0}.setup-form-grid .full{grid-column:auto}.setup-note-card{display:grid;gap:5px;padding:13px 14px;margin:14px 0}.setup-note-card strong{white-space:normal}.setup-note-card span{font-size:10.5px}.setup-toggle-card{align-items:flex-start;padding:14px;gap:10px}.setup-toggle-card span>strong{font-size:13px}.setup-toggle-card span>small{font-size:10px;line-height:1.45}
   .google-mobile-handoff{grid-template-columns:38px minmax(0,1fr);padding:13px}.google-mobile-handoff .handoff-icon{width:38px;height:38px}.boot-card{width:calc(100vw - 44px);min-width:0;max-width:360px;padding:16px;border-radius:18px}.boot-card strong{font-size:18px}.boot-card span{font-size:12px}
+  .boot-card{gap:12px;padding:18px 16px;border-radius:24px}.boot-brand-row{grid-template-columns:48px minmax(0,1fr) 22px;gap:12px}.boot-brand-mark{width:48px;height:48px;border-radius:15px;font-size:22px}.boot-card strong{font-size:18px}.boot-card span{font-size:12px}.boot-pill-row{gap:6px}.boot-pill-row span{font-size:10px;padding:5px 9px}.boot-footnote{font-size:10.5px}.settings-nav-section{margin-left:28px;padding-left:10px}.nav-subitem{padding:8px 10px}.nav-subitem span{font-size:11px}.nav-subitem small{font-size:9px}
 }
 
 /* P7.5 — Settings Center: category-first instead of one endless settings page */
