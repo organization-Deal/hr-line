@@ -397,6 +397,8 @@ function bindEvents() {
   $('#addWorkLocationBtn').onclick = openWorkLocationModal;
   $('#addDepartmentBtn').onclick = openDepartmentModal;
   $('#addPositionBtn').onclick = openPositionModal;
+  $('#positionAssignSaveBtn').onclick = savePositionAssignment;
+  $('#positionAssignSearch').addEventListener('input', renderPositionAssignPeople);
   if ($('#addPositionInlineBtn')) $('#addPositionInlineBtn').onclick = openPositionModal;
   $('#addScheduleBtn').onclick = openScheduleModal;
   $('#addHolidayBtn').onclick = openHolidayModal;
@@ -1225,8 +1227,11 @@ window.openPeopleProfile = id => {
   $('#peopleProfileEmployeeId').value=employee.id;
   $('#peopleProfileTitle').textContent=`จัดการ ${employee.nickname||employee.first_name}`;
   $('#peopleProfileStatus').value=employee.people_status||'employee';
-  $('#peopleProfileDepartment').innerHTML=`<option value="">ไม่ระบุ</option>${(state.peopleCore.departments||[]).map(d=>`<option value="${d.id}" ${Number(employee.department_id)===Number(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}`;
-  $('#peopleProfilePosition').innerHTML=`<option value="">ไม่ระบุ</option>${(state.peopleCore.positions||[]).map(pos=>`<option value="${pos.id}" ${Number(employee.position_id)===Number(pos.id)?'selected':''}>${escapeHtml(pos.name)}</option>`).join('')}`;
+  const profileDepartment=$('#peopleProfileDepartment'); const profilePosition=$('#peopleProfilePosition');
+  const profileDepartments=state.peopleCore.departments||[]; const profilePositions=state.peopleCore.positions||[];
+  profileDepartment.innerHTML=`<option value="">ไม่ระบุแผนก</option>${profileDepartments.map(d=>`<option value="${d.id}" ${Number(employee.department_id)===Number(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}`;
+  const renderProfilePositions=()=>{const departmentId=Number(profileDepartment.value||0);const filtered=profilePositions.filter(pos=>!departmentId||!pos.department_id||Number(pos.department_id)===departmentId);profilePosition.innerHTML=`<option value="">ไม่ระบุตำแหน่ง</option>${filtered.map(pos=>`<option value="${pos.id}" ${Number(employee.position_id)===Number(pos.id)?'selected':''}>${escapeHtml(pos.name)}${pos.department_name?` · ${escapeHtml(pos.department_name)}`:''}</option>`).join('')}`;};
+  profileDepartment.onchange=()=>{profilePosition.value='';renderProfilePositions();}; renderProfilePositions();
   $('#peopleProfileManager').innerHTML=`<option value="">ไม่ระบุ</option>${state.employees.filter(e=>Number(e.id)!==Number(id)&&e.status==='active').map(e=>`<option value="${e.id}" ${Number(employee.manager_employee_id)===Number(e.id)?'selected':''}>${escapeHtml(e.nickname||e.first_name)}${e.department_name?` · ${escapeHtml(e.department_name)}`:''}</option>`).join('')}`;
   $('#peopleProfileProbationEnd').value=employee.probation_end_date||''; $('#peopleProfileConfirmedAt').value=employee.confirmed_at||''; $('#peopleProfileEndDate').value=employee.end_date||''; $('#peopleProfileEndReason').value=employee.end_reason||'';
   const selectedLocations=new Set(String(employee.work_location_ids||'').split(',').filter(Boolean).map(Number));
@@ -1835,18 +1840,51 @@ function renderWorkLocations() {
     </article>`).join('') : emptyState('ยังไม่มี Work Location', 'เพิ่มสำนักงานใหญ่ สาขา หรือหน้างาน แล้วเลือกให้พนักงานตอนส่งลิงก์เชิญ');
 }
 
+window.openPositionAssignment = id => {
+  const position=(state.peopleCore?.positions||[]).find(p=>Number(p.id)===Number(id)); if(!position)return;
+  $('#positionAssignId').value=position.id;
+  $('#positionAssignTitle').textContent=`จัดคน · ${position.name}`;
+  $('#positionAssignSubtitle').textContent=position.department_name?`ตำแหน่งนี้อยู่ในแผนก ${position.department_name} · คนที่เลือกจะถูกย้ายเข้าแผนกนี้อัตโนมัติ`:'เลือกพนักงานที่ต้องการให้อยู่ในตำแหน่งนี้';
+  $('#positionAssignSearch').value='';
+  renderPositionAssignPeople();
+  $('#positionAssignModal').showModal();
+};
+window.openPositionForDepartment = departmentId => openPositionModal(Number(departmentId));
+function renderPositionAssignPeople(){
+  const root=$('#positionAssignPeople'); if(!root)return;
+  const positionId=Number($('#positionAssignId').value||0);
+  const query=String($('#positionAssignSearch').value||'').trim().toLowerCase();
+  let employees=state.employees.filter(e=>e.status==='active');
+  if(query) employees=employees.filter(e=>[e.nickname,e.first_name,e.last_name,e.employee_code,e.department_name,e.position_name].some(v=>String(v||'').toLowerCase().includes(query)));
+  root.innerHTML=employees.length?employees.map(e=>`<label class="position-person-row"><input type="checkbox" value="${e.id}" ${Number(e.position_id)===positionId?'checked':''}/><span class="person-mini-avatar">${initial(e)}</span><span class="position-person-copy"><strong>${escapeHtml(e.nickname||e.first_name)} ${escapeHtml(e.last_name||'')}</strong><small>${escapeHtml(e.employee_code||'')} · ${escapeHtml(e.department_name||'ยังไม่ระบุแผนก')} · ${escapeHtml(e.position_name||'ยังไม่ระบุตำแหน่ง')}</small></span></label>`).join(''):emptyState('ไม่พบพนักงาน','ลองค้นหาด้วยชื่อ รหัสพนักงาน หรือแผนก');
+  const syncCount=()=>{$('#positionAssignCount').textContent=`${$$('#positionAssignPeople input:checked').length} คน`;};
+  syncCount();
+  $$('#positionAssignPeople input').forEach(input=>input.onchange=syncCount);
+}
+async function savePositionAssignment(){
+  const id=Number($('#positionAssignId').value||0);
+  const employee_ids=$$('#positionAssignPeople input:checked').map(i=>Number(i.value));
+  const button=$('#positionAssignSaveBtn'); button.disabled=true;
+  try{
+    await api(`/api/positions/${id}/assign`,{method:'POST',body:JSON.stringify({employee_ids})});
+    $('#positionAssignModal').close();
+    await loadAll({silent:true});
+    toast(`บันทึกคนในตำแหน่งแล้ว ${employee_ids.length} คน`);
+  }catch(e){toast(e.message,true);}finally{button.disabled=false;}
+}
+
 function renderPeopleCore(){
   const core=state.peopleCore||{}; const departments=core.departments||[]; const schedules=core.schedules||[]; const holidays=core.holidays||[];
   const org=$('#organizationChart');
   if(org){
     const roots=departments.filter(d=>!d.parent_department_id||!departments.some(x=>Number(x.id)===Number(d.parent_department_id)));
-    const renderNode=(d,depth=0)=>`<div class="org-node" style="--depth:${depth}"><div class="org-line"></div><div class="org-card"><div><strong>${escapeHtml(d.name)}</strong><small>${Number(d.employee_count||0)} คน · ${d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า'}</small></div><button class="text-btn" onclick="window.editDepartment(${Number(d.id)})">แก้ไข</button></div>${departments.filter(x=>Number(x.parent_department_id)===Number(d.id)).map(x=>renderNode(x,depth+1)).join('')}</div>`;
+    const renderNode=(d,depth=0)=>{const positionCount=(core.positions||[]).filter(p=>Number(p.department_id)===Number(d.id)).length;return `<div class="org-node" style="--depth:${depth}"><div class="org-line"></div><div class="org-card org-card-modern"><div class="org-card-copy"><strong>${escapeHtml(d.name)}</strong><small>${Number(d.employee_count||0)} คน · ${positionCount} ตำแหน่ง</small><em>${d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า'}</em></div><div class="org-card-actions"><button class="text-btn" type="button" onclick="window.openPositionForDepartment(${Number(d.id)})">+ ตำแหน่ง</button><button class="text-btn" type="button" onclick="window.editDepartment(${Number(d.id)})">แก้ไข</button></div></div>${departments.filter(x=>Number(x.parent_department_id)===Number(d.id)).map(x=>renderNode(x,depth+1)).join('')}</div>`;};
     org.innerHTML=roots.length?roots.map(d=>renderNode(d)).join(''):emptyState('ยังไม่มีโครงสร้างแผนก','เพิ่มแผนกแรก แล้วค่อยกำหนดหัวหน้าและแผนกย่อย');
   }
   const positionRoot=$('#positionList');
   if(positionRoot){
     const positions=core.positions||[];
-    positionRoot.innerHTML=positions.length?positions.map(p=>`<article class="position-row"><div><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.department_name||'ใช้ได้ทุกแผนก')}</small></div><span class="badge badge-soft">${Number(p.employee_count||0)} คน</span></article>`).join(''):emptyState('ยังไม่มีตำแหน่ง','เพิ่มตำแหน่ง เช่น Graphic Designer, Sales, Accountant เพื่อใช้ตอนเพิ่มพนักงาน');
+    positionRoot.innerHTML=positions.length?positions.map(p=>{const assigned=state.employees.filter(e=>Number(e.position_id)===Number(p.id));const preview=assigned.slice(0,3).map(e=>escapeHtml(e.nickname||e.first_name)).join(', ');return `<article class="position-row position-card-modern"><div class="position-card-main"><div class="position-symbol">${escapeHtml(String(p.name||'?').slice(0,1).toUpperCase())}</div><div><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.department_name||'ตำแหน่งกลาง · ใช้ได้ทุกแผนก')}</small>${assigned.length?`<em>${preview}${assigned.length>3?` +${assigned.length-3}`:''}</em>`:'<em>ยังไม่มีคนในตำแหน่งนี้</em>'}</div></div><div class="position-card-actions"><span class="badge badge-soft">${assigned.length} คน</span><button class="text-btn position-assign-btn" type="button" onclick="window.openPositionAssignment(${Number(p.id)})">จัดคน</button></div></article>`}).join(''):emptyState('ยังไม่มีตำแหน่ง','เริ่มจากสร้างตำแหน่ง แล้วกด “จัดคน” เพื่อระบุว่าใครอยู่ตำแหน่งไหน');
   }
   const scheduleRoot=$('#workScheduleList');
   if(scheduleRoot){

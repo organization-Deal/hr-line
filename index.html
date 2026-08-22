@@ -896,5 +896,22 @@
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
   <script src="/app.js?v=1.0-p7.5" type="module"></script>
+
+  <dialog id="positionAssignModal" class="modal position-assign-modal">
+    <div class="modal-head">
+      <div><p class="kicker">POSITION ASSIGNMENT</p><h2 id="positionAssignTitle">จัดคนเข้าตำแหน่ง</h2><p id="positionAssignSubtitle" class="muted">เลือกพนักงานที่ต้องการให้อยู่ในตำแหน่งนี้</p></div>
+      <button class="icon-btn" type="button" data-close-dialog="positionAssignModal" aria-label="ปิด">×</button>
+    </div>
+    <input id="positionAssignId" type="hidden" />
+    <div class="position-assign-toolbar">
+      <label class="search-box compact-search"><span>⌕</span><input id="positionAssignSearch" type="search" placeholder="ค้นหาชื่อ รหัส หรือแผนก" /></label>
+      <span id="positionAssignCount" class="badge badge-soft">0 คน</span>
+    </div>
+    <div id="positionAssignPeople" class="position-assign-people"></div>
+    <div class="modal-actions">
+      <button class="secondary-btn" type="button" data-close-dialog="positionAssignModal">ยกเลิก</button>
+      <button id="positionAssignSaveBtn" class="primary-btn" type="button">บันทึกคนในตำแหน่ง</button>
+    </div>
+  </dialog>
 </body>
 </html>
