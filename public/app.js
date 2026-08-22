@@ -50,6 +50,92 @@ function setBootStatus(message,showRetry=false){const text=$('#bootStatusText');
 function startBootWatchdog(){clearTimeout(bootWatchdog);setBootStatus('กำลังเปิดระบบ HR…',false);bootWatchdog=setTimeout(()=>{if(!$('#bootSplash')?.classList.contains('hidden'))setBootStatus('เครือข่ายตอบช้ากว่าปกติ',true);},7000);}
 function stopBootWatchdog(){clearTimeout(bootWatchdog);bootWatchdog=null;}
 
+const DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
+let deferredLoadTimer = null;
+let deferredLoadInFlight = false;
+
+function dashboardCacheKey() {
+  const companyId = Number(state.me?.active_company_id || activeCompany()?.id || 0);
+  return companyId ? `nakna.dashboard.${companyId}` : null;
+}
+function readDashboardCache() {
+  const key = dashboardCacheKey();
+  if (!key) return null;
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const cached = JSON.parse(raw);
+    if (!cached?.dashboard || Date.now() - Number(cached.saved_at || 0) > DASHBOARD_CACHE_TTL_MS) return null;
+    return cached;
+  } catch { return null; }
+}
+function writeDashboardCache() {
+  const key = dashboardCacheKey();
+  if (!key || !state.dashboard) return;
+  try {
+    sessionStorage.setItem(key, JSON.stringify({
+      saved_at: Date.now(),
+      dashboard: state.dashboard,
+      companyProfile: state.companyProfile || null,
+    }));
+  } catch {}
+}
+function hydrateDashboardCache() {
+  const cached = readDashboardCache();
+  if (!cached) return false;
+  state.dashboard = cached.dashboard;
+  if (cached.companyProfile) state.companyProfile = cached.companyProfile;
+  try {
+    renderDashboard();
+    renderIdentity();
+    $('#todayText').textContent = formatDate(state.dashboard.today);
+    $('#sidebarCompany').textContent = state.dashboard.client?.name || activeCompany()?.name || 'บริษัทของคุณ';
+  } catch {}
+  return true;
+}
+async function loadDashboardFast({ silent = true } = {}) {
+  const started = performance.now();
+  try {
+    const [dashboard, companyProfile] = await Promise.all([
+      api('/api/dashboard', { timeoutMs: 12000 }),
+      api('/api/company-profile', { timeoutMs: 12000 }).catch(() => null),
+    ]);
+    state.dashboard = dashboard || emptyDashboard();
+    if (companyProfile) state.companyProfile = companyProfile.company || companyProfile;
+    renderDashboard();
+    renderIdentity();
+    $('#todayText').textContent = formatDate(state.dashboard.today);
+    $('#sidebarCompany').textContent = state.dashboard.client?.name || activeCompany()?.name || 'บริษัทของคุณ';
+    writeDashboardCache();
+    if (!silent) toast('อัปเดตภาพรวมแล้ว');
+    return true;
+  } catch (error) {
+    if (!state.dashboard) state.dashboard = emptyDashboard();
+    try { renderDashboard(); } catch {}
+    renderLoadProblem([{ label: 'ภาพรวม', message: error.message }]);
+    return false;
+  } finally {
+    const elapsed = Math.round(performance.now() - started);
+    console.info(`[Nakna] fast dashboard ${elapsed}ms`);
+  }
+}
+function scheduleDeferredLoad(delay = 250) {
+  clearTimeout(deferredLoadTimer);
+  deferredLoadTimer = setTimeout(async () => {
+    if (deferredLoadInFlight) return;
+    deferredLoadInFlight = true;
+    try { await loadAll({ silent: true, background: true }); }
+    finally { deferredLoadInFlight = false; }
+  }, delay);
+}
+function warmWorkspaceInBackground() {
+  // Migrations are the source of truth in production. Runtime bootstrap is only
+  // a safety net and must never block first paint on mobile.
+  setTimeout(() => api('/api/bootstrap', { timeoutMs: 30000 }).catch(error => {
+    console.warn('[Nakna] background bootstrap failed', error?.message || error);
+  }), 1200);
+}
+
 const stageLabels = {
   new: 'ผู้สมัครใหม่',
   screening: 'คัดกรอง',
@@ -141,7 +227,9 @@ async function boot() {
     const onboardingReady = await maybeRunOnboarding({ forceNewBusiness: returnState.forceNewBusiness });
     if (!onboardingReady) return;
     showAppShell();
-    if (await ensureWorkspaceReady()) await loadAll({ silent: true });
+    const hadCache = hydrateDashboardCache();
+    await loadDashboardFast({ silent: true });
+    scheduleDeferredLoad(hadCache ? 450 : 180);
   } catch (error) {
     showAppShell();
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
@@ -764,8 +852,8 @@ async function runLoadPool(tasks, limit = 6) {
   return results;
 }
 
-async function loadAll({ silent = false } = {}) {
-  setLoading(true);
+async function loadAll({ silent = false, background = false } = {}) {
+  if (!background) setLoading(true);
   const errors = [];
   const safeLoad = async (label, promise, fallback) => {
     try { return await promise; }
@@ -849,6 +937,7 @@ async function loadAll({ silent = false } = {}) {
     renderIdentity();
     renderSettings();
     renderLoadProblem(errors);
+    writeDashboardCache();
     if (!silent && !errors.length) toast('อัปเดตข้อมูลล่าสุดแล้ว');
     if (!silent && errors.length) toast(`โหลดได้บางส่วน · มี ${errors.length} จุดที่ต้องลองใหม่`, true);
   } catch (error) {
@@ -857,7 +946,7 @@ async function loadAll({ silent = false } = {}) {
       renderLoadProblem([{ label: 'ระบบ HR', message: error.message }]);
     }
   } finally {
-    setLoading(false);
+    if (!background) setLoading(false);
   }
 }
 
@@ -1608,6 +1697,7 @@ function showView(name) {
 
   closeMobileNav();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (name !== 'dashboard' && !deferredLoadInFlight) scheduleDeferredLoad(0);
 }
 
 function renderWorkLocations() {
