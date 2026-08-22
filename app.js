@@ -38,6 +38,7 @@ const state = {
   activeApproverEmployeeId: null,
   activeLeaveProfileEmployeeId: null,
   currentView: 'dashboard',
+  activeSettingsCategory: null,
 };
 
 const $ = selector => document.querySelector(selector);
@@ -169,6 +170,17 @@ const viewMeta = {
   analytics: ['People Analytics', 'PEOPLE INTELLIGENCE'],
   'saas-admin': ['Nakna Admin', 'SAAS CONTROL'],
   settings: ['ตั้งค่า', 'SYSTEM'],
+};
+
+const settingsCategoryMeta = {
+  company: { title: 'ตั้งค่าบริษัท', kicker: 'COMPANY', description: 'ข้อมูลบริษัท แผนก ตำแหน่ง และโครงสร้างองค์กร' },
+  worktime: { title: 'ตั้งค่าเวลาทำงาน', kicker: 'WORK SCHEDULE', description: 'ตั้งเวลาระดับบริษัท รายแผนก หรือรายคน พร้อม Grace period' },
+  attendance: { title: 'ตั้งค่าการเช็กอิน', kicker: 'ATTENDANCE', description: 'กำหนดสถานที่ พิกัด รัศมี และกติกาเช็กเอาต์นอกพื้นที่' },
+  leave: { title: 'การลา & วันหยุด', kicker: 'LEAVE & HOLIDAY', description: 'ตั้งประเภทลา สิทธิ์ช่วงทดลองงาน และปฏิทินวันหยุดบริษัท' },
+  approvals: { title: 'สิทธิ์ & การอนุมัติ', kicker: 'APPROVAL FLOW', description: 'กำหนดหัวหน้า ผู้อนุมัติ และสิทธิ์ที่ใช้ในแต่ละ Workflow' },
+  integrations: { title: 'การเชื่อมต่อ', kicker: 'INTEGRATIONS', description: 'เชื่อม LINE, Gmail, Google Drive และ Google Sheets' },
+  payroll: { title: 'ตั้งค่า Payroll', kicker: 'PAYROLL', description: 'กำหนดวันจ่าย ภาษี ประกันสังคม และกติกาการหัก' },
+  billing: { title: 'แพ็กเกจ & Billing', kicker: 'SUBSCRIPTION', description: 'ดู Free Trial, Active Seats, แพ็กเกจ และ Invoice' },
 };
 
 async function api(path, options = {}) {
@@ -344,6 +356,12 @@ function bindEvents() {
   $$('[data-jump]').forEach(button => {
     button.onclick = () => showView(button.dataset.jump);
   });
+
+  $$('[data-settings-open]').forEach(button => {
+    button.onclick = () => openSettingsCategory(button.dataset.settingsOpen);
+  });
+  $('#settingsBackBtn').onclick = () => showSettingsHome();
+  $('#settingsPayrollOpenBtn').onclick = openPayrollSettingsModal;
 
   $('#addEmployeeBtn').onclick = openEmployeeModal;
   $('#inviteEmployeeBtn').onclick = openInviteModal;
@@ -1696,8 +1714,32 @@ function showView(name) {
   $('#pageKicker').textContent = kicker;
 
   closeMobileNav();
+  if (name === 'settings') showSettingsHome({ scroll: false });
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (name !== 'dashboard' && !deferredLoadInFlight) scheduleDeferredLoad(0);
+}
+
+function showSettingsHome({ scroll = true } = {}) {
+  state.activeSettingsCategory = null;
+  $('#settingsHome')?.classList.remove('hidden');
+  $('#settingsDetail')?.classList.add('hidden');
+  $$('[data-settings-category]').forEach(panel => panel.classList.add('hidden'));
+  $$('.settings-detail-tabs [data-settings-open]').forEach(button => button.classList.remove('active'));
+  if (scroll && state.currentView === 'settings') window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function openSettingsCategory(category) {
+  const meta = settingsCategoryMeta[category];
+  if (!meta) return;
+  state.activeSettingsCategory = category;
+  $('#settingsHome')?.classList.add('hidden');
+  $('#settingsDetail')?.classList.remove('hidden');
+  $$('[data-settings-category]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.settingsCategory !== category));
+  $$('.settings-detail-tabs [data-settings-open]').forEach(button => button.classList.toggle('active', button.dataset.settingsOpen === category));
+  if ($('#settingsDetailTitle')) $('#settingsDetailTitle').textContent = meta.title;
+  if ($('#settingsDetailKicker')) $('#settingsDetailKicker').textContent = meta.kicker;
+  if ($('#settingsDetailDescription')) $('#settingsDetailDescription').textContent = meta.description;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function renderWorkLocations() {
@@ -1958,13 +2000,49 @@ async function saveLeavePolicy(){
 }
 
 function renderSettings() {
-  $('#companyProfileShortcut').classList.toggle('disabled', !canManageCompanyProfile());
-  $('#statusCompanyAction').disabled = !canManageCompanyProfile();
+  $('#companyProfileShortcut')?.classList.toggle('disabled', !canManageCompanyProfile());
+  if ($('#statusCompanyAction')) $('#statusCompanyAction').disabled = !canManageCompanyProfile();
   renderLineIntegration();
   renderGoogleWorkspace();
   renderSetupOverview();
   renderApproverAccess();
+  renderSettingsHub();
   if($('#probationLeaveLockToggle')) $('#probationLeaveLockToggle').checked = state.employeeService?.leave_settings?.lock_leave_during_probation !== false;
+}
+
+function renderSettingsHub() {
+  const profile = state.companyProfile || state.dashboard?.client || activeCompany() || {};
+  const core = state.peopleCore || {};
+  const schedules = core.schedules || [];
+  const holidays = core.holidays || [];
+  const locations = state.workLocations || [];
+  const leavePolicies = state.leavePolicies || [];
+  const approvers = (state.approverAccess || []).filter(item => (item.permissions || []).length);
+  const line = state.lineIntegration || {};
+  const google = state.googleWorkspace || {};
+  const payroll = state.payroll?.settings || {};
+  const subscription = state.subscription || {};
+
+  const companyReady = companyProfileCompleted(profile);
+  const lineReady = Boolean(line.mode === 'dedicated' && line.connected);
+  const googleReady = Boolean(google.connected);
+  const essentials = [companyReady, schedules.length > 0 || Boolean(profile.work_start), locations.length > 0, leavePolicies.length > 0, googleReady];
+  const readyCount = essentials.filter(Boolean).length;
+  if ($('#settingsReadyBadge')) {
+    $('#settingsReadyBadge').textContent = `${readyCount}/${essentials.length} พื้นฐานพร้อม`;
+    $('#settingsReadyBadge').className = `badge ${readyCount === essentials.length ? 'badge-success' : readyCount ? 'badge-soft' : 'badge-neutral'}`;
+  }
+  if ($('#settingsCompanyMeta')) $('#settingsCompanyMeta').textContent = companyReady ? `${profile.name || 'บริษัท'} · ${(core.departments || []).length} แผนก` : 'ควรกรอกข้อมูลบริษัทให้ครบ';
+  if ($('#settingsWorktimeMeta')) $('#settingsWorktimeMeta').textContent = schedules.length ? `${schedules.length} กติกาเวลาทำงาน` : `${profile.work_start || '09:00'}–${profile.work_end || '18:00'} ค่าเริ่มต้น`;
+  if ($('#settingsAttendanceMeta')) $('#settingsAttendanceMeta').textContent = locations.length ? `${locations.filter(x => Number(x.is_active) !== 0).length} จุดเช็กอิน` : 'ยังไม่มีจุดเช็กอิน';
+  if ($('#settingsLeaveMeta')) $('#settingsLeaveMeta').textContent = `${leavePolicies.length} ประเภทลา · ${holidays.length} วันหยุด`;
+  if ($('#settingsApprovalMeta')) $('#settingsApprovalMeta').textContent = approvers.length ? `${approvers.length} คนมีสิทธิ์อนุมัติ` : 'ยังไม่ได้กำหนดผู้อนุมัติ';
+  if ($('#settingsIntegrationMeta')) $('#settingsIntegrationMeta').textContent = `${lineReady ? 'LINE OA ✓' : 'LINE นากนะ'} · ${googleReady ? 'Google ✓' : 'Google ยังไม่เชื่อม'}`;
+  if ($('#settingsPayrollMeta')) $('#settingsPayrollMeta').textContent = payroll.pay_day ? `จ่ายวันที่ ${payroll.pay_day} · ${Number(payroll.social_security_enabled ?? 1) ? 'SSO ✓' : 'SSO ปิด'}` : 'ใช้ค่ามาตรฐานก่อนตั้งค่า';
+  if ($('#settingsBillingMeta')) $('#settingsBillingMeta').textContent = subscription.plan?.name || subscription.plan_name || (subscription.trial ? 'Free Trial' : 'ดูสถานะแพ็กเกจ');
+  if ($('#settingsCompanyName')) $('#settingsCompanyName').textContent = profile.name || 'ข้อมูลบริษัท';
+  if ($('#settingsCompanyProfileText')) $('#settingsCompanyProfileText').textContent = `${profile.work_start || '09:00'}–${profile.work_end || '18:00'} · ${profile.timezone || 'Asia/Bangkok'}`;
+  if ($('#settingsPayrollDetail')) $('#settingsPayrollDetail').textContent = `วันจ่าย ${payroll.pay_day || 28} · ภาษี ${Number(payroll.tax_enabled ?? 1) ? 'เปิด' : 'ปิด'} · ประกันสังคม ${Number(payroll.social_security_enabled ?? 1) ? 'เปิด' : 'ปิด'}`;
 }
 
 function renderGoogleWorkspace() {

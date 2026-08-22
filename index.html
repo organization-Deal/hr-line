@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.4" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.5" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -205,7 +205,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.4</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.5</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -449,15 +449,137 @@
 
       <section id="view-settings" class="view">
         <div class="settings-preview">
-          <div class="page-intro"><div><p class="kicker">SYSTEM</p><h1>ตั้งค่า</h1><p>โครงสร้างบริษัท เวลาเข้างาน LINE และสิทธิ์การใช้งาน</p></div></div>
-          <div class="settings-grid">
-            <article id="companyProfileShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h6M9 14h6"/></svg></div><div><strong>ข้อมูลบริษัท</strong><p>ชื่อบริษัท เวลาเข้างาน และค่าพื้นฐาน</p></div><span>→</span></article>
-            <article id="lineIntegrationShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H8l-3 3V5Z"/></svg></div><div><strong>LINE Official Account</strong><p>เชื่อมธุรกิจใน LINE เข้ากับ Workspace</p></div><span>→</span></article>
-            <article id="googleWorkspaceShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6M8 18v2M16 18v2"/></svg></div><div><strong>Google</strong><p>เชื่อม Gmail + Drive + Google Sheets</p></div><span>→</span></article>
-            <article id="approverAccessShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.5 8.2 8 9 4.5-.8 8-4 8-9V7l-8-4Z"/><path d="m9 12 2 2 4-4"/></svg></div><div><strong>สิทธิ์ผู้อนุมัติ</strong><p>กำหนดว่าใครอนุมัติลา OT เวลา และคำขอ HR ได้</p></div><span>→</span></article>
+          <div id="settingsHome" class="settings-home">
+            <div class="page-intro settings-main-intro">
+              <div><p class="kicker">SETTINGS CENTER</p><h1>ตั้งค่าระบบ</h1><p>เลือกหมวดที่ต้องการตั้งค่า ไม่ต้องเลื่อนหาทุกอย่างในหน้าเดียว</p></div>
+              <span id="settingsReadyBadge" class="badge badge-soft">กำลังตรวจ</span>
+            </div>
+
+            <div class="settings-guide-card">
+              <div class="settings-guide-icon">⚙</div>
+              <div><strong>เริ่มจากค่าบริษัท แล้วค่อยตั้งรายละเอียดแต่ละทีม</strong><p>นากนะจะใช้ค่าระดับบริษัทเป็นค่าเริ่มต้น และให้ Override รายแผนก/รายคนในจุดที่รองรับ</p></div>
+            </div>
+
+            <div class="settings-category-grid" aria-label="หมวดการตั้งค่า">
+              <button class="settings-category-card" type="button" data-settings-open="company">
+                <span class="settings-category-icon">🏢</span><span class="settings-category-copy"><strong>ตั้งค่าบริษัท</strong><small>ข้อมูลบริษัท · แผนก · ตำแหน่ง · โครงสร้างองค์กร</small><em id="settingsCompanyMeta">กำลังโหลด…</em></span><span class="settings-chevron">›</span>
+              </button>
+              <button class="settings-category-card" type="button" data-settings-open="worktime">
+                <span class="settings-category-icon">◷</span><span class="settings-category-copy"><strong>ตั้งค่าเวลาทำงาน</strong><small>เวลาบริษัท · รายแผนก · รายคน · Grace period</small><em id="settingsWorktimeMeta">กำลังโหลด…</em></span><span class="settings-chevron">›</span>
+              </button>
+              <button class="settings-category-card" type="button" data-settings-open="attendance">
+                <span class="settings-category-icon">⌖</span><span class="settings-category-copy"><strong>ตั้งค่าการเช็กอิน</strong><small>สถานที่ · พิกัด · รัศมี · เช็กเอาต์นอกพื้นที่</small><em id="settingsAttendanceMeta">กำลังโหลด…</em></span><span class="settings-chevron">›</span>
+              </button>
+              <button class="settings-category-card" type="button" data-settings-open="leave">
+                <span class="settings-category-icon">☂</span><span class="settings-category-copy"><strong>การลา & วันหยุด</strong><small>ประเภทลา · สิทธิ์ช่วงทดลองงาน · วันหยุดประจำปี</small><em id="settingsLeaveMeta">กำลังโหลด…</em></span><span class="settings-chevron">›</span>
+              </button>
+              <button class="settings-category-card" type="button" data-settings-open="approvals">
+                <span class="settings-category-icon">✓</span><span class="settings-category-copy"><strong>สิทธิ์ & การอนุมัติ</strong><small>หัวหน้า · ผู้อนุมัติ · สิทธิ์แต่ละ Workflow</small><em id="settingsApprovalMeta">กำลังโหลด…</em></span><span class="settings-chevron">›</span>
+              </button>
+              <button class="settings-category-card" type="button" data-settings-open="integrations">
+                <span class="settings-category-icon">↔</span><span class="settings-category-copy"><strong>การเชื่อมต่อ</strong><small>LINE · Gmail · Google Drive · Google Sheets</small><em id="settingsIntegrationMeta">กำลังโหลด…</em></span><span class="settings-chevron">›</span>
+              </button>
+              <button class="settings-category-card" type="button" data-settings-open="payroll">
+                <span class="settings-category-icon">฿</span><span class="settings-category-copy"><strong>ตั้งค่า Payroll</strong><small>วันจ่าย · ภาษี · ประกันสังคม · กติกาการหัก</small><em id="settingsPayrollMeta">กำลังโหลด…</em></span><span class="settings-chevron">›</span>
+              </button>
+              <button class="settings-category-card" type="button" data-settings-open="billing">
+                <span class="settings-category-icon">◫</span><span class="settings-category-copy"><strong>แพ็กเกจ & Billing</strong><small>Free Trial · Active Seats · แพ็กเกจ · Invoice</small><em id="settingsBillingMeta">กำลังโหลด…</em></span><span class="settings-chevron">›</span>
+              </button>
+            </div>
           </div>
 
-          <div class="setup-overview-section">
+          <div id="settingsDetail" class="settings-detail hidden">
+            <div class="settings-detail-head">
+              <button id="settingsBackBtn" class="settings-back-btn" type="button" aria-label="กลับหน้าตั้งค่า">‹</button>
+              <div><p id="settingsDetailKicker" class="kicker">SETTINGS</p><h1 id="settingsDetailTitle">ตั้งค่า</h1><p id="settingsDetailDescription">เลือกและบันทึกค่าที่ต้องการ</p></div>
+            </div>
+            <div class="settings-detail-tabs" aria-label="เปลี่ยนหมวดการตั้งค่า">
+              <button type="button" data-settings-open="company">บริษัท</button>
+              <button type="button" data-settings-open="worktime">เวลางาน</button>
+              <button type="button" data-settings-open="attendance">เช็กอิน</button>
+              <button type="button" data-settings-open="leave">ลา & วันหยุด</button>
+              <button type="button" data-settings-open="approvals">อนุมัติ</button>
+              <button type="button" data-settings-open="integrations">เชื่อมต่อ</button>
+              <button type="button" data-settings-open="payroll">Payroll</button>
+              <button type="button" data-settings-open="billing">Billing</button>
+            </div>
+
+            <div class="settings-category-panel hidden" data-settings-category="company">
+              <div class="settings-subsection settings-company-profile">
+                <div class="page-intro compact"><div><p class="kicker">COMPANY PROFILE</p><h2>ข้อมูลบริษัท</h2><p>ค่าพื้นฐานของ Workspace เช่น ชื่อบริษัท เวลาเริ่มงาน และ Timezone</p></div></div>
+                <article id="companyProfileShortcut" class="setting-card setting-card-action settings-wide-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h6M9 14h6"/></svg></div><div><strong id="settingsCompanyName">ข้อมูลบริษัท</strong><p id="settingsCompanyProfileText">กดเพื่อแก้ไขข้อมูลหลักของบริษัท</p></div><span>→</span></article>
+              </div>
+              <div id="organizationSection" class="people-core-section">
+            <div class="page-intro compact">
+              <div><p class="kicker">ORGANIZATION</p><h2>โครงสร้างองค์กร</h2><p>สร้างแผนก แผนกย่อย ตำแหน่ง และกำหนดหัวหน้า เพื่อให้งานอนุมัติและตารางงานรู้ว่าใครขึ้นกับใคร</p></div>
+              <div class="section-action-group"><button id="addPositionBtn" class="secondary-btn" type="button">+ ตำแหน่ง</button><button id="addDepartmentBtn" class="primary-btn" type="button">+ แผนก</button></div>
+            </div>
+            <div id="organizationChart" class="organization-chart"></div>
+          </div>
+            </div>
+
+            <div class="settings-category-panel hidden" data-settings-category="worktime">
+              <div id="workScheduleSection" class="people-core-section">
+            <div class="page-intro compact">
+              <div><p class="kicker">WORK SCHEDULE</p><h2>เวลาทำงาน</h2><p>ค่าเวลาจะไล่ลำดับจาก รายคน → แผนก → บริษัท เพื่อรองรับทีมที่เข้าไม่พร้อมกัน</p></div>
+              <button id="addScheduleBtn" class="primary-btn" type="button">+ ตั้งเวลาทำงาน</button>
+            </div>
+            <div id="workScheduleList" class="work-schedule-list"></div>
+          </div>
+            </div>
+
+            <div class="settings-category-panel hidden" data-settings-category="attendance">
+              <div class="work-location-section">
+            <div class="page-intro compact">
+              <div><p class="kicker">ATTENDANCE LOCATION</p><h2>Work Location</h2><p>สร้างจุดที่อนุญาตให้เช็กอินได้ แล้วเลือกจุดให้พนักงานตั้งแต่ตอนส่งลิงก์เชิญ</p></div>
+              <button id="addWorkLocationBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่ม Location</button>
+            </div>
+            <div class="attendance-policy-card"><div><strong>Check-out นอกพื้นที่</strong><p>เปิดได้ถ้าบริษัทอนุญาตให้พนักงานออกงานนอก Location โดยระบบจะบันทึกพิกัดและติดสถานะ “นอกพื้นที่” ไว้ตรวจสอบ</p></div><label class="switch"><input id="attendancePolicyToggle" type="checkbox"/><span></span></label></div>
+            <div id="workLocationList" class="work-location-list"></div>
+          </div>
+            </div>
+
+            <div class="settings-category-panel hidden" data-settings-category="leave">
+              <div id="holidaySection" class="people-core-section">
+            <div class="page-intro compact">
+              <div><p class="kicker">COMPANY HOLIDAYS</p><h2>วันหยุดบริษัท</h2><p>HR กำหนดปฏิทินวันหยุดประจำปีไว้ให้พนักงานใช้เป็นข้อมูลกลางเดียวกัน</p></div>
+              <div class="section-action-group"><span id="holidayCountBadge" class="badge badge-soft">0 วัน</span><button id="addHolidayBtn" class="primary-btn" type="button">+ วันหยุด</button></div>
+            </div>
+            <div id="holidayCompliance" class="holiday-compliance warn"></div>
+            <div id="holidayList" class="holiday-list"></div>
+          </div>
+              <div class="leave-access-section">
+            <div class="page-intro compact"><div><p class="kicker">LEAVE ACCESS</p><h2>สิทธิ์ลาระหว่างทดลองงาน</h2><p>ตั้งค่าเริ่มต้นของบริษัท แล้ว HR สามารถ Override รายคนจากหน้า Employee Leave Profile ได้</p></div></div>
+            <article class="policy-toggle-card"><div><strong>ล็อกสิทธิ์ลาก่อนผ่านทดลองงาน</strong><p>ประเภทลาที่เปิด “ใช้ได้ระหว่างทดลองงาน” จะยังขอได้ตามปกติ</p></div><label class="switch"><input id="probationLeaveLockToggle" type="checkbox" checked><span></span></label></article>
+          </div>
+              <div class="leave-policy-section">
+            <div class="page-intro compact">
+              <div><p class="kicker">LEAVE POLICY</p><h2>นโยบายและสิทธิ์การลา</h2><p>กำหนดประเภทลา สิทธิ์เริ่มต้น เหตุผล หลักฐาน และเงื่อนไขล่วงหน้าของบริษัท</p></div>
+              <button id="addLeavePolicyBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มประเภทลา</button>
+            </div>
+            <div id="leavePolicyList" class="leave-policy-list"></div>
+            <p class="settings-hint">ค่าเริ่มต้นเป็น Template สำหรับทดลองระบบ HR สามารถแก้สิทธิ์รายคนได้จากหน้า “พนักงาน” และควรตรวจให้ตรงกับ Policy/กฎหมายที่บริษัทใช้จริงก่อน Production</p>
+          </div>
+            </div>
+
+            <div class="settings-category-panel hidden" data-settings-category="approvals">
+              <div class="settings-subsection">
+                <article id="approverAccessShortcut" class="setting-card setting-card-action settings-wide-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.5 8.2 8 9 4.5-.8 8-4 8-9V7l-8-4Z"/><path d="m9 12 2 2 4-4"/></svg></div><div><strong>สิทธิ์ผู้อนุมัติ</strong><p>กำหนดให้หัวหน้าหรือ HR อนุมัติการลา เวลา และคำขอต่าง ๆ</p></div><span>→</span></article>
+              </div>
+              <div id="approverAccessSection" class="approver-access-section">
+            <div class="page-intro compact">
+              <div><p class="kicker">APPROVER ACCESS</p><h2>สิทธิ์ผู้อนุมัติ</h2><p>แนวเดียวกับระบบรับจ่าย: เลือกบทบาท → เลือกพนักงาน → เปิดสิทธิ์ที่ต้องใช้ แล้วระบบจะตรวจสิทธิ์ก่อนอนุมัติจริง</p></div>
+              <div class="section-action-group"><span id="approverAccessCount" class="badge badge-soft">0 คน</span><button id="addApproverAccessBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มสิทธิ์</button></div>
+            </div>
+            <div class="approver-role-guide">
+              <div><strong>ผู้อนุมัติ</strong><span>เหมาะกับหัวหน้าทีม/Manager</span></div><div><strong>LINE-first</strong><span>อนุมัติจาก LINE ได้เมื่อเชื่อมบัญชีแล้ว</span></div><div><strong>แยกสิทธิ์</strong><span>เปิดเฉพาะงานที่ต้องอนุมัติ ไม่เห็นข้อมูลเกินจำเป็น</span></div>
+            </div>
+            <div id="approverAccessList" class="approver-access-list"></div>
+          </div>
+            </div>
+
+            <div class="settings-category-panel hidden" data-settings-category="integrations">
+              <div class="setup-overview-section">
             <div class="page-intro compact"><div><p class="kicker">WORKSPACE STATUS</p><h2>สถานะการตั้งค่าระบบ</h2><p>เห็นทันทีว่าบริษัทกรอกข้อมูล เชื่อม LINE และเชื่อม Google พร้อมหรือยัง</p></div><span id="setupOverviewBadge" class="badge badge-soft">0/3 พร้อมใช้งาน</span></div>
             <div class="setup-progress"><div id="setupProgressBar" class="setup-progress-bar"></div></div>
             <div class="setup-status-grid">
@@ -466,18 +588,11 @@
               <article class="status-card"><div class="status-card-head"><div class="status-icon google-status-icon">G</div><span id="statusGoogleBadge" class="badge badge-neutral">รอตั้งค่า</span></div><strong>Google</strong><p id="statusGoogleText">กำลังตรวจสอบ Gmail, Drive และ Sheets…</p><button id="statusGoogleAction" class="secondary-btn" type="button">เชื่อม Google</button></article>
             </div>
           </div>
-
-          <div id="subscriptionSection" class="subscription-section">
-            <div class="page-intro compact"><div><p class="kicker">SUBSCRIPTION</p><h2>Trial & Active Employee Seats</h2><p>ทดลองใช้ 30 วัน และนับจำนวน Active Employee Seat ของ Workspace เพื่อรองรับการคิดค่าบริการตามจำนวนคน</p></div><span id="subscriptionBadge" class="badge badge-soft">กำลังโหลด</span></div>
-            <article class="subscription-card">
-              <div class="subscription-main"><span id="subscriptionPlanKicker">FREE TRIAL</span><strong id="subscriptionPlanName">Free Trial</strong><p id="subscriptionText">กำลังตรวจสอบสถานะ…</p></div>
-              <div class="seat-meter"><div><span>Active Employee Seats</span><strong id="subscriptionSeats">0</strong></div><div class="seat-track"><i id="subscriptionSeatBar"></i></div><small id="subscriptionSeatHint">นับเฉพาะ Probation / Employee / Leave of absence</small></div>
-              <div class="subscription-actions"><button id="subscriptionPlanBtn" class="secondary-btn" type="button">ดูแพ็กเกจ</button><button id="generateInvoiceBtn" class="text-btn hidden" type="button">สร้าง Invoice</button></div>
-            </article>
-            <div id="subscriptionInvoiceList" class="subscription-invoices"></div>
-          </div>
-
-          <div class="company-line-section">
+              <div class="settings-integration-shortcuts">
+                <article id="lineIntegrationShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H8l-3 3V5Z"/></svg></div><div><strong>LINE Official Account</strong><p>เชื่อม OA บริษัท หรือใช้นากนะกลาง</p></div><span>→</span></article>
+                <article id="googleWorkspaceShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6M8 18v2M16 18v2"/></svg></div><div><strong>Google</strong><p>Gmail + Drive + Google Sheets</p></div><span>→</span></article>
+              </div>
+              <div class="company-line-section">
             <div class="page-intro compact">
               <div><p class="kicker">COMPANY INTEGRATION</p><h2>LINE Official Account</h2><p>บริษัทเลือกใช้ LINE “นากนะ” กลางได้ หรือเชื่อม OA ของบริษัทเองเพื่อให้พนักงานคุยกับแบรนด์ของบริษัทโดยตรง</p></div>
             </div>
@@ -495,8 +610,7 @@
             </article>
             <p class="settings-hint">ถ้ายังไม่เชื่อม OA ของบริษัท ระบบจะใช้ LINE “นากนะ” กลางเป็นค่าเริ่มต้น พอเชื่อม OA ของบริษัทแล้ว Invite ใหม่และข้อความ HR จะวิ่งผ่าน OA ของบริษัทนั้นอัตโนมัติ</p>
           </div>
-
-          <div id="googleWorkspaceSection" class="google-workspace-section">
+              <div id="googleWorkspaceSection" class="google-workspace-section">
             <div class="page-intro compact"><div><p class="kicker">COMPANY DATA</p><h2>Google</h2><p>เชื่อมบัญชี Google ของบริษัทครั้งเดียว เพื่อใช้ Gmail, เก็บเอกสารใน Drive และสร้าง HR Database ใน Google Sheets</p></div></div>
             <article class="integration-card workspace-google-card">
               <div class="integration-logo google-workspace-logo">G</div>
@@ -510,66 +624,32 @@
             </article>
             <p class="settings-hint">เมื่อเชื่อมครั้งแรก นากนะจะสร้างโฟลเดอร์เอกสาร HR และ Google Sheet ฐานข้อมูลของ Workspace นี้ให้อัตโนมัติ พร้อม Sync snapshot จากระบบปัจจุบันเข้า Sheet</p>
           </div>
-
-          <div id="organizationSection" class="people-core-section">
-            <div class="page-intro compact">
-              <div><p class="kicker">ORGANIZATION</p><h2>โครงสร้างองค์กร</h2><p>สร้างแผนก แผนกย่อย ตำแหน่ง และกำหนดหัวหน้า เพื่อให้งานอนุมัติและตารางงานรู้ว่าใครขึ้นกับใคร</p></div>
-              <div class="section-action-group"><button id="addPositionBtn" class="secondary-btn" type="button">+ ตำแหน่ง</button><button id="addDepartmentBtn" class="primary-btn" type="button">+ แผนก</button></div>
             </div>
-            <div id="organizationChart" class="organization-chart"></div>
-          </div>
 
-          <div id="workScheduleSection" class="people-core-section">
-            <div class="page-intro compact">
-              <div><p class="kicker">WORK SCHEDULE</p><h2>เวลาทำงาน</h2><p>ค่าเวลาจะไล่ลำดับจาก รายคน → แผนก → บริษัท เพื่อรองรับทีมที่เข้าไม่พร้อมกัน</p></div>
-              <button id="addScheduleBtn" class="primary-btn" type="button">+ ตั้งเวลาทำงาน</button>
+            <div class="settings-category-panel hidden" data-settings-category="payroll">
+              <div class="settings-subsection payroll-settings-center">
+                <div class="page-intro compact"><div><p class="kicker">PAYROLL SETTINGS</p><h2>กติกาเงินเดือน</h2><p>ตั้งค่าพื้นฐานสำหรับการคำนวณ Payroll ก่อนสร้างรอบเงินเดือน</p></div></div>
+                <article class="settings-action-panel">
+                  <div class="settings-action-icon">฿</div>
+                  <div><strong>Payroll ของบริษัท</strong><p id="settingsPayrollDetail">วันจ่ายเงินเดือน · ภาษี · ประกันสังคม · รายการหักอัตโนมัติ</p></div>
+                  <button id="settingsPayrollOpenBtn" class="primary-btn" type="button">ตั้งค่า Payroll</button>
+                </article>
+                <p class="settings-hint">การคำนวณจริงยังใช้ Flow Preview → ตรวจ → Lock → Publish เพื่อป้องกันยอดเปลี่ยนหลังประกาศสลิป</p>
+              </div>
             </div>
-            <div id="workScheduleList" class="work-schedule-list"></div>
-          </div>
 
-          <div id="holidaySection" class="people-core-section">
-            <div class="page-intro compact">
-              <div><p class="kicker">COMPANY HOLIDAYS</p><h2>วันหยุดบริษัท</h2><p>HR กำหนดปฏิทินวันหยุดประจำปีไว้ให้พนักงานใช้เป็นข้อมูลกลางเดียวกัน</p></div>
-              <div class="section-action-group"><span id="holidayCountBadge" class="badge badge-soft">0 วัน</span><button id="addHolidayBtn" class="primary-btn" type="button">+ วันหยุด</button></div>
+            <div class="settings-category-panel hidden" data-settings-category="billing">
+              <div id="subscriptionSection" class="subscription-section">
+            <div class="page-intro compact"><div><p class="kicker">SUBSCRIPTION</p><h2>Trial & Active Employee Seats</h2><p>ทดลองใช้ 30 วัน และนับจำนวน Active Employee Seat ของ Workspace เพื่อรองรับการคิดค่าบริการตามจำนวนคน</p></div><span id="subscriptionBadge" class="badge badge-soft">กำลังโหลด</span></div>
+            <article class="subscription-card">
+              <div class="subscription-main"><span id="subscriptionPlanKicker">FREE TRIAL</span><strong id="subscriptionPlanName">Free Trial</strong><p id="subscriptionText">กำลังตรวจสอบสถานะ…</p></div>
+              <div class="seat-meter"><div><span>Active Employee Seats</span><strong id="subscriptionSeats">0</strong></div><div class="seat-track"><i id="subscriptionSeatBar"></i></div><small id="subscriptionSeatHint">นับเฉพาะ Probation / Employee / Leave of absence</small></div>
+              <div class="subscription-actions"><button id="subscriptionPlanBtn" class="secondary-btn" type="button">ดูแพ็กเกจ</button><button id="generateInvoiceBtn" class="text-btn hidden" type="button">สร้าง Invoice</button></div>
+            </article>
+            <div id="subscriptionInvoiceList" class="subscription-invoices"></div>
+          </div>
             </div>
-            <div id="holidayCompliance" class="holiday-compliance warn"></div>
-            <div id="holidayList" class="holiday-list"></div>
           </div>
-
-          <div id="approverAccessSection" class="approver-access-section">
-            <div class="page-intro compact">
-              <div><p class="kicker">APPROVER ACCESS</p><h2>สิทธิ์ผู้อนุมัติ</h2><p>แนวเดียวกับระบบรับจ่าย: เลือกบทบาท → เลือกพนักงาน → เปิดสิทธิ์ที่ต้องใช้ แล้วระบบจะตรวจสิทธิ์ก่อนอนุมัติจริง</p></div>
-              <div class="section-action-group"><span id="approverAccessCount" class="badge badge-soft">0 คน</span><button id="addApproverAccessBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มสิทธิ์</button></div>
-            </div>
-            <div class="approver-role-guide">
-              <div><strong>ผู้อนุมัติ</strong><span>เหมาะกับหัวหน้าทีม/Manager</span></div><div><strong>LINE-first</strong><span>อนุมัติจาก LINE ได้เมื่อเชื่อมบัญชีแล้ว</span></div><div><strong>แยกสิทธิ์</strong><span>เปิดเฉพาะงานที่ต้องอนุมัติ ไม่เห็นข้อมูลเกินจำเป็น</span></div>
-            </div>
-            <div id="approverAccessList" class="approver-access-list"></div>
-          </div>
-
-          <div class="leave-access-section">
-            <div class="page-intro compact"><div><p class="kicker">LEAVE ACCESS</p><h2>สิทธิ์ลาระหว่างทดลองงาน</h2><p>ตั้งค่าเริ่มต้นของบริษัท แล้ว HR สามารถ Override รายคนจากหน้า Employee Leave Profile ได้</p></div></div>
-            <article class="policy-toggle-card"><div><strong>ล็อกสิทธิ์ลาก่อนผ่านทดลองงาน</strong><p>ประเภทลาที่เปิด “ใช้ได้ระหว่างทดลองงาน” จะยังขอได้ตามปกติ</p></div><label class="switch"><input id="probationLeaveLockToggle" type="checkbox" checked><span></span></label></article>
-          </div>
-
-          <div class="leave-policy-section">
-            <div class="page-intro compact">
-              <div><p class="kicker">LEAVE POLICY</p><h2>นโยบายและสิทธิ์การลา</h2><p>กำหนดประเภทลา สิทธิ์เริ่มต้น เหตุผล หลักฐาน และเงื่อนไขล่วงหน้าของบริษัท</p></div>
-              <button id="addLeavePolicyBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มประเภทลา</button>
-            </div>
-            <div id="leavePolicyList" class="leave-policy-list"></div>
-            <p class="settings-hint">ค่าเริ่มต้นเป็น Template สำหรับทดลองระบบ HR สามารถแก้สิทธิ์รายคนได้จากหน้า “พนักงาน” และควรตรวจให้ตรงกับ Policy/กฎหมายที่บริษัทใช้จริงก่อน Production</p>
-          </div>
-
-          <div class="work-location-section">
-            <div class="page-intro compact">
-              <div><p class="kicker">ATTENDANCE LOCATION</p><h2>Work Location</h2><p>สร้างจุดที่อนุญาตให้เช็กอินได้ แล้วเลือกจุดให้พนักงานตั้งแต่ตอนส่งลิงก์เชิญ</p></div>
-              <button id="addWorkLocationBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่ม Location</button>
-            </div>
-            <div class="attendance-policy-card"><div><strong>Check-out นอกพื้นที่</strong><p>เปิดได้ถ้าบริษัทอนุญาตให้พนักงานออกงานนอก Location โดยระบบจะบันทึกพิกัดและติดสถานะ “นอกพื้นที่” ไว้ตรวจสอบ</p></div><label class="switch"><input id="attendancePolicyToggle" type="checkbox"/><span></span></label></div>
-            <div id="workLocationList" class="work-location-list"></div>
-          </div>
-
         </div>
       </section>
     </main>
@@ -793,6 +873,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.4" type="module"></script>
+  <script src="/app.js?v=1.0-p7.5" type="module"></script>
 </body>
 </html>
