@@ -3085,6 +3085,13 @@ async function processLineEvent(event, env, lineCtx) {
       return replyLineMessages(accessToken,event.replyToken,[linked.ok?buildWelcomeFlex(linked.name,linked.company_name||'บริษัทของคุณ'):buildSimpleNoticeFlex('เชื่อม LINE ไม่สำเร็จ',linked.error,'error')]);
     }
 
+    // Owner commands must work even when the same LINE account is also linked
+    // as an employee (or is not linked as an employee at all).
+    if(isOwnerDashboardCommand(text)){
+      const ownerAccess=await getLineOwnerDashboardAccess(env,lineCtx,lineUserId);
+      if(ownerAccess) return replyLineMessages(accessToken,event.replyToken,[buildOwnerDashboardFlex(ownerAccess)]);
+    }
+
     const emp=await employee();
     if(!emp) return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ยังไม่ได้เชื่อมบัญชี','ถ้าคุณเป็นเจ้าของบริษัทหรือ HR ให้พิมพ์ “เชื่อมธุรกิจ”\nถ้าคุณเป็นพนักงาน ให้เปิดลิงก์เชิญเข้าทีมที่ HR ส่งให้','warning')]);
     const session=await getLineSession(env.DB,sessionKey);
@@ -3132,7 +3139,7 @@ async function processLineEvent(event, env, lineCtx) {
     }
 
     const lower=text.toLowerCase();
-    if(['เมนู','menu','help','ช่วยเหลือ'].includes(lower)) return replyLineMessages(accessToken,event.replyToken,[buildEmployeeMenuFlex(emp)]);
+    if(['เมนู','menu','help','ช่วยเหลือ'].includes(lower)) return replyLineMessages(accessToken,event.replyToken,[await buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp)]);
     if(['ลา','ขอลา','leave','ขอลางาน'].includes(lower)) return sendLeaveTypeMenu(env,event.replyToken,emp,accessToken);
     if(['สิทธิ์ลา','วันลา','leave balance'].includes(lower)) return sendLeaveBalance(env,event.replyToken,emp,accessToken);
     if(['วันหยุด','holiday','holidays','วันหยุดบริษัท'].includes(lower)) return sendCompanyHolidays(env,event.replyToken,emp,accessToken);
@@ -3157,7 +3164,7 @@ async function processLineEvent(event, env, lineCtx) {
       const a=await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(emp.id),dateInBangkok()).first();
       return replyLineMessages(accessToken,event.replyToken,[buildEmployeeStatusFlex(emp,a)]);
     }
-    return replyLineMessages(accessToken,event.replyToken,[buildEmployeeMenuFlex(emp)]);
+    return replyLineMessages(accessToken,event.replyToken,[await buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp)]);
   }
 
   if (event.type==='message' && ['image','file'].includes(event.message?.type)){
@@ -3192,7 +3199,7 @@ async function processLineEvent(event, env, lineCtx) {
   if(event.type==='postback'){
     const emp=await employee(); if(!emp) return replyLine(accessToken,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
     const data=new URLSearchParams(event.postback?.data||''); const action=data.get('action');
-    if(action==='menu') return replyLineMessages(accessToken,event.replyToken,[buildEmployeeMenuFlex(emp)]);
+    if(action==='menu') return replyLineMessages(accessToken,event.replyToken,[await buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp)]);
     if(action==='checkin'||action==='checkout'){ await setLineSession(env.DB,sessionKey,action); return replyLineWithLocationQuickReply(accessToken,event.replyToken,`📍 ส่ง Location ปัจจุบันมาเพื่อ${action==='checkin'?'เช็กอิน':'เช็กเอาต์'}`); }
     if(action==='leave_menu') return sendLeaveTypeMenu(env,event.replyToken,emp,accessToken);
     if(action==='leave_balance') return sendLeaveBalance(env,event.replyToken,emp,accessToken);
@@ -3638,6 +3645,28 @@ async function findLinkedEmployeeByLine(db,providerScope,lineUserId){
     .bind(String(lineUserId),String(providerScope||'default')).first();
 }
 
+function isOwnerDashboardCommand(text){
+  const normalized=String(text||'').trim().toLowerCase().replace(/\s+/g,' ');
+  return ['แดชบอร์ด','dashboard','เปิด dashboard','เปิดแดชบอร์ด','owner dashboard','เจ้าของ','โหมดเจ้าของ','จัดการบริษัท'].includes(normalized);
+}
+
+async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId){
+  const providerScope=String(lineCtx?.providerScope||'default');
+  const user=await findLineBusinessUser(env.DB,providerScope,lineUserId).catch(()=>null);
+  if(!user?.id) return null;
+  const memberships=await getLineBusinessMemberships(env.DB,Number(user.id));
+  const owned=memberships.filter(row=>String(row.role||'').toLowerCase()==='owner');
+  if(!owned.length) return null;
+  const primary=owned[0];
+  const dashboardUrl=await issueLineWebLoginLink(env,Number(user.id),{clientId:Number(primary.id),purpose:'dashboard'});
+  return {user,primary,businesses:owned,dashboardUrl};
+}
+
+async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
+  const ownerAccess=await getLineOwnerDashboardAccess(env,lineCtx,lineUserId).catch(()=>null);
+  return buildEmployeeMenuFlex(emp,ownerAccess);
+}
+
 async function createCompanyForLineOwner(env,user,name,lineUserId){
   let code=companyCode(name);
   for(let i=0;i<5;i++){
@@ -3704,7 +3733,10 @@ async function issueLineWebLoginLink(env,userId,{clientId=null,purpose='business
   const token=randomToken(40);
   const tokenHash=await sha256Hex(token);
   const expiresAt=new Date(Date.now()+15*60*1000).toISOString();
-  await env.DB.prepare(`DELETE FROM line_web_login_tokens WHERE user_id=?1 AND purpose=?2 AND used_at IS NULL`).bind(Number(userId),String(purpose)).run();
+  // Keep other still-valid cards usable. Older code deleted every unused token
+  // for the same purpose, which made Dashboard buttons in previous LINE cards
+  // stop working as soon as a new menu was opened.
+  await env.DB.prepare(`DELETE FROM line_web_login_tokens WHERE user_id=?1 AND (used_at IS NOT NULL OR expires_at<=?2)`).bind(Number(userId),new Date().toISOString()).run();
   await env.DB.prepare(`INSERT INTO line_web_login_tokens (token_hash,user_id,client_id,purpose,expires_at) VALUES (?1,?2,?3,?4,?5)`)
     .bind(tokenHash,Number(userId),clientId?Number(clientId):null,String(purpose),expiresAt).run();
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
@@ -5181,11 +5213,20 @@ function buildWelcomeFlex(name,company){
     footer:[linePrimaryButton('เปิดเมนูพนักงาน',{type:'postback',label:'เปิดเมนูพนักงาน',data:'action=menu'})]
   })};
 }
-function buildEmployeeMenuFlex(emp){
+function buildEmployeeMenuFlex(emp,ownerAccess=null){
   const name=emp.nickname||emp.first_name;
-  return {type:'flex',altText:'เมนูพนักงาน · นากนะ',contents:lineBubble({
-    eyebrow:'นากนะ · EMPLOYEE',title:`สวัสดี ${name} 👋`,subtitle:emp.company_name||'',
+  const isOwner=Boolean(ownerAccess?.dashboardUrl&&ownerAccess?.primary);
+  const ownerCompany=ownerAccess?.primary?.name||'';
+  const footer=isOwner?[
+    linePrimaryButton('Dashboard เจ้าของ',{type:'uri',label:'Dashboard เจ้าของ',uri:ownerAccess.dashboardUrl})
+  ]:[];
+  return {type:'flex',altText:isOwner?'เมนู Owner + พนักงาน · นากนะ':'เมนูพนักงาน · นากนะ',contents:lineBubble({
+    eyebrow:isOwner?'นากนะ · OWNER + EMPLOYEE':'นากนะ · EMPLOYEE',title:`สวัสดี ${name} 👋`,subtitle:emp.company_name||'',
     body:[
+      ...(isOwner?[lineInfoCard([
+        lineInfoRow('โหมดเจ้าของ',ownerCompany||'ธุรกิจของคุณ',LINE_CI.primary),
+        lineText('บัญชี LINE นี้เป็นได้ทั้ง Owner และพนักงาน โดยไม่ต้องถอดสิทธิ์พนักงาน','xxs',LINE_CI.muted)
+      ],'teal')]:[]),
       lineText('จัดการเรื่องงานประจำวันได้จากตรงนี้','sm',LINE_CI.muted),
       linePrimaryButton('📍  เช็กอิน',{type:'postback',label:'เช็กอิน',data:'action=checkin'}),
       lineSecondaryButton('🏠  เช็กเอาต์',{type:'postback',label:'เช็กเอาต์',data:'action=checkout'}),
@@ -5196,7 +5237,25 @@ function buildEmployeeMenuFlex(emp){
       lineSecondaryButton('🎓  Learning & KPI',{type:'postback',label:'Learning & KPI',data:'action=learning'},LINE_CI.mintSoft),
       lineSecondaryButton('🎁  แต้ม & ของรางวัล',{type:'postback',label:'แต้ม & ของรางวัล',data:'action=rewards'},'#FFF7E8'),
       lineSecondaryButton('🔒  แจ้งเรื่องส่วนตัวถึง HR',{type:'postback',label:'แจ้ง HR',data:'action=hr_case'},LINE_CI.coralSoft),
-    ]
+    ],
+    footer
+  })};
+}
+
+function buildOwnerDashboardFlex(ownerAccess){
+  const primary=ownerAccess?.primary||{};
+  const count=Array.isArray(ownerAccess?.businesses)?ownerAccess.businesses.length:1;
+  return {type:'flex',altText:'Owner Dashboard · นากนะ',contents:lineBubble({
+    eyebrow:'นากนะ · OWNER',title:'Dashboard เจ้าของ',subtitle:primary.name||'ธุรกิจของคุณ',status:'Owner',statusTone:'success',
+    body:[
+      lineInfoCard([
+        lineInfoRow('ธุรกิจ',primary.name||'—'),
+        lineInfoRow('สิทธิ์','Owner',LINE_CI.primary),
+        ...(count>1?[lineInfoRow('ธุรกิจที่เป็นเจ้าของ',`${count} ธุรกิจ`)]:[])
+      ],'teal'),
+      lineText('กดปุ่มด้านล่างเพื่อเปิด HR Dashboard ลิงก์มีอายุ 15 นาทีและใช้ได้ครั้งเดียว','xs',LINE_CI.muted)
+    ],
+    footer:[linePrimaryButton('เปิด Dashboard',{type:'uri',label:'เปิด Dashboard',uri:ownerAccess.dashboardUrl})]
   })};
 }
 function buildEmployeeStatusFlex(emp,a){
