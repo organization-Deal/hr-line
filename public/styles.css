@@ -1281,3 +1281,30 @@ html.js body:not(.nakna-ready) dialog { display: none !important; }
 .inline-create-btn{margin-top:9px;border:0;background:transparent;color:var(--primary);font-weight:700;font-size:11px;padding:4px 0;text-align:left}
 .inline-create-btn:hover{text-decoration:underline}
 @media(max-width:720px){.inline-create-btn{font-size:12px;padding:8px 0}.field-help{font-size:10.5px}}
+
+/* P7.11 — Organization assignment + visual cleanup */
+.settings-category-panel[data-settings-category="company"]{max-width:1120px}
+.settings-category-panel[data-settings-category="company"] .settings-company-profile{margin-bottom:18px}
+.settings-category-panel[data-settings-category="company"] .people-core-section{padding-top:22px;border-top:1px solid var(--border)}
+.settings-category-panel[data-settings-category="company"] .page-intro.compact{align-items:flex-start;margin-bottom:14px}
+.settings-category-panel[data-settings-category="company"] .page-intro.compact h2{font-size:22px;letter-spacing:-.02em}
+.settings-category-panel[data-settings-category="company"] .page-intro.compact p{max-width:620px}
+.org-card-modern{padding:16px 17px;border-radius:16px;box-shadow:0 6px 24px rgba(22,57,60,.035)}
+.org-card-copy{display:grid;gap:2px}.org-card-copy strong{font-size:13px}.org-card-copy small{font-size:10px}.org-card-copy em{font-style:normal;color:#7b898b;font-size:9.5px}
+.org-card-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.position-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.position-card-modern{padding:15px 16px;border-radius:16px;box-shadow:0 6px 24px rgba(22,57,60,.035)}
+.position-card-main{display:flex;align-items:center;gap:11px;min-width:0}.position-symbol{width:38px;height:38px;flex:0 0 auto;display:grid;place-items:center;border-radius:12px;background:#eaf6f3;color:#147f80;font-weight:700;font-size:13px}.position-card-main strong{font-size:13px}.position-card-main em{display:block;margin-top:5px;font-style:normal;color:#6f7f81;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}.position-card-actions{display:flex;align-items:center;gap:8px}.position-assign-btn{font-weight:700}
+.position-assign-modal{width:min(680px,calc(100vw - 28px));max-height:min(82vh,760px)}
+.position-assign-toolbar{display:flex;gap:10px;align-items:center;margin:14px 0}.compact-search{flex:1;margin:0}.position-assign-people{display:grid;gap:7px;max-height:430px;overflow:auto;padding-right:2px}.position-person-row{display:grid;grid-template-columns:20px 36px minmax(0,1fr);gap:10px;align-items:center;padding:11px 12px;border:1px solid var(--border);border-radius:13px;background:#fff;cursor:pointer}.position-person-row:has(input:checked){border-color:#8accc6;background:#f2faf8}.position-person-row input{width:17px;height:17px;accent-color:#178b8b}.person-mini-avatar{width:36px;height:36px;display:grid;place-items:center;border-radius:11px;background:#eaf6f3;color:#147f80;font-weight:700}.position-person-copy{min-width:0}.position-person-copy strong{display:block;color:#163f47;font-size:11.5px}.position-person-copy small{display:block;margin-top:2px;color:#7d898b;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:720px){
+  .settings-detail-tabs{display:none!important}
+  .settings-detail-head{margin-bottom:18px}
+  .settings-category-panel[data-settings-category="company"] .page-intro.compact{display:grid;gap:12px}
+  .settings-category-panel[data-settings-category="company"] .section-action-group{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .settings-category-panel[data-settings-category="company"] .section-action-group button{width:100%;min-height:44px}
+  .organization-position-head{display:grid;grid-template-columns:1fr auto;align-items:end}.organization-position-head h3{font-size:20px}
+  .position-list{grid-template-columns:1fr}.position-card-modern{align-items:flex-start}.position-card-actions{flex-direction:column;align-items:flex-end}.position-card-main em{max-width:190px}
+  .org-card-modern{align-items:flex-start}.org-card-actions{flex-direction:column;align-items:flex-end}.org-card-actions .text-btn{padding:3px 0}
+  .position-assign-modal{width:calc(100vw - 20px);max-height:88dvh;border-radius:22px}.position-assign-toolbar{position:sticky;top:0;background:#fff;z-index:2;padding-top:4px}.position-assign-people{max-height:52dvh}.position-person-row{grid-template-columns:20px 34px minmax(0,1fr);padding:10px}.person-mini-avatar{width:34px;height:34px}.position-person-copy small{font-size:9px}
+}
