@@ -377,6 +377,17 @@ function bindEvents() {
       openSettingsCategory(target, { scroll: false });
     };
   });
+  $$('[data-settings-sidebar-jump]').forEach(button => {
+    button.onclick = () => {
+      state.settingsNavExpanded = true;
+      state.activeSettingsCategory = 'company';
+      showView('settings');
+      openSettingsCategory('company', { scroll: false });
+      $$('.nav-subitem').forEach(item => item.classList.remove('active'));
+      button.classList.add('active');
+      requestAnimationFrame(() => $('#organizationSection')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    };
+  });
   $('#settingsBackBtn').onclick = () => showSettingsHome();
   $('#settingsPayrollOpenBtn').onclick = openPayrollSettingsModal;
 
@@ -386,6 +397,7 @@ function bindEvents() {
   $('#addWorkLocationBtn').onclick = openWorkLocationModal;
   $('#addDepartmentBtn').onclick = openDepartmentModal;
   $('#addPositionBtn').onclick = openPositionModal;
+  if ($('#addPositionInlineBtn')) $('#addPositionInlineBtn').onclick = openPositionModal;
   $('#addScheduleBtn').onclick = openScheduleModal;
   $('#addHolidayBtn').onclick = openHolidayModal;
   $('#departmentSaveBtn').onclick = saveDepartment;
@@ -1799,6 +1811,7 @@ function renderSettingsSidebar() {
   const payroll = state.payroll?.settings || {};
   const subscription = state.subscription || {};
   if ($('#settingsSidebarCompanyMeta')) $('#settingsSidebarCompanyMeta').textContent = `${(core.departments || []).length} แผนก · ${profile.name || 'โปรไฟล์บริษัท'}`;
+  if ($('#settingsSidebarOrgMeta')) $('#settingsSidebarOrgMeta').textContent = `${(core.departments || []).length} แผนก · ${(core.positions || []).length} ตำแหน่ง`;
   if ($('#settingsSidebarWorktimeMeta')) $('#settingsSidebarWorktimeMeta').textContent = schedules.length ? `${schedules.length} กติกาเวลาทำงาน` : `${profile.work_start || '09:00'}–${profile.work_end || '18:00'} ค่าเริ่มต้น`;
   if ($('#settingsSidebarAttendanceMeta')) $('#settingsSidebarAttendanceMeta').textContent = locations.length ? `${locations.filter(x => Number(x.is_active) !== 0).length} จุดเช็กอิน` : 'ยังไม่มี Work location';
   if ($('#settingsSidebarLeaveMeta')) $('#settingsSidebarLeaveMeta').textContent = `${leavePolicies.length} ประเภทลา · ${holidays.length} วันหยุด`;
@@ -1828,6 +1841,11 @@ function renderPeopleCore(){
     const roots=departments.filter(d=>!d.parent_department_id||!departments.some(x=>Number(x.id)===Number(d.parent_department_id)));
     const renderNode=(d,depth=0)=>`<div class="org-node" style="--depth:${depth}"><div class="org-line"></div><div class="org-card"><div><strong>${escapeHtml(d.name)}</strong><small>${Number(d.employee_count||0)} คน · ${d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า'}</small></div><button class="text-btn" onclick="window.editDepartment(${Number(d.id)})">แก้ไข</button></div>${departments.filter(x=>Number(x.parent_department_id)===Number(d.id)).map(x=>renderNode(x,depth+1)).join('')}</div>`;
     org.innerHTML=roots.length?roots.map(d=>renderNode(d)).join(''):emptyState('ยังไม่มีโครงสร้างแผนก','เพิ่มแผนกแรก แล้วค่อยกำหนดหัวหน้าและแผนกย่อย');
+  }
+  const positionRoot=$('#positionList');
+  if(positionRoot){
+    const positions=core.positions||[];
+    positionRoot.innerHTML=positions.length?positions.map(p=>`<article class="position-row"><div><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.department_name||'ใช้ได้ทุกแผนก')}</small></div><span class="badge badge-soft">${Number(p.employee_count||0)} คน</span></article>`).join(''):emptyState('ยังไม่มีตำแหน่ง','เพิ่มตำแหน่ง เช่น Graphic Designer, Sales, Accountant เพื่อใช้ตอนเพิ่มพนักงาน');
   }
   const scheduleRoot=$('#workScheduleList');
   if(scheduleRoot){
@@ -1907,11 +1925,13 @@ async function saveWorkLocation() {
 }
 
 function openEmployeeModal() {
-  openModal('EMPLOYEE', 'เพิ่มพนักงานใหม่', 'กรอกเฉพาะข้อมูลที่มีตอนนี้ได้ รหัสพนักงานระบบสร้างให้อัตโนมัติ และค่อยเติมข้อมูลอื่นภายหลังได้', [
+  openModal('EMPLOYEE', 'เพิ่มพนักงานใหม่', 'กรอกข้อมูลพื้นฐาน แล้วเลือกแผนกและตำแหน่งได้ทันที ระบบจะผูกเข้ากับ Organization Chart อัตโนมัติ', [
     ['employee_code', 'รหัสพนักงาน (ไม่กรอก = สร้างอัตโนมัติ)', 'text'],
     ['nickname', 'ชื่อเล่น', 'text'],
     ['first_name', 'ชื่อ', 'text', true],
     ['last_name', 'นามสกุล', 'text', true],
+    ['department_id', 'แผนก', 'select'],
+    ['position_id', 'ตำแหน่ง', 'select'],
     ['email', 'อีเมล', 'email'],
     ['phone', 'เบอร์โทร', 'text'],
     ['birth_date', 'วันเกิด', 'date'],
@@ -1919,6 +1939,8 @@ function openEmployeeModal() {
     ['probation_end_date', 'วันครบ Probation', 'date'],
     ['contract_end_date', 'วันสิ้นสุดสัญญา', 'date'],
   ], async data => {
+    data.department_id = data.department_id || null;
+    data.position_id = data.position_id || null;
     await api('/api/employees', { method: 'POST', body: JSON.stringify(data) });
     await loadAll({ silent: true });
   });
@@ -1926,6 +1948,27 @@ function openEmployeeModal() {
   if (code) code.placeholder = 'เช่น NK-0001 · เว้นว่างได้';
   const start = $('#field-start_date');
   if (start && !start.value) start.value = localDateKey(new Date());
+  const department = $('#field-department_id');
+  const position = $('#field-position_id');
+  const departments = state.peopleCore?.departments || state.lookups?.departments || [];
+  const positions = state.peopleCore?.positions || state.lookups?.positions || [];
+  if (department) {
+    department.innerHTML = `<option value="">ยังไม่ระบุแผนก</option>${departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}`;
+  }
+  const renderPositionOptions = () => {
+    if (!position) return;
+    const departmentId = Number(department?.value || 0);
+    const filtered = positions.filter(x => !departmentId || !x.department_id || Number(x.department_id) === departmentId);
+    position.innerHTML = `<option value="">ยังไม่ระบุตำแหน่ง</option>${filtered.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}${x.department_name?` · ${escapeHtml(x.department_name)}`:''}</option>`).join('')}`;
+  };
+  if (department) department.onchange = renderPositionOptions;
+  renderPositionOptions();
+  if (!departments.length) {
+    const hint = document.createElement('div');
+    hint.className = 'modal-inline-hint full';
+    hint.innerHTML = `<strong>ยังไม่มีแผนก</strong><span>ไปที่ ตั้งค่า → โครงสร้างองค์กร เพื่อสร้างแผนกและตำแหน่งก่อน หรือเพิ่มพนักงานโดยไม่ระบุก่อนได้</span>`;
+    $('#modalFields')?.prepend(hint);
+  }
 }
 
 function openCandidateModal() {
@@ -1956,7 +1999,7 @@ function openModal(eyebrow, title, subtitle, fields, onSave) {
   $('#modalFields').innerHTML = fields.map(([name, label, type, required]) => `
     <div class="field">
       <label for="field-${name}">${label}${required ? ' <em>*</em>' : ''}</label>
-      <input id="field-${name}" name="${name}" type="${type}" ${required ? 'required' : ''} />
+      ${type === 'select' ? `<select id="field-${name}" name="${name}" ${required ? 'required' : ''}></select>` : `<input id="field-${name}" name="${name}" type="${type}" ${required ? 'required' : ''} />`}
     </div>`).join('');
 
   $('#modalSave').onclick = async () => {

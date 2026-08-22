@@ -1264,3 +1264,14 @@ html.js body:not(.nakna-ready) dialog { display: none !important; }
 
 /* P7.7 — Settings opens directly into category detail; overview hub retired */
 #settingsHome{display:none!important}
+
+/* P7.9 — Organization + employee department/position flow */
+.organization-position-block{margin-top:20px;padding-top:18px;border-top:1px solid var(--border)}
+.organization-position-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:12px}
+.organization-position-head h3{margin:4px 0;color:var(--primary-dark);font-size:18px}
+.organization-position-head p{margin:0;color:var(--text-tertiary);font-size:11px}
+.position-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.position-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border:1px solid var(--border);border-radius:14px;background:#fff}
+.position-row strong{display:block;color:var(--primary-dark);font-size:12px}.position-row small{display:block;margin-top:3px;color:var(--text-tertiary);font-size:10px}
+.modal-inline-hint{grid-column:1/-1;display:grid;gap:3px;padding:11px 12px;border:1px solid #d8e8e4;border-radius:12px;background:#f5faf8}.modal-inline-hint strong{font-size:11px;color:#174c50}.modal-inline-hint span{font-size:10px;line-height:1.5;color:#758385}
+@media(max-width:720px){.position-list{grid-template-columns:1fr}.organization-position-head{align-items:flex-start}.organization-position-head .secondary-btn{white-space:nowrap}.settings-nav-section .nav-subitem[data-settings-sidebar-jump="organization"]{margin-top:-2px}}
