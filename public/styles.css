@@ -1275,3 +1275,9 @@ html.js body:not(.nakna-ready) dialog { display: none !important; }
 .position-row strong{display:block;color:var(--primary-dark);font-size:12px}.position-row small{display:block;margin-top:3px;color:var(--text-tertiary);font-size:10px}
 .modal-inline-hint{grid-column:1/-1;display:grid;gap:3px;padding:11px 12px;border:1px solid #d8e8e4;border-radius:12px;background:#f5faf8}.modal-inline-hint strong{font-size:11px;color:#174c50}.modal-inline-hint span{font-size:10px;line-height:1.5;color:#758385}
 @media(max-width:720px){.position-list{grid-template-columns:1fr}.organization-position-head{align-items:flex-start}.organization-position-head .secondary-btn{white-space:nowrap}.settings-nav-section .nav-subitem[data-settings-sidebar-jump="organization"]{margin-top:-2px}}
+
+/* P7.10 — make Department creation obvious from Position flow */
+.field-help{margin-top:7px;color:var(--text-tertiary);font-size:10px;line-height:1.5}
+.inline-create-btn{margin-top:9px;border:0;background:transparent;color:var(--primary);font-weight:700;font-size:11px;padding:4px 0;text-align:left}
+.inline-create-btn:hover{text-decoration:underline}
+@media(max-width:720px){.inline-create-btn{font-size:12px;padding:8px 0}.field-help{font-size:10.5px}}

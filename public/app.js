@@ -402,6 +402,7 @@ function bindEvents() {
   $('#addHolidayBtn').onclick = openHolidayModal;
   $('#departmentSaveBtn').onclick = saveDepartment;
   $('#positionSaveBtn').onclick = savePosition;
+  if ($('#positionCreateDepartmentBtn')) $('#positionCreateDepartmentBtn').onclick = () => { $('#positionModal')?.close(); state.resumePositionAfterDepartment = true; openDepartmentModal(); };
   $('#scheduleSaveBtn').onclick = saveSchedule;
   $('#scheduleScopeType').onchange = refreshScheduleTarget;
   $('#holidaySaveBtn').onclick = saveHoliday;
@@ -1870,8 +1871,36 @@ function openDepartmentModal(department=null){
   $('#departmentManager').innerHTML=`<option value="">ยังไม่กำหนด</option>${state.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}" ${Number(department?.manager_employee_id)===Number(e.id)?'selected':''}>${escapeHtml(e.nickname||e.first_name)}${e.department_name?` · ${escapeHtml(e.department_name)}`:''}</option>`).join('')}`;
   $('#departmentModalTitle').textContent=department?'แก้ไขแผนก':'เพิ่มแผนก'; $('#departmentModal').showModal();
 }
-async function saveDepartment(){const id=$('#departmentId').value;const body={name:$('#departmentName').value.trim(),code:$('#departmentCode').value.trim(),parent_department_id:$('#departmentParent').value||null,manager_employee_id:$('#departmentManager').value||null};if(body.name.length<2)return toast('กรุณาใส่ชื่อแผนก',true);const b=$('#departmentSaveBtn');b.disabled=true;try{await api(id?`/api/departments/${id}`:'/api/departments',{method:id?'PATCH':'POST',body:JSON.stringify(body)});$('#departmentModal').close();await loadAll({silent:true});toast('บันทึกโครงสร้างแผนกแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
-function openPositionModal(){ $('#positionName').value=''; $('#positionDepartment').innerHTML=`<option value="">ไม่ระบุแผนก</option>${(state.peopleCore.departments||[]).map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}`; $('#positionModal').showModal(); }
+async function saveDepartment(){
+  const id=$('#departmentId').value;
+  const isCreating=!id;
+  const body={name:$('#departmentName').value.trim(),code:$('#departmentCode').value.trim(),parent_department_id:$('#departmentParent').value||null,manager_employee_id:$('#departmentManager').value||null};
+  if(body.name.length<2)return toast('กรุณาใส่ชื่อแผนก',true);
+  const b=$('#departmentSaveBtn');b.disabled=true;
+  try{
+    const result=await api(id?`/api/departments/${id}`:'/api/departments',{method:id?'PATCH':'POST',body:JSON.stringify(body)});
+    $('#departmentModal').close();
+    const resumePosition=Boolean(state.resumePositionAfterDepartment && isCreating);
+    state.resumePositionAfterDepartment=false;
+    await loadAll({silent:true});
+    toast('บันทึกโครงสร้างแผนกแล้ว');
+    if(resumePosition) requestAnimationFrame(()=>openPositionModal(Number(result?.id||0)));
+  }catch(e){toast(e.message,true);}finally{b.disabled=false;}
+}
+function openPositionModal(preselectDepartmentId=0){
+  const departments=state.peopleCore?.departments||[];
+  if(!departments.length){
+    state.resumePositionAfterDepartment=true;
+    toast('ยังไม่มีแผนก — สร้างแผนกแรกก่อน แล้วระบบจะพากลับมาเพิ่มตำแหน่งให้อัตโนมัติ');
+    openDepartmentModal();
+    return;
+  }
+  $('#positionName').value='';
+  $('#positionDepartment').innerHTML=`${departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}<option value="">ไม่ระบุแผนก</option>`;
+  if(preselectDepartmentId && departments.some(d=>Number(d.id)===Number(preselectDepartmentId))) $('#positionDepartment').value=String(preselectDepartmentId);
+  const help=$('#positionDepartmentHelp'); if(help) help.textContent=`มี ${departments.length} แผนก · เลือกแผนกที่ตำแหน่งนี้สังกัด หรือสร้างแผนกใหม่ได้`; 
+  $('#positionModal').showModal();
+}
 async function savePosition(){const body={name:$('#positionName').value.trim(),department_id:$('#positionDepartment').value||null};if(body.name.length<2)return toast('กรุณาใส่ชื่อตำแหน่ง',true);const b=$('#positionSaveBtn');b.disabled=true;try{await api('/api/positions',{method:'POST',body:JSON.stringify(body)});$('#positionModal').close();await loadAll({silent:true});toast('เพิ่มตำแหน่งแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
 window.openScheduleFor=(type,id)=>openScheduleModal(type,id);
 window.resetSchedule=async(type,id)=>{if(!confirm('ล้างตาราง Override นี้และกลับไปใช้ค่าระดับบนใช่ไหม?'))return;try{await api(`/api/work-schedules/${type}/${Number(id||0)}`,{method:'DELETE'});await loadAll({silent:true});toast('ล้างตาราง Override แล้ว');}catch(e){toast(e.message,true);}};
