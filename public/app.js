@@ -364,7 +364,7 @@ function bindEvents() {
     button.onclick = () => {
       showView('settings');
       const target = button.dataset.settingsSidebarOpen;
-      if (target === 'home') showSettingsHome();
+      if (target === 'home') openSettingsCategory('company');
       else openSettingsCategory(target);
     };
   });
@@ -1722,7 +1722,10 @@ function showView(name) {
   $('#pageKicker').textContent = kicker;
 
   closeMobileNav();
-  if (name === 'settings') showSettingsHome({ scroll: false });
+  if (name === 'settings') {
+    const firstCategory = state.activeSettingsCategory || 'company';
+    openSettingsCategory(firstCategory, { scroll: false });
+  }
   syncSettingsSidebar();
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (name !== 'dashboard' && !deferredLoadInFlight) scheduleDeferredLoad(0);
@@ -1738,7 +1741,7 @@ function showSettingsHome({ scroll = true } = {}) {
   if (scroll && state.currentView === 'settings') window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function openSettingsCategory(category) {
+function openSettingsCategory(category, { scroll = true } = {}) {
   const meta = settingsCategoryMeta[category];
   if (!meta) return;
   state.activeSettingsCategory = category;
@@ -1750,7 +1753,7 @@ function openSettingsCategory(category) {
   if ($('#settingsDetailKicker')) $('#settingsDetailKicker').textContent = meta.kicker;
   if ($('#settingsDetailDescription')) $('#settingsDetailDescription').textContent = meta.description;
   syncSettingsSidebar();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function syncSettingsSidebar() {
