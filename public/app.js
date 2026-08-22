@@ -360,6 +360,14 @@ function bindEvents() {
   $$('[data-settings-open]').forEach(button => {
     button.onclick = () => openSettingsCategory(button.dataset.settingsOpen);
   });
+  $$('[data-settings-sidebar-open]').forEach(button => {
+    button.onclick = () => {
+      showView('settings');
+      const target = button.dataset.settingsSidebarOpen;
+      if (target === 'home') showSettingsHome();
+      else openSettingsCategory(target);
+    };
+  });
   $('#settingsBackBtn').onclick = () => showSettingsHome();
   $('#settingsPayrollOpenBtn').onclick = openPayrollSettingsModal;
 
@@ -1715,6 +1723,7 @@ function showView(name) {
 
   closeMobileNav();
   if (name === 'settings') showSettingsHome({ scroll: false });
+  syncSettingsSidebar();
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (name !== 'dashboard' && !deferredLoadInFlight) scheduleDeferredLoad(0);
 }
@@ -1725,6 +1734,7 @@ function showSettingsHome({ scroll = true } = {}) {
   $('#settingsDetail')?.classList.add('hidden');
   $$('[data-settings-category]').forEach(panel => panel.classList.add('hidden'));
   $$('.settings-detail-tabs [data-settings-open]').forEach(button => button.classList.remove('active'));
+  syncSettingsSidebar();
   if (scroll && state.currentView === 'settings') window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1739,7 +1749,41 @@ function openSettingsCategory(category) {
   if ($('#settingsDetailTitle')) $('#settingsDetailTitle').textContent = meta.title;
   if ($('#settingsDetailKicker')) $('#settingsDetailKicker').textContent = meta.kicker;
   if ($('#settingsDetailDescription')) $('#settingsDetailDescription').textContent = meta.description;
+  syncSettingsSidebar();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function syncSettingsSidebar() {
+  const open = state.currentView === 'settings';
+  $('#settingsNavSection')?.classList.toggle('hidden', !open);
+  $('#settingsNavOverview')?.classList.toggle('active', open && !state.activeSettingsCategory);
+  $$('[data-settings-sidebar-open]').forEach(button => {
+    if (button.dataset.settingsSidebarOpen === 'home') return;
+    button.classList.toggle('active', open && button.dataset.settingsSidebarOpen === state.activeSettingsCategory);
+  });
+}
+
+function renderSettingsSidebar() {
+  const profile = state.companyProfile || state.dashboard?.client || activeCompany() || {};
+  const core = state.peopleCore || {};
+  const schedules = core.schedules || [];
+  const holidays = core.holidays || [];
+  const locations = state.workLocations || [];
+  const leavePolicies = state.leavePolicies || [];
+  const approvers = (state.approverAccess || []).filter(item => (item.permissions || []).length);
+  const line = state.lineIntegration || {};
+  const google = state.googleWorkspace || {};
+  const payroll = state.payroll?.settings || {};
+  const subscription = state.subscription || {};
+  if ($('#settingsSidebarCompanyMeta')) $('#settingsSidebarCompanyMeta').textContent = `${(core.departments || []).length} แผนก · ${profile.name || 'โปรไฟล์บริษัท'}`;
+  if ($('#settingsSidebarWorktimeMeta')) $('#settingsSidebarWorktimeMeta').textContent = schedules.length ? `${schedules.length} กติกาเวลาทำงาน` : `${profile.work_start || '09:00'}–${profile.work_end || '18:00'} ค่าเริ่มต้น`;
+  if ($('#settingsSidebarAttendanceMeta')) $('#settingsSidebarAttendanceMeta').textContent = locations.length ? `${locations.filter(x => Number(x.is_active) !== 0).length} จุดเช็กอิน` : 'ยังไม่มี Work location';
+  if ($('#settingsSidebarLeaveMeta')) $('#settingsSidebarLeaveMeta').textContent = `${leavePolicies.length} ประเภทลา · ${holidays.length} วันหยุด`;
+  if ($('#settingsSidebarApprovalMeta')) $('#settingsSidebarApprovalMeta').textContent = approvers.length ? `${approvers.length} คนมีสิทธิ์อนุมัติ` : 'ยังไม่ได้กำหนดผู้อนุมัติ';
+  if ($('#settingsSidebarIntegrationMeta')) $('#settingsSidebarIntegrationMeta').textContent = `${line.connected ? 'LINE ✓' : 'LINE default'} · ${google.connected ? 'Google ✓' : 'Google ยังไม่เชื่อม'}`;
+  if ($('#settingsSidebarPayrollMeta')) $('#settingsSidebarPayrollMeta').textContent = `จ่ายวันที่ ${payroll.pay_day || 28} · ${Number(payroll.social_security_enabled ?? 1) ? 'SSO ✓' : 'SSO ปิด'}`;
+  if ($('#settingsSidebarBillingMeta')) $('#settingsSidebarBillingMeta').textContent = subscription.plan?.name || subscription.plan_name || (subscription.trial ? 'Free Trial' : 'ยังไม่มีแพ็กเกจ');
+  syncSettingsSidebar();
 }
 
 function renderWorkLocations() {
@@ -2007,6 +2051,7 @@ function renderSettings() {
   renderSetupOverview();
   renderApproverAccess();
   renderSettingsHub();
+  renderSettingsSidebar();
   if($('#probationLeaveLockToggle')) $('#probationLeaveLockToggle').checked = state.employeeService?.leave_settings?.lock_leave_during_probation !== false;
 }
 
