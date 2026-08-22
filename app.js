@@ -39,6 +39,7 @@ const state = {
   activeLeaveProfileEmployeeId: null,
   currentView: 'dashboard',
   activeSettingsCategory: null,
+  settingsNavExpanded: false,
 };
 
 const $ = selector => document.querySelector(selector);
@@ -351,7 +352,13 @@ function bindEvents() {
   $('#generateInvoiceBtn').onclick = generateSubscriptionInvoice;
 
   $$('.nav-item').forEach(button => {
-    button.onclick = () => showView(button.dataset.view);
+    button.onclick = () => {
+      if (button.dataset.view === 'settings') {
+        toggleSettingsNav();
+        return;
+      }
+      showView(button.dataset.view);
+    };
   });
   $$('[data-jump]').forEach(button => {
     button.onclick = () => showView(button.dataset.jump);
@@ -362,10 +369,12 @@ function bindEvents() {
   });
   $$('[data-settings-sidebar-open]').forEach(button => {
     button.onclick = () => {
-      showView('settings');
       const target = button.dataset.settingsSidebarOpen;
-      if (target === 'home') openSettingsCategory('company');
-      else openSettingsCategory(target);
+      if (!settingsCategoryMeta[target]) return;
+      state.settingsNavExpanded = true;
+      state.activeSettingsCategory = target;
+      showView('settings');
+      openSettingsCategory(target, { scroll: false });
     };
   });
   $('#settingsBackBtn').onclick = () => showSettingsHome();
@@ -1706,11 +1715,23 @@ async function saveProbationLeaveLock(){
   try{const result=await api('/api/leave-settings',{method:'PATCH',body:JSON.stringify({lock_leave_during_probation:input.checked})});state.employeeService={...(state.employeeService||{}),leave_settings:{lock_leave_during_probation:result.lock_leave_during_probation}};toast(result.lock_leave_during_probation?'ล็อกวันลาระหว่างทดลองงานแล้ว':'อนุญาตวันลาระหว่างทดลองงานตาม Policy แล้ว');}catch(e){input.checked=!input.checked;toast(e.message,true);}finally{input.disabled=false;}
 }
 
+function toggleSettingsNav() {
+  state.settingsNavExpanded = !state.settingsNavExpanded;
+  const settingsButton = document.querySelector('[data-view="settings"]');
+  settingsButton?.setAttribute('aria-expanded', String(state.settingsNavExpanded));
+  syncSettingsSidebar();
+  if (state.settingsNavExpanded) {
+    setTimeout(() => $('#settingsNavSection')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 30);
+  }
+}
+
 function showView(name) {
   const target = $(`#view-${name}`);
   if (!target) return;
 
   state.currentView = name;
+  if (name !== 'settings') state.settingsNavExpanded = false;
+  else state.settingsNavExpanded = true;
   $$('.view').forEach(view => view.classList.remove('active'));
   $$('.nav-item').forEach(button => button.classList.remove('active'));
 
@@ -1722,9 +1743,8 @@ function showView(name) {
   $('#pageKicker').textContent = kicker;
 
   closeMobileNav();
-  if (name === 'settings') {
-    const firstCategory = state.activeSettingsCategory || 'company';
-    openSettingsCategory(firstCategory, { scroll: false });
+  if (name === 'settings' && state.activeSettingsCategory) {
+    openSettingsCategory(state.activeSettingsCategory, { scroll: false });
   }
   syncSettingsSidebar();
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1757,12 +1777,12 @@ function openSettingsCategory(category, { scroll = true } = {}) {
 }
 
 function syncSettingsSidebar() {
-  const open = state.currentView === 'settings';
+  const open = Boolean(state.settingsNavExpanded || state.currentView === 'settings');
   $('#settingsNavSection')?.classList.toggle('hidden', !open);
-  $('#settingsNavOverview')?.classList.toggle('active', open && !state.activeSettingsCategory);
+  const settingsButton = document.querySelector('[data-view="settings"]');
+  settingsButton?.setAttribute('aria-expanded', String(open));
   $$('[data-settings-sidebar-open]').forEach(button => {
-    if (button.dataset.settingsSidebarOpen === 'home') return;
-    button.classList.toggle('active', open && button.dataset.settingsSidebarOpen === state.activeSettingsCategory);
+    button.classList.toggle('active', state.currentView === 'settings' && button.dataset.settingsSidebarOpen === state.activeSettingsCategory);
   });
 }
 
