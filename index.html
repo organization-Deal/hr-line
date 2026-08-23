@@ -223,7 +223,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.9</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.12</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -527,17 +527,20 @@
                 <div class="page-intro compact"><div><p class="kicker">COMPANY PROFILE</p><h2>ข้อมูลบริษัท</h2><p>ค่าพื้นฐานของ Workspace เช่น ชื่อบริษัท เวลาเริ่มงาน และ Timezone</p></div></div>
                 <article id="companyProfileShortcut" class="setting-card setting-card-action settings-wide-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h6M9 14h6"/></svg></div><div><strong id="settingsCompanyName">ข้อมูลบริษัท</strong><p id="settingsCompanyProfileText">กดเพื่อแก้ไขข้อมูลหลักของบริษัท</p></div><span>→</span></article>
               </div>
-              <div id="organizationSection" class="people-core-section">
-            <div class="page-intro compact">
-              <div><p class="kicker">ORGANIZATION</p><h2>โครงสร้างองค์กร</h2><p>สร้างแผนก แผนกย่อย ตำแหน่ง และกำหนดหัวหน้า เพื่อให้งานอนุมัติและตารางงานรู้ว่าใครขึ้นกับใคร</p></div>
-              <div class="section-action-group"><button id="addPositionBtn" class="secondary-btn" type="button">+ ตำแหน่ง</button><button id="addDepartmentBtn" class="primary-btn" type="button">+ แผนก</button></div>
-            </div>
-            <div id="organizationChart" class="organization-chart"></div>
-            <div class="organization-position-block">
-              <div class="organization-position-head"><div><p class="kicker">POSITIONS</p><h3>ตำแหน่งในบริษัท</h3><p>สร้างตำแหน่งไว้ก่อน แล้วเลือกได้ทันทีตอนเพิ่มพนักงาน</p></div><button id="addPositionInlineBtn" class="secondary-btn" type="button">+ เพิ่มตำแหน่ง</button></div>
-              <div id="positionList" class="position-list"></div>
-            </div>
-          </div>
+              <div id="organizationSection" class="people-core-section org-builder-section">
+                <div class="page-intro compact org-builder-intro">
+                  <div><p class="kicker">ORGANIZATION BUILDER</p><h2>โครงสร้างองค์กร</h2><p>จัดระดับบริษัทและแผนกให้ครบ แล้วดูภาพรวมทั้งองค์กรได้ในผังเดียว</p></div>
+                  <div class="section-action-group"><button id="viewFullOrgChartBtn" class="secondary-btn" type="button">ดูผังองค์กร</button><button id="addDepartmentBtn" class="primary-btn" type="button">+ แผนก</button></div>
+                </div>
+                <section class="company-leadership-block">
+                  <div class="org-block-head"><div><p class="kicker">COMPANY LEVEL</p><h3>ระดับบริษัท</h3><p>Owner, CEO, HR และตำแหน่งกลางที่ไม่อยู่ใต้แผนก</p></div><button id="addCompanyPositionBtn" class="text-btn" type="button">+ ตำแหน่งระดับบริษัท</button></div>
+                  <div id="companyLeadershipChart" class="company-leadership-chart"></div>
+                </section>
+                <section class="department-overview-block">
+                  <div class="org-block-head"><div><p class="kicker">DEPARTMENTS</p><h3>แผนกทั้งหมด</h3><p>หน้าแรกแสดงเฉพาะแผนก กดเข้าไปเพื่อจัดหัวหน้า ตำแหน่ง และคนในทีม</p></div><span id="departmentOverviewCount" class="badge badge-soft">0 แผนก</span></div>
+                  <div id="organizationChart" class="organization-chart department-flow-grid"></div>
+                </section>
+              </div>
             </div>
 
             <div class="settings-category-panel hidden" data-settings-category="worktime">
@@ -887,6 +890,27 @@
       <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="broadcastSendBtn" class="primary-btn">ส่งประกาศตอนนี้</button></div></form>
   </dialog>
 
+  <dialog id="departmentDetailModal" class="modal department-detail-modal">
+    <div class="modal-head department-detail-head">
+      <div><p class="kicker">DEPARTMENT</p><h2 id="departmentDetailTitle">แผนก</h2><p id="departmentDetailMeta" class="muted">จัดหัวหน้า ตำแหน่ง และคนในทีม</p></div>
+      <button class="icon-btn" type="button" data-close-dialog="departmentDetailModal" aria-label="ปิด">×</button>
+    </div>
+    <input id="departmentDetailId" type="hidden" />
+    <div id="departmentDetailBody" class="department-detail-body"></div>
+    <div class="modal-actions department-detail-actions">
+      <button id="departmentDetailEditBtn" class="secondary-btn" type="button">แก้ไขแผนก</button>
+      <button id="departmentDetailAddPositionBtn" class="primary-btn" type="button">+ เพิ่มตำแหน่ง</button>
+    </div>
+  </dialog>
+
+  <dialog id="fullOrgChartModal" class="modal full-org-chart-modal">
+    <div class="modal-head full-org-head">
+      <div><p class="kicker">ORGANIZATION CHART</p><h2>ภาพรวมทั้งองค์กร</h2><p class="muted">ดูว่าใครอยู่บนสุด ใครรายงานใคร และแต่ละแผนกเชื่อมกันอย่างไร</p></div>
+      <div class="full-org-actions"><button id="orgZoomOutBtn" class="icon-btn" type="button" aria-label="ย่อ">−</button><button id="orgZoomResetBtn" class="icon-btn" type="button" aria-label="รีเซ็ต">1:1</button><button id="orgZoomInBtn" class="icon-btn" type="button" aria-label="ขยาย">+</button><button class="icon-btn" type="button" data-close-dialog="fullOrgChartModal" aria-label="ปิด">×</button></div>
+    </div>
+    <div class="full-org-canvas-wrap"><div id="fullOrgChartCanvas" class="full-org-chart-canvas"></div></div>
+  </dialog>
+
   <dialog id="hrCaseModal" class="hr-case-modal">
     <form method="dialog"><div class="modal-head"><div><p class="kicker">PRIVATE HR CASE</p><h3 id="hrCaseModalTitle">เรื่องส่วนตัวถึง HR</h3><p id="hrCaseModalSub">ข้อมูลนี้จำกัดเฉพาะ HR</p></div><button type="button" class="close-btn" value="cancel">×</button></div>
       <div id="hrCaseDetail" class="hr-case-detail"></div>
@@ -895,7 +919,7 @@
   </dialog>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.5" type="module"></script>
+  <script src="/app.js?v=1.0-p7.12" type="module"></script>
 
   <dialog id="positionAssignModal" class="modal position-assign-modal">
     <div class="modal-head">
