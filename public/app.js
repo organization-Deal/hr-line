@@ -396,10 +396,17 @@ function bindEvents() {
   $('#inviteEmployeeBtnInline').onclick = openInviteModal;
   $('#addWorkLocationBtn').onclick = openWorkLocationModal;
   $('#addDepartmentBtn').onclick = openDepartmentModal;
-  $('#addPositionBtn').onclick = openPositionModal;
+  $('#addPositionBtn') && ($('#addPositionBtn').onclick = openPositionModal);
   $('#positionAssignSaveBtn').onclick = savePositionAssignment;
   $('#positionAssignSearch').addEventListener('input', renderPositionAssignPeople);
   if ($('#addPositionInlineBtn')) $('#addPositionInlineBtn').onclick = openPositionModal;
+  $('#addCompanyPositionBtn') && ($('#addCompanyPositionBtn').onclick = () => openPositionModal(0));
+  $('#viewFullOrgChartBtn') && ($('#viewFullOrgChartBtn').onclick = openFullOrgChart);
+  $('#departmentDetailEditBtn') && ($('#departmentDetailEditBtn').onclick = () => { const id=Number($('#departmentDetailId').value||0); $('#departmentDetailModal').close(); if(id) window.editDepartment(id); });
+  $('#departmentDetailAddPositionBtn') && ($('#departmentDetailAddPositionBtn').onclick = () => { const id=Number($('#departmentDetailId').value||0); $('#departmentDetailModal').close(); if(id) openPositionModal(id); });
+  $('#orgZoomOutBtn') && ($('#orgZoomOutBtn').onclick = () => setOrgZoom(orgChartZoom - .1));
+  $('#orgZoomResetBtn') && ($('#orgZoomResetBtn').onclick = () => setOrgZoom(1));
+  $('#orgZoomInBtn') && ($('#orgZoomInBtn').onclick = () => setOrgZoom(orgChartZoom + .1));
   $('#addScheduleBtn').onclick = openScheduleModal;
   $('#addHolidayBtn').onclick = openHolidayModal;
   $('#departmentSaveBtn').onclick = saveDepartment;
@@ -1873,19 +1880,78 @@ async function savePositionAssignment(){
   }catch(e){toast(e.message,true);}finally{button.disabled=false;}
 }
 
+let orgChartZoom = 1;
+function setOrgZoom(value){
+  orgChartZoom=Math.max(.65,Math.min(1.5,Number(value||1)));
+  const canvas=$('#fullOrgChartCanvas');
+  if(canvas) canvas.style.setProperty('--org-zoom',String(orgChartZoom));
+  const reset=$('#orgZoomResetBtn'); if(reset) reset.textContent=`${Math.round(orgChartZoom*100)}%`;
+}
+function employeeDisplayName(employee){ return [employee?.nickname||employee?.first_name, employee?.last_name].filter(Boolean).join(' ') || employee?.employee_code || 'พนักงาน'; }
+function departmentPositions(departmentId){ return (state.peopleCore?.positions||[]).filter(p=>Number(p.department_id)===Number(departmentId)); }
+function employeesInDepartment(departmentId){ return (state.employees||[]).filter(e=>e.status==='active'&&Number(e.department_id)===Number(departmentId)); }
+function employeesInPosition(positionId){ return (state.employees||[]).filter(e=>e.status==='active'&&Number(e.position_id)===Number(positionId)); }
+function renderPersonChip(employee){ return `<span class="org-person-chip"><b>${escapeHtml(initial(employee))}</b><span>${escapeHtml(employeeDisplayName(employee))}</span></span>`; }
+function renderCompanyLeadership(){
+  const root=$('#companyLeadershipChart'); if(!root)return;
+  const user=state.me?.user||{}; const role=activeCompanyRole();
+  const companyPositions=(state.peopleCore?.positions||[]).filter(p=>!p.department_id);
+  const ownerCard=String(role)==='owner'?`<article class="leadership-node owner-node"><span class="leadership-rank">OWNER</span><div class="leadership-avatar">${escapeHtml((user.name||user.email||'O').slice(0,1).toUpperCase())}</div><strong>${escapeHtml(user.name||user.email||'Owner')}</strong><small>เจ้าของ Workspace</small></article>`:'';
+  const positionCards=companyPositions.map(p=>{const assigned=employeesInPosition(p.id);return `<article class="leadership-node company-position-node" onclick="window.openPositionAssignment(${Number(p.id)})"><span class="leadership-rank">${escapeHtml(String(p.name||'POSITION').toUpperCase())}</span><strong>${escapeHtml(p.name)}</strong><small>${assigned.length?`${assigned.length} คน`:'ยังไม่ได้จัดคน'}</small><div class="leadership-people">${assigned.slice(0,3).map(renderPersonChip).join('')}</div><button class="text-btn" type="button">จัดคน</button></article>`}).join('');
+  root.innerHTML=(ownerCard||positionCards)?`<div class="leadership-flow">${ownerCard}${positionCards}</div>`:emptyState('ยังไม่มีระดับบริษัท','Owner จะแสดงอัตโนมัติ และสามารถเพิ่ม CEO / HR / Managing Director เป็นตำแหน่งระดับบริษัทได้');
+}
+window.openDepartmentDetail = departmentId => {
+  const department=(state.peopleCore?.departments||[]).find(d=>Number(d.id)===Number(departmentId)); if(!department)return;
+  $('#departmentDetailId').value=department.id;
+  $('#departmentDetailTitle').textContent=department.name;
+  const people=employeesInDepartment(department.id), positions=departmentPositions(department.id);
+  $('#departmentDetailMeta').textContent=`${people.length} คน · ${positions.length} ตำแหน่ง${department.manager_employee_id?` · หัวหน้า ${department.manager_nickname||department.manager_first_name||'กำหนดแล้ว'}`:' · ยังไม่กำหนดหัวหน้า'}`;
+  const head=department.manager_employee_id?state.employees.find(e=>Number(e.id)===Number(department.manager_employee_id)):null;
+  const unpositioned=people.filter(e=>!e.position_id);
+  $('#departmentDetailBody').innerHTML=`
+    <section class="department-head-card ${head?'has-head':''}"><div class="department-head-icon">${head?escapeHtml(initial(head)):'?'}</div><div><span>หัวหน้าแผนก</span><strong>${head?escapeHtml(employeeDisplayName(head)):'ยังไม่ได้กำหนด'}</strong><small>${head?escapeHtml(head.position_name||'Department Head'):'กดแก้ไขแผนกเพื่อเลือกหัวหน้า'}</small></div><button class="text-btn" type="button" onclick="window.editDepartmentFromDetail(${Number(department.id)})">${head?'เปลี่ยน':'กำหนดหัวหน้า'}</button></section>
+    <section class="department-position-section"><div class="department-section-head"><div><p class="kicker">POSITIONS</p><h3>ตำแหน่งใน ${escapeHtml(department.name)}</h3></div><span class="badge badge-soft">${positions.length} ตำแหน่ง</span></div>
+    <div class="department-position-list">${positions.length?positions.map(p=>{const assigned=employeesInPosition(p.id);return `<article class="department-position-card"><div class="position-symbol">${escapeHtml(String(p.name||'?').slice(0,1).toUpperCase())}</div><div class="department-position-copy"><strong>${escapeHtml(p.name)}</strong><small>${assigned.length?`${assigned.length} คน`:'ยังไม่มีคน'}</small><div class="department-position-people">${assigned.slice(0,5).map(renderPersonChip).join('')}</div></div><button class="secondary-btn small-btn" type="button" onclick="window.assignPositionFromDepartment(${Number(p.id)})">จัดคน</button></article>`}).join(''):emptyState('ยังไม่มีตำแหน่งในแผนกนี้','เพิ่ม Head, Manager, Senior หรือสมาชิกทีมได้จากปุ่มด้านล่าง')}</div></section>
+    ${unpositioned.length?`<section class="unpositioned-section"><div class="department-section-head"><div><p class="kicker">NEEDS ATTENTION</p><h3>คนที่ยังไม่มีตำแหน่ง</h3></div><span class="badge badge-warn">${unpositioned.length} คน</span></div><div class="unpositioned-people">${unpositioned.map(renderPersonChip).join('')}</div></section>`:''}`;
+  $('#departmentDetailModal').showModal();
+};
+function renderEmployeeBranch(employee, people, level=0){
+  const children=people.filter(e=>Number(e.manager_employee_id)===Number(employee.id));
+  return `<div class="org-person-node" style="--person-level:${level}"><div class="org-person-card"><b>${escapeHtml(initial(employee))}</b><span><strong>${escapeHtml(employeeDisplayName(employee))}</strong><small>${escapeHtml(employee.position_name||'ยังไม่ระบุตำแหน่ง')}</small></span></div>${children.length?`<div class="org-person-children">${children.map(c=>renderEmployeeBranch(c,people,level+1)).join('')}</div>`:''}</div>`;
+}
+function renderDepartmentTree(department){
+  const people=employeesInDepartment(department.id); const positions=departmentPositions(department.id);
+  const head=department.manager_employee_id?people.find(e=>Number(e.id)===Number(department.manager_employee_id))||state.employees.find(e=>Number(e.id)===Number(department.manager_employee_id)):null;
+  let roots=people.filter(e=>!e.manager_employee_id||!people.some(x=>Number(x.id)===Number(e.manager_employee_id)));
+  if(head){roots=[head,...roots.filter(e=>Number(e.id)!==Number(head.id))];}
+  return `<section class="full-org-department"><button type="button" class="full-org-department-head" onclick="window.closeFullOrgAndOpenDepartment(${Number(department.id)})"><strong>${escapeHtml(department.name)}</strong><span>${people.length} คน · ${positions.length} ตำแหน่ง</span></button><div class="full-org-department-body">${roots.length?roots.map(r=>renderEmployeeBranch(r,people)).join(''):emptyState('ยังไม่มีคนในแผนก','จัดคนเข้าตำแหน่งแล้วผังจะขึ้นอัตโนมัติ')}</div></section>`;
+}
+window.closeFullOrgAndOpenDepartment=id=>{ $('#fullOrgChartModal').close(); window.openDepartmentDetail(id); };
+window.editDepartmentFromDetail=id=>{ $('#departmentDetailModal')?.close(); window.editDepartment(id); };
+window.assignPositionFromDepartment=id=>{ $('#departmentDetailModal')?.close(); window.openPositionAssignment(id); };
+function openFullOrgChart(){
+  const root=$('#fullOrgChartCanvas'); if(!root)return;
+  const departments=state.peopleCore?.departments||[]; const companyPositions=(state.peopleCore?.positions||[]).filter(p=>!p.department_id);
+  const user=state.me?.user||{};
+  const companyPeople=companyPositions.flatMap(p=>employeesInPosition(p.id).map(e=>({...e,_company_position:p.name})));
+  root.innerHTML=`<div class="full-org-tree"><div class="full-org-company-root"><article class="full-org-owner"><span>OWNER</span><strong>${escapeHtml(user.name||user.email||'Owner')}</strong><small>${escapeHtml(activeCompany()?.name||state.companyProfile?.name||'บริษัท')}</small></article>${companyPeople.length?`<div class="full-org-company-roles">${companyPeople.map(e=>`<article class="full-org-role"><b>${escapeHtml(initial(e))}</b><strong>${escapeHtml(employeeDisplayName(e))}</strong><small>${escapeHtml(e._company_position)}</small></article>`).join('')}</div>`:''}</div><div class="full-org-departments">${departments.length?departments.map(renderDepartmentTree).join(''):emptyState('ยังไม่มีแผนก','สร้างแผนกก่อน แล้วภาพรวมองค์กรจะปรากฏตรงนี้')}</div></div>`;
+  setOrgZoom(1); $('#fullOrgChartModal').showModal();
+}
 function renderPeopleCore(){
   const core=state.peopleCore||{}; const departments=core.departments||[]; const schedules=core.schedules||[]; const holidays=core.holidays||[];
   const org=$('#organizationChart');
   if(org){
     const roots=departments.filter(d=>!d.parent_department_id||!departments.some(x=>Number(x.id)===Number(d.parent_department_id)));
-    const renderNode=(d,depth=0)=>{const positionCount=(core.positions||[]).filter(p=>Number(p.department_id)===Number(d.id)).length;return `<div class="org-node" style="--depth:${depth}"><div class="org-line"></div><div class="org-card org-card-modern"><div class="org-card-copy"><strong>${escapeHtml(d.name)}</strong><small>${Number(d.employee_count||0)} คน · ${positionCount} ตำแหน่ง</small><em>${d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า'}</em></div><div class="org-card-actions"><button class="text-btn" type="button" onclick="window.openPositionForDepartment(${Number(d.id)})">+ ตำแหน่ง</button><button class="text-btn" type="button" onclick="window.editDepartment(${Number(d.id)})">แก้ไข</button></div></div>${departments.filter(x=>Number(x.parent_department_id)===Number(d.id)).map(x=>renderNode(x,depth+1)).join('')}</div>`;};
-    org.innerHTML=roots.length?roots.map(d=>renderNode(d)).join(''):emptyState('ยังไม่มีโครงสร้างแผนก','เพิ่มแผนกแรก แล้วค่อยกำหนดหัวหน้าและแผนกย่อย');
+    const renderDepartmentCard=(d,depth=0)=>{
+      const people=employeesInDepartment(d.id), positions=departmentPositions(d.id);
+      const headName=d.manager_employee_id?(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว'):'ยังไม่กำหนด';
+      const children=departments.filter(x=>Number(x.parent_department_id)===Number(d.id));
+      return `<div class="department-flow-node" style="--dept-depth:${depth}"><button class="department-overview-card" type="button" onclick="window.openDepartmentDetail(${Number(d.id)})"><div class="department-overview-top"><span class="department-mark">${escapeHtml(String(d.name||'?').slice(0,1).toUpperCase())}</span><span class="department-overview-copy"><strong>${escapeHtml(d.name)}</strong><small>${people.length} คน · ${positions.length} ตำแหน่ง</small></span><span class="department-arrow">›</span></div><div class="department-overview-foot"><span>หัวหน้า</span><b>${escapeHtml(headName)}</b></div></button>${children.length?`<div class="department-child-flow">${children.map(x=>renderDepartmentCard(x,depth+1)).join('')}</div>`:''}</div>`;
+    };
+    org.innerHTML=roots.length?roots.map(d=>renderDepartmentCard(d)).join(''):emptyState('ยังไม่มีแผนก','เพิ่มแผนกแรก แล้วกดเข้าไปจัดหัวหน้า ตำแหน่ง และคนในทีม');
+    if($('#departmentOverviewCount')) $('#departmentOverviewCount').textContent=`${departments.length} แผนก`;
   }
-  const positionRoot=$('#positionList');
-  if(positionRoot){
-    const positions=core.positions||[];
-    positionRoot.innerHTML=positions.length?positions.map(p=>{const assigned=state.employees.filter(e=>Number(e.position_id)===Number(p.id));const preview=assigned.slice(0,3).map(e=>escapeHtml(e.nickname||e.first_name)).join(', ');return `<article class="position-row position-card-modern"><div class="position-card-main"><div class="position-symbol">${escapeHtml(String(p.name||'?').slice(0,1).toUpperCase())}</div><div><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.department_name||'ตำแหน่งกลาง · ใช้ได้ทุกแผนก')}</small>${assigned.length?`<em>${preview}${assigned.length>3?` +${assigned.length-3}`:''}</em>`:'<em>ยังไม่มีคนในตำแหน่งนี้</em>'}</div></div><div class="position-card-actions"><span class="badge badge-soft">${assigned.length} คน</span><button class="text-btn position-assign-btn" type="button" onclick="window.openPositionAssignment(${Number(p.id)})">จัดคน</button></div></article>`}).join(''):emptyState('ยังไม่มีตำแหน่ง','เริ่มจากสร้างตำแหน่ง แล้วกด “จัดคน” เพื่อระบุว่าใครอยู่ตำแหน่งไหน');
-  }
+  renderCompanyLeadership();
   const scheduleRoot=$('#workScheduleList');
   if(scheduleRoot){
     const groups=new Map(); for(const r of schedules){const key=`${r.scope_type}:${r.scope_id}`;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r);}
