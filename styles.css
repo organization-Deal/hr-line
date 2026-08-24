@@ -1351,3 +1351,19 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
 @media(max-width:720px){
   .action-status{left:16px;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));max-width:none;min-width:0;padding:13px 14px;border-radius:16px}
 }
+
+
+/* P7.15 — Unified account identity, account menu and safe workspace deletion */
+.top-actions{position:relative}
+.account-menu{position:absolute;top:calc(100% + 10px);right:0;z-index:120;width:330px;padding:12px;border:1px solid var(--border);border-radius:18px;background:rgba(255,255,255,.98);box-shadow:0 22px 60px rgba(23,49,52,.16);backdrop-filter:blur(18px)}
+.account-menu.hidden{display:none!important}
+.account-menu-head{display:grid;grid-template-columns:44px minmax(0,1fr);gap:11px;align-items:center;padding:7px 7px 12px;border-bottom:1px solid var(--border)}
+.account-menu-avatar{width:44px;height:44px;display:grid;place-items:center;border-radius:14px;background:#e6f4f1;color:var(--primary);font-weight:700;background-size:cover;background-position:center}
+.account-menu-avatar.has-photo{color:transparent}
+.account-menu-head strong{display:block;color:var(--primary-dark);font-size:13px}.account-menu-head small{display:block;margin-top:2px;color:var(--text-tertiary);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-menu-status{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 7px;color:#718083;font-size:10px;border-bottom:1px solid var(--border)}
+.account-menu-action{width:100%;display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;align-items:center;margin-top:6px;padding:10px;border:0;border-radius:12px;background:transparent;text-align:left;color:#29484c}
+.account-menu-action:hover{background:#f3f8f6}.account-menu-action>span{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:#eef6f3;color:var(--primary);font-weight:700}.account-menu-action strong{display:block;font-size:11.5px}.account-menu-action small{display:block;margin-top:1px;color:#8a9798;font-size:9px;line-height:1.35}.account-menu-action.danger strong{color:#b44e4e}.account-menu-action.danger>span{background:#fff0ee;color:#b44e4e}
+.company-menu-row{display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:4px;align-items:center;border-radius:11px}.company-menu-row.active{background:var(--primary-soft)}.company-menu-row .company-menu-item{background:transparent}.company-delete-btn{width:30px;height:30px;border:0;border-radius:9px;background:transparent;color:#a48582;font-size:15px}.company-delete-btn:hover{background:#fff0ee;color:#b44e4e}
+.delete-company-modal{max-width:520px}.danger-kicker{color:#b44e4e!important}.delete-company-warning{display:grid;gap:5px;margin:4px 0 16px;padding:15px;border:1px solid #f0c8c2;border-radius:14px;background:#fff7f5}.delete-company-warning strong{color:#8f3939;font-size:14px}.delete-company-warning p{margin:0;color:#745d5b;font-size:11px;line-height:1.55}.delete-company-warning small{color:#9b8582;font-size:9.5px;line-height:1.45}.danger-btn{border:0;border-radius:11px;padding:10px 14px;background:#b94d4d;color:#fff;font-weight:700}.danger-btn:disabled{opacity:.55}
+@media(max-width:720px){.account-menu{position:fixed;top:calc(72px + env(safe-area-inset-top));right:14px;left:14px;width:auto;max-width:none;border-radius:20px}.profile-chip>div{display:none}.profile-chip{padding:4px}.company-menu-row{grid-template-columns:minmax(0,1fr) 40px}.company-delete-btn{width:36px;height:36px}}
