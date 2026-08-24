@@ -1383,3 +1383,6 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
   .employee-row-actions .text-btn{min-height:40px;padding:8px 10px;border:1px solid #e1ebe7;border-radius:11px;background:#fff;text-align:center}
   .employee-row-actions .danger-text{border-color:#f1d7d4;background:#fff8f7;color:#b84f4d}
 }
+
+/* P7.28 Dedicated HR Inbox */
+.hr-inbox-toolbar{align-items:flex-end;gap:16px}.hr-inbox-filters{display:flex;gap:10px;flex-wrap:wrap}.hr-inbox-filters .search-input{min-width:260px}.hr-inbox-filters select{min-height:40px;border:1px solid var(--border);border-radius:12px;background:#fff;padding:0 12px;color:var(--text)}.hr-inbox-list{display:grid;gap:10px}.hr-inbox-case-row{width:100%;text-align:left}.hr-case-title-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.hr-case-title-line strong{font-size:14px}@media(max-width:720px){.hr-inbox-toolbar{align-items:stretch}.hr-inbox-filters{display:grid;grid-template-columns:1fr}.hr-inbox-filters .search-input{min-width:0;width:100%}.hr-inbox-summary{grid-template-columns:1fr 1fr}.hr-inbox-summary .service-summary-card:last-child{grid-column:1/-1}}
