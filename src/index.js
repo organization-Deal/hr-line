@@ -1442,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.34', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.35', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1904,9 +1904,11 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/company-profile' && method === 'GET') {
+    await ensureV100P7Ready(env.DB);
     const client = await getClient(env.DB, clientId);
     if (!client) return json({ error: 'ไม่พบบริษัท' }, 404);
-    return json({ company: publicCompanyProfile(client) });
+    const asset=await env.DB.prepare('SELECT logo_data_url FROM company_assets WHERE client_id=?1').bind(clientId).first();
+    return json({ company: {...publicCompanyProfile(client),logo_data_url:asset?.logo_data_url||''} });
   }
 
   if (path === '/api/company-profile' && method === 'PATCH') {
@@ -1922,7 +1924,21 @@ async function handleApi(request, env, url, auth, ctx) {
       .bind(name, timezone, workStart, workEnd, lateGrace, clientId).run();
     await safeAudit(env.DB, clientId, 'user', String(auth.user.id), 'company.profile.update', 'client', String(clientId), { name, timezone, work_start: workStart, work_end: workEnd, late_grace_minutes: lateGrace });
     const client = await getClient(env.DB, clientId);
-    return json({ ok: true, company: publicCompanyProfile(client) });
+    const asset=await env.DB.prepare('SELECT logo_data_url FROM company_assets WHERE client_id=?1').bind(clientId).first();
+    return json({ ok: true, company: {...publicCompanyProfile(client),logo_data_url:asset?.logo_data_url||''} });
+  }
+
+  if (path === '/api/company-logo' && method === 'PUT') {
+    if (!['owner','co_owner','hr_admin','hr'].includes(String(auth.role || ''))) return json({ error: 'ไม่มีสิทธิ์แก้โลโก้บริษัท' }, 403);
+    await ensureV100P7Ready(env.DB); const body=await safeJson(request); const dataUrl=String(body.data_url||'');
+    if(!/^data:image\/(png|jpeg|webp);base64,/i.test(dataUrl))return json({error:'รองรับเฉพาะ PNG, JPG และ WebP'},400);
+    if(dataUrl.length>700000)return json({error:'โลโก้มีขนาดใหญ่เกิน 512 KB'},413);
+    await env.DB.prepare(`INSERT INTO company_assets (client_id,logo_data_url,updated_at) VALUES (?1,?2,CURRENT_TIMESTAMP) ON CONFLICT(client_id) DO UPDATE SET logo_data_url=excluded.logo_data_url,updated_at=CURRENT_TIMESTAMP`).bind(clientId,dataUrl).run();
+    return json({ok:true,logo_data_url:dataUrl});
+  }
+  if (path === '/api/company-logo' && method === 'DELETE') {
+    if (!['owner','co_owner','hr_admin','hr'].includes(String(auth.role || ''))) return json({ error: 'ไม่มีสิทธิ์แก้โลโก้บริษัท' }, 403);
+    await ensureV100P7Ready(env.DB); await env.DB.prepare('DELETE FROM company_assets WHERE client_id=?1').bind(clientId).run(); return json({ok:true});
   }
 
   if (path === '/api/integrations/google-workspace/mobile-handoff' && method === 'POST') {
@@ -4317,7 +4333,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.34',
+    version:'1.0-P7.35',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -5392,6 +5408,7 @@ async function ensureV100P7Ready(db){
       catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}
     }
   }
+  await db.prepare(`CREATE TABLE IF NOT EXISTS company_assets (client_id INTEGER PRIMARY KEY, logo_data_url TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
   SCHEMA_READY.add('p7');
 }
 
@@ -7463,8 +7480,10 @@ async function reconcileAccountIdentity(env,auth){
 }
 
 async function getMemberships(db, userId) {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS company_assets (client_id INTEGER PRIMARY KEY, logo_data_url TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
   const result = await db.prepare(`
     SELECT c.id, c.name, c.code, m.role,
+           (SELECT logo_data_url FROM company_assets ca WHERE ca.client_id=c.id) AS logo_data_url,
            (SELECT COUNT(*) FROM employees e WHERE e.client_id=c.id AND e.status!='deleted') AS employee_count,
            (SELECT COUNT(*) FROM departments d WHERE d.client_id=c.id) AS department_count
     FROM company_members m JOIN clients c ON c.id=m.client_id
