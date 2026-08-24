@@ -1442,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.26', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.27', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1626,10 +1626,13 @@ async function handleApi(request, env, url, auth, ctx) {
     });
     const memberships = await getMemberships(env.DB, auth.user.id);
     const claimable = memberships.length ? null : await getClaimableLegacyCompany(env.DB);
+    const activeMembership=memberships.find(row=>Number(row.id)===Number(auth.clientId))||memberships[0]||null;
     return json({
       user: publicUser(auth.user),
       companies: memberships,
-      active_company_id: auth.clientId || null,
+      active_company_id: auth.clientId || activeMembership?.id || null,
+      active_role: activeMembership?.role || null,
+      is_primary_owner: Boolean(activeMembership?.is_primary_owner),
       setup_mode: auth.setupMode || null,
       claimable_company: claimable,
     });
@@ -1642,7 +1645,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/onboarding/recruitment-gmail' && method === 'POST') {
     if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
-    if (!['owner','hr_admin','hr'].includes(String(auth.role||''))) return json({ error:'ไม่มีสิทธิ์ตั้งค่า Recruitment Gmail' },403);
+    if (!['owner','co_owner','hr_admin','hr'].includes(String(auth.role||''))) return json({ error:'ไม่มีสิทธิ์ตั้งค่า Recruitment Gmail' },403);
     await ensureV100P7Ready(env.DB);
     const body=await safeJson(request);
     const enabled=body.enabled===false?0:1;
@@ -1654,7 +1657,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/onboarding/complete' && method === 'POST') {
     if (!clientId) return json({ error:'COMPANY_REQUIRED' },409);
-    if (!['owner','hr_admin','hr'].includes(String(auth.role||''))) return json({ error:'ไม่มีสิทธิ์จบการตั้งค่า' },403);
+    if (!['owner','co_owner','hr_admin','hr'].includes(String(auth.role||''))) return json({ error:'ไม่มีสิทธิ์จบการตั้งค่า' },403);
     await ensureV100P7Ready(env.DB);
     const google=await env.DB.prepare(`SELECT id FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
     if(!google) return json({error:'กรุณาเชื่อม Google ก่อนเริ่มใช้งาน'},409);
@@ -1672,7 +1675,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/recruitment/gmail/sync' && method === 'POST') {
     if (!clientId) return json({error:'COMPANY_REQUIRED'},409);
-    if (!['owner','hr_admin','hr'].includes(String(auth.role||''))) return json({error:'ไม่มีสิทธิ์ Sync Gmail ผู้สมัคร'},403);
+    if (!['owner','co_owner','hr_admin','hr'].includes(String(auth.role||''))) return json({error:'ไม่มีสิทธิ์ Sync Gmail ผู้สมัคร'},403);
     try{
       const result=await syncRecruitmentGmailForClient(env,clientId,{limit:30});
       return json({ok:true,...result});
@@ -1692,7 +1695,7 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/benefits' && method === 'POST') {
-    if (!['owner','hr_admin','hr'].includes(String(auth.role||''))) return json({error:'ไม่มีสิทธิ์จัดการสวัสดิการ'},403);
+    if (!['owner','co_owner','hr_admin','hr'].includes(String(auth.role||''))) return json({error:'ไม่มีสิทธิ์จัดการสวัสดิการ'},403);
     await ensureV100P7Ready(env.DB);
     const body=await safeJson(request); const name=String(body.name||'').trim(); if(name.length<2)return json({error:'กรุณาใส่ชื่อสวัสดิการ'},400);
     const code=slugCode(body.code||name)||`benefit-${Date.now()}`;
@@ -1702,7 +1705,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
   const benefitEnrollMatch=path.match(/^\/api\/benefits\/(\d+)\/enroll$/);
   if(benefitEnrollMatch && method==='POST'){
-    if(!['owner','hr_admin','hr'].includes(String(auth.role||'')))return json({error:'ไม่มีสิทธิ์จัดการสวัสดิการ'},403);
+    if(!['owner','co_owner','hr_admin','hr'].includes(String(auth.role||'')))return json({error:'ไม่มีสิทธิ์จัดการสวัสดิการ'},403);
     await ensureV100P7Ready(env.DB); const benefitId=Number(benefitEnrollMatch[1]); const body=await safeJson(request); const employeeId=Number(body.employee_id||0);
     const [benefit,employee]=await Promise.all([env.DB.prepare(`SELECT id FROM benefit_programs WHERE id=?1 AND client_id=?2`).bind(benefitId,clientId).first(),env.DB.prepare(`SELECT id FROM employees WHERE id=?1 AND client_id=?2`).bind(employeeId,clientId).first()]);
     if(!benefit||!employee)return json({error:'ไม่พบสวัสดิการหรือพนักงาน'},404);
@@ -1724,7 +1727,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.26', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.27', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -1734,6 +1737,8 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/companies' && method === 'POST') {
     const body = await safeJson(request);
+    const explicitNewWorkspace = auth.setupMode === 'new' || body.confirm_new_workspace === true;
+    if (!explicitNewWorkspace) return json({ error: 'NEW_WORKSPACE_CONFIRM_REQUIRED', detail:'การสร้างบริษัทใหม่ต้องเริ่มจากเมนู “สร้าง Workspace ใหม่” โดยตั้งใจ' }, 409);
     const name = String(body.name || '').trim();
     if (name.length < 2) return json({ error: 'กรุณาใส่ชื่อบริษัท' }, 400);
     await ensureV100P7Ready(env.DB);
@@ -1784,13 +1789,13 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/company-access' && method === 'GET') {
     if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
-    if (String(auth.role || '') !== 'owner') return json({ error: 'เฉพาะ Owner เท่านั้นที่จัดการเจ้าของร่วมและผู้ดูแลระบบได้' }, 403);
+    if (!(await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner เท่านั้นที่จัดการสิทธิ์ระดับ Workspace ได้' }, 403);
     await ensureLineBusinessOnboardingReady(env.DB);
     const members = (await env.DB.prepare(`
       SELECT m.user_id,m.role,m.status,m.created_at,u.name,u.email,u.picture_url,u.line_user_id,u.line_provider_scope,u.auth_provider
       FROM company_members m
       JOIN users u ON u.id=m.user_id
-      WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','hr_admin')
+      WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','co_owner','hr_admin','hr','payroll_admin','manager','approver')
       ORDER BY CASE m.role WHEN 'owner' THEN 0 ELSE 1 END,m.id
     `).bind(clientId).all()).results || [];
     const employees = (await env.DB.prepare(`
@@ -1803,28 +1808,42 @@ async function handleApi(request, env, url, auth, ctx) {
       WHERE e.client_id=?1 AND e.status!='deleted'
       ORDER BY COALESCE(e.nickname,e.first_name),e.id
     `).bind(clientId).all()).results || [];
-    const roleByUser = new Map(members.map(row => [Number(row.user_id), String(row.role || '')]));
+    const primaryOwnerUserId=await getPrimaryOwnerUserId(env.DB,clientId);
+    const effectiveMembers=members.map(row=>{
+      const stored=String(row.role||'');
+      const effective=(stored==='owner'&&Number(row.user_id)!==Number(primaryOwnerUserId))?'co_owner':stored;
+      return {...row,stored_role:stored,role:effective,is_primary_owner:Number(row.user_id)===Number(primaryOwnerUserId),is_me:Number(row.user_id)===Number(auth.user.id)};
+    });
+    const roleByUser = new Map(effectiveMembers.map(row => [Number(row.user_id), String(row.role || '')]));
     return json({
-      members: members.map(row => ({...row,is_me:Number(row.user_id)===Number(auth.user.id)})),
+      members: effectiveMembers,
       eligible_employees: employees.map(row => ({
         ...row,
         current_role: row.account_user_id ? roleByUser.get(Number(row.account_user_id)) || null : null,
-        // Employee LINE connection is a valid Nakna identity. Legacy rows may not yet have a users row;
-        // POST /api/company-access backfills that account automatically.
         linked: Boolean(row.account_user_id || row.line_user_id),
         account_backfill_needed: Boolean(row.line_user_id && !row.account_user_id),
       })),
+      role_catalog:[
+        {value:'co_owner',label:'Co-Owner · เจ้าของร่วม',description:'ดูแลได้เกือบทั้งหมด ยกเว้นลบบริษัท เปลี่ยน Billing และโอนเจ้าของหลัก'},
+        {value:'hr_admin',label:'HR Admin · ผู้ดูแล HR',description:'พนักงาน เวลา ลา Recruitment เอกสาร Learning และงาน HR'},
+        {value:'payroll_admin',label:'Payroll Admin · ผู้ดูแลเงินเดือน',description:'Payroll ภาษี SSO Payslip และเอกสารเงินเดือน'},
+        {value:'manager',label:'Manager · หัวหน้าทีม',description:'ดูทีม เวลา KPI และคำขอในขอบเขตทีม'},
+        {value:'approver',label:'Approver · ผู้อนุมัติ',description:'อนุมัติคำขอที่ได้รับมอบหมาย โดยไม่แก้การตั้งค่าบริษัท'}
+      ],
       current_user_id: Number(auth.user.id),
+      primary_owner_user_id:Number(primaryOwnerUserId||0)||null,
     });
   }
 
   if (path === '/api/company-access' && method === 'POST') {
     if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
-    if (String(auth.role || '') !== 'owner') return json({ error: 'เฉพาะ Owner เท่านั้นที่เพิ่มเจ้าของร่วมหรือ HR Admin ได้' }, 403);
+    if (!(await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner เท่านั้นที่เพิ่มสิทธิ์ระดับ Workspace ได้' }, 403);
     await ensureLineBusinessOnboardingReady(env.DB);
     const body = await safeJson(request);
     const employeeId = Number(body.employee_id || 0);
-    const role = ['owner','hr_admin'].includes(String(body.role || '')) ? String(body.role) : 'owner';
+    const requestedRole=String(body.role||'').toLowerCase();
+    const role=requestedRole==='owner'?'co_owner':requestedRole;
+    if(!GRANTABLE_WORKSPACE_ROLES.has(role)) return json({error:'ระดับสิทธิ์ไม่ถูกต้อง'},400);
     const employee = await env.DB.prepare(`SELECT * FROM employees WHERE id=?1 AND client_id=?2 AND status!='deleted'`).bind(employeeId,clientId).first();
     if (!employee) return json({ error: 'ไม่พบพนักงานในบริษัทนี้' }, 404);
     const targetUser = await ensureEmployeeNaknaUser(env.DB, employee);
@@ -1833,6 +1852,9 @@ async function handleApi(request, env, url, auth, ctx) {
       VALUES (?1,?2,?3,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
       ON CONFLICT(client_id,user_id) DO UPDATE SET role=excluded.role,status='active',updated_at=CURRENT_TIMESTAMP`)
       .bind(clientId,Number(targetUser.id),role).run();
+    // Access grant means joining this existing Workspace, not creating a new business.
+    // Point every active session of the recipient to this Workspace so mobile/desktop land in the same company.
+    await env.DB.prepare(`UPDATE auth_sessions SET selected_client_id=?1,last_seen_at=CURRENT_TIMESTAMP WHERE user_id=?2 AND expires_at>CURRENT_TIMESTAMP`).bind(clientId,Number(targetUser.id)).run().catch(()=>{});
     await safeAudit(env.DB,clientId,'user',String(auth.user.id),'company.access.grant','user',String(targetUser.id),{role,employee_id:employeeId}).catch(()=>{});
     // Tell the recipient immediately in LINE so the new access is not invisible.
     // This is best-effort: granting access must still succeed even when LINE push is unavailable.
@@ -1846,15 +1868,12 @@ async function handleApi(request, env, url, auth, ctx) {
   const companyAccessDeleteMatch = path.match(/^\/api\/company-access\/(\d+)$/);
   if (companyAccessDeleteMatch && method === 'DELETE') {
     if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
-    if (String(auth.role || '') !== 'owner') return json({ error: 'เฉพาะ Owner เท่านั้นที่ถอนสิทธิ์ได้' }, 403);
+    if (!(await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner เท่านั้นที่ถอนสิทธิ์ระดับ Workspace ได้' }, 403);
     const targetUserId = Number(companyAccessDeleteMatch[1]);
-    if (targetUserId === Number(auth.user.id)) return json({ error: 'ไม่สามารถถอนสิทธิ์ Owner ของตัวเองจากหน้าจอนี้ ให้ Owner คนอื่นเป็นผู้ถอนสิทธิ์แทน' }, 400);
+    const primaryOwnerUserId=await getPrimaryOwnerUserId(env.DB,clientId);
+    if (targetUserId === Number(primaryOwnerUserId)) return json({ error: 'ไม่สามารถถอน Primary Owner ได้ กรุณาโอนความเป็นเจ้าของก่อน' }, 400);
     const target = await env.DB.prepare(`SELECT * FROM company_members WHERE client_id=?1 AND user_id=?2 AND status='active' LIMIT 1`).bind(clientId,targetUserId).first();
     if (!target) return json({ error:'ไม่พบสิทธิ์ของบัญชีนี้' },404);
-    if (String(target.role||'') === 'owner') {
-      const ownerCount = await env.DB.prepare(`SELECT COUNT(*) AS n FROM company_members WHERE client_id=?1 AND role='owner' AND status='active'`).bind(clientId).first();
-      if (Number(ownerCount?.n||0) <= 1) return json({ error:'บริษัทต้องมี Owner อย่างน้อย 1 คน' },400);
-    }
     await env.DB.prepare(`UPDATE company_members SET status='revoked',updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND user_id=?2`).bind(clientId,targetUserId).run();
     await safeAudit(env.DB,clientId,'user',String(auth.user.id),'company.access.revoke','user',String(targetUserId),{previous_role:target.role}).catch(()=>{});
     AUTH_CACHE.clear();
@@ -1869,7 +1888,7 @@ async function handleApi(request, env, url, auth, ctx) {
     const row = await env.DB.prepare(`SELECT c.id,c.name,m.role,(SELECT COUNT(*) FROM employees e WHERE e.client_id=c.id AND e.status!='deleted') AS employee_count FROM clients c JOIN company_members m ON m.client_id=c.id WHERE c.id=?1 AND m.user_id=?2 AND m.status='active' LIMIT 1`)
       .bind(deleteClientId, Number(auth.user.id)).first();
     if (!row) return json({ error: 'ไม่พบบริษัทหรือคุณไม่มีสิทธิ์' }, 404);
-    if (String(row.role||'') !== 'owner') return json({ error: 'เฉพาะ Owner เท่านั้นที่ลบบริษัทได้' }, 403);
+    if (!(await isPrimaryWorkspaceOwner(env.DB,deleteClientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner เท่านั้นที่ลบบริษัทได้' }, 403);
     const confirmName=String(body.confirm_name||'').trim();
     if (confirmName !== String(row.name||'').trim()) return json({ error: 'กรุณาพิมพ์ชื่อบริษัทให้ตรงเพื่อยืนยันการลบ' }, 400);
     await safeAudit(env.DB,deleteClientId,'user',String(auth.user.id),'company.delete','client',String(deleteClientId),{name:row.name,employee_count:Number(row.employee_count||0)}).catch(()=>{});
@@ -1891,7 +1910,7 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/company-profile' && method === 'PATCH') {
-    if (!['owner','hr_admin','hr'].includes(String(auth.role || ''))) return json({ error: 'ไม่มีสิทธิ์แก้ข้อมูลบริษัท' }, 403);
+    if (!['owner','co_owner','hr_admin','hr'].includes(String(auth.role || ''))) return json({ error: 'ไม่มีสิทธิ์แก้ข้อมูลบริษัท' }, 403);
     const body = await safeJson(request);
     const name = String(body.name || '').trim();
     const timezone = String(body.timezone || 'Asia/Bangkok').trim() || 'Asia/Bangkok';
@@ -2910,7 +2929,7 @@ async function handleApi(request, env, url, auth, ctx) {
     const [client, openCases, broadcasts, integration] = await Promise.all([
       getClient(env.DB,clientId),
       canManagePeopleAdmin(auth.role) ? env.DB.prepare(`SELECT COUNT(*) AS n FROM hr_cases WHERE client_id=?1 AND status NOT IN ('resolved','closed')`).bind(clientId).first() : Promise.resolve({n:0}),
-      ['owner','hr_admin','hr','manager'].includes(String(auth.role||'')) ? env.DB.prepare(`SELECT COUNT(*) AS n FROM broadcasts WHERE client_id=?1`).bind(clientId).first() : Promise.resolve({n:0}),
+      ['owner','co_owner','hr_admin','hr','manager'].includes(String(auth.role||'')) ? env.DB.prepare(`SELECT COUNT(*) AS n FROM broadcasts WHERE client_id=?1`).bind(clientId).first() : Promise.resolve({n:0}),
       getWorkspaceLineIntegration(env,clientId,false),
     ]);
     return json({
@@ -3155,11 +3174,11 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if(path==='/api/subscription/plan' && method==='POST'){
-    if(String(auth.role)!=='owner')return json({error:'เฉพาะ Owner ที่เปลี่ยนแพ็กเกจได้'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const plan=await env.DB.prepare(`SELECT * FROM subscription_plans WHERE code=?1 AND status='active'`).bind(String(body.plan_code||'')).first(); if(!plan)return json({error:'ไม่พบแพ็กเกจ'},404); await env.DB.prepare(`UPDATE company_subscriptions SET plan_id=?1,status=CASE WHEN status='trialing' THEN 'trialing' ELSE 'active' END,billing_cycle=?2,updated_at=CURRENT_TIMESTAMP WHERE client_id=?3`).bind(Number(plan.id),body.billing_cycle==='annual'?'annual':'monthly',clientId).run(); return json({ok:true,...await getSubscriptionOverview(env.DB,clientId)});
+    if(!(await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id)))return json({error:'เฉพาะ Primary Owner ที่เปลี่ยนแพ็กเกจได้'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const plan=await env.DB.prepare(`SELECT * FROM subscription_plans WHERE code=?1 AND status='active'`).bind(String(body.plan_code||'')).first(); if(!plan)return json({error:'ไม่พบแพ็กเกจ'},404); await env.DB.prepare(`UPDATE company_subscriptions SET plan_id=?1,status=CASE WHEN status='trialing' THEN 'trialing' ELSE 'active' END,billing_cycle=?2,updated_at=CURRENT_TIMESTAMP WHERE client_id=?3`).bind(Number(plan.id),body.billing_cycle==='annual'?'annual':'monthly',clientId).run(); return json({ok:true,...await getSubscriptionOverview(env.DB,clientId)});
   }
 
   if(path==='/api/subscription/invoices/generate' && method==='POST'){
-    if(String(auth.role)!=='owner')return json({error:'เฉพาะ Owner ที่สร้างใบเรียกเก็บได้'},403); await ensurePhase5Defaults(env.DB,clientId); try{return json({ok:true,invoice:await generateBillingInvoice(env.DB,clientId)},201);}catch(e){return json({error:e.message},e.status||400);}
+    if(!(await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id)))return json({error:'เฉพาะ Primary Owner ที่สร้างใบเรียกเก็บได้'},403); await ensurePhase5Defaults(env.DB,clientId); try{return json({ok:true,invoice:await generateBillingInvoice(env.DB,clientId)},201);}catch(e){return json({error:e.message},e.status||400);}
   }
 
   if(path==='/api/admin/saas/overview' && method==='GET'){
@@ -4063,11 +4082,55 @@ function isOwnerDashboardCommand(text){
   return ['แดชบอร์ด','dashboard','เปิด dashboard','เปิดแดชบอร์ด','owner dashboard','เจ้าของ','โหมดเจ้าของ','จัดการบริษัท','ฝั่งบริหาร','โหมดบริหาร','ฝ่ายบริหาร','hr','hr admin','ผู้ดูแลระบบ'].includes(normalized);
 }
 
+const WORKSPACE_ACCESS_ROLE_META = Object.freeze({
+  owner: { label:'Primary Owner', thai:'เจ้าของหลัก', level:100 },
+  co_owner: { label:'Co-Owner', thai:'เจ้าของร่วม', level:90 },
+  hr_admin: { label:'HR Admin', thai:'ผู้ดูแล HR', level:80 },
+  hr: { label:'HR', thai:'HR', level:75 },
+  payroll_admin: { label:'Payroll Admin', thai:'ผู้ดูแลเงินเดือน', level:70 },
+  manager: { label:'Manager', thai:'หัวหน้าทีม', level:60 },
+  approver: { label:'Approver', thai:'ผู้อนุมัติ', level:50 },
+  employee: { label:'Employee', thai:'พนักงาน', level:20 },
+  viewer: { label:'Viewer', thai:'ผู้ดู', level:10 },
+});
+const GRANTABLE_WORKSPACE_ROLES = new Set(['co_owner','hr_admin','payroll_admin','manager','approver']);
+const DASHBOARD_ACCESS_ROLES = new Set(['owner','co_owner','hr_admin','hr','payroll_admin','manager','approver']);
+function workspaceRoleLabel(role){
+  const value=String(role||'').toLowerCase();
+  const meta=WORKSPACE_ACCESS_ROLE_META[value];
+  return meta ? meta.label : (value||'Member');
+}
+function workspaceRoleThai(role){
+  const value=String(role||'').toLowerCase();
+  const meta=WORKSPACE_ACCESS_ROLE_META[value];
+  return meta ? meta.thai : 'สมาชิก';
+}
+function isDashboardAccessRole(role){ return DASHBOARD_ACCESS_ROLES.has(String(role||'').toLowerCase()); }
+function canManageHrWorkspaceRole(role){ return ['owner','co_owner','hr_admin','hr'].includes(String(role||'').toLowerCase()); }
+function canManagePayrollWorkspaceRole(role){ return ['owner','co_owner','hr_admin','hr','payroll_admin'].includes(String(role||'').toLowerCase()); }
+async function getPrimaryOwnerUserId(db,clientId){
+  const cid=Number(clientId||0); if(!cid) return null;
+  const onboarding=await db.prepare(`SELECT owner_user_id FROM company_onboarding WHERE client_id=?1 LIMIT 1`).bind(cid).first().catch(()=>null);
+  if(Number(onboarding?.owner_user_id||0)>0){
+    const active=await db.prepare(`SELECT 1 AS ok FROM company_members WHERE client_id=?1 AND user_id=?2 AND role='owner' AND status='active' LIMIT 1`).bind(cid,Number(onboarding.owner_user_id)).first().catch(()=>null);
+    if(active?.ok) return Number(onboarding.owner_user_id);
+  }
+  const first=await db.prepare(`SELECT user_id FROM company_members WHERE client_id=?1 AND role='owner' AND status='active' ORDER BY id LIMIT 1`).bind(cid).first().catch(()=>null);
+  return Number(first?.user_id||0)||null;
+}
+async function isPrimaryWorkspaceOwner(db,clientId,userId){
+  const primary=await getPrimaryOwnerUserId(db,clientId);
+  return Boolean(primary && Number(primary)===Number(userId));
+}
 function lineManagementRoleLabel(role){
   const value=String(role||'').toLowerCase();
-  if(value==='owner') return 'Owner';
+  if(value==='owner') return 'Primary Owner';
+  if(value==='co_owner') return 'Co-Owner';
   if(value==='hr_admin') return 'HR Admin';
   if(value==='hr') return 'HR';
+  if(value==='payroll_admin') return 'Payroll Admin';
+  if(value==='manager') return 'Manager';
+  if(value==='approver') return 'Approver';
   return 'ผู้ดูแล';
 }
 
@@ -4088,7 +4151,7 @@ async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId,preferredClien
   if(!user?.id) return null;
 
   const memberships=await getLineBusinessMemberships(env.DB,Number(user.id));
-  const managed=memberships.filter(row=>['owner','hr_admin','hr'].includes(String(row.role||'').toLowerCase()));
+  const managed=memberships.filter(row=>isDashboardAccessRole(row.role));
   if(!managed.length) return null;
 
   const preferred=Number(preferredClientId||0)>0 ? managed.find(row=>Number(row.id)===Number(preferredClientId)) : null;
@@ -4221,12 +4284,14 @@ async function finishLineWebLogin(request,env){
   const purpose=String(row.purpose||'');
   const isBusinessSetup=purpose==='business_setup';
   const isGoogleHandoff=purpose==='google_oauth_handoff';
+  const isWorkspaceAccess=purpose==='workspace_access';
   const cookies=[sessionCookie(sessionToken)];
   if(isBusinessSetup){cookies.push(clearCookie('nakna_company'));cookies.push(setupModeCookie('new'));}
   else{cookies.push(clearCookie('nakna_setup_mode'));if(selectedClientId)cookies.push(companyCookie(selectedClientId));}
   if(isGoogleHandoff)return redirectResponse(`${appOrigin(request,env)}/integrations/google-workspace/start?handoff=1`,cookies);
   const setup=isBusinessSetup?'&setup=new':'';
-  return redirectResponse(`${appOrigin(request,env)}/?auth=line${setup}&fresh=p75`,cookies);
+  const joined=isWorkspaceAccess?'&workspace=joined':'';
+  return redirectResponse(`${appOrigin(request,env)}/?auth=line${setup}${joined}&fresh=p727`,cookies);
 }
 
 async function getPublicOnboardingConfig(env){
@@ -4252,7 +4317,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.26',
+    version:'1.0-P7.27',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -4318,25 +4383,35 @@ async function handleLineBusinessOnboardingText({text,event,env,lineCtx,lineUser
 
 function buildBusinessWebSetupFlex({businesses=[],linkedEmployee=null,setupUrl,dashboardUrl=null}={}){
   const hasBusiness=Array.isArray(businesses)&&businesses.length>0;
-  const companyName=hasBusiness?businesses[0].name:null;
-  const body=[
-    lineInfoCard([
-      lineInfoRow('1','เปิดศูนย์ตั้งค่าบนเว็บ'),
-      lineInfoRow('2','สร้าง/เลือกธุรกิจ'),
-      lineInfoRow('3','เชื่อม Gmail + Drive + Sheets'),
-      lineInfoRow('4','เริ่ม Free Trial 30 วัน')
-    ],'teal'),
-    lineText('ตั้งแต่เวอร์ชันนี้ LINE จะไม่ถามชื่อบริษัทในแชตแล้ว การสร้างธุรกิจและเชื่อม Google ทำบน Dashboard ทั้งหมด','xs',LINE_CI.muted)
-  ];
-  if(linkedEmployee) body.push(lineText(`LINE นี้เป็นพนักงานของ ${linkedEmployee.company_name||'บริษัท'} อยู่แล้ว และยังสามารถเป็น Owner ของธุรกิจอื่นได้`,'xs',LINE_CI.muted));
-  if(hasBusiness) body.push(lineText(`มี Workspace อยู่แล้ว ${businesses.length} ธุรกิจ${companyName?` · ${companyName}`:''}`,'xs',LINE_CI.muted));
-  const footer=[linePrimaryButton(hasBusiness?'ตั้งค่า / สร้างธุรกิจเพิ่ม':'เริ่มตั้งค่าธุรกิจ',{type:'uri',label:hasBusiness?'ตั้งค่าธุรกิจ':'เริ่มตั้งค่า',uri:setupUrl})];
-  if(dashboardUrl) footer.push(lineSecondaryButton('เปิด Dashboard',{type:'uri',label:'เปิด Dashboard',uri:dashboardUrl}));
-  return {type:'flex',altText:'ตั้งค่าธุรกิจ Nakna HR บนเว็บ',contents:lineBubble({
-    eyebrow:'NAKNA · BUSINESS SETUP',
-    title:hasBusiness?'จัดการธุรกิจของคุณ':'เชื่อมธุรกิจกับนากนะ',
-    subtitle:'LINE → Web Setup → Google → HR Dashboard',
-    status:hasBusiness?'Owner':'30-day Trial',statusTone:'success',body,footer
+  const primaryBusiness=hasBusiness?businesses[0]:null;
+  const companyName=primaryBusiness?.name||null;
+  const roleLabel=primaryBusiness?lineManagementRoleLabel(primaryBusiness.role):null;
+  const body=[];
+  if(hasBusiness){
+    body.push(lineInfoCard([
+      lineInfoRow('บริษัท',companyName||'—'),
+      lineInfoRow('สิทธิ์',roleLabel||'Member',LINE_CI.primary),
+      ...(businesses.length>1?[lineInfoRow('Workspace ที่เข้าถึง',`${businesses.length} บริษัท`)]:[])
+    ],'teal'));
+    body.push(lineText('บัญชีนี้มีสิทธิ์ใน Workspace เดิมอยู่แล้ว กดเข้า Dashboard ได้ทันที ไม่ต้องตั้งค่าบริษัทหรือสร้างธุรกิจใหม่','xs',LINE_CI.primaryDark,'bold'));
+  }else{
+    body.push(lineInfoCard([
+      lineInfoRow('1','สร้าง Workspace ใหม่'),
+      lineInfoRow('2','เชื่อม Gmail + Drive + Sheets'),
+      lineInfoRow('3','เริ่ม Free Trial 30 วัน')
+    ],'teal'));
+    body.push(lineText('ใช้เส้นทางนี้เฉพาะตอนคุณต้องการสร้างบริษัทใหม่ของตัวเองเท่านั้น','xs',LINE_CI.muted));
+  }
+  if(linkedEmployee) body.push(lineText(`LINE นี้เป็นพนักงานของ ${linkedEmployee.company_name||'บริษัท'} อยู่ด้วย บทบาทพนักงานกับบทบาทบริหารแยกจากกัน`,'xs',LINE_CI.muted));
+  const footer=[];
+  if(hasBusiness&&dashboardUrl) footer.push(linePrimaryButton('เปิด Workspace ที่มีสิทธิ์',{type:'uri',label:'เปิด Dashboard',uri:dashboardUrl}));
+  if(hasBusiness) footer.push(lineSecondaryButton('สร้าง Workspace ใหม่',{type:'uri',label:'สร้าง Workspace ใหม่',uri:setupUrl},LINE_CI.mintSoft));
+  else footer.push(linePrimaryButton('สร้าง Workspace ใหม่',{type:'uri',label:'สร้าง Workspace ใหม่',uri:setupUrl}));
+  return {type:'flex',altText:hasBusiness?'เปิด Workspace ที่ได้รับสิทธิ์':'สร้าง Workspace ใหม่ใน Nakna HR',contents:lineBubble({
+    eyebrow:hasBusiness?'NAKNA · YOUR WORKSPACE':'NAKNA · NEW WORKSPACE',
+    title:hasBusiness?'เข้า Workspace เดิม':'สร้างบริษัทใหม่',
+    subtitle:hasBusiness?'สิทธิ์พร้อมแล้ว · ไม่ต้องสร้างธุรกิจซ้ำ':'LINE → New Workspace → Google → HR Dashboard',
+    status:hasBusiness?(roleLabel||'Member'):'30-day Trial',statusTone:'success',body,footer
   })};
 }
 
@@ -4375,7 +4450,7 @@ function buildBusinessReadyFlex(company,loginUrl,existing=false,totalCompanies=1
   })};
 }
 
-function canManagePayroll(role){ return ['owner','hr_admin','hr'].includes(String(role||'')); }
+function canManagePayroll(role){ return canManagePayrollWorkspaceRole(role); }
 
 function roundMoney(value){ return Math.round((Number(value||0)+Number.EPSILON)*100)/100; }
 
@@ -4548,9 +4623,9 @@ async function generateEmployeeCertificate(env,clientId,employeeId,type,userId,n
 function wrapTextSimple(text,maxChars){const words=String(text||'').split(/\s+/);const lines=[];let line='';for(const word of words){if((line+' '+word).trim().length>maxChars&&line){lines.push(line);line=word;}else line=(line+' '+word).trim();}if(line)lines.push(line);return lines;}
 
 
-function canViewEngagement(role){ return ['owner','hr_admin','hr','manager','viewer'].includes(String(role||'')); }
-function canManageEngagement(role){ return ['owner','hr_admin','hr'].includes(String(role||'')); }
-function canViewAnalytics(role){ return ['owner','hr_admin','hr','manager','viewer'].includes(String(role||'')); }
+function canViewEngagement(role){ return ['owner','co_owner','hr_admin','hr','manager','viewer'].includes(String(role||'')); }
+function canManageEngagement(role){ return ['owner','co_owner','hr_admin','hr'].includes(String(role||'')); }
+function canViewAnalytics(role){ return ['owner','co_owner','hr_admin','hr','manager','viewer'].includes(String(role||'')); }
 function isNaknaSaasAdmin(env,email){
   const allowed=String(env.NAKNA_ADMIN_EMAILS||'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
   return Boolean(email&&allowed.includes(String(email).trim().toLowerCase()));
@@ -4730,10 +4805,10 @@ async function runPhase5DailyAutomation(env){
   return {clients:clients.length,awards};
 }
 
-function canManageLearning(role){ return ['owner','hr_admin','hr','manager'].includes(String(role||'')); }
-function canManageLearningAdmin(role){ return ['owner','hr_admin','hr'].includes(String(role||'')); }
-function canManagePerformance(role){ return ['owner','hr_admin','hr','manager'].includes(String(role||'')); }
-function canManagePerformanceAdmin(role){ return ['owner','hr_admin','hr'].includes(String(role||'')); }
+function canManageLearning(role){ return ['owner','co_owner','hr_admin','hr','manager'].includes(String(role||'')); }
+function canManageLearningAdmin(role){ return ['owner','co_owner','hr_admin','hr'].includes(String(role||'')); }
+function canManagePerformance(role){ return ['owner','co_owner','hr_admin','hr','manager'].includes(String(role||'')); }
+function canManagePerformanceAdmin(role){ return ['owner','co_owner','hr_admin','hr'].includes(String(role||'')); }
 
 async function getLearningOverview(db,clientId,auth=null){
   const [coursesRes,modulesRes,questionsRes,assignmentsRes,progressRes] = await db.batch([
@@ -4783,7 +4858,7 @@ function calculateKpiProgress(goal,actualValue,manualProgress){
 }
 
 async function canActOnPerformanceEmployee(db,auth,clientId,employeeId){
-  if(['owner','hr_admin','hr'].includes(String(auth.role||'')))return true;
+  if(['owner','co_owner','hr_admin','hr'].includes(String(auth.role||'')))return true;
   if(String(auth.role||'')!=='manager')return false;
   const actor=await db.prepare(`SELECT id FROM employees WHERE client_id=?1 AND lower(email)=lower(?2) AND status='active' LIMIT 1`).bind(clientId,String(auth.user?.email||'')).first();
   if(!actor)return false;
@@ -4911,7 +4986,7 @@ function hrCasePriorityLabel(priority){return ({normal:'ปกติ',high:'ส�
 
 async function notifyHrCaseRecipients(env,row){
   if(!row?.client_id)return;
-  const recipients=(await env.DB.prepare(`SELECT DISTINCT u.id AS user_id,u.line_user_id,u.line_provider_scope,m.role FROM company_members m JOIN users u ON u.id=m.user_id WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','hr_admin','hr') AND u.status='active' AND u.line_user_id IS NOT NULL`).bind(Number(row.client_id)).all()).results||[];
+  const recipients=(await env.DB.prepare(`SELECT DISTINCT u.id AS user_id,u.line_user_id,u.line_provider_scope,m.role FROM company_members m JOIN users u ON u.id=m.user_id WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','co_owner','hr_admin','hr') AND u.status='active' AND u.line_user_id IS NOT NULL`).bind(Number(row.client_id)).all()).results||[];
   const seen=new Set();
   for(const recipient of recipients){
     const scope=String(recipient.line_provider_scope||'default'),key=`${scope}:${recipient.line_user_id}`;if(seen.has(key))continue;seen.add(key);
@@ -5101,22 +5176,22 @@ async function sendEngagementPortal(env,replyToken,emp,accessToken){
 function safeJsonParse(value,fallback=null){try{return JSON.parse(value);}catch{return fallback;}}
 
 function canManagePeople(role) {
-  return ['owner','hr_admin','hr','manager'].includes(String(role || ''));
+  return ['owner','co_owner','hr_admin','hr','manager'].includes(String(role || ''));
 }
 function canManagePeopleAdmin(role) {
-  return ['owner','hr_admin','hr'].includes(String(role || ''));
+  return ['owner','co_owner','hr_admin','hr'].includes(String(role || ''));
 }
 
 function canOverrideLeave(role) {
-  return ['owner','hr_admin','hr'].includes(String(role || ''));
+  return ['owner','co_owner','hr_admin','hr'].includes(String(role || ''));
 }
 
 function canManageIntegrations(role) {
-  return ['owner','hr_admin'].includes(String(role || ''));
+  return ['owner','co_owner','hr_admin'].includes(String(role || ''));
 }
 
 function canManageApproverAccess(role) {
-  return ['owner','hr_admin','hr'].includes(String(role || ''));
+  return ['owner','co_owner','hr_admin','hr'].includes(String(role || ''));
 }
 
 function approverPermissionCatalog(){
@@ -5651,7 +5726,7 @@ async function resolveLineLeaveAdmin(env,lineCtx,lineUserId,requestId){
   if(!user?.id) return null;
   const member=await env.DB.prepare(`SELECT role FROM company_members WHERE client_id=?1 AND user_id=?2 AND status='active' LIMIT 1`)
     .bind(Number(row.client_id),Number(user.id)).first();
-  if(!member||!['owner','hr_admin','hr'].includes(String(member.role||'').toLowerCase())) return null;
+  if(!member||!['owner','co_owner','hr_admin','hr'].includes(String(member.role||'').toLowerCase())) return null;
   return {row,user,role:String(member.role||'')};
 }
 
@@ -5660,7 +5735,7 @@ async function notifyDirectHrLeaveRequest(env,row){
     SELECT DISTINCT u.id AS user_id,u.line_user_id,u.line_provider_scope,m.role
     FROM company_members m
     JOIN users u ON u.id=m.user_id AND u.status='active'
-    WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','hr_admin','hr')
+    WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','co_owner','hr_admin','hr')
       AND u.line_user_id IS NOT NULL
   `).bind(Number(row.client_id)).all()).results||[];
   const seen=new Set();
@@ -5699,7 +5774,7 @@ async function notifyHrLeaveDecision(env,row,actorEmployeeId){
       JOIN employee_permissions p ON p.employee_id=e.id AND p.client_id=e.client_id
       WHERE e.client_id=?1 AND e.status='active' AND e.line_user_id IS NOT NULL AND p.permission_key='hr_request.approve' AND e.id<>?2`).bind(Number(row.client_id),Number(actorEmployeeId||0)),
     env.DB.prepare(`SELECT DISTINCT u.line_user_id,u.line_provider_scope FROM company_members m JOIN users u ON u.id=m.user_id
-      WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','hr_admin','hr') AND u.status='active' AND u.line_user_id IS NOT NULL`).bind(Number(row.client_id))
+      WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','co_owner','hr_admin','hr') AND u.status='active' AND u.line_user_id IS NOT NULL`).bind(Number(row.client_id))
   ]);
   const recipients=[...(employeeHr.results||[]),...(accountHr.results||[])];
   const seen=new Set();
@@ -5985,22 +6060,30 @@ function buildOwnerDashboardFlex(ownerAccess){
 }
 
 function buildCompanyAccessGrantedFlex({companyName,role,dashboardUrl}){
-  const isOwner=String(role||'')==='owner';
-  const roleLabel=isOwner?'Owner · เจ้าของร่วม':'HR Admin';
+  const value=String(role||'').toLowerCase();
+  const roleLabel=workspaceRoleLabel(value);
+  const detail={
+    co_owner:'ดูแล Workspace ได้เกือบทั้งหมด แต่การลบบริษัท เปลี่ยนแพ็กเกจ และโอนเจ้าของหลักยังเป็นสิทธิ์ของ Primary Owner',
+    hr_admin:'จัดการพนักงาน เวลา การลา Recruitment เอกสาร Learning และงาน HR ได้ โดยไม่แตะ Billing หรือการลบบริษัท',
+    payroll_admin:'เข้าถึง Payroll ภาษี ประกันสังคม Payslip และเอกสารเงินเดือน โดยไม่เห็นการตั้งค่าบริษัทส่วนที่ไม่เกี่ยวข้อง',
+    manager:'ดูแลทีม งาน KPI เวลา และคำขอของทีมตามขอบเขตที่ได้รับ',
+    approver:'รับและอนุมัติคำขอที่ได้รับมอบหมาย เช่น การลา โดยไม่สามารถแก้การตั้งค่าบริษัท',
+  }[value]||'คุณได้รับสิทธิ์เข้าจัดการ Workspace นี้ตามบทบาทที่กำหนด';
   return {type:'flex',altText:`คุณได้รับสิทธิ์ ${roleLabel} · ${companyName}`,contents:lineBubble({
     eyebrow:'WORKSPACE ACCESS',
-    title:'ได้รับสิทธิ์ใหม่แล้ว 🎉',
+    title:'ได้รับสิทธิ์เข้าบริษัทแล้ว 🎉',
     subtitle:companyName||'บริษัทของคุณ',
     status:roleLabel,
     statusTone:'success',
     body:[
       lineInfoCard([
         lineInfoRow('บริษัท',companyName||'—'),
-        lineInfoRow('สิทธิ์',roleLabel,LINE_CI.primary)
+        lineInfoRow('บทบาท',roleLabel,LINE_CI.primary)
       ],'teal'),
-      lineText(isOwner?'คุณสามารถจัดการบริษัท พนักงาน Payroll เอกสาร และการตั้งค่าหลักได้':'คุณสามารถเข้าจัดการงาน HR ของ Workspace นี้ตามสิทธิ์ผู้ดูแลได้','xs',LINE_CI.muted)
+      lineText(detail,'xs',LINE_CI.muted),
+      lineText('นี่คือการเข้าร่วม Workspace เดิมของบริษัท ไม่ต้องสร้างธุรกิจใหม่หรือตั้งค่าบริษัทใหม่','xxs',LINE_CI.primaryDark,'bold')
     ],
-    footer:[linePrimaryButton('เปิด HR Dashboard',{type:'uri',label:'เปิด HR Dashboard',uri:dashboardUrl})]
+    footer:[linePrimaryButton('เข้า Workspace นี้',{type:'uri',label:'เข้า Workspace นี้',uri:dashboardUrl})]
   })};
 }
 
@@ -6037,7 +6120,7 @@ async function notifyCompanyAccessGranted(env,{clientId,targetUser,employee,role
   const scope=String(employee?.line_provider_scope||targetUser?.line_provider_scope||'default');
   const token=await getAccessTokenForProviderScope(env,Number(clientId),scope); if(!token) return false;
   const company=await env.DB.prepare('SELECT name FROM clients WHERE id=?1').bind(Number(clientId)).first();
-  const dashboardUrl=await issueLineWebLoginLink(env,Number(targetUser.id),{clientId:Number(clientId),purpose:'dashboard'});
+  const dashboardUrl=await issueLineWebLoginLink(env,Number(targetUser.id),{clientId:Number(clientId),purpose:'workspace_access'});
   await pushLineMessages(token,lineUserId,[buildCompanyAccessGrantedFlex({companyName:company?.name||'บริษัทของคุณ',role,dashboardUrl})]);
   return true;
 }
@@ -6610,6 +6693,21 @@ async function getWebOnboardingStatus(env,auth){
   const clientId=auth.clientId?Number(auth.clientId):null;
   if(!clientId){
     return {completed:false,requires_company:true,current_step:'company',company:null,google:{connected:false},recruitment_gmail:{connected:false,enabled:true},trial:null};
+  }
+  const primaryOwner=await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user?.id);
+  if(!primaryOwner){
+    const client=await getClient(env.DB,clientId);
+    return {
+      completed:true,
+      access_joined:true,
+      requires_company:false,
+      current_step:'complete',
+      company:client?publicCompanyProfile(client):null,
+      google:{connected:null},
+      recruitment_gmail:{connected:null,enabled:null},
+      trial:null,
+      message:'JOIN_EXISTING_WORKSPACE'
+    };
   }
   const [client,onboarding,google,recruitment,subscription]=await Promise.all([
     getClient(env.DB,clientId),
@@ -7242,7 +7340,7 @@ async function fetchGoogleProfile(accessToken) {
 }
 
 
-const ACCOUNT_ROLE_PRIORITY={owner:100,hr_admin:90,hr:80,manager:60,approver:50,employee:20,viewer:10};
+const ACCOUNT_ROLE_PRIORITY={owner:100,co_owner:95,hr_admin:90,hr:80,payroll_admin:75,manager:60,approver:50,employee:20,viewer:10};
 function strongerAccountRole(a,b){return (ACCOUNT_ROLE_PRIORITY[String(a||'')]||0)>=(ACCOUNT_ROLE_PRIORITY[String(b||'')]||0)?String(a||'employee'):String(b||'employee');}
 function isSyntheticNaknaUser(user){return String(user?.email||'').endsWith('@nakna.local')||String(user?.google_sub||'').startsWith('line:');}
 
@@ -7376,7 +7474,14 @@ async function getMemberships(db, userId) {
   const rows=result.results||[];
   const counts=new Map();
   for(const row of rows){const key=String(row.name||'').trim().toLowerCase();counts.set(key,(counts.get(key)||0)+1);}
-  return rows.map(row=>({...row,duplicate_name:(counts.get(String(row.name||'').trim().toLowerCase())||0)>1}));
+  const mapped=[];
+  for(const row of rows){
+    const primaryOwnerUserId=await getPrimaryOwnerUserId(db,Number(row.id));
+    const storedRole=String(row.role||'');
+    const effectiveRole=(storedRole==='owner'&&primaryOwnerUserId&&Number(primaryOwnerUserId)!==Number(userId))?'co_owner':storedRole;
+    mapped.push({...row,stored_role:storedRole,role:effectiveRole,is_primary_owner:Boolean(primaryOwnerUserId&&Number(primaryOwnerUserId)===Number(userId)),duplicate_name:(counts.get(String(row.name||'').trim().toLowerCase())||0)>1});
+  }
+  return mapped;
 }
 
 async function getClaimableLegacyCompany(db) {
