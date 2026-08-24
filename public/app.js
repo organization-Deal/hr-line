@@ -184,9 +184,70 @@ const settingsCategoryMeta = {
   billing: { title: 'แพ็กเกจ & Billing', kicker: 'SUBSCRIPTION', description: 'ดู Free Trial, Active Seats, แพ็กเกจ และ Invoice' },
 };
 
+
+let actionStatusCounter = 0;
+let actionStatusHideTimer = null;
+let actionStatusStartedAt = 0;
+
+function requestActionCopy(path = '', method = 'POST') {
+  const p = String(path).toLowerCase();
+  const m = String(method || 'POST').toUpperCase();
+  if (m === 'DELETE') return ['กำลังลบข้อมูล…', 'ระบบกำลังอัปเดตข้อมูลให้ตรงกัน'];
+  if (p.includes('/sync')) return ['กำลังซิงก์ข้อมูล…', 'กำลังอัปเดตข้อมูลล่าสุด'];
+  if (p.includes('check-in') || p.includes('checkin')) return ['กำลังเช็กอิน…', 'กำลังบันทึกเวลาและตำแหน่ง'];
+  if (p.includes('check-out') || p.includes('checkout')) return ['กำลังเช็กเอาต์…', 'กำลังบันทึกเวลาออกงาน'];
+  if (p.includes('/publish')) return ['กำลังเผยแพร่…', 'กำลังบันทึกและแจ้งผู้เกี่ยวข้อง'];
+  if (p.includes('/generate')) return ['กำลังสร้างข้อมูล…', 'กรุณารอสักครู่'];
+  return ['กำลังบันทึก…', 'กำลังบันทึกการเปลี่ยนแปลงของคุณ'];
+}
+
+function showActionStatus(title = 'กำลังบันทึก…', text = 'กรุณารอสักครู่') {
+  const root = $('#actionStatus');
+  if (!root) return;
+  clearTimeout(actionStatusHideTimer);
+  actionStatusStartedAt = Date.now();
+  root.classList.remove('hidden', 'success', 'error');
+  $('#actionStatusTitle').textContent = title;
+  $('#actionStatusText').textContent = text;
+  document.body?.classList.add('is-mutating');
+}
+
+function finishActionStatus(ok = true, title = null, text = null) {
+  const root = $('#actionStatus');
+  if (!root) return;
+  root.classList.remove('success', 'error');
+  root.classList.add(ok ? 'success' : 'error');
+  $('#actionStatusTitle').textContent = title || (ok ? 'บันทึกแล้ว' : 'บันทึกไม่สำเร็จ');
+  $('#actionStatusText').textContent = text || (ok ? 'ข้อมูลล่าสุดถูกอัปเดตเรียบร้อย' : 'ลองใหม่อีกครั้ง หรือตรวจสอบการเชื่อมต่อ');
+  document.body?.classList.remove('is-mutating');
+  const elapsed = Date.now() - actionStatusStartedAt;
+  const wait = Math.max(650, 950 - elapsed);
+  clearTimeout(actionStatusHideTimer);
+  actionStatusHideTimer = setTimeout(() => root.classList.add('hidden'), ok ? wait + 850 : wait + 1800);
+}
+
+function beginMutationStatus(path, method, silent = false) {
+  if (silent) return false;
+  actionStatusCounter += 1;
+  if (actionStatusCounter === 1) {
+    const [title, text] = requestActionCopy(path, method);
+    showActionStatus(title, text);
+  }
+  return true;
+}
+
+function endMutationStatus(tracked, ok = true) {
+  if (!tracked) return;
+  actionStatusCounter = Math.max(0, actionStatusCounter - 1);
+  if (actionStatusCounter === 0) finishActionStatus(ok);
+}
+
 async function api(path, options = {}) {
   const controller = new AbortController();
-  const { timeoutMs: requestedTimeout, ...fetchOptions } = options;
+  const { timeoutMs: requestedTimeout, silentStatus = false, ...fetchOptions } = options;
+  const method = String(fetchOptions.method || 'GET').toUpperCase();
+  const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+  const trackedMutation = mutating ? beginMutationStatus(path, method, silentStatus) : false;
   const timeoutMs = Number(requestedTimeout || 18000);
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res;
@@ -201,27 +262,32 @@ async function api(path, options = {}) {
       },
     });
   } catch (error) {
+    clearTimeout(timer);
+    endMutationStatus(trackedMutation, false);
     if (error?.name === 'AbortError') throw new Error(`API_TIMEOUT:${path}`);
     throw error;
-  } finally {
-    clearTimeout(timer);
   }
+  clearTimeout(timer);
 
   let data = {};
   try { data = await res.json(); } catch {}
 
   if (res.status === 401) {
+    endMutationStatus(trackedMutation, false);
     showLogin();
     throw new Error('AUTH_REQUIRED');
   }
   if (res.status === 409 && data.error === 'COMPANY_REQUIRED') {
+    endMutationStatus(trackedMutation, false);
     await loadSessionOnly();
     throw new Error('COMPANY_REQUIRED');
   }
   if (!res.ok) {
+    endMutationStatus(trackedMutation, false);
     const detail = data.detail ? ` · ${data.detail}` : '';
     throw new Error(`${data.error || `HTTP_${res.status}`}${detail}`);
   }
+  endMutationStatus(trackedMutation, true);
   return data;
 }
 
