@@ -161,6 +161,7 @@ const leaveLabels = {
 const viewMeta = {
   dashboard: ['ภาพรวม', 'HR COMMAND CENTER'],
   employees: ['พนักงาน', 'PEOPLE'],
+  organization: ['โครงสร้างทีม', 'ORGANIZATION'],
   recruitment: ['Recruitment', 'TALENT'],
   benefits: ['สวัสดิการ', 'BENEFITS'],
   attendance: ['เวลาเข้างาน', 'WORKDAY'],
@@ -176,7 +177,7 @@ const viewMeta = {
 };
 
 const settingsCategoryMeta = {
-  company: { title: 'ตั้งค่าบริษัท', kicker: 'COMPANY', description: 'ข้อมูลบริษัท แผนก ตำแหน่ง และโครงสร้างองค์กร' },
+  company: { title: 'ตั้งค่าบริษัท', kicker: 'COMPANY', description: 'ข้อมูลบริษัทและข้อมูลพื้นฐานของ Workspace' },
   worktime: { title: 'ตั้งค่าเวลาทำงาน', kicker: 'WORK SCHEDULE', description: 'ตั้งเวลาระดับบริษัท รายแผนก หรือรายคน พร้อม Grace period' },
   attendance: { title: 'ตั้งค่าการเช็กอิน', kicker: 'ATTENDANCE', description: 'กำหนดสถานที่ พิกัด รัศมี และกติกาเช็กเอาต์นอกพื้นที่' },
   leave: { title: 'การลา & วันหยุด', kicker: 'LEAVE & HOLIDAY', description: 'ตั้งประเภทลา สิทธิ์ช่วงทดลองงาน และปฏิทินวันหยุดบริษัท' },
@@ -485,18 +486,6 @@ function bindEvents() {
       state.activeSettingsJump = null;
       showView('settings');
       openSettingsCategory(target, { scroll: false });
-    };
-  });
-  $$('[data-settings-sidebar-jump]').forEach(button => {
-    button.onclick = () => {
-      state.settingsNavExpanded = true;
-      state.activeSettingsCategory = 'company';
-      state.activeSettingsJump = 'organization';
-      showView('settings');
-      openSettingsCategory('company', { scroll: false });
-      $$('.nav-subitem').forEach(item => item.classList.remove('active'));
-      button.classList.add('active');
-      requestAnimationFrame(() => $('#organizationSection')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     };
   });
   $('#settingsBackBtn').onclick = () => showSettingsHome();
