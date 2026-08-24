@@ -1426,7 +1426,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.20', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.21', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1680,7 +1680,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.20', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.21', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -1750,7 +1750,7 @@ async function handleApi(request, env, url, auth, ctx) {
       ORDER BY CASE m.role WHEN 'owner' THEN 0 ELSE 1 END,m.id
     `).bind(clientId).all()).results || [];
     const employees = (await env.DB.prepare(`
-      SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.avatar_url,e.line_user_id,e.line_provider_scope,e.status,
+      SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.avatar_url,e.line_user_id,e.line_provider_scope,e.line_display_name,e.line_picture_url,e.status,
         COALESCE(
           (SELECT u.id FROM users u WHERE u.status='active' AND e.line_user_id IS NOT NULL AND u.line_user_id=e.line_user_id AND COALESCE(u.line_provider_scope,'default')=COALESCE(e.line_provider_scope,'default') LIMIT 1),
           (SELECT u.id FROM users u WHERE u.status='active' AND e.email IS NOT NULL AND TRIM(e.email)<>'' AND LOWER(u.email)=LOWER(e.email) LIMIT 1)
@@ -1762,7 +1762,14 @@ async function handleApi(request, env, url, auth, ctx) {
     const roleByUser = new Map(members.map(row => [Number(row.user_id), String(row.role || '')]));
     return json({
       members: members.map(row => ({...row,is_me:Number(row.user_id)===Number(auth.user.id)})),
-      eligible_employees: employees.map(row => ({...row,current_role:row.account_user_id?roleByUser.get(Number(row.account_user_id))||null:null,linked:Boolean(row.account_user_id)})),
+      eligible_employees: employees.map(row => ({
+        ...row,
+        current_role: row.account_user_id ? roleByUser.get(Number(row.account_user_id)) || null : null,
+        // Employee LINE connection is a valid Nakna identity. Legacy rows may not yet have a users row;
+        // POST /api/company-access backfills that account automatically.
+        linked: Boolean(row.account_user_id || row.line_user_id),
+        account_backfill_needed: Boolean(row.line_user_id && !row.account_user_id),
+      })),
       current_user_id: Number(auth.user.id),
     });
   }
@@ -1776,15 +1783,8 @@ async function handleApi(request, env, url, auth, ctx) {
     const role = ['owner','hr_admin'].includes(String(body.role || '')) ? String(body.role) : 'owner';
     const employee = await env.DB.prepare(`SELECT * FROM employees WHERE id=?1 AND client_id=?2 AND status!='deleted'`).bind(employeeId,clientId).first();
     if (!employee) return json({ error: 'ไม่พบพนักงานในบริษัทนี้' }, 404);
-    let targetUser = null;
-    if (employee.line_user_id) {
-      targetUser = await env.DB.prepare(`SELECT * FROM users WHERE status='active' AND line_user_id=?1 AND COALESCE(line_provider_scope,'default')=COALESCE(?2,'default') LIMIT 1`)
-        .bind(String(employee.line_user_id), employee.line_provider_scope || 'default').first();
-    }
-    if (!targetUser && employee.email) {
-      targetUser = await env.DB.prepare(`SELECT * FROM users WHERE status='active' AND LOWER(email)=LOWER(?1) LIMIT 1`).bind(String(employee.email).trim()).first();
-    }
-    if (!targetUser?.id) return json({ error: 'พนักงานคนนี้ยังไม่มีบัญชีนากนะ กรุณาให้เชื่อม LINE หรือเข้าสู่ระบบด้วย Google ก่อน แล้วค่อยเพิ่มสิทธิ์ Owner' }, 409);
+    const targetUser = await ensureEmployeeNaknaUser(env.DB, employee);
+    if (!targetUser?.id) return json({ error: 'พนักงานคนนี้ยังไม่ได้เชื่อม LINE หรือ Google กับนากนะ กรุณาเชื่อมบัญชีก่อน แล้วค่อยเพิ่มสิทธิ์ Owner' }, 409);
     await env.DB.prepare(`INSERT INTO company_members (client_id,user_id,role,status,created_at,updated_at)
       VALUES (?1,?2,?3,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
       ON CONFLICT(client_id,user_id) DO UPDATE SET role=excluded.role,status='active',updated_at=CURRENT_TIMESTAMP`)
@@ -3817,6 +3817,8 @@ async function linkLineJoinToken(db, accessToken, lineUserId, token, { providerS
       .bind(lineUserId, providerScope, profile?.displayName || null, profile?.pictureUrl || null, Number(row.employee_id)),
     db.prepare('UPDATE line_join_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1').bind(tokenHash),
   ]);
+  const linkedEmployee = await db.prepare(`SELECT id,client_id,employee_code,first_name,last_name,nickname,email,line_user_id,line_provider_scope,line_display_name,line_picture_url,status FROM employees WHERE id=?1`).bind(Number(row.employee_id)).first();
+  if (linkedEmployee) await ensureEmployeeNaknaUser(db, linkedEmployee).catch(error => console.warn(JSON.stringify({level:'warn',event:'employee_line_user_backfill_skip',employee_id:Number(row.employee_id),message:String(error?.message||error)})));
   await safeAudit(db, Number(row.client_id), 'line', lineUserId, 'employee.line_link_invite', 'employee', String(row.employee_id), null);
   return { ok:true, name:row.nickname || row.first_name, company_name:row.company_name };
 }
@@ -3905,6 +3907,67 @@ async function findLinkedEmployeeByLine(db,providerScope,lineUserId){
     WHERE e.line_user_id=?1 AND COALESCE(e.line_provider_scope,'default')=?2 AND e.status='active'
     ORDER BY e.id DESC LIMIT 1`)
     .bind(String(lineUserId),String(providerScope||'default')).first();
+}
+
+async function ensureEmployeeNaknaUser(db, employee){
+  if (!employee) return null;
+  await ensureLineBusinessOnboardingReady(db);
+  const lineUserId = String(employee.line_user_id || '').trim();
+  const providerScope = String(employee.line_provider_scope || 'default');
+  const employeeEmail = String(employee.email || '').trim().toLowerCase();
+
+  // 1) Existing LINE identity is authoritative.
+  if (lineUserId) {
+    const byLine = await db.prepare(`SELECT * FROM users WHERE status='active' AND line_user_id=?1 AND COALESCE(line_provider_scope,'default')=?2 LIMIT 1`)
+      .bind(lineUserId, providerScope).first();
+    if (byLine?.id) return byLine;
+  }
+
+  // 2) If the employee already has a Google/Nakna account with the same email, attach LINE to that account.
+  if (employeeEmail) {
+    const byEmail = await db.prepare(`SELECT * FROM users WHERE status='active' AND LOWER(email)=?1 LIMIT 1`).bind(employeeEmail).first();
+    if (byEmail?.id) {
+      if (lineUserId && !byEmail.line_user_id) {
+        try {
+          await db.prepare(`UPDATE users SET line_user_id=?1,line_provider_scope=?2,auth_provider=CASE WHEN auth_provider LIKE '%google%' THEN 'google+line' ELSE 'line' END,name=COALESCE(NULLIF(?3,''),name),picture_url=COALESCE(NULLIF(?4,''),picture_url),updated_at=CURRENT_TIMESTAMP WHERE id=?5`)
+            .bind(lineUserId,providerScope,String(employee.line_display_name||employee.nickname||employee.first_name||''),String(employee.line_picture_url||employee.avatar_url||''),Number(byEmail.id)).run();
+        } catch (error) {
+          // Another canonical account may already own the LINE identity; resolve it instead of failing the Owner flow.
+          const canonical = await db.prepare(`SELECT * FROM users WHERE status='active' AND line_user_id=?1 AND COALESCE(line_provider_scope,'default')=?2 LIMIT 1`).bind(lineUserId,providerScope).first();
+          if (canonical?.id) return canonical;
+          throw error;
+        }
+        return db.prepare('SELECT * FROM users WHERE id=?1').bind(Number(byEmail.id)).first();
+      }
+      return byEmail;
+    }
+  }
+
+  // 3) A LINE-linked employee is already authenticated enough for Workspace access.
+  // Backfill the legacy users row so Owner/HR Admin can be granted without forcing another login.
+  if (!lineUserId) return null;
+  const identityHash = await sha256Hex(`${providerScope}:${lineUserId}`);
+  const googleSub = `line:${identityHash}`;
+  const email = employeeEmail || `line-${identityHash.slice(0,32)}@nakna.local`;
+  const displayName = String(employee.line_display_name || employee.nickname || `${employee.first_name||''} ${employee.last_name||''}`.trim() || 'LINE Employee').trim();
+  const picture = String(employee.line_picture_url || employee.avatar_url || '').trim() || null;
+  try {
+    await db.prepare(`INSERT INTO users (google_sub,email,name,picture_url,locale,status,line_user_id,line_provider_scope,auth_provider)
+      VALUES (?1,?2,?3,?4,'th','active',?5,?6,'line')
+      ON CONFLICT(google_sub) DO UPDATE SET name=excluded.name,picture_url=COALESCE(excluded.picture_url,users.picture_url),status='active',line_user_id=excluded.line_user_id,line_provider_scope=excluded.line_provider_scope,auth_provider=CASE WHEN users.auth_provider LIKE '%google%' THEN 'google+line' ELSE 'line' END,updated_at=CURRENT_TIMESTAMP`)
+      .bind(googleSub,email,displayName,picture,lineUserId,providerScope).run();
+  } catch (error) {
+    // Email may belong to a Google account created between checks; attach to it instead.
+    if (employeeEmail) {
+      const raced = await db.prepare(`SELECT * FROM users WHERE status='active' AND LOWER(email)=?1 LIMIT 1`).bind(employeeEmail).first();
+      if (raced?.id) {
+        if (!raced.line_user_id) await db.prepare(`UPDATE users SET line_user_id=?1,line_provider_scope=?2,auth_provider='google+line',updated_at=CURRENT_TIMESTAMP WHERE id=?3`).bind(lineUserId,providerScope,Number(raced.id)).run();
+        return db.prepare('SELECT * FROM users WHERE id=?1').bind(Number(raced.id)).first();
+      }
+    }
+    throw error;
+  }
+  return db.prepare(`SELECT * FROM users WHERE status='active' AND line_user_id=?1 AND COALESCE(line_provider_scope,'default')=?2 LIMIT 1`).bind(lineUserId,providerScope).first();
 }
 
 function isOwnerDashboardCommand(text){
@@ -4066,7 +4129,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.20',
+    version:'1.0-P7.21',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -4751,6 +4814,8 @@ async function linkLineAccount(db, lineUserId, token, { providerScope='default',
     db.prepare('UPDATE employees SET line_user_id=?1,line_provider_scope=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3').bind(lineUserId,providerScope,Number(row.employee_id)),
     db.prepare('UPDATE line_link_tokens SET used_at=CURRENT_TIMESTAMP WHERE token=?1').bind(token),
   ]);
+  const linkedEmployee = await db.prepare(`SELECT id,client_id,employee_code,first_name,last_name,nickname,email,line_user_id,line_provider_scope,line_display_name,line_picture_url,status FROM employees WHERE id=?1`).bind(Number(row.employee_id)).first();
+  if (linkedEmployee) await ensureEmployeeNaknaUser(db, linkedEmployee).catch(error => console.warn(JSON.stringify({level:'warn',event:'employee_line_user_backfill_skip',employee_id:Number(row.employee_id),message:String(error?.message||error)})));
   await audit(db, Number(row.client_id), 'line', lineUserId, 'employee.line_link', 'employee', String(row.employee_id), null);
   return { ok: true, name: row.nickname || row.first_name, company_name: row.company_name };
 }
