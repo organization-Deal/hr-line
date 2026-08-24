@@ -1371,7 +1371,7 @@ function renderEmployees(query = '') {
         <td data-label="LINE">${employee.line_user_id
           ? `<div class="line-connected"><span class="badge badge-success"><span class="status-dot"></span> เชื่อมแล้ว</span><small>${escapeHtml(employee.line_display_name || 'LINE account')}</small></div>`
           : '<span class="badge badge-neutral">ยังไม่เชื่อม</span>'}</td>
-        <td data-label="จัดการ"><button class="text-btn" onclick="window.openPeopleProfile(${Number(employee.id)})">โปรไฟล์</button><br><button class="text-btn" onclick="window.openLeaveProfile(${Number(employee.id)})">สิทธิ์ลา</button></td>
+        <td data-label="จัดการ"><div class="employee-row-actions"><button class="text-btn" onclick="window.openEmployeeEdit(${Number(employee.id)})">แก้ไข</button><button class="text-btn" onclick="window.openPeopleProfile(${Number(employee.id)})">โปรไฟล์</button><button class="text-btn" onclick="window.openLeaveProfile(${Number(employee.id)})">สิทธิ์ลา</button><button class="text-btn danger-text" onclick="window.deleteEmployee(${Number(employee.id)})">ลบ</button></div></td>
       </tr>`).join('')
     : `<tr><td colspan="6">${emptyState('ไม่พบพนักงาน', 'ลองค้นหาด้วยชื่อ รหัสพนักงาน แผนก หรือ LINE อีกครั้ง')}</td></tr>`;
 }
@@ -2199,6 +2199,80 @@ function openEmployeeModal() {
     $('#modalFields')?.prepend(hint);
   }
 }
+
+window.openEmployeeEdit = id => {
+  const employee = state.employees.find(item => Number(item.id) === Number(id));
+  if (!employee) return toast('ไม่พบข้อมูลพนักงาน', true);
+  openModal('EMPLOYEE', `แก้ไข ${employee.nickname || employee.first_name}`, 'แก้ข้อมูลพื้นฐาน แผนก และตำแหน่งของพนักงาน แล้วกดบันทึก', [
+    ['employee_code', 'รหัสพนักงาน', 'text', true],
+    ['nickname', 'ชื่อเล่น', 'text'],
+    ['first_name', 'ชื่อ', 'text', true],
+    ['last_name', 'นามสกุล', 'text', true],
+    ['department_id', 'แผนก', 'select'],
+    ['position_id', 'ตำแหน่ง', 'select'],
+    ['email', 'อีเมล', 'email'],
+    ['phone', 'เบอร์โทร', 'text'],
+    ['birth_date', 'วันเกิด', 'date'],
+    ['start_date', 'วันเริ่มงาน', 'date', true],
+    ['probation_end_date', 'วันครบ Probation', 'date'],
+    ['contract_end_date', 'วันสิ้นสุดสัญญา', 'date'],
+  ], async data => {
+    data.department_id = data.department_id || null;
+    data.position_id = data.position_id || null;
+    await api(`/api/employees/${employee.id}`, { method: 'PATCH', body: JSON.stringify(data) });
+    await loadAll({ silent: true });
+    toast('แก้ไขข้อมูลพนักงานแล้ว');
+  });
+
+  const departments = state.peopleCore?.departments || state.lookups?.departments || [];
+  const positions = state.peopleCore?.positions || state.lookups?.positions || [];
+  const department = $('#field-department_id');
+  const position = $('#field-position_id');
+  if (department) department.innerHTML = `<option value="">ยังไม่ระบุแผนก</option>${departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}`;
+  const renderPositionOptions = (selectedPositionId = null) => {
+    if (!position) return;
+    const departmentId = Number(department?.value || 0);
+    const filtered = positions.filter(x => !departmentId || !x.department_id || Number(x.department_id) === departmentId);
+    position.innerHTML = `<option value="">ยังไม่ระบุตำแหน่ง</option>${filtered.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}${x.department_name?` · ${escapeHtml(x.department_name)}`:''}</option>`).join('')}`;
+    if (selectedPositionId) position.value = String(selectedPositionId);
+  };
+  if (department) {
+    department.value = employee.department_id ? String(employee.department_id) : '';
+    department.onchange = () => renderPositionOptions(null);
+  }
+  renderPositionOptions(employee.position_id);
+  const values = {
+    employee_code: employee.employee_code,
+    nickname: employee.nickname,
+    first_name: employee.first_name,
+    last_name: employee.last_name,
+    email: employee.email,
+    phone: employee.phone,
+    birth_date: employee.birth_date,
+    start_date: employee.start_date,
+    probation_end_date: employee.probation_end_date,
+    contract_end_date: employee.contract_end_date,
+  };
+  Object.entries(values).forEach(([key,value]) => { const field = $(`#field-${key}`); if (field) field.value = value || ''; });
+  $('#modalSave').textContent = 'บันทึกการแก้ไข';
+};
+
+window.deleteEmployee = async id => {
+  const employee = state.employees.find(item => Number(item.id) === Number(id));
+  if (!employee) return toast('ไม่พบข้อมูลพนักงาน', true);
+  const name = `${employee.nickname || employee.first_name} ${employee.last_name || ''}`.trim();
+  const confirmed = window.confirm(`ลบ ${name} ออกจากบริษัท?\n\nข้อมูลที่ผูกกับพนักงานคนนี้ เช่น เวลาเข้างาน คำขอลา และข้อมูล HR ที่อ้างอิงพนักงาน อาจถูกลบตามด้วย`);
+  if (!confirmed) return;
+  const typed = window.prompt(`เพื่อยืนยันการลบ กรุณาพิมพ์คำว่า ลบ`);
+  if (typed !== 'ลบ') return toast('ยกเลิกการลบแล้ว');
+  try {
+    await api(`/api/employees/${employee.id}`, { method: 'DELETE', body: '{}' });
+    await loadAll({ silent: true });
+    toast(`ลบ ${name} แล้ว`);
+  } catch (error) {
+    toast(error.message || 'ลบพนักงานไม่สำเร็จ', true);
+  }
+};
 
 function openCandidateModal() {
   openModal('RECRUITMENT', 'เพิ่มผู้สมัคร', 'เริ่มเก็บ Candidate ตั้งแต่เข้ามา เพื่อไม่ให้ประวัติการติดต่อหลุดหาย', [
