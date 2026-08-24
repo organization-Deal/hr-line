@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.30" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.31" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -205,6 +205,10 @@
 
         <p class="nav-label">คนและทีม</p>
         <button class="nav-item" data-view="employees"><svg viewBox="0 0 24 24"><path d="M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 10A3.5 3.5 0 1 0 9.5 3a3.5 3.5 0 0 0 0 7ZM18 8v6M21 11h-6"/></svg><span>พนักงาน</span></button>
+        <button class="nav-item people-config-item" type="button" data-settings-sidebar-jump="organization"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="7" height="5.5" rx="1.5"/><rect x="13.5" y="4" width="7" height="5.5" rx="1.5"/><rect x="8.5" y="14.5" width="7" height="5.5" rx="1.5"/><path d="M7 9.5v2.5h10V9.5M12 12v2.5"/></svg><span>โครงสร้างทีม</span></button>
+        <button class="nav-item people-config-item" type="button" data-settings-sidebar-open="worktime"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3.2 2"/></svg><span>เวลาทำงาน</span></button>
+        <button class="nav-item people-config-item" type="button" data-settings-sidebar-open="leave"><svg viewBox="0 0 24 24"><path d="M5 5.5h14v14H5z"/><path d="M8 3.5v4M16 3.5v4M5 9.5h14"/></svg><span>สิทธิ์ลา & วันหยุด</span></button>
+        <button class="nav-item people-config-item" type="button" data-settings-sidebar-open="approvals"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><path d="M3.5 19c.5-3.4 2.2-5 4.5-5 1.2 0 2.2.4 3 1.1M14 12.5l2.2 2.2L20.5 10.5"/></svg><span>สิทธิ์ & การอนุมัติ</span></button>
         <button class="nav-item" data-view="recruitment"><svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM3 21v-2a6 6 0 0 1 6-6h2M16 11l2 2 4-4M15 21h6"/></svg><span>Recruitment</span></button>
         <button class="nav-item" data-view="benefits"><svg viewBox="0 0 24 24"><path d="M12 21s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 11c0 5.65-7 10-7 10Z"/><path d="M9 13h6M12 10v6"/></svg><span>สวัสดิการ</span></button>
         <button class="nav-item" data-view="performance"><svg viewBox="0 0 24 24"><path d="m4 18 5-5 4 3 7-9"/><path d="M15 7h5v5"/></svg><span>Learning & KPI</span></button>
@@ -216,22 +220,17 @@
         <button class="nav-item" data-view="documents"><svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg><span>เอกสาร</span><i class="soon-dot"></i></button>
         <button class="nav-item" data-view="settings" aria-expanded="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg><span>ตั้งค่า</span><i class="soon-dot"></i></button>
         <div id="settingsNavSection" class="settings-nav-section hidden" aria-label="หมวดการตั้งค่า">
-          <button class="nav-subitem" type="button" data-settings-sidebar-open="company"><span>ตั้งค่าบริษัท</span><small id="settingsSidebarCompanyMeta">ข้อมูลบริษัท แผนก และตำแหน่ง</small></button>
-          <button class="nav-subitem" type="button" data-settings-sidebar-jump="organization"><span>โครงสร้างองค์กร</span><small id="settingsSidebarOrgMeta">แผนก · ตำแหน่ง · หัวหน้า</small></button>
-          <button class="nav-subitem" type="button" data-settings-sidebar-open="worktime"><span>เวลาทำงาน</span><small id="settingsSidebarWorktimeMeta">ตารางเวลาบริษัทและทีม</small></button>
-          <button class="nav-subitem" type="button" data-settings-sidebar-open="attendance"><span>การเช็กอิน</span><small id="settingsSidebarAttendanceMeta">Work location และรัศมี</small></button>
-          <button class="nav-subitem" type="button" data-settings-sidebar-open="leave"><span>การลา & วันหยุด</span><small id="settingsSidebarLeaveMeta">ประเภทลาและปฏิทินวันหยุด</small></button>
-          <button class="nav-subitem" type="button" data-settings-sidebar-open="approvals"><span>สิทธิ์ & การอนุมัติ</span><small id="settingsSidebarApprovalMeta">หัวหน้าและผู้อนุมัติ</small></button>
-          <button class="nav-subitem" type="button" data-settings-sidebar-open="integrations"><span>การเชื่อมต่อ</span><small id="settingsSidebarIntegrationMeta">LINE และ Google Workspace</small></button>
-          <button class="nav-subitem" type="button" data-settings-sidebar-open="payroll"><span>Payroll</span><small id="settingsSidebarPayrollMeta">วันจ่าย ภาษี และประกันสังคม</small></button>
-          <button class="nav-subitem" type="button" data-settings-sidebar-open="billing"><span>แพ็กเกจ & Billing</span><small id="settingsSidebarBillingMeta">แพ็กเกจปัจจุบันและการใช้งาน</small></button>
+          <button class="nav-subitem" type="button" data-settings-sidebar-open="company"><span>บริษัท</span></button>
+          <button class="nav-subitem" type="button" data-settings-sidebar-open="attendance"><span>การเช็กอิน</span></button>
+          <button class="nav-subitem" type="button" data-settings-sidebar-open="integrations"><span>การเชื่อมต่อ</span></button>
+          <button class="nav-subitem" type="button" data-settings-sidebar-open="billing"><span>แพ็กเกจ & Billing</span></button>
         </div>
         <button id="saasAdminNav" class="nav-item hidden" data-view="saas-admin"><svg viewBox="0 0 24 24"><path d="M4 20V8l8-5 8 5v12M8 20v-6h8v6M8 9h.01M12 9h.01M16 9h.01"/></svg><span>Nakna Admin</span></button>
       </nav>
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.30</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.31</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -403,9 +402,9 @@
           <div class="page-actions"><span id="hrInboxOpenBadge" class="badge badge-warning">0 เรื่องเปิด</span></div>
         </div>
         <div class="service-summary-grid hr-inbox-summary">
-          <article class="service-summary-card"><span>🔒</span><div><small>เรื่องที่ยังเปิดอยู่</small><strong id="hrInboxOpenCount">0</strong><p>Open / In progress / Waiting employee</p></div></article>
-          <article class="service-summary-card"><span>⚠️</span><div><small>เรื่องเร่งด่วน</small><strong id="hrInboxUrgentCount">0</strong><p>Priority สูงหรือด่วน</p></div></article>
-          <article class="service-summary-card"><span>✅</span><div><small>ปิดแล้ว</small><strong id="hrInboxClosedCount">0</strong><p>Resolved / Closed</p></div></article>
+          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="3"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10"/></svg></span><div><small>เรื่องที่ยังเปิดอยู่</small><strong id="hrInboxOpenCount">0</strong><p>Open / In progress / Waiting employee</p></div></article>
+          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><path d="M12 4 21 20H3L12 4Z"/><path d="M12 9v5M12 17.2v.1"/></svg></span><div><small>เรื่องเร่งด่วน</small><strong id="hrInboxUrgentCount">0</strong><p>Priority สูงหรือด่วน</p></div></article>
+          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.2 12.1 2.4 2.4 5.4-5.5"/></svg></span><div><small>ปิดแล้ว</small><strong id="hrInboxClosedCount">0</strong><p>Resolved / Closed</p></div></article>
         </div>
         <article class="panel">
           <div class="panel-head hr-inbox-toolbar">
@@ -425,9 +424,9 @@
           <div class="page-actions"><span class="badge badge-warning" id="requestCountBadge">0 เรื่องเปิด</span><button id="createBroadcastBtn" class="primary-btn" type="button">+ ส่งประกาศ</button></div>
         </div>
         <div class="service-summary-grid">
-          <article class="service-summary-card"><span>🔒</span><div><small>เรื่องส่วนตัวถึง HR</small><strong id="hrCaseOpenCount">0</strong><p>เห็นเฉพาะ Owner / HR Admin / HR</p></div></article>
-          <article class="service-summary-card"><span>📣</span><div><small>ประกาศที่ส่งแล้ว</small><strong id="broadcastTotalCount">0</strong><p>Broadcast เข้า LINE พนักงาน</p></div></article>
-          <article class="service-summary-card"><span>▦</span><div><small>LINE Rich Menu</small><strong id="richMenuStatusText">ยังไม่ตั้ง</strong><p>6 เมนูหลักสำหรับพนักงาน</p></div></article>
+          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="3"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10"/></svg></span><div><small>เรื่องส่วนตัวถึง HR</small><strong id="hrCaseOpenCount">0</strong><p>เห็นเฉพาะ Owner / HR Admin / HR</p></div></article>
+          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><path d="M4 13.5h3l8 4V6.5l-8 4H4z"/><path d="M7 13.5 8.5 19h3"/></svg></span><div><small>ประกาศที่ส่งแล้ว</small><strong id="broadcastTotalCount">0</strong><p>Broadcast เข้า LINE พนักงาน</p></div></article>
+          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M12 5v14M4 12h16"/></svg></span><div><small>LINE Rich Menu</small><strong id="richMenuStatusText">ยังไม่ตั้ง</strong><p>6 เมนูหลักสำหรับพนักงาน</p></div></article>
         </div>
         <div class="service-grid">
           <article class="panel service-cases-panel">

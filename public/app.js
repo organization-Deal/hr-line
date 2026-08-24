@@ -482,6 +482,7 @@ function bindEvents() {
       if (!settingsCategoryMeta[target]) return;
       state.settingsNavExpanded = true;
       state.activeSettingsCategory = target;
+      state.activeSettingsJump = null;
       showView('settings');
       openSettingsCategory(target, { scroll: false });
     };
@@ -490,6 +491,7 @@ function bindEvents() {
     button.onclick = () => {
       state.settingsNavExpanded = true;
       state.activeSettingsCategory = 'company';
+      state.activeSettingsJump = 'organization';
       showView('settings');
       openSettingsCategory('company', { scroll: false });
       $$('.nav-subitem').forEach(item => item.classList.remove('active'));
