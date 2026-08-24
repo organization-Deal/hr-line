@@ -901,7 +901,7 @@ function renderIdentity() {
         <span><strong>${escapeHtml(company.name)}</strong><small>${escapeHtml(roleLabel(company.role))} · ${Number(company.employee_count||0)} คน${company.duplicate_name?` · Workspace #${Number(company.id)}`:''}</small></span>
         ${Number(company.id) === Number(me.active_company_id) ? '<b>✓</b>' : ''}
       </button>
-      ${String(company.role)==='owner'?`<button class="company-delete-btn" type="button" data-delete-company-id="${Number(company.id)}" title="ลบบริษัท" aria-label="ลบ ${escapeHtml(company.name)}">⌫</button>`:''}
+      ${String(company.role)==='owner'?`<button class="company-delete-btn" type="button" data-delete-company-id="${Number(company.id)}" title="ลบบริษัท" aria-label="ลบ ${escapeHtml(company.name)}"><span aria-hidden="true">×</span><b>ลบ</b></button>`:''}
     </div>`).join('');
   $$('[data-company-id]').forEach(button => {
     button.onclick = event => {
