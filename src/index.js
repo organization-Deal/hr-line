@@ -1442,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.25', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.26', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1518,6 +1518,12 @@ export default {
         return await submitPublicLeaveForm(request, env, publicLeaveMatch[1]);
       }
 
+      const publicHrCaseAttachmentMatch = url.pathname.match(/^\/api\/public\/hr-case\/([A-Za-z0-9_-]{32,})\/attachments$/);
+      if (publicHrCaseAttachmentMatch && request.method === 'POST') {
+        await ensureV100P2Ready(env.DB);
+        return await uploadPublicHrCaseAttachment(request, env, publicHrCaseAttachmentMatch[1]);
+      }
+
       const publicHrCaseMatch = url.pathname.match(/^\/api\/public\/hr-case\/([A-Za-z0-9_-]{32,})$/);
       if (publicHrCaseMatch && request.method === 'GET') {
         await ensureV100P2Ready(env.DB);
@@ -1525,7 +1531,7 @@ export default {
       }
       if (publicHrCaseMatch && request.method === 'POST') {
         await ensureV100P2Ready(env.DB);
-        return await submitPublicHrCaseForm(request, env, publicHrCaseMatch[1]);
+        return await submitPublicHrCaseForm(request, env, publicHrCaseMatch[1], ctx);
       }
 
       const publicLearningMatch = url.pathname.match(/^\/api\/public\/learning\/([A-Za-z0-9_-]{32,})$/);
@@ -1718,7 +1724,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.25', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.26', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -4246,7 +4252,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.25',
+    version:'1.0-P7.26',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -4811,39 +4817,77 @@ async function getPublicHrCaseForm(env,token){
   });
 }
 
-async function submitPublicHrCaseForm(request,env,token){
+async function submitPublicHrCaseForm(request,env,token,ctx=null){
   const access=await getEmployeePortalAccess(env.DB,token);
   if(!access)return json({error:'ลิงก์หมดอายุ กรุณากลับไปที่ LINE แล้วกด “แจ้ง HR” ใหม่'},401);
-  let form;try{form=await request.formData();}catch{return json({error:'อ่านแบบฟอร์มไม่ได้ กรุณาลองใหม่'},400);}
-  const category=String(form.get('category')||'other').trim().slice(0,40);
-  const subject=String(form.get('subject')||'').trim().slice(0,120);
-  const detail=String(form.get('detail')||'').trim().slice(0,4000);
-  const urgency=String(form.get('urgency')||'normal');
-  const contactPreference=String(form.get('contact_preference')||'line').slice(0,30);
+
+  const contentType=String(request.headers.get('content-type')||'').toLowerCase();
+  let category='other',subject='',detail='',urgency='normal',contactPreference='line';
+  if(contentType.includes('application/json')){
+    let body;try{body=await request.json();}catch{return json({error:'อ่านข้อมูลไม่ได้ กรุณาลองใหม่'},400);}
+    category=String(body.category||'other').trim().slice(0,40);
+    subject=String(body.subject||'').trim().slice(0,120);
+    detail=String(body.detail||'').trim().slice(0,4000);
+    urgency=String(body.urgency||'normal');
+    contactPreference=String(body.contact_preference||'line').slice(0,30);
+  }else{
+    let form;try{form=await request.formData();}catch{return json({error:'อ่านแบบฟอร์มไม่ได้ กรุณาลองใหม่'},400);}
+    category=String(form.get('category')||'other').trim().slice(0,40);
+    subject=String(form.get('subject')||'').trim().slice(0,120);
+    detail=String(form.get('detail')||'').trim().slice(0,4000);
+    urgency=String(form.get('urgency')||'normal');
+    contactPreference=String(form.get('contact_preference')||'line').slice(0,30);
+  }
+
   if(subject.length<3)return json({error:'กรุณาใส่หัวข้ออย่างน้อย 3 ตัวอักษร'},400);
   if(detail.length<5)return json({error:'กรุณาเล่ารายละเอียดเพิ่มอีกนิด'},400);
   const priority=['normal','high','urgent'].includes(urgency)?urgency:'normal';
-  const rawFiles=form.getAll('attachment').filter(f=>f&&typeof f==='object'&&typeof f.arrayBuffer==='function'&&Number(f.size||0)>0);
-  if(rawFiles.length>3)return json({error:'แนบไฟล์ได้สูงสุด 3 ไฟล์'},400);
-  const allowed=file=>String(file.type||'').startsWith('image/')||['application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(String(file.type||''));
-  for(const file of rawFiles){
-    if(Number(file.size||0)>10*1024*1024)return json({error:`ไฟล์ ${file.name||''} ใหญ่เกิน 10 MB`},413);
-    if(!allowed(file))return json({error:`ไฟล์ ${file.name||''} ไม่รองรับ กรุณาใช้รูป, PDF, DOC หรือ DOCX`},415);
-  }
   const result=await env.DB.prepare(`INSERT INTO hr_cases(client_id,employee_id,subject,detail,category,priority,status,confidential,submitted_via,contact_preference) VALUES(?1,?2,?3,?4,?5,?6,'open',1,'line_web',?7)`).bind(Number(access.client_id),Number(access.employee_id),subject,detail,category,priority,contactPreference).run();
   const caseId=Number(result.meta.last_row_id);
-  try{
-    for(const file of rawFiles) await storeHrCaseAttachmentBinary(env,{clientId:Number(access.client_id),caseId,bytes:await file.arrayBuffer(),fileName:String(file.name||`attachment-${Date.now()}`),contentType:String(file.type||'application/octet-stream'),fileSize:Number(file.size||0)});
-  }catch(error){
-    await env.DB.prepare('DELETE FROM hr_cases WHERE id=?1 AND client_id=?2').bind(caseId,Number(access.client_id)).run().catch(()=>{});
-    throw error;
-  }
   await env.DB.prepare(`INSERT INTO hr_case_events(client_id,case_id,actor_type,actor_employee_id,action,message) VALUES(?1,?2,'employee',?3,'submitted',?4)`).bind(Number(access.client_id),caseId,Number(access.employee_id),detail).run();
   await safeAudit(env.DB,Number(access.client_id),'employee',String(access.employee_id),'hr_case.create','hr_case',String(caseId),{subject,category,priority,submitted_via:'line_web'});
   const row=await env.DB.prepare(`SELECT c.*,e.first_name,e.last_name,e.nickname,e.employee_code,e.line_user_id AS employee_line_user_id,e.line_provider_scope AS employee_line_provider_scope,cl.name AS company_name FROM hr_cases c JOIN employees e ON e.id=c.employee_id JOIN clients cl ON cl.id=c.client_id WHERE c.id=?1`).bind(caseId).first();
-  await notifyHrCaseRecipients(env,row).catch(error=>console.error(JSON.stringify({level:'error',event:'hr_case_notify_failed',case_id:caseId,message:String(error?.message||error)})));
-  await pushHrCaseSubmittedConfirmation(env,row).catch(()=>{});
-  return json({ok:true,case:{id:caseId,code:`HR-${String(caseId).padStart(4,'0')}`,subject,status:'open',attachments:rawFiles.length}},201);
+
+  const notifyTask=(async()=>{
+    await notifyHrCaseRecipients(env,row).catch(error=>console.error(JSON.stringify({level:'error',event:'hr_case_notify_failed',case_id:caseId,message:String(error?.message||error)})));
+    await pushHrCaseSubmittedConfirmation(env,row).catch(error=>console.error(JSON.stringify({level:'error',event:'hr_case_confirmation_failed',case_id:caseId,message:String(error?.message||error)})));
+  })();
+  if(ctx?.waitUntil)ctx.waitUntil(notifyTask);else await notifyTask;
+
+  return json({ok:true,case:{id:caseId,code:`HR-${String(caseId).padStart(4,'0')}`,subject,status:'open',attachments:0}},201);
+}
+
+async function uploadPublicHrCaseAttachment(request,env,token){
+  const access=await getEmployeePortalAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์หมดอายุ กรุณากลับไปที่ LINE แล้วกด “แจ้ง HR” ใหม่'},401);
+  let form;try{form=await request.formData();}catch{return json({error:'อ่านไฟล์ไม่ได้ กรุณาลองใหม่'},400);}
+  const caseId=Number(form.get('case_id')||0);
+  const file=form.get('attachment');
+  if(!caseId||!file||typeof file!=='object'||typeof file.arrayBuffer!=='function'||Number(file.size||0)<=0)return json({error:'ไม่พบไฟล์ที่ต้องการอัปโหลด'},400);
+  const row=await env.DB.prepare(`SELECT id FROM hr_cases WHERE id=?1 AND client_id=?2 AND employee_id=?3`).bind(caseId,Number(access.client_id),Number(access.employee_id)).first();
+  if(!row)return json({error:'ไม่พบเรื่องแจ้ง HR นี้'},404);
+  if(Number(file.size||0)>10*1024*1024)return json({error:`ไฟล์ ${file.name||''} ใหญ่เกิน 10 MB`},413);
+  const allowed=String(file.type||'').startsWith('image/')||['application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(String(file.type||''));
+  if(!allowed)return json({error:`ไฟล์ ${file.name||''} ไม่รองรับ กรุณาใช้รูป, PDF, DOC หรือ DOCX`},415);
+  const fileName=String(file.name||`attachment-${Date.now()}`);
+  const fileSize=Number(file.size||0);
+  const existing=await env.DB.prepare(`SELECT id,storage_provider FROM hr_case_attachments WHERE case_id=?1 AND file_name=?2 AND file_size=?3 ORDER BY id DESC LIMIT 1`).bind(caseId,fileName,fileSize).first().catch(()=>null);
+  if(existing)return json({ok:true,attachment:{id:Number(existing.id),file_name:fileName,already_uploaded:true}});
+  try{
+    await storeHrCaseAttachmentBinary(env,{clientId:Number(access.client_id),caseId,bytes:await file.arrayBuffer(),fileName,contentType:String(file.type||'application/octet-stream'),fileSize});
+  }catch(error){
+    console.error(JSON.stringify({level:'error',event:'hr_case_attachment_failed',case_id:caseId,file:fileName,message:String(error?.message||error)}));
+    return json({error:safeHrCaseUploadError(error)},503);
+  }
+  const saved=await env.DB.prepare(`SELECT id,storage_provider,drive_url FROM hr_case_attachments WHERE case_id=?1 AND file_name=?2 AND file_size=?3 ORDER BY id DESC LIMIT 1`).bind(caseId,fileName,fileSize).first().catch(()=>null);
+  return json({ok:true,attachment:{id:Number(saved?.id||0),file_name:fileName,storage_provider:saved?.storage_provider||null,drive_url:saved?.drive_url||null}},201);
+}
+
+function safeHrCaseUploadError(error){
+  const message=String(error?.message||error||'');
+  if(/ยังไม่ได้เชื่อม Google Drive|ที่เก็บไฟล์สำรอง/i.test(message))return 'ส่งเรื่องสำเร็จแล้ว แต่ยังอัปโหลดไฟล์ไม่ได้ เพราะที่เก็บเอกสารยังไม่พร้อม กรุณาแจ้ง HR ให้ตรวจ Google Drive';
+  if(/token|unauthor|invalid_grant|google/i.test(message))return 'ส่งเรื่องสำเร็จแล้ว แต่ Google Drive เชื่อมต่อมีปัญหา กรุณาให้ HR เชื่อม Google ใหม่';
+  return 'ส่งเรื่องสำเร็จแล้ว แต่ไฟล์แนบอัปโหลดไม่สำเร็จ กรุณาลองแนบใหม่ภายหลังหรือติดต่อ HR';
 }
 
 async function storeHrCaseAttachmentBinary(env,{clientId,caseId,bytes,fileName,contentType,fileSize}){
