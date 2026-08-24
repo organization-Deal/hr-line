@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.27" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.28" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -194,6 +194,7 @@
         <button class="nav-item" data-view="attendance"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>เวลาเข้างาน</span></button>
         <button class="nav-item" data-view="leave"><svg viewBox="0 0 24 24"><path d="M6 4v3M18 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12H4V7a1 1 0 0 1 1-1Z"/></svg><span>การลา</span></button>
         <button class="nav-item" data-view="requests"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H8l-3 3V5Z"/><path d="M8 9h8M8 12h5"/></svg><span>Employee Service</span></button>
+        <button id="hrInboxNav" class="nav-item" data-view="hr-inbox"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="m4 7 8 6 8-6"/><path d="M16.5 4.5 19 7l-2.5 2.5"/></svg><span>แจ้ง HR</span><i class="nav-alert hidden" id="hrInboxNavCount">0</i></button>
 
         <p class="nav-label">คนและทีม</p>
         <button class="nav-item" data-view="employees"><svg viewBox="0 0 24 24"><path d="M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 10A3.5 3.5 0 1 0 9.5 3a3.5 3.5 0 0 0 0 7ZM18 8v6M21 11h-6"/></svg><span>พนักงาน</span></button>
@@ -387,6 +388,28 @@
             <div id="leaveCalendar" class="leave-calendar"></div>
           </article>
         </div>
+      </section>
+
+      <section id="view-hr-inbox" class="view">
+        <div class="page-intro">
+          <div><p class="kicker">CONFIDENTIAL HR INBOX</p><h1>แจ้งเรื่องถึง HR</h1><p>เรื่องส่วนตัว คำร้องเรียน และปัญหาที่พนักงานส่งถึง HR โดยตรง เห็นเฉพาะ Owner / HR Admin / HR</p></div>
+          <div class="page-actions"><span id="hrInboxOpenBadge" class="badge badge-warning">0 เรื่องเปิด</span></div>
+        </div>
+        <div class="service-summary-grid hr-inbox-summary">
+          <article class="service-summary-card"><span>🔒</span><div><small>เรื่องที่ยังเปิดอยู่</small><strong id="hrInboxOpenCount">0</strong><p>Open / In progress / Waiting employee</p></div></article>
+          <article class="service-summary-card"><span>⚠️</span><div><small>เรื่องเร่งด่วน</small><strong id="hrInboxUrgentCount">0</strong><p>Priority สูงหรือด่วน</p></div></article>
+          <article class="service-summary-card"><span>✅</span><div><small>ปิดแล้ว</small><strong id="hrInboxClosedCount">0</strong><p>Resolved / Closed</p></div></article>
+        </div>
+        <article class="panel">
+          <div class="panel-head hr-inbox-toolbar">
+            <div><p class="kicker">PRIVATE CASES</p><h3>รายการแจ้งจากพนักงาน</h3><p class="panel-subtitle">กดแต่ละเรื่องเพื่อดูรายละเอียด หลักฐาน อัปเดตสถานะ และตอบกลับพนักงาน</p></div>
+            <div class="page-actions hr-inbox-filters">
+              <input id="hrInboxSearch" class="search-input compact" type="search" placeholder="ค้นหาชื่อพนักงาน / หัวข้อ / หมวด" />
+              <select id="hrInboxStatusFilter"><option value="all">ทุกสถานะ</option><option value="open">รับเรื่องแล้ว</option><option value="in_progress">กำลังดำเนินการ</option><option value="waiting_employee">รอพนักงาน</option><option value="resolved">แก้ไขแล้ว</option><option value="closed">ปิดเรื่อง</option></select>
+            </div>
+          </div>
+          <div id="hrInboxList" class="hr-case-list hr-inbox-list"></div>
+        </article>
       </section>
 
       <section id="view-requests" class="view">

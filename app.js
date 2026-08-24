@@ -1845,8 +1845,43 @@ function renderEmployeeService(){
 
   const broadcastRoot=$('#broadcastList');
   if(broadcastRoot) broadcastRoot.innerHTML=broadcasts.length?broadcasts.slice(0,8).map(b=>`<article class="broadcast-row"><div><strong>${escapeHtml(b.title)}</strong><p>${escapeHtml(b.message)}</p><small>${formatDateTime(b.created_at)} · ${escapeHtml(b.audience_type==='all'?'ทุกคน':b.audience_type==='department'?'เฉพาะแผนก':'เลือกพนักงาน')}</small></div><div class="broadcast-stats"><span class="badge ${b.status==='sent'?'badge-success':b.status==='partial'?'badge-warning':'badge-neutral'}">${escapeHtml(b.status)}</span><small>${Number(b.delivered_count||0)}/${Number(b.total_recipients||0)} ส่งสำเร็จ</small>${b.status==='draft'?`<button class="text-btn" onclick="window.sendBroadcastById(${Number(b.id)})">ส่งตอนนี้</button>`:''}</div></article>`).join(''):emptyState('ยังไม่มีประกาศ','ส่งประกาศจาก HR เข้า LINE ของพนักงานได้จากปุ่มด้านบน');
+  renderHrInbox();
 }
 
+function renderHrInbox(){
+  const role=String(activeCompanyRole()||'');
+  const isHr=['owner','co_owner','primary_owner','hr_admin','hr'].includes(role);
+  const nav=$('#hrInboxNav');
+  if(nav) nav.classList.toggle('hidden',!isHr);
+  if(!isHr) return;
+  const cases=state.hrCases||[];
+  const open=cases.filter(c=>!['resolved','closed'].includes(String(c.status))).length;
+  const urgent=cases.filter(c=>!['resolved','closed'].includes(String(c.status))&&['urgent','high'].includes(String(c.priority))).length;
+  const closed=cases.filter(c=>['resolved','closed'].includes(String(c.status))).length;
+  if($('#hrInboxNavCount')){ $('#hrInboxNavCount').textContent=String(open); $('#hrInboxNavCount').classList.toggle('hidden',open===0); }
+  if($('#hrInboxOpenBadge')) $('#hrInboxOpenBadge').textContent=`${open} เรื่องเปิด`;
+  if($('#hrInboxOpenCount')) $('#hrInboxOpenCount').textContent=String(open);
+  if($('#hrInboxUrgentCount')) $('#hrInboxUrgentCount').textContent=String(urgent);
+  if($('#hrInboxClosedCount')) $('#hrInboxClosedCount').textContent=String(closed);
+  renderHrInboxList();
+}
+function renderHrInboxList(){
+  const root=$('#hrInboxList'); if(!root) return;
+  const q=String($('#hrInboxSearch')?.value||'').trim().toLowerCase();
+  const status=String($('#hrInboxStatusFilter')?.value||'all');
+  const rows=(state.hrCases||[]).filter(c=>{
+    if(status!=='all'&&String(c.status)!==status)return false;
+    if(!q)return true;
+    return [c.subject,c.detail,c.category,c.nickname,c.first_name,c.last_name,c.department_name].some(v=>String(v||'').toLowerCase().includes(q));
+  });
+  const statusLabels={open:'รับเรื่องแล้ว',in_progress:'กำลังดำเนินการ',waiting_employee:'รอพนักงาน',resolved:'แก้ไขแล้ว',closed:'ปิดเรื่อง'};
+  const priorityLabels={urgent:'ด่วน',high:'สูง',normal:'ปกติ',low:'ต่ำ'};
+  root.innerHTML=rows.length?rows.map(c=>{
+    const priorityClass=c.priority==='urgent'?'badge-danger':c.priority==='high'?'badge-warning':'badge-neutral';
+    const category=escapeHtml(c.category||'เรื่องส่วนตัว');
+    return `<button class="hr-case-row hr-inbox-case-row" type="button" onclick="window.openHrCase(${Number(c.id)})"><div class="hr-case-id"><span class="badge ${priorityClass}">${escapeHtml(priorityLabels[c.priority]||'ส่วนตัว')}</span><strong>#HR-${String(c.id).padStart(4,'0')}</strong></div><div class="hr-case-copy"><div class="hr-case-title-line"><strong>${escapeHtml(c.subject)}</strong><span class="badge badge-soft">${category}</span></div><p>${escapeHtml(c.detail)}</p><small>${escapeHtml(c.nickname||c.first_name||'พนักงาน')}${c.department_name?` · ${escapeHtml(c.department_name)}`:''} · ${formatDateTime(c.created_at)}</small></div><span class="badge ${['resolved','closed'].includes(c.status)?'badge-success':'badge-soft'}">${escapeHtml(statusLabels[c.status]||c.status)}</span></button>`;
+  }).join(''):emptyState(q||status!=='all'?'ไม่พบเรื่องที่ค้นหา':'ยังไม่มีเรื่องแจ้ง HR','เมื่อพนักงานส่งฟอร์ม “แจ้ง HR” รายการจะเข้าหน้านี้อัตโนมัติ');
+}
 function renderBroadcastAudienceFields(){
   const mode=$('#broadcastAudience').value;
   $('#broadcastDepartmentField').classList.toggle('hidden',mode!=='department');
@@ -2809,6 +2844,7 @@ function attentionCopy(item) {
     probation: `มีพนักงาน ${item.count} คนใกล้ครบ Probation`,
     contract: `มีสัญญาพนักงาน ${item.count} รายการใกล้หมด`,
     candidate: `มีผู้สมัคร ${item.count} คนที่ควร Follow up`,
+    hr_private: `แจ้งเรื่องส่วนตัวถึง HR ${item.count} เรื่อง`,
     request: `มีคำขอ HR ค้างอยู่ ${item.count} รายการ`,
   };
   return copies[item.key] || item.label;
@@ -2821,17 +2857,19 @@ function attentionHelp(key) {
     probation: 'เตรียมส่งแบบประเมินให้ Manager',
     contract: 'เช็กการต่อสัญญาก่อนถึงวันหมดอายุ',
     candidate: 'ผู้สมัครไม่มี Activity มากกว่า 3 วัน',
+    hr_private: 'เปิดดูเรื่องร้องเรียนหรือเรื่องส่วนตัวที่พนักงานส่งถึง HR',
     request: 'คำขอจากพนักงานที่ยังไม่ได้ปิดงาน',
   })[key] || 'เปิดดูรายละเอียดและดำเนินการต่อ';
 }
 
 function attentionTarget(key) {
-  return ({ missing: 'attendance', leave_pending: 'leave', probation: 'employees', contract: 'employees', candidate: 'recruitment', request: 'requests' })[key];
+  return ({ missing: 'attendance', leave_pending: 'leave', probation: 'employees', contract: 'employees', candidate: 'recruitment', hr_private: 'hr-inbox', request: 'requests' })[key];
 }
 
 function attentionTone(item) {
   if (item.key === 'missing') return 'coral';
   if (['leave_pending', 'probation', 'contract'].includes(item.key)) return 'warning';
+  if (item.key === 'hr_private') return 'coral';
   if (item.key === 'request') return 'info';
   return '';
 }
