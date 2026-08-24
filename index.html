@@ -894,6 +894,11 @@
       <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ปิด</button><button type="button" id="hrCaseSaveBtn" class="primary-btn">บันทึกและตอบกลับ</button></div></form>
   </dialog>
 
+  <div id="actionStatus" class="action-status hidden" role="status" aria-live="polite" aria-atomic="true">
+    <span id="actionStatusIcon" class="action-status-icon"><i class="action-status-spinner" aria-hidden="true"></i></span>
+    <span class="action-status-copy"><strong id="actionStatusTitle">กำลังบันทึก…</strong><small id="actionStatusText">กรุณารอสักครู่</small></span>
+  </div>
+
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
   <script src="/app.js?v=1.0-p7.5" type="module"></script>
 
