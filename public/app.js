@@ -50,7 +50,8 @@ let bootWatchdog = null;
 let onboardingRefreshInFlight = false;
 function isLineInAppBrowser(){const ua=String(navigator.userAgent||'');return /(?:^|[;\s])Line\/[0-9]|LIFF/i.test(ua);}
 function setBootStatus(message,showRetry=false){const text=$('#bootStatusText');if(text)text.textContent=message;$('#bootRetryBtn')?.classList.toggle('hidden',!showRetry);}
-function startBootWatchdog(){clearTimeout(bootWatchdog);setBootStatus('กำลังเปิดระบบ HR…',false);bootWatchdog=setTimeout(()=>{if(!$('#bootSplash')?.classList.contains('hidden'))setBootStatus('เครือข่ายตอบช้ากว่าปกติ',true);},7000);}
+function initBootLogo(){const logo=$('#bootLogo');if(!logo)return;const markMissing=()=>logo.classList.add('is-missing');logo.addEventListener('error',markMissing,{once:true});if(logo.complete&&logo.naturalWidth===0)markMissing();}
+function startBootWatchdog(){clearTimeout(bootWatchdog);setBootStatus('กำลังเตรียมพื้นที่ทำงานของคุณ',false);bootWatchdog=setTimeout(()=>{if(!$('#bootSplash')?.classList.contains('hidden'))setBootStatus('เครือข่ายตอบช้ากว่าปกติ',true);},7000);}
 function stopBootWatchdog(){clearTimeout(bootWatchdog);bootWatchdog=null;}
 
 const DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
