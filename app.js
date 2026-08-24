@@ -403,6 +403,8 @@ function bindEvents() {
   $('#companyProfileShortcut').onclick = openCompanyProfileModal;
   $('#statusCompanyAction').onclick = openCompanyProfileModal;
   $('#companyProfileSaveBtn').onclick = saveCompanyProfile;
+  $('#companyLogoFile').onchange = handleCompanyLogoFile;
+  $('#companyLogoRemoveBtn').onclick = removeCompanyLogo;
   $('#googleWorkspaceShortcut').onclick = () => document.querySelector('#googleWorkspaceSection')?.scrollIntoView({behavior:'smooth',block:'start'});
   $('#googleWorkspaceConnectBtn').onclick = connectGoogleWorkspace;
   $('#googleWorkspaceSyncBtn').onclick = syncGoogleWorkspace;
@@ -488,7 +490,6 @@ function bindEvents() {
       openSettingsCategory(target, { scroll: false });
     };
   });
-  $('#settingsBackBtn').onclick = () => showSettingsHome();
   $('#settingsPayrollOpenBtn').onclick = openPayrollSettingsModal;
 
   $('#addEmployeeBtn').onclick = openEmployeeModal;
@@ -888,13 +889,13 @@ function renderIdentity() {
   if (active) {
     $('#sidebarCompany').textContent = active.name;
     $('#sidebarRole').textContent = roleLabel(active.role);
-    $('#companyAvatar').textContent = (active.name || 'N').trim().slice(0, 1).toUpperCase();
+    const companyAvatar=$('#companyAvatar'); const companyLogo=active.logo_data_url||''; companyAvatar.textContent=companyLogo?'':(active.name||'N').trim().slice(0,1).toUpperCase(); companyAvatar.classList.toggle('has-logo',Boolean(companyLogo)); companyAvatar.style.backgroundImage=companyLogo?`url("${String(companyLogo).replace(/"/g,'%22')}")`:'';
   }
 
   $('#companyMenu').innerHTML = memberships.map(company => `
     <div class="company-menu-row ${Number(company.id) === Number(me.active_company_id) ? 'active' : ''}">
       <button class="company-menu-item" data-company-id="${Number(company.id)}" role="menuitem">
-        <span class="company-menu-avatar">${escapeHtml((company.name || 'N').slice(0,1).toUpperCase())}</span>
+        <span class="company-menu-avatar ${company.logo_data_url?'has-logo':''}" ${company.logo_data_url?`style="background-image:url('${String(company.logo_data_url).replace(/'/g,'%27')}')"`:''}>${company.logo_data_url?'':escapeHtml((company.name||'N').slice(0,1).toUpperCase())}</span>
         <span><strong>${escapeHtml(company.name)}</strong><small>${escapeHtml(roleLabel(company.role))} · ${Number(company.employee_count||0)} คน${company.duplicate_name?` · Workspace #${Number(company.id)}`:''}</small></span>
         ${Number(company.id) === Number(me.active_company_id) ? '<b>✓</b>' : ''}
       </button>
@@ -954,14 +955,40 @@ function openCompanyProfileModal() {
   $('#companyProfileWorkEnd').value = profile.work_end || '18:00';
   $('#companyProfileLateGrace').value = profile.late_grace_minutes ?? 10;
   $('#companyProfileTimezone').value = profile.timezone || 'Asia/Bangkok';
+  if ($('#companyLogoFile')) $('#companyLogoFile').value='';
+  renderCompanyLogoEditor(profile.logo_data_url || '');
   $('#companyProfileModal').showModal();
+}
+
+function renderCompanyLogoEditor(dataUrl='') {
+  const preview=$('#companyLogoPreview'); if(!preview)return;
+  preview.innerHTML=dataUrl?`<img src="${String(dataUrl).replace(/"/g,'%22')}" alt="โลโก้บริษัท"/>`:'<span>โลโก้</span>';
+  preview.dataset.current=dataUrl||'';
+  $('#companyLogoRemoveBtn')?.classList.toggle('hidden',!dataUrl);
+}
+
+async function fileToDataUrl(file){
+  return await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||''));reader.onerror=()=>reject(new Error('อ่านไฟล์โลโก้ไม่สำเร็จ'));reader.readAsDataURL(file);});
+}
+
+async function handleCompanyLogoFile(){
+  const file=$('#companyLogoFile')?.files?.[0]; if(!file)return;
+  if(!['image/png','image/jpeg','image/webp'].includes(file.type))return toast('รองรับเฉพาะ PNG, JPG และ WebP',true);
+  if(file.size>512*1024){$('#companyLogoFile').value='';return toast('โลโก้ต้องมีขนาดไม่เกิน 512 KB',true);}
+  try{const dataUrl=await fileToDataUrl(file);renderCompanyLogoEditor(dataUrl);$('#companyLogoPreview').dataset.pending=dataUrl;}catch(error){toast(error.message,true);}
+}
+
+async function removeCompanyLogo(){
+  const button=$('#companyLogoRemoveBtn');button.disabled=true;
+  try{await api('/api/company-logo',{method:'DELETE'}); if(state.companyProfile)state.companyProfile.logo_data_url=''; const active=activeCompany();if(active)active.logo_data_url=''; renderCompanyLogoEditor('');renderIdentity();toast('ลบโลโก้บริษัทแล้ว');}
+  catch(error){toast(error.message,true);}finally{button.disabled=false;}
 }
 
 async function saveCompanyProfile() {
   const body={name:$('#companyProfileName').value.trim(),work_start:$('#companyProfileWorkStart').value,work_end:$('#companyProfileWorkEnd').value,late_grace_minutes:Number($('#companyProfileLateGrace').value||0),timezone:$('#companyProfileTimezone').value.trim()||'Asia/Bangkok'};
   if(body.name.length<2)return toast('กรุณาใส่ชื่อบริษัท',true);
   const button=$('#companyProfileSaveBtn');button.disabled=true;button.textContent='กำลังบันทึก…';
-  try{const result=await api('/api/company-profile',{method:'PATCH',body:JSON.stringify(body)});state.companyProfile=result.company;const active=activeCompany();if(active)active.name=result.company.name;$('#companyProfileModal').close();renderIdentity();renderSettings();toast('บันทึกข้อมูลบริษัทแล้ว');}
+  try{let result=await api('/api/company-profile',{method:'PATCH',body:JSON.stringify(body)});const pending=$('#companyLogoPreview')?.dataset?.pending||'';if(pending){const logoResult=await api('/api/company-logo',{method:'PUT',body:JSON.stringify({data_url:pending})});result.company.logo_data_url=logoResult.logo_data_url||pending;delete $('#companyLogoPreview').dataset.pending;}state.companyProfile=result.company;const active=activeCompany();if(active){active.name=result.company.name;active.logo_data_url=result.company.logo_data_url||active.logo_data_url||'';}$('#companyProfileModal').close();renderIdentity();renderSettings();toast('บันทึกข้อมูลบริษัทแล้ว');}
   catch(error){toast(error.message,true);}finally{button.disabled=false;button.textContent='บันทึกข้อมูลบริษัท';}
 }
 

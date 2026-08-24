@@ -1462,3 +1462,14 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
 .people-config-item svg{stroke-width:1.55!important}
 .people-config-item span{font-weight:500}
 @media(max-width:720px){.nakna-metric-icon{width:40px!important;height:40px!important;border-radius:13px!important}.nakna-metric-icon svg{width:19px;height:19px}.service-summary-card{grid-template-columns:40px minmax(0,1fr)}}
+
+/* P7.35 brand + company logo */
+.brand-logo-image{overflow:hidden;background:#fff!important;border:1px solid #e1ece9!important;}
+.brand-logo-image img{width:100%;height:100%;object-fit:contain;display:block;}
+.brand-logo-image.logo-fallback::after{content:'น';display:grid;place-items:center;width:100%;height:100%;background:#178b8b;color:#fff;font-weight:700;}
+.company-avatar.has-logo,.company-menu-avatar.has-logo{background-size:cover!important;background-position:center!important;background-repeat:no-repeat!important;color:transparent!important;}
+.company-logo-editor{display:flex;gap:16px;align-items:center;padding:14px;border:1px solid #dce7e4;border-radius:18px;background:#f8fbfa;}
+.company-logo-preview{width:76px;height:76px;flex:0 0 76px;border-radius:18px;background:#e9f4f1;border:1px solid #d5e6e1;display:grid;place-items:center;overflow:hidden;color:#178b8b;font-weight:700;}
+.company-logo-preview img{width:100%;height:100%;object-fit:cover;display:block;}
+.company-logo-actions{display:grid;gap:7px;min-width:0;flex:1}.company-logo-actions input[type=file]{width:100%;font-size:12px}.company-logo-actions small{color:#81908f;font-size:11px}.company-logo-actions .text-btn{justify-self:start;padding:0;}
+@media(max-width:700px){.company-logo-editor{align-items:flex-start}.company-logo-preview{width:64px;height:64px;flex-basis:64px;border-radius:16px}}
