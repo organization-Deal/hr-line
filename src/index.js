@@ -1426,7 +1426,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.21', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.22', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1680,7 +1680,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.21', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.22', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -1790,8 +1790,13 @@ async function handleApi(request, env, url, auth, ctx) {
       ON CONFLICT(client_id,user_id) DO UPDATE SET role=excluded.role,status='active',updated_at=CURRENT_TIMESTAMP`)
       .bind(clientId,Number(targetUser.id),role).run();
     await safeAudit(env.DB,clientId,'user',String(auth.user.id),'company.access.grant','user',String(targetUser.id),{role,employee_id:employeeId}).catch(()=>{});
+    // Tell the recipient immediately in LINE so the new access is not invisible.
+    // This is best-effort: granting access must still succeed even when LINE push is unavailable.
+    await notifyCompanyAccessGranted(env,{clientId,targetUser,employee,role}).catch(error=>{
+      console.warn(JSON.stringify({level:'warn',event:'company_access_notify_failed',client_id:clientId,user_id:Number(targetUser.id),message:String(error?.message||error)}));
+    });
     AUTH_CACHE.clear();
-    return json({ ok:true, user_id:Number(targetUser.id), role });
+    return json({ ok:true, user_id:Number(targetUser.id), role, notified_line:Boolean(employee.line_user_id||targetUser.line_user_id) });
   }
 
   const companyAccessDeleteMatch = path.match(/^\/api\/company-access\/(\d+)$/);
@@ -3354,6 +3359,23 @@ async function processLineEvent(event, env, lineCtx) {
       if(ownerAccess) return replyLineMessages(accessToken,event.replyToken,[buildOwnerDashboardFlex(ownerAccess)]);
     }
 
+    // HR/Owner may not have an employee row. Handle the reject-reason continuation
+    // before employee-only routing so direct-to-HR leave approvals work for pure admin accounts.
+    const adminSession=await getLineSession(env.DB,sessionKey);
+    if(adminSession?.action==='leave_hr_reject_reason'){
+      try{
+        const requestId=Number(adminSession.payload?.request_id||0);
+        const admin=await resolveLineLeaveAdmin(env,lineCtx,lineUserId,requestId);
+        if(!admin) throw httpError('คุณไม่มีสิทธิ์จัดการคำขอลานี้',403);
+        const result=await decideLeaveRequest(env,requestId,'rejected',{actorType:'user',actorUserId:Number(admin.user.id),reason:text,clientId:Number(admin.row.client_id),enforceApprover:false});
+        await clearLineSession(env.DB,sessionKey);
+        return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('บันทึกผลเรียบร้อยแล้ว',`ไม่อนุมัติคำขอ #LV-${String(result.id).padStart(4,'0')} · ${text}`,'success')]);
+      }catch(e){
+        if(String(e?.message||'').includes('ไม่ได้รออนุมัติแล้ว')) await clearLineSession(env.DB,sessionKey);
+        return replyLine(accessToken,event.replyToken,`❌ ${e.message}`);
+      }
+    }
+
     const emp=await employee();
     if(!emp) return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ยังไม่ได้เชื่อมบัญชี','ถ้าคุณเป็นเจ้าของบริษัทหรือ HR ให้พิมพ์ “เชื่อมธุรกิจ”\nถ้าคุณเป็นพนักงาน ให้เปิดลิงก์เชิญเข้าทีมที่ HR ส่งให้','warning')]);
     const session=await getLineSession(env.DB,sessionKey);
@@ -3459,8 +3481,25 @@ async function processLineEvent(event, env, lineCtx) {
   }
 
   if(event.type==='postback'){
-    const emp=await employee(); if(!emp) return replyLine(accessToken,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
     const data=new URLSearchParams(event.postback?.data||''); const action=data.get('action');
+
+    // Direct HR/Owner approval cards are account-level actions and must work even
+    // when that administrator is not registered as an employee in this Workspace.
+    if(action==='leave_hr_approve'||action==='leave_hr_reject'){
+      const requestId=Number(data.get('id')||0);
+      try{
+        const admin=await resolveLineLeaveAdmin(env,lineCtx,lineUserId,requestId);
+        if(!admin) throw httpError('คุณไม่มีสิทธิ์จัดการคำขอลานี้',403);
+        if(action==='leave_hr_approve'){
+          const result=await decideLeaveRequest(env,requestId,'approved',{actorType:'user',actorUserId:Number(admin.user.id),clientId:Number(admin.row.client_id),enforceApprover:false});
+          return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('อนุมัติเรียบร้อยแล้ว',`คำขอ #LV-${String(result.id).padStart(4,'0')} ถูกอนุมัติแล้ว`,'success')]);
+        }
+        await setLineSession(env.DB,sessionKey,'leave_hr_reject_reason',{request_id:requestId,client_id:Number(admin.row.client_id)});
+        return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ระบุเหตุผลที่ไม่อนุมัติ','พิมพ์เหตุผลส่งเป็นข้อความถัดไป นากนะจะแจ้งกลับให้พนักงานทันที','coral')]);
+      }catch(e){return replyLine(accessToken,event.replyToken,`❌ ${e.message}`);}
+    }
+
+    const emp=await employee(); if(!emp) return replyLine(accessToken,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
     if(action==='menu') return replyLineMessages(accessToken,event.replyToken,[await buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp)]);
     if(action==='checkin'||action==='checkout'){ await setLineSession(env.DB,sessionKey,action); return replyLineWithLocationQuickReply(accessToken,event.replyToken,`📍 ส่ง Location ปัจจุบันมาเพื่อ${action==='checkin'?'เช็กอิน':'เช็กเอาต์'}`); }
     if(action==='leave_menu') return sendLeaveTypeMenu(env,event.replyToken,emp,accessToken);
@@ -4129,7 +4168,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.21',
+    version:'1.0-P7.22',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -5287,15 +5326,53 @@ async function serveSharedEvidence(env,token){
 
 async function notifyLeaveApprover(env,requestId){
   const row=await getLeaveRequestDetail(env.DB,requestId); if(!row||row.status!=='pending') return;
-  if(!row.approver_employee_id||!row.approver_line_user_id){
-    console.info(JSON.stringify({level:'info',event:'leave_routed_to_hr_dashboard',request_id:requestId,client_id:row.client_id}));
-    return;
-  }
   const profile=await getEmployeeLeaveProfile(env.DB,Number(row.employee_id),Number(row.client_id),Number(String(row.start_date).slice(0,4)));
   const balance=profile.balances.find(x=>Number(x.id)===Number(row.policy_id));
   let evidenceUrl=null; if(Number(row.evidence_count)>0) evidenceUrl=await createEvidenceShareUrl(env,requestId);
+  if(!row.approver_employee_id||!row.approver_line_user_id){
+    console.info(JSON.stringify({level:'info',event:'leave_routed_to_hr_line',request_id:requestId,client_id:row.client_id}));
+    await notifyDirectHrLeaveRequest(env,{...row,balance,evidence_url:evidenceUrl});
+    return;
+  }
   const token=await getAccessTokenForProviderScope(env,Number(row.client_id),row.approver_line_provider_scope); if(!token)return;
   await pushLineMessages(token,row.approver_line_user_id,[buildLeaveApprovalFlex({...row,balance,evidence_url:evidenceUrl})]);
+}
+
+async function resolveLineLeaveAdmin(env,lineCtx,lineUserId,requestId){
+  const row=await getLeaveRequestDetail(env.DB,Number(requestId));
+  if(!row||row.status!=='pending') throw httpError('คำขอนี้ไม่ได้รออนุมัติแล้ว',409);
+  // These account-level cards are only for requests routed directly to HR/Owner.
+  if(row.approver_employee_id) return null;
+  const providerScope=String(lineCtx?.providerScope||'default');
+  const user=await findLineBusinessUser(env.DB,providerScope,lineUserId).catch(()=>null);
+  if(!user?.id) return null;
+  const member=await env.DB.prepare(`SELECT role FROM company_members WHERE client_id=?1 AND user_id=?2 AND status='active' LIMIT 1`)
+    .bind(Number(row.client_id),Number(user.id)).first();
+  if(!member||!['owner','hr_admin','hr'].includes(String(member.role||'').toLowerCase())) return null;
+  return {row,user,role:String(member.role||'')};
+}
+
+async function notifyDirectHrLeaveRequest(env,row){
+  const recipients=(await env.DB.prepare(`
+    SELECT DISTINCT u.id AS user_id,u.line_user_id,u.line_provider_scope,m.role
+    FROM company_members m
+    JOIN users u ON u.id=m.user_id AND u.status='active'
+    WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','hr_admin','hr')
+      AND u.line_user_id IS NOT NULL
+  `).bind(Number(row.client_id)).all()).results||[];
+  const seen=new Set();
+  for(const recipient of recipients){
+    const scope=String(recipient.line_provider_scope||'default');
+    const key=`${scope}:${recipient.line_user_id}`;
+    // Do not send a card that lets the requester approve their own leave.
+    if(recipient.line_user_id===row.employee_line_user_id && scope===String(row.employee_line_provider_scope||'default')) continue;
+    if(seen.has(key)) continue;
+    seen.add(key);
+    const token=await getAccessTokenForProviderScope(env,Number(row.client_id),scope); if(!token) continue;
+    await pushLineMessages(token,recipient.line_user_id,[buildHrLeaveApprovalFlex(row,recipient.role)]).catch(error=>{
+      console.warn(JSON.stringify({level:'warn',event:'leave_hr_push_failed',request_id:Number(row.id),user_id:Number(recipient.user_id),message:String(error?.message||error)}));
+    });
+  }
 }
 
 async function notifyEmployeeEvidenceRequired(env,requestId){
@@ -5314,12 +5391,22 @@ async function notifyLeaveDecision(env,row){
 }
 
 async function notifyHrLeaveDecision(env,row,actorEmployeeId){
-  const hrRows=(await env.DB.prepare(`SELECT DISTINCT e.id,e.line_user_id,e.line_provider_scope FROM employees e
-    JOIN employee_permissions p ON p.employee_id=e.id AND p.client_id=e.client_id
-    WHERE e.client_id=?1 AND e.status='active' AND e.line_user_id IS NOT NULL AND p.permission_key='hr_request.approve' AND e.id<>?2`).bind(Number(row.client_id),Number(actorEmployeeId||0)).all()).results||[];
-  for(const hr of hrRows){
-    const token=await getAccessTokenForProviderScope(env,Number(row.client_id),hr.line_provider_scope); if(!token)continue;
-    await pushLineMessages(token,hr.line_user_id,[buildHrLeaveDecisionNoticeFlex(row)]);
+  const [employeeHr,accountHr]=await env.DB.batch([
+    env.DB.prepare(`SELECT DISTINCT e.line_user_id,e.line_provider_scope FROM employees e
+      JOIN employee_permissions p ON p.employee_id=e.id AND p.client_id=e.client_id
+      WHERE e.client_id=?1 AND e.status='active' AND e.line_user_id IS NOT NULL AND p.permission_key='hr_request.approve' AND e.id<>?2`).bind(Number(row.client_id),Number(actorEmployeeId||0)),
+    env.DB.prepare(`SELECT DISTINCT u.line_user_id,u.line_provider_scope FROM company_members m JOIN users u ON u.id=m.user_id
+      WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','hr_admin','hr') AND u.status='active' AND u.line_user_id IS NOT NULL`).bind(Number(row.client_id))
+  ]);
+  const recipients=[...(employeeHr.results||[]),...(accountHr.results||[])];
+  const seen=new Set();
+  for(const hr of recipients){
+    const scope=String(hr.line_provider_scope||'default');
+    const key=`${scope}:${hr.line_user_id}`;
+    if(seen.has(key)) continue;
+    seen.add(key);
+    const token=await getAccessTokenForProviderScope(env,Number(row.client_id),scope); if(!token)continue;
+    await pushLineMessages(token,hr.line_user_id,[buildHrLeaveDecisionNoticeFlex(row)]).catch(()=>{});
   }
 }
 
@@ -5599,6 +5686,64 @@ function buildOwnerDashboardFlex(ownerAccess){
     ],
     footer:[linePrimaryButton('เปิด Dashboard',{type:'uri',label:'เปิด Dashboard',uri:ownerAccess.dashboardUrl})]
   })};
+}
+
+function buildCompanyAccessGrantedFlex({companyName,role,dashboardUrl}){
+  const isOwner=String(role||'')==='owner';
+  const roleLabel=isOwner?'Owner · เจ้าของร่วม':'HR Admin';
+  return {type:'flex',altText:`คุณได้รับสิทธิ์ ${roleLabel} · ${companyName}`,contents:lineBubble({
+    eyebrow:'WORKSPACE ACCESS',
+    title:'ได้รับสิทธิ์ใหม่แล้ว 🎉',
+    subtitle:companyName||'บริษัทของคุณ',
+    status:roleLabel,
+    statusTone:'success',
+    body:[
+      lineInfoCard([
+        lineInfoRow('บริษัท',companyName||'—'),
+        lineInfoRow('สิทธิ์',roleLabel,LINE_CI.primary)
+      ],'teal'),
+      lineText(isOwner?'คุณสามารถจัดการบริษัท พนักงาน Payroll เอกสาร และการตั้งค่าหลักได้':'คุณสามารถเข้าจัดการงาน HR ของ Workspace นี้ตามสิทธิ์ผู้ดูแลได้','xs',LINE_CI.muted)
+    ],
+    footer:[linePrimaryButton('เปิด HR Dashboard',{type:'uri',label:'เปิด HR Dashboard',uri:dashboardUrl})]
+  })};
+}
+
+function buildHrLeaveApprovalFlex(row,role='hr_admin'){
+  const remaining=row.balance?.remaining_days;
+  const body=[lineInfoCard([
+    lineInfoRow('พนักงาน',row.nickname||row.first_name||'—'),
+    lineInfoRow('ประเภท',row.leave_type_name||row.leave_type||'—'),
+    lineInfoRow('ช่วง',formatLeaveRange(row)),
+    lineInfoRow('จำนวน',`${Number(row.duration_days||0)} วัน`),
+    ...(remaining==null?[]:[lineInfoRow('สิทธิ์คงเหลือหลังจอง',`${Number(remaining)} วัน`)]),
+    lineInfoRow('ส่งถึง','HR / Owner',LINE_CI.primary)
+  ],'teal')];
+  if(row.reason) body.push(lineText(`เหตุผล: ${row.reason}`,'xs',LINE_CI.text));
+  if(row.evidence_url) body.push(lineSecondaryButton('ดูหลักฐาน',{type:'uri',label:'ดูหลักฐาน',uri:row.evidence_url},LINE_CI.mintSoft));
+  body.push(lineText('ไม่มีผู้อนุมัติรายบุคคล คำขอนี้จึงส่งตรงถึง Owner / HR Admin','xxs',LINE_CI.muted));
+  return {type:'flex',altText:`คำขอลาใหม่จาก ${row.nickname||row.first_name}`,contents:lineBubble({
+    eyebrow:`คำขอ #LV-${String(row.id).padStart(4,'0')}`,
+    title:'มีคำขอลารอ HR อนุมัติ',
+    subtitle:`${row.nickname||row.first_name} · ${row.leave_type_name||row.leave_type}`,
+    status:String(role||'').toLowerCase()==='owner'?'Owner':'HR Admin',
+    statusTone:'warning',
+    body,
+    footer:[
+      linePrimaryButton('อนุมัติ',{type:'postback',label:'อนุมัติ',data:`action=leave_hr_approve&id=${row.id}`}),
+      lineDangerButton('ไม่อนุมัติ',{type:'postback',label:'ไม่อนุมัติ',data:`action=leave_hr_reject&id=${row.id}`})
+    ]
+  })};
+}
+
+async function notifyCompanyAccessGranted(env,{clientId,targetUser,employee,role}){
+  const lineUserId=employee?.line_user_id||targetUser?.line_user_id;
+  if(!lineUserId) return false;
+  const scope=String(employee?.line_provider_scope||targetUser?.line_provider_scope||'default');
+  const token=await getAccessTokenForProviderScope(env,Number(clientId),scope); if(!token) return false;
+  const company=await env.DB.prepare('SELECT name FROM clients WHERE id=?1').bind(Number(clientId)).first();
+  const dashboardUrl=await issueLineWebLoginLink(env,Number(targetUser.id),{clientId:Number(clientId),purpose:'dashboard'});
+  await pushLineMessages(token,lineUserId,[buildCompanyAccessGrantedFlex({companyName:company?.name||'บริษัทของคุณ',role,dashboardUrl})]);
+  return true;
 }
 function buildEmployeeStatusFlex(emp,a){
   const hasIn=Boolean(a?.check_in_at), hasOut=Boolean(a?.check_out_at), isLeave=a?.status==='leave';
