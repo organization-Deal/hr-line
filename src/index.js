@@ -1426,7 +1426,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.14', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.15', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1576,6 +1576,10 @@ async function handleApi(request, env, url, auth, ctx) {
   const clientId = auth.clientId ? Number(auth.clientId) : null;
 
   if (path === '/api/me' && method === 'GET') {
+    auth = await reconcileAccountIdentity(env, auth).catch(error => {
+      console.warn(JSON.stringify({level:'warn',event:'account_identity_reconcile_failed',message:String(error?.message||error)}));
+      return auth;
+    });
     const memberships = await getMemberships(env.DB, auth.user.id);
     const claimable = memberships.length ? null : await getClaimableLegacyCompany(env.DB);
     return json({
@@ -1676,7 +1680,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.14', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.15', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -1732,6 +1736,29 @@ async function handleApi(request, env, url, auth, ctx) {
       .bind(nextClientId, Number(auth.user.id)).run();
     AUTH_CACHE.clear();
     return withCookie(json({ ok: true, client_id: nextClientId, synced_sessions: true }), companyCookie(nextClientId));
+  }
+
+
+  const companyDeleteMatch = path.match(/^\/api\/companies\/(\d+)$/);
+  if (companyDeleteMatch && method === 'DELETE') {
+    const deleteClientId = Number(companyDeleteMatch[1]);
+    const body = await safeJson(request);
+    const row = await env.DB.prepare(`SELECT c.id,c.name,m.role,(SELECT COUNT(*) FROM employees e WHERE e.client_id=c.id AND e.status!='deleted') AS employee_count FROM clients c JOIN company_members m ON m.client_id=c.id WHERE c.id=?1 AND m.user_id=?2 AND m.status='active' LIMIT 1`)
+      .bind(deleteClientId, Number(auth.user.id)).first();
+    if (!row) return json({ error: 'ไม่พบบริษัทหรือคุณไม่มีสิทธิ์' }, 404);
+    if (String(row.role||'') !== 'owner') return json({ error: 'เฉพาะ Owner เท่านั้นที่ลบบริษัทได้' }, 403);
+    const confirmName=String(body.confirm_name||'').trim();
+    if (confirmName !== String(row.name||'').trim()) return json({ error: 'กรุณาพิมพ์ชื่อบริษัทให้ตรงเพื่อยืนยันการลบ' }, 400);
+    await safeAudit(env.DB,deleteClientId,'user',String(auth.user.id),'company.delete','client',String(deleteClientId),{name:row.name,employee_count:Number(row.employee_count||0)}).catch(()=>{});
+    await env.DB.prepare('DELETE FROM clients WHERE id=?1').bind(deleteClientId).run();
+    const next = await env.DB.prepare(`SELECT client_id FROM company_members WHERE user_id=?1 AND status='active' ORDER BY id DESC LIMIT 1`).bind(Number(auth.user.id)).first();
+    const nextClientId=next?.client_id?Number(next.client_id):null;
+    await env.DB.prepare(`UPDATE auth_sessions SET selected_client_id=?1,last_seen_at=CURRENT_TIMESTAMP WHERE user_id=?2 AND expires_at>CURRENT_TIMESTAMP`)
+      .bind(nextClientId,Number(auth.user.id)).run();
+    AUTH_CACHE.clear();
+    const response=json({ok:true,deleted_client_id:deleteClientId,next_client_id:nextClientId});
+    response.headers.append('Set-Cookie', nextClientId ? companyCookie(nextClientId) : clearCookie('nakna_company'));
+    return response;
   }
 
   if (path === '/api/company-profile' && method === 'GET') {
@@ -3857,7 +3884,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.14',
+    version:'1.0-P7.15',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -5637,6 +5664,7 @@ async function authorizeUser(request, env, { requireCompany = true } = {}) {
   const session = await env.DB.prepare(`
     SELECT s.token_hash, s.user_id, s.selected_client_id, s.expires_at, s.last_seen_at,
            u.google_sub, u.email, u.name, u.picture_url, u.locale, u.status,
+           u.line_user_id, u.line_provider_scope, u.auth_provider,
            cm.role AS selected_role, cm.status AS selected_member_status
     FROM auth_sessions s
     JOIN users u ON u.id=s.user_id
@@ -5696,6 +5724,9 @@ async function authorizeUser(request, env, { requireCompany = true } = {}) {
       name: session.name,
       picture_url: session.picture_url,
       locale: session.locale,
+      line_user_id: session.line_user_id || null,
+      line_provider_scope: session.line_provider_scope || null,
+      auth_provider: session.auth_provider || (String(session.email||'').endsWith('@nakna.local') ? 'line' : 'google'),
     },
   };
   AUTH_CACHE.set(cacheKey, { expiresAt: Date.now() + AUTH_CACHE_TTL_MS, auth });
@@ -5712,6 +5743,13 @@ async function authorizeUser(request, env, { requireCompany = true } = {}) {
 async function startGoogleLogin(request, env) {
   assertGoogleConfig(env);
   const state = randomToken(32);
+  const url = new URL(request.url);
+  const wantsLink = url.searchParams.get('link') === '1';
+  let linkMode = false;
+  if (wantsLink) {
+    const current = await authorizeUser(request, env, { requireCompany: false }).catch(()=>null);
+    linkMode = Boolean(current?.ok);
+  }
 
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
@@ -5721,7 +5759,9 @@ async function startGoogleLogin(request, env) {
     state,
     prompt: 'select_account',
   });
-  return redirectResponse(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, [oauthStateCookie('nakna_oauth_state', state, 600)]);
+  const cookies=[oauthStateCookie('nakna_oauth_state', state, 600)];
+  if(linkMode) cookies.push(googleLinkModeCookie(600));
+  return redirectResponse(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, cookies);
 }
 
 async function finishGoogleLogin(request, env) {
@@ -5757,6 +5797,22 @@ async function finishGoogleLogin(request, env) {
   if (!profile?.sub || !profile?.email || profile.email_verified === false) {
     console.warn(JSON.stringify({ level: 'warn', event: 'google_oauth_failed', stage: 'profile_validation' }));
     return json({ error: 'GOOGLE_PROFILE_INVALID', stage: 'profile_validation' }, 400);
+  }
+
+  const linkMode = getCookie(request,'nakna_google_link') === '1';
+  if(linkMode){
+    const currentAuth=await authorizeUser(request,env,{requireCompany:false}).catch(()=>null);
+    if(currentAuth?.ok){
+      try{
+        const linked=await linkGoogleProfileToAccount(env,currentAuth,profile);
+        const response=redirectResponse(`${appOrigin(request,env)}/?account=linked`,[clearCookie('nakna_oauth_state'),clearCookie('nakna_google_link')]);
+        if(linked?.clientId) response.headers.append('Set-Cookie',companyCookie(linked.clientId));
+        return response;
+      }catch(error){
+        console.error(JSON.stringify({level:'error',event:'google_account_link_failed',message:String(error?.message||error)}));
+        return redirectResponse(`${appOrigin(request,env)}/?account_error=link`,[clearCookie('nakna_oauth_state'),clearCookie('nakna_google_link')]);
+      }
+    }
   }
 
   let user;
@@ -5797,7 +5853,7 @@ async function finishGoogleLogin(request, env) {
     return json({ error: 'DB_SESSION_CREATE_FAILED', stage: 'db_session', detail }, 500);
   }
 
-  const cookies = [sessionCookie(sessionToken), clearCookie('nakna_oauth_state')];
+  const cookies = [sessionCookie(sessionToken), clearCookie('nakna_oauth_state'), clearCookie('nakna_google_link')];
   if (firstMembership) cookies.push(companyCookie(Number(firstMembership.client_id)));
   return redirectResponse(`${appOrigin(request, env)}/?auth=success`, cookies);
 }
@@ -6033,6 +6089,7 @@ async function finishGoogleWorkspaceConnection(request, env, ctx) {
   try {
     const tokens = await exchangeGoogleCode(code, oauthRedirectUri(request, env, '/integrations/google-workspace/callback'), env);
     const profile = await fetchGoogleProfile(tokens.access_token);
+    auth = await linkGoogleProfileToAccount(env,auth,profile).catch(error=>{console.warn(JSON.stringify({level:'warn',event:'workspace_account_link_skip',message:String(error?.message||error)}));return auth;});
     const current = await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1`).bind(Number(auth.clientId)).first();
     let previous = null;
     if (current?.encrypted_tokens) { try { previous = await decryptJson(current.encrypted_tokens, key); } catch {} }
@@ -6467,6 +6524,129 @@ async function fetchGoogleProfile(accessToken) {
   return data;
 }
 
+
+const ACCOUNT_ROLE_PRIORITY={owner:100,hr_admin:90,hr:80,manager:60,approver:50,employee:20,viewer:10};
+function strongerAccountRole(a,b){return (ACCOUNT_ROLE_PRIORITY[String(a||'')]||0)>=(ACCOUNT_ROLE_PRIORITY[String(b||'')]||0)?String(a||'employee'):String(b||'employee');}
+function isSyntheticNaknaUser(user){return String(user?.email||'').endsWith('@nakna.local')||String(user?.google_sub||'').startsWith('line:');}
+
+async function mergeUserAccounts(env,{sourceUserId,canonicalUserId,preferredClientId=null}={}){
+  const sourceId=Number(sourceUserId),canonicalId=Number(canonicalUserId);
+  if(!sourceId||!canonicalId||sourceId===canonicalId)return canonicalId;
+  await ensureLineBusinessOnboardingReady(env.DB);
+  const [source,canonical]=await Promise.all([
+    env.DB.prepare('SELECT * FROM users WHERE id=?1').bind(sourceId).first(),
+    env.DB.prepare('SELECT * FROM users WHERE id=?1').bind(canonicalId).first(),
+  ]);
+  if(!source||!canonical)throw new Error('ACCOUNT_MERGE_USER_NOT_FOUND');
+  const memberships=(await env.DB.prepare(`SELECT client_id,role,status FROM company_members WHERE user_id=?1 AND status='active'`).bind(sourceId).all()).results||[];
+  for(const row of memberships){
+    const existing=await env.DB.prepare(`SELECT id,role FROM company_members WHERE user_id=?1 AND client_id=?2 LIMIT 1`).bind(canonicalId,Number(row.client_id)).first();
+    if(existing){
+      await env.DB.prepare(`UPDATE company_members SET role=?1,status='active',updated_at=CURRENT_TIMESTAMP WHERE id=?2`).bind(strongerAccountRole(existing.role,row.role),Number(existing.id)).run();
+    }else{
+      await env.DB.prepare(`INSERT INTO company_members (client_id,user_id,role,status) VALUES (?1,?2,?3,'active')`).bind(Number(row.client_id),canonicalId,String(row.role||'employee')).run();
+    }
+  }
+  await env.DB.prepare(`UPDATE company_members SET status='merged',updated_at=CURRENT_TIMESTAMP WHERE user_id=?1 AND status='active'`).bind(sourceId).run();
+
+  const sourceGmail=await env.DB.prepare(`SELECT id FROM gmail_connections WHERE user_id=?1`).bind(sourceId).first().catch(()=>null);
+  if(sourceGmail){
+    const canonicalGmail=await env.DB.prepare(`SELECT id FROM gmail_connections WHERE user_id=?1`).bind(canonicalId).first().catch(()=>null);
+    if(canonicalGmail)await env.DB.prepare(`DELETE FROM gmail_connections WHERE user_id=?1`).bind(sourceId).run().catch(()=>{});
+    else await env.DB.prepare(`UPDATE gmail_connections SET user_id=?1,updated_at=CURRENT_TIMESTAMP WHERE user_id=?2`).bind(canonicalId,sourceId).run().catch(()=>{});
+  }
+
+  const updateUserRefs=[
+    ['auth_sessions','user_id'],['oauth_states','user_id'],['line_web_login_tokens','user_id'],['line_admin_login_tokens','user_id'],
+    ['company_onboarding','owner_user_id'],['google_workspace_integrations','connected_by_user_id'],['line_integrations','connected_by_user_id']
+  ];
+  for(const [table,column] of updateUserRefs){
+    try{await env.DB.prepare(`UPDATE ${table} SET ${column}=?1 WHERE ${column}=?2`).bind(canonicalId,sourceId).run();}catch{}
+  }
+  try{await env.DB.prepare(`UPDATE employee_permissions SET granted_by_user_id=?1 WHERE granted_by_user_id=?2`).bind(canonicalId,sourceId).run();}catch{}
+
+  const lineUserId=canonical.line_user_id||source.line_user_id||null;
+  const lineScope=canonical.line_provider_scope||source.line_provider_scope||null;
+  const provider=lineUserId?'google+line':(canonical.auth_provider||'google');
+  await env.DB.prepare(`UPDATE users SET line_user_id=?1,line_provider_scope=?2,auth_provider=?3,status='active',updated_at=CURRENT_TIMESTAMP WHERE id=?4`)
+    .bind(lineUserId,lineScope,provider,canonicalId).run();
+  await env.DB.prepare(`UPDATE users SET line_user_id=NULL,line_provider_scope=NULL,auth_provider='merged',status='merged',updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(sourceId).run();
+
+  let selected=preferredClientId?Number(preferredClientId):null;
+  if(selected){
+    const canUse=await env.DB.prepare(`SELECT 1 AS ok FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(canonicalId,selected).first();
+    if(!canUse)selected=null;
+  }
+  if(!selected){
+    const first=await env.DB.prepare(`SELECT client_id FROM company_members WHERE user_id=?1 AND status='active' ORDER BY id DESC LIMIT 1`).bind(canonicalId).first();
+    selected=first?.client_id?Number(first.client_id):null;
+  }
+  await env.DB.prepare(`UPDATE auth_sessions SET selected_client_id=?1,last_seen_at=CURRENT_TIMESTAMP WHERE user_id=?2 AND expires_at>CURRENT_TIMESTAMP`).bind(selected,canonicalId).run();
+  AUTH_CACHE.clear();
+  return canonicalId;
+}
+
+async function promoteLineUserToGoogle(env,user,profile){
+  const email=String(profile?.email||'').trim().toLowerCase();
+  const sub=String(profile?.sub||'').trim();
+  if(!email||!sub)throw new Error('GOOGLE_PROFILE_INVALID');
+  await env.DB.prepare(`UPDATE users SET google_sub=?1,email=?2,name=COALESCE(?3,name),picture_url=COALESCE(?4,picture_url),locale=COALESCE(?5,locale),auth_provider=CASE WHEN line_user_id IS NOT NULL THEN 'google+line' ELSE 'google' END,status='active',updated_at=CURRENT_TIMESTAMP WHERE id=?6`)
+    .bind(sub,email,profile.name||null,profile.picture||null,profile.locale||null,Number(user.id)).run();
+  AUTH_CACHE.clear();
+  return Number(user.id);
+}
+
+async function linkGoogleProfileToAccount(env,auth,profile){
+  await ensureLineBusinessOnboardingReady(env.DB);
+  const current=await env.DB.prepare('SELECT * FROM users WHERE id=?1').bind(Number(auth.user.id)).first();
+  if(!current)throw new Error('CURRENT_USER_NOT_FOUND');
+  const email=String(profile?.email||'').trim().toLowerCase();
+  const sub=String(profile?.sub||'').trim();
+  if(!email||!sub)throw new Error('GOOGLE_PROFILE_INVALID');
+  const existing=await env.DB.prepare(`SELECT * FROM users WHERE id<>?1 AND status='active' AND (google_sub=?2 OR lower(email)=?3) ORDER BY CASE WHEN google_sub=?2 THEN 0 ELSE 1 END,id LIMIT 1`)
+    .bind(Number(current.id),sub,email).first();
+  let canonicalId;
+  if(existing?.id){
+    canonicalId=Number(existing.id);
+    await mergeUserAccounts(env,{sourceUserId:Number(current.id),canonicalUserId:canonicalId,preferredClientId:auth.clientId});
+    if(current.line_user_id&&!existing.line_user_id){
+      await env.DB.prepare(`UPDATE users SET line_user_id=?1,line_provider_scope=?2,auth_provider='google+line',updated_at=CURRENT_TIMESTAMP WHERE id=?3`).bind(current.line_user_id,current.line_provider_scope||'default',canonicalId).run();
+    }
+  }else{
+    canonicalId=await promoteLineUserToGoogle(env,current,profile);
+  }
+  await env.DB.prepare(`UPDATE users SET name=COALESCE(?1,name),picture_url=COALESCE(?2,picture_url),locale=COALESCE(?3,locale),status='active',updated_at=CURRENT_TIMESTAMP WHERE id=?4`)
+    .bind(profile.name||null,profile.picture||null,profile.locale||null,canonicalId).run();
+  const fresh=await env.DB.prepare('SELECT * FROM users WHERE id=?1').bind(canonicalId).first();
+  const member=auth.clientId?await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(canonicalId,Number(auth.clientId)).first():null;
+  AUTH_CACHE.clear();
+  return {...auth,user:fresh,role:member?.role||auth.role,clientId:auth.clientId||null};
+}
+
+async function reconcileAccountIdentity(env,auth){
+  await ensureLineBusinessOnboardingReady(env.DB);
+  let current=await env.DB.prepare('SELECT * FROM users WHERE id=?1').bind(Number(auth.user.id)).first();
+  if(!current)return auth;
+  let resolvedClientId=auth.clientId?Number(auth.clientId):null;
+  if(!isSyntheticNaknaUser(current)){
+    const shadow=await env.DB.prepare(`SELECT u.id,g.client_id FROM google_workspace_integrations g JOIN users u ON u.id=g.connected_by_user_id WHERE u.id<>?1 AND u.status='active' AND (g.google_sub=?2 OR lower(g.email)=lower(?3)) ORDER BY g.updated_at DESC LIMIT 1`)
+      .bind(Number(current.id),String(current.google_sub||''),String(current.email||'')).first().catch(()=>null);
+    if(shadow?.id){
+      resolvedClientId=Number(shadow.client_id||resolvedClientId||0)||null;
+      await mergeUserAccounts(env,{sourceUserId:Number(shadow.id),canonicalUserId:Number(current.id),preferredClientId:resolvedClientId});
+    }
+  }else{
+    const integration=await env.DB.prepare(`SELECT google_sub,email FROM google_workspace_integrations WHERE connected_by_user_id=?1 AND status='connected' ORDER BY updated_at DESC LIMIT 1`).bind(Number(current.id)).first().catch(()=>null);
+    if(integration?.email&&integration?.google_sub){
+      const profile={sub:integration.google_sub,email:integration.email,name:current.name,picture:current.picture_url,locale:current.locale};
+      return await linkGoogleProfileToAccount(env,auth,profile);
+    }
+  }
+  const fresh=await env.DB.prepare('SELECT * FROM users WHERE id=?1').bind(Number(current.id)).first();
+  const member=resolvedClientId?await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(Number(current.id),resolvedClientId).first():null;
+  return {...auth,user:fresh||auth.user,clientId:resolvedClientId,role:member?.role||auth.role};
+}
+
 async function getMemberships(db, userId) {
   const result = await db.prepare(`
     SELECT c.id, c.name, c.code, m.role,
@@ -6511,7 +6691,17 @@ async function createCompanyForUser(db, auth, name) {
 
 function publicUser(user) {
   const email=String(user.email||'');
-  return { id:user.id, email:email.endsWith('@nakna.local')?null:email, name:user.name, picture_url:user.picture_url, locale:user.locale };
+  const publicEmail=email.endsWith('@nakna.local')?null:email;
+  return {
+    id:user.id,
+    email:publicEmail,
+    name:user.name,
+    picture_url:user.picture_url,
+    locale:user.locale,
+    auth_provider:user.auth_provider|| (publicEmail?'google':'line'),
+    line_connected:Boolean(user.line_user_id),
+    google_connected:Boolean(publicEmail && !String(user.google_sub||'').startsWith('line:')),
+  };
 }
 
 function publicCompanyProfile(client){return {id:client.id,name:client.name,code:client.code,timezone:client.timezone,work_start:client.work_start,work_end:client.work_end,late_grace_minutes:Number(client.late_grace_minutes||0)};}
@@ -6568,6 +6758,10 @@ function setupModeCookie(mode='new') {
 
 function oauthStateCookie(name, state, maxAge) {
   return `${name}=${encodeURIComponent(state)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+}
+
+function googleLinkModeCookie(maxAge=600) {
+  return `nakna_google_link=1; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 }
 
 function clearCookie(name) {
