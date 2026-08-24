@@ -1426,7 +1426,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.23', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.24', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1692,7 +1692,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.23', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.24', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -4023,24 +4023,53 @@ async function ensureEmployeeNaknaUser(db, employee){
 
 function isOwnerDashboardCommand(text){
   const normalized=String(text||'').trim().toLowerCase().replace(/\s+/g,' ');
-  return ['แดชบอร์ด','dashboard','เปิด dashboard','เปิดแดชบอร์ด','owner dashboard','เจ้าของ','โหมดเจ้าของ','จัดการบริษัท'].includes(normalized);
+  return ['แดชบอร์ด','dashboard','เปิด dashboard','เปิดแดชบอร์ด','owner dashboard','เจ้าของ','โหมดเจ้าของ','จัดการบริษัท','ฝั่งบริหาร','โหมดบริหาร','ฝ่ายบริหาร','hr','hr admin','ผู้ดูแลระบบ'].includes(normalized);
 }
 
-async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId){
+function lineManagementRoleLabel(role){
+  const value=String(role||'').toLowerCase();
+  if(value==='owner') return 'Owner';
+  if(value==='hr_admin') return 'HR Admin';
+  if(value==='hr') return 'HR';
+  return 'ผู้ดูแล';
+}
+
+async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId,preferredClientId=null){
   const providerScope=String(lineCtx?.providerScope||'default');
-  const user=await findLineBusinessUser(env.DB,providerScope,lineUserId).catch(()=>null);
+  let user=await findLineBusinessUser(env.DB,providerScope,lineUserId).catch(()=>null);
+
+  // Legacy employee rows may have LINE linked before the Nakna account layer existed.
+  // Backfill the account on demand so Owner/HR permissions are visible in the same LINE card.
+  if(!user?.id){
+    const params=[String(lineUserId),providerScope];
+    let query=`SELECT e.* FROM employees e WHERE e.line_user_id=?1 AND COALESCE(e.line_provider_scope,'default')=?2 AND e.status='active'`;
+    if(Number(preferredClientId||0)>0){ query+=` AND e.client_id=?3`; params.push(Number(preferredClientId)); }
+    query+=` ORDER BY e.id DESC LIMIT 1`;
+    const employeeRow=await env.DB.prepare(query).bind(...params).first().catch(()=>null);
+    if(employeeRow) user=await ensureEmployeeNaknaUser(env.DB,employeeRow).catch(()=>null);
+  }
   if(!user?.id) return null;
+
   const memberships=await getLineBusinessMemberships(env.DB,Number(user.id));
-  const owned=memberships.filter(row=>String(row.role||'').toLowerCase()==='owner');
-  if(!owned.length) return null;
-  const primary=owned[0];
+  const managed=memberships.filter(row=>['owner','hr_admin','hr'].includes(String(row.role||'').toLowerCase()));
+  if(!managed.length) return null;
+
+  const preferred=Number(preferredClientId||0)>0 ? managed.find(row=>Number(row.id)===Number(preferredClientId)) : null;
+  const primary=preferred||managed[0];
   const dashboardUrl=await issueLineWebLoginLink(env,Number(user.id),{clientId:Number(primary.id),purpose:'dashboard'});
-  return {user,primary,businesses:owned,dashboardUrl};
+  return {
+    user,
+    primary,
+    businesses:managed,
+    dashboardUrl,
+    role:String(primary.role||'').toLowerCase(),
+    roleLabel:lineManagementRoleLabel(primary.role),
+  };
 }
 
 async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const [ownerAccess,leaveToken]=await Promise.all([
-    getLineOwnerDashboardAccess(env,lineCtx,lineUserId).catch(()=>null),
+    getLineOwnerDashboardAccess(env,lineCtx,lineUserId,Number(emp.client_id)).catch(()=>null),
     issueEmployeePortalToken(env.DB,Number(emp.client_id),Number(emp.id)).catch(()=>null),
   ]);
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
@@ -4185,7 +4214,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.23',
+    version:'1.0-P7.24',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -5734,18 +5763,18 @@ function buildWelcomeFlex(name,company){
 }
 function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null){
   const name=emp.nickname||emp.first_name;
-  const isOwner=Boolean(ownerAccess?.dashboardUrl&&ownerAccess?.primary);
-  const ownerCompany=ownerAccess?.primary?.name||'';
-  const footer=isOwner?[
-    linePrimaryButton('Dashboard เจ้าของ',{type:'uri',label:'Dashboard เจ้าของ',uri:ownerAccess.dashboardUrl})
+  const hasManagement=Boolean(ownerAccess?.dashboardUrl&&ownerAccess?.primary);
+  const managementCompany=ownerAccess?.primary?.name||emp.company_name||'';
+  const roleLabel=ownerAccess?.roleLabel||lineManagementRoleLabel(ownerAccess?.role);
+  const footer=hasManagement?[
+    lineText('สำหรับผู้บริหาร / HR','xs',LINE_CI.primaryDark,'bold'),
+    lineText(`${roleLabel} · ${managementCompany||'ธุรกิจของคุณ'}`,'xxs',LINE_CI.muted,'regular'),
+    linePrimaryButton('เปิด HR Dashboard',{type:'uri',label:'เปิด HR Dashboard',uri:ownerAccess.dashboardUrl})
   ]:[];
-  return {type:'flex',altText:isOwner?'เมนู Owner + พนักงาน · นากนะ':'เมนูพนักงาน · นากนะ',contents:lineBubble({
-    eyebrow:isOwner?'นากนะ · OWNER + EMPLOYEE':'นากนะ · EMPLOYEE',title:`สวัสดี ${name} 👋`,subtitle:emp.company_name||'',
+  return {type:'flex',altText:hasManagement?`เมนูพนักงาน + ${roleLabel} · นากนะ`:'เมนูพนักงาน · นากนะ',contents:lineBubble({
+    eyebrow:hasManagement?`นากนะ · EMPLOYEE + ${String(roleLabel).toUpperCase()}`:'นากนะ · EMPLOYEE',title:`สวัสดี ${name} 👋`,subtitle:emp.company_name||'',
     body:[
-      ...(isOwner?[lineInfoCard([
-        lineInfoRow('โหมดเจ้าของ',ownerCompany||'ธุรกิจของคุณ',LINE_CI.primary),
-        lineText('บัญชี LINE นี้เป็นได้ทั้ง Owner และพนักงาน โดยไม่ต้องถอดสิทธิ์พนักงาน','xxs',LINE_CI.muted)
-      ],'teal')]:[]),
+      lineText('เมนูพนักงาน','xs',LINE_CI.primaryDark,'bold'),
       lineText('จัดการเรื่องงานประจำวันได้จากตรงนี้','sm',LINE_CI.muted),
       linePrimaryButton('📍  เช็กอิน',{type:'postback',label:'เช็กอิน',data:'action=checkin'}),
       lineSecondaryButton('🏠  เช็กเอาต์',{type:'postback',label:'เช็กเอาต์',data:'action=checkout'}),
@@ -5764,17 +5793,18 @@ function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null){
 function buildOwnerDashboardFlex(ownerAccess){
   const primary=ownerAccess?.primary||{};
   const count=Array.isArray(ownerAccess?.businesses)?ownerAccess.businesses.length:1;
-  return {type:'flex',altText:'Owner Dashboard · นากนะ',contents:lineBubble({
-    eyebrow:'นากนะ · OWNER',title:'Dashboard เจ้าของ',subtitle:primary.name||'ธุรกิจของคุณ',status:'Owner',statusTone:'success',
+  const roleLabel=ownerAccess?.roleLabel||lineManagementRoleLabel(ownerAccess?.role);
+  return {type:'flex',altText:`${roleLabel} Dashboard · นากนะ`,contents:lineBubble({
+    eyebrow:`นากนะ · ${String(roleLabel).toUpperCase()}`,title:'HR Dashboard',subtitle:primary.name||'ธุรกิจของคุณ',status:roleLabel,statusTone:'success',
     body:[
       lineInfoCard([
         lineInfoRow('ธุรกิจ',primary.name||'—'),
-        lineInfoRow('สิทธิ์','Owner',LINE_CI.primary),
-        ...(count>1?[lineInfoRow('ธุรกิจที่เป็นเจ้าของ',`${count} ธุรกิจ`)]:[])
+        lineInfoRow('สิทธิ์',roleLabel,LINE_CI.primary),
+        ...(count>1?[lineInfoRow('ธุรกิจที่ดูแล',`${count} ธุรกิจ`)]:[])
       ],'teal'),
-      lineText('กดปุ่มด้านล่างเพื่อเปิด HR Dashboard ลิงก์มีอายุ 15 นาทีและใช้ได้ครั้งเดียว','xs',LINE_CI.muted)
+      lineText('เปิด Dashboard เพื่อจัดการพนักงาน เวลา การลา เอกสาร Payroll และการตั้งค่าตามสิทธิ์ของคุณ','xs',LINE_CI.muted)
     ],
-    footer:[linePrimaryButton('เปิด Dashboard',{type:'uri',label:'เปิด Dashboard',uri:ownerAccess.dashboardUrl})]
+    footer:[linePrimaryButton('เปิด HR Dashboard',{type:'uri',label:'เปิด HR Dashboard',uri:ownerAccess.dashboardUrl})]
   })};
 }
 
