@@ -1426,7 +1426,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.17', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.18', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1680,7 +1680,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.17', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.18', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -1736,6 +1736,80 @@ async function handleApi(request, env, url, auth, ctx) {
       .bind(nextClientId, Number(auth.user.id)).run();
     AUTH_CACHE.clear();
     return withCookie(json({ ok: true, client_id: nextClientId, synced_sessions: true }), companyCookie(nextClientId));
+  }
+
+  if (path === '/api/company-access' && method === 'GET') {
+    if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
+    if (String(auth.role || '') !== 'owner') return json({ error: 'เฉพาะ Owner เท่านั้นที่จัดการเจ้าของร่วมและผู้ดูแลระบบได้' }, 403);
+    await ensureLineBusinessOnboardingReady(env.DB);
+    const members = (await env.DB.prepare(`
+      SELECT m.user_id,m.role,m.status,m.created_at,u.name,u.email,u.picture_url,u.line_user_id,u.line_provider_scope,u.auth_provider
+      FROM company_members m
+      JOIN users u ON u.id=m.user_id
+      WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','hr_admin')
+      ORDER BY CASE m.role WHEN 'owner' THEN 0 ELSE 1 END,m.id
+    `).bind(clientId).all()).results || [];
+    const employees = (await env.DB.prepare(`
+      SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.avatar_url,e.line_user_id,e.line_provider_scope,e.status,
+        COALESCE(
+          (SELECT u.id FROM users u WHERE u.status='active' AND e.line_user_id IS NOT NULL AND u.line_user_id=e.line_user_id AND COALESCE(u.line_provider_scope,'default')=COALESCE(e.line_provider_scope,'default') LIMIT 1),
+          (SELECT u.id FROM users u WHERE u.status='active' AND e.email IS NOT NULL AND TRIM(e.email)<>'' AND LOWER(u.email)=LOWER(e.email) LIMIT 1)
+        ) AS account_user_id
+      FROM employees e
+      WHERE e.client_id=?1 AND e.status!='deleted'
+      ORDER BY COALESCE(e.nickname,e.first_name),e.id
+    `).bind(clientId).all()).results || [];
+    const roleByUser = new Map(members.map(row => [Number(row.user_id), String(row.role || '')]));
+    return json({
+      members: members.map(row => ({...row,is_me:Number(row.user_id)===Number(auth.user.id)})),
+      eligible_employees: employees.map(row => ({...row,current_role:row.account_user_id?roleByUser.get(Number(row.account_user_id))||null:null,linked:Boolean(row.account_user_id)})),
+      current_user_id: Number(auth.user.id),
+    });
+  }
+
+  if (path === '/api/company-access' && method === 'POST') {
+    if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
+    if (String(auth.role || '') !== 'owner') return json({ error: 'เฉพาะ Owner เท่านั้นที่เพิ่มเจ้าของร่วมหรือ HR Admin ได้' }, 403);
+    await ensureLineBusinessOnboardingReady(env.DB);
+    const body = await safeJson(request);
+    const employeeId = Number(body.employee_id || 0);
+    const role = ['owner','hr_admin'].includes(String(body.role || '')) ? String(body.role) : 'owner';
+    const employee = await env.DB.prepare(`SELECT * FROM employees WHERE id=?1 AND client_id=?2 AND status!='deleted'`).bind(employeeId,clientId).first();
+    if (!employee) return json({ error: 'ไม่พบพนักงานในบริษัทนี้' }, 404);
+    let targetUser = null;
+    if (employee.line_user_id) {
+      targetUser = await env.DB.prepare(`SELECT * FROM users WHERE status='active' AND line_user_id=?1 AND COALESCE(line_provider_scope,'default')=COALESCE(?2,'default') LIMIT 1`)
+        .bind(String(employee.line_user_id), employee.line_provider_scope || 'default').first();
+    }
+    if (!targetUser && employee.email) {
+      targetUser = await env.DB.prepare(`SELECT * FROM users WHERE status='active' AND LOWER(email)=LOWER(?1) LIMIT 1`).bind(String(employee.email).trim()).first();
+    }
+    if (!targetUser?.id) return json({ error: 'พนักงานคนนี้ยังไม่มีบัญชีนากนะ กรุณาให้เชื่อม LINE หรือเข้าสู่ระบบด้วย Google ก่อน แล้วค่อยเพิ่มสิทธิ์ Owner' }, 409);
+    await env.DB.prepare(`INSERT INTO company_members (client_id,user_id,role,status,created_at,updated_at)
+      VALUES (?1,?2,?3,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      ON CONFLICT(client_id,user_id) DO UPDATE SET role=excluded.role,status='active',updated_at=CURRENT_TIMESTAMP`)
+      .bind(clientId,Number(targetUser.id),role).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'company.access.grant','user',String(targetUser.id),{role,employee_id:employeeId}).catch(()=>{});
+    AUTH_CACHE.clear();
+    return json({ ok:true, user_id:Number(targetUser.id), role });
+  }
+
+  const companyAccessDeleteMatch = path.match(/^\/api\/company-access\/(\d+)$/);
+  if (companyAccessDeleteMatch && method === 'DELETE') {
+    if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
+    if (String(auth.role || '') !== 'owner') return json({ error: 'เฉพาะ Owner เท่านั้นที่ถอนสิทธิ์ได้' }, 403);
+    const targetUserId = Number(companyAccessDeleteMatch[1]);
+    if (targetUserId === Number(auth.user.id)) return json({ error: 'ไม่สามารถถอนสิทธิ์ Owner ของตัวเองจากหน้าจอนี้ ให้ Owner คนอื่นเป็นผู้ถอนสิทธิ์แทน' }, 400);
+    const target = await env.DB.prepare(`SELECT * FROM company_members WHERE client_id=?1 AND user_id=?2 AND status='active' LIMIT 1`).bind(clientId,targetUserId).first();
+    if (!target) return json({ error:'ไม่พบสิทธิ์ของบัญชีนี้' },404);
+    if (String(target.role||'') === 'owner') {
+      const ownerCount = await env.DB.prepare(`SELECT COUNT(*) AS n FROM company_members WHERE client_id=?1 AND role='owner' AND status='active'`).bind(clientId).first();
+      if (Number(ownerCount?.n||0) <= 1) return json({ error:'บริษัทต้องมี Owner อย่างน้อย 1 คน' },400);
+    }
+    await env.DB.prepare(`UPDATE company_members SET status='revoked',updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND user_id=?2`).bind(clientId,targetUserId).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'company.access.revoke','user',String(targetUserId),{previous_role:target.role}).catch(()=>{});
+    AUTH_CACHE.clear();
+    return json({ok:true});
   }
 
 
@@ -3911,7 +3985,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.17',
+    version:'1.0-P7.18',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
