@@ -2609,7 +2609,15 @@ function renderCompanyAccessRoleHint(){
   }[role]||'เลือกสิทธิ์ตามหน้าที่จริง');
 }
 
-function openCompanyAccessModal() {
+async function openCompanyAccessModal() {
+  // Always refresh Workspace access data before opening the modal.
+  // Employee list can change after the page first loads, so stale state must never drive this selector.
+  try {
+    state.companyAccess = await api(`/api/company-access?ts=${Date.now()}`);
+    renderCompanyAccess();
+  } catch (error) {
+    return toast(error.message || 'โหลดรายชื่อพนักงานไม่สำเร็จ', true);
+  }
   const data = state.companyAccess || { members: [], eligible_employees: [] };
   const employees = data.eligible_employees || [];
   const select = $('#companyAccessEmployeeSelect');
