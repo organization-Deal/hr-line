@@ -1442,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.36', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.37', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1789,7 +1789,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/company-access' && method === 'GET') {
     if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
-    if (!(await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner เท่านั้นที่จัดการสิทธิ์ระดับ Workspace ได้' }, 403);
+    if (!(await canManageWorkspaceAccess(env.DB,clientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner หรือ Co-Owner เท่านั้นที่จัดการสิทธิ์ระดับ Workspace ได้' }, 403);
     await ensureLineBusinessOnboardingReady(env.DB);
     const members = (await env.DB.prepare(`
       SELECT m.user_id,m.role,m.status,m.created_at,u.name,u.email,u.picture_url,u.line_user_id,u.line_provider_scope,u.auth_provider
@@ -1837,7 +1837,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/company-access' && method === 'POST') {
     if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
-    if (!(await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner เท่านั้นที่เพิ่มสิทธิ์ระดับ Workspace ได้' }, 403);
+    if (!(await canManageWorkspaceAccess(env.DB,clientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner หรือ Co-Owner เท่านั้นที่เพิ่มสิทธิ์ระดับ Workspace ได้' }, 403);
     await ensureLineBusinessOnboardingReady(env.DB);
     const body = await safeJson(request);
     const employeeId = Number(body.employee_id || 0);
@@ -1868,7 +1868,7 @@ async function handleApi(request, env, url, auth, ctx) {
   const companyAccessDeleteMatch = path.match(/^\/api\/company-access\/(\d+)$/);
   if (companyAccessDeleteMatch && method === 'DELETE') {
     if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
-    if (!(await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner เท่านั้นที่ถอนสิทธิ์ระดับ Workspace ได้' }, 403);
+    if (!(await canManageWorkspaceAccess(env.DB,clientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner หรือ Co-Owner เท่านั้นที่ถอนสิทธิ์ระดับ Workspace ได้' }, 403);
     const targetUserId = Number(companyAccessDeleteMatch[1]);
     const primaryOwnerUserId=await getPrimaryOwnerUserId(env.DB,clientId);
     if (targetUserId === Number(primaryOwnerUserId)) return json({ error: 'ไม่สามารถถอน Primary Owner ได้ กรุณาโอนความเป็นเจ้าของก่อน' }, 400);
@@ -4138,6 +4138,20 @@ async function isPrimaryWorkspaceOwner(db,clientId,userId){
   const primary=await getPrimaryOwnerUserId(db,clientId);
   return Boolean(primary && Number(primary)===Number(userId));
 }
+async function getEffectiveWorkspaceRole(db,clientId,userId){
+  const row=await db.prepare(`SELECT role FROM company_members WHERE client_id=?1 AND user_id=?2 AND status='active' LIMIT 1`).bind(Number(clientId),Number(userId)).first().catch(()=>null);
+  if(!row?.role) return null;
+  const stored=String(row.role||'').toLowerCase();
+  if(stored==='owner'){
+    const primary=await getPrimaryOwnerUserId(db,clientId);
+    return Number(primary)===Number(userId)?'owner':'co_owner';
+  }
+  return stored;
+}
+async function canManageWorkspaceAccess(db,clientId,userId){
+  const role=await getEffectiveWorkspaceRole(db,clientId,userId);
+  return ['owner','co_owner'].includes(String(role||''));
+}
 function lineManagementRoleLabel(role){
   const value=String(role||'').toLowerCase();
   if(value==='owner') return 'Primary Owner';
@@ -4333,7 +4347,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.36',
+    version:'1.0-P7.37',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
