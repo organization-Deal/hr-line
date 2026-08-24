@@ -3183,3 +3183,34 @@ window.changeSaasStatus=async(id,current)=>{const next=prompt('สถานะ: 
 window.markInvoicePaid=async(id,total)=>{if(!confirm(`ยืนยันรับชำระ ${money(total)} ?`))return;try{await api(`/api/admin/saas/invoices/${id}/mark-paid`,{method:'POST',body:JSON.stringify({amount:total,method:'manual',provider:'manual',note:'บันทึกจาก Nakna Admin Console'})});await refreshPhase5();toast('บันทึกรับชำระแล้ว')}catch(e){toast(e.message,true)}};
 
 boot();
+
+// P7.38 — Detailed Help Center
+(function initNaknaHelpCenter(){
+  const modal=document.getElementById('helpCenterModal');
+  const openBtn=document.getElementById('helpCenterBtn');
+  if(!modal||!openBtn)return;
+  const closeBtn=document.getElementById('helpCenterClose');
+  const nav=[...modal.querySelectorAll('[data-help-section]')];
+  const sections=[...modal.querySelectorAll('[data-help-content]')];
+  const search=document.getElementById('helpSearchInput');
+  const subtitle=document.getElementById('helpCenterSubtitle');
+  const titles={start:'ตั้งระบบ HR ตั้งแต่เริ่มจนใช้งานจริง',people:'จัดคน แผนก ตำแหน่ง และหัวหน้าให้ถูกโครงสร้าง',line:'ประสบการณ์พนักงานและผู้บริหารผ่าน LINE',leave:'ตั้งสิทธิ์ลาและ Workflow อนุมัติให้ทำงานจริง',hr:'รับเรื่องส่วนตัวจากพนักงานแบบเป็นความลับ',access:'กำหนดสิทธิ์ตามหน้าที่และความรับผิดชอบ',payroll:'เตรียมข้อมูลเงินเดือนและออกเอกสารพนักงาน',trouble:'วิธีเช็กปัญหาที่พบบ่อยก่อนแก้ระบบ'};
+  function show(id){
+    nav.forEach(b=>b.classList.toggle('active',b.dataset.helpSection===id));
+    sections.forEach(s=>s.classList.toggle('active',s.dataset.helpContent===id));
+    if(subtitle)subtitle.textContent=titles[id]||'คู่มือใช้งานนากนะ';
+    const content=modal.querySelector('.help-center-content'); if(content)content.scrollTop=0;
+    if(search)search.value='';
+  }
+  openBtn.addEventListener('click',()=>{show('start');modal.showModal();});
+  closeBtn?.addEventListener('click',()=>modal.close());
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.close();});
+  nav.forEach(b=>b.addEventListener('click',()=>show(b.dataset.helpSection)));
+  document.getElementById('helpGoDashboardBtn')?.addEventListener('click',()=>{modal.close();document.querySelector('[data-view="dashboard"]')?.click();});
+  search?.addEventListener('input',()=>{
+    const q=search.value.trim().toLowerCase();
+    if(!q)return;
+    const matches=sections.filter(s=>s.textContent.toLowerCase().includes(q));
+    if(matches.length){show(matches[0].dataset.helpContent);search.value=q;}
+  });
+})();

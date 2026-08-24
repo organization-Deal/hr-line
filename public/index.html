@@ -227,7 +227,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.37</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.38</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -239,6 +239,7 @@
           <div><p class="kicker" id="pageKicker">HR COMMAND CENTER</p><h2 id="pageTitle">ภาพรวม</h2></div>
         </div>
         <div class="top-actions">
+          <button id="helpCenterBtn" class="help-center-trigger" type="button" aria-haspopup="dialog" aria-controls="helpCenterModal"><span class="help-play-icon">▶</span><span>วิธีใช้</span></button>
           <div class="date-chip"><svg viewBox="0 0 24 24"><path d="M6 4v3M18 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12H4V7a1 1 0 0 1 1-1Z"/></svg><span id="todayText">—</span></div>
           <button id="refreshBtn" class="icon-btn" title="อัปเดตข้อมูล" aria-label="อัปเดตข้อมูล"><svg viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.5 9a7 7 0 0 0-12-2L4 11M5.5 15a7 7 0 0 0 12 2l2.5-4"/></svg></button>
           <button id="accountMenuBtn" class="profile-chip" type="button" aria-label="บัญชีผู้ใช้" aria-haspopup="menu" aria-expanded="false"><span id="profileAvatar">HR</span><div><strong id="profileName">ผู้ใช้งาน</strong><small id="profileRole">กำลังโหลด...</small></div></button>
@@ -716,6 +717,131 @@
   </div>
 
   <div id="mobileNavBackdrop" class="mobile-nav-backdrop"></div>
+
+  <dialog id="helpCenterModal" class="help-center-modal" aria-labelledby="helpCenterTitle">
+    <div class="help-center-shell">
+      <aside class="help-center-nav">
+        <div class="help-center-brand">
+          <div class="help-center-logo"><img src="/logo.png" alt="นากนะ" onerror="this.style.display='none';this.parentElement.classList.add('fallback')"/></div>
+          <div><span>NAKNA GUIDE</span><strong>วิธีใช้นากนะ</strong></div>
+        </div>
+        <label class="help-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="helpSearchInput" type="search" placeholder="ค้นหาวิธีใช้..." autocomplete="off"/></label>
+        <nav id="helpGuideNav" class="help-guide-nav" aria-label="หัวข้อวิธีใช้">
+          <button class="active" type="button" data-help-section="start"><span>01</span><div><strong>เริ่มใช้งาน</strong><small>Setup บริษัทให้พร้อม</small></div></button>
+          <button type="button" data-help-section="people"><span>02</span><div><strong>คนและทีม</strong><small>พนักงาน แผนก ตำแหน่ง</small></div></button>
+          <button type="button" data-help-section="line"><span>03</span><div><strong>LINE พนักงาน</strong><small>เช็กอิน ลา เมนู LINE</small></div></button>
+          <button type="button" data-help-section="leave"><span>04</span><div><strong>การลา & อนุมัติ</strong><small>สิทธิ์ลา Workflow</small></div></button>
+          <button type="button" data-help-section="hr"><span>05</span><div><strong>แจ้ง HR</strong><small>เรื่องส่วนตัวและ Inbox</small></div></button>
+          <button type="button" data-help-section="access"><span>06</span><div><strong>สิทธิ์ผู้ใช้งาน</strong><small>Owner HR Manager</small></div></button>
+          <button type="button" data-help-section="payroll"><span>07</span><div><strong>Payroll & เอกสาร</strong><small>เงินเดือน Payslip</small></div></button>
+          <button type="button" data-help-section="trouble"><span>08</span><div><strong>แก้ปัญหา</strong><small>เชื่อมต่อ โหลดช้า Sync</small></div></button>
+        </nav>
+        <div class="help-guide-note"><strong>เคล็ดลับ</strong><p>กดเมนูด้านซ้ายเพื่อเปิดหน้าจริง แล้วกลับมาดูวิธีใช้ต่อได้ทุกเมื่อ</p></div>
+      </aside>
+      <main class="help-center-content">
+        <header class="help-center-head">
+          <div><p>HELP CENTER</p><h2 id="helpCenterTitle">คู่มือใช้งานนากนะ</h2><span id="helpCenterSubtitle">ตั้งระบบ HR ตั้งแต่เริ่มจนใช้งานจริง</span></div>
+          <button id="helpCenterClose" class="help-close-btn" type="button" aria-label="ปิดวิธีใช้"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </header>
+
+        <section class="help-section active" data-help-content="start">
+          <div class="help-hero"><div><span class="help-eyebrow">QUICK START</span><h3>เริ่มให้พร้อมใน 10 ขั้นตอน</h3><p>ลำดับนี้ช่วยให้ตั้งระบบครั้งแรกโดยไม่ต้องย้อนกลับมาแก้ข้อมูลซ้ำ</p></div><div class="help-progress-orb"><b>10</b><span>ขั้นตอน</span></div></div>
+          <div class="help-step-list">
+            <article><span>1</span><div><strong>สร้างหรือเลือก Workspace</strong><p>ถ้าเป็นเจ้าของบริษัทใหม่ค่อยสร้าง Workspace แต่ถ้าได้รับเชิญ ให้เข้า Workspace เดิม ห้ามสร้างบริษัทซ้ำ</p></div></article>
+            <article><span>2</span><div><strong>เชื่อม Google</strong><p>เชื่อม Gmail + Drive + Sheets เพื่อให้ระบบเก็บเอกสาร HR, ส่ง Payslip และ Sync ฐานข้อมูลได้</p></div></article>
+            <article><span>3</span><div><strong>ใส่ข้อมูลบริษัท</strong><p>ตั้งชื่อบริษัท โลโก้ Timezone และข้อมูลพื้นฐานจากเมนู “บริษัท”</p></div></article>
+            <article><span>4</span><div><strong>สร้างโครงสร้างทีม</strong><p>สร้างแผนก ตำแหน่ง และกำหนดหัวหน้าก่อนเพิ่มพนักงาน เพื่อให้สิทธิ์และ Workflow ทำงานถูกต้อง</p></div></article>
+            <article><span>5</span><div><strong>กำหนดเวลาทำงาน</strong><p>ตั้งเวลาเริ่ม/เลิกงานและ Grace period ระดับบริษัท แล้ว Override รายแผนกหรือรายคนเมื่อจำเป็น</p></div></article>
+            <article><span>6</span><div><strong>สร้าง Work Location</strong><p>กำหนดสถานที่ พิกัด และรัศมีเช็กอิน ตรวจว่าพนักงานที่เกี่ยวข้องได้รับ Location ถูกต้อง</p></div></article>
+            <article><span>7</span><div><strong>ตั้งสิทธิ์ลา & วันหยุด</strong><p>กำหนดประเภทลา โควตา วันหยุดบริษัท เงื่อนไขหลักฐาน และสถานะพนักงานทดลองงาน</p></div></article>
+            <article><span>8</span><div><strong>เพิ่มพนักงานและเชื่อม LINE</strong><p>สร้าง/เชิญพนักงาน ระบุแผนก ตำแหน่ง หัวหน้า แล้วให้พนักงานเชื่อม LINE กับบัญชีของตน</p></div></article>
+            <article><span>9</span><div><strong>กำหนดสิทธิ์ผู้บริหาร</strong><p>เพิ่ม Co-Owner, HR Admin, Payroll Admin, Manager หรือ Approver เท่าที่จำเป็น</p></div></article>
+            <article><span>10</span><div><strong>ทดสอบก่อนใช้งานจริง</strong><p>ลองเช็กอิน ขอลา อนุมัติ แจ้ง HR และเปิด Dashboard จาก LINE อย่างน้อย 1 รอบก่อนเชิญทั้งบริษัท</p></div></article>
+          </div>
+          <div class="help-callout"><strong>ควรทดสอบด้วยบัญชีพนักงานจริง 1 คน</strong><span>เพื่อเห็น Flow ฝั่งพนักงานและฝั่ง HR พร้อมกัน ก่อนเปิดให้ทั้งบริษัทใช้</span></div>
+        </section>
+
+        <section class="help-section" data-help-content="people">
+          <div class="help-section-title"><span>PEOPLE & TEAM</span><h3>จัดโครงสร้างคนให้ข้อมูลไม่มั่ว</h3><p>แนะนำให้สร้างแผนกและตำแหน่งก่อน แล้วค่อยเพิ่มคนเข้าระบบ</p></div>
+          <div class="help-card-grid">
+            <article><b>01</b><strong>สร้างแผนก</strong><p>เข้า “โครงสร้างทีม” → + แผนก → ใส่ชื่อ/Code/แผนกแม่ และกำหนดหัวหน้าได้ภายหลัง</p></article>
+            <article><b>02</b><strong>สร้างตำแหน่ง</strong><p>สร้างตำแหน่งและผูกกับแผนก เพื่อให้ตอนเพิ่มพนักงานเลือกได้ทันที</p></article>
+            <article><b>03</b><strong>เพิ่มพนักงาน</strong><p>ใส่รหัส ชื่อ อีเมล วันเริ่มงาน Probation แผนก ตำแหน่ง และ Work Location</p></article>
+            <article><b>04</b><strong>กำหนดหัวหน้า</strong><p>ตั้งหัวหน้าโดยตรงหรือหัวหน้าแผนก เพื่อให้ Leave Approval และ Team View เดินตามสายงานจริง</p></article>
+          </div>
+          <div class="help-flow"><span>แผนก</span><i>→</i><span>ตำแหน่ง</span><i>→</i><span>พนักงาน</span><i>→</i><span>หัวหน้า</span><i>→</i><span>สิทธิ์</span></div>
+          <div class="help-tip"><strong>พนักงาน 1 คนมีหลายบทบาทได้</strong><p>เช่นเป็น Employee และ Co-Owner พร้อมกัน โดยข้อมูลเวลา/ลาเป็นฝั่ง Employee ส่วนสิทธิ์บริหารมาจาก Workspace Role</p></div>
+        </section>
+
+        <section class="help-section" data-help-content="line">
+          <div class="help-section-title"><span>LINE EXPERIENCE</span><h3>Flow ที่พนักงานใช้ทุกวัน</h3><p>LINE เป็นหน้าประจำวัน ส่วน Dashboard ใช้จัดการข้อมูลเชิงลึก</p></div>
+          <div class="help-two-column">
+            <article class="help-guide-panel"><h4>พนักงานเริ่มใช้งาน</h4><ol><li>Add LINE นากนะ</li><li>รับลิงก์เชิญจาก HR หรือเชื่อมกับ Workspace</li><li>เปิดเมนูพนักงาน</li><li>เช็กอิน / เช็กเอาต์ / ขอลา / ดูสิทธิ์</li></ol></article>
+            <article class="help-guide-panel"><h4>Owner / HR ใน LINE</h4><ol><li>บัญชีเดียวกันยังใช้เมนู Employee ได้</li><li>ถ้ามีสิทธิ์บริหาร จะเห็นกลุ่ม “สำหรับผู้บริหาร / HR”</li><li>กดเปิด HR Dashboard ได้จาก LINE</li><li>คำขออนุมัติจะเด้งเป็น Card ให้กดได้</li></ol></article>
+          </div>
+          <div class="help-warning"><strong>ถ้าการ์ดเก่ายังแสดง Flow เดิม</strong><span>พิมพ์ “เมนู” ใน LINE ใหม่อีกครั้ง เพื่อให้บอทส่ง Card เวอร์ชันล่าสุด</span></div>
+        </section>
+
+        <section class="help-section" data-help-content="leave">
+          <div class="help-section-title"><span>LEAVE WORKFLOW</span><h3>ตั้งสิทธิ์ลาให้ครบก่อนรับคำขอจริง</h3></div>
+          <div class="help-workflow">
+            <article><span>พนักงาน</span><strong>เปิดฟอร์มลาใน LINE</strong><p>เลือกประเภท วันที่ เต็มวัน/ครึ่งวัน เหตุผล และแนบรูป/PDF ได้</p></article><i>→</i>
+            <article><span>ระบบ</span><strong>ตรวจสิทธิ์</strong><p>ตรวจโควตา Probation หลักฐาน และผู้อนุมัติตาม Workflow</p></article><i>→</i>
+            <article><span>Approver</span><strong>อนุมัติ / ไม่อนุมัติ</strong><p>หัวหน้าหรือ HR/Owner ได้ Card แจ้งเตือนและกดจัดการได้</p></article><i>→</i>
+            <article><span>พนักงาน</span><strong>รับผลใน LINE</strong><p>สถานะเปลี่ยนและวันลาคงเหลืออัปเดตทันที</p></article>
+          </div>
+          <div class="help-checklist"><h4>ถ้าสิทธิ์ลาไม่ทำงาน ให้เช็ก</h4><label>ประเภทลามีสิทธิ์เริ่มต้นหรือ Override รายคนแล้ว</label><label>พนักงานไม่ได้ถูกล็อกสิทธิ์ระหว่าง Probation</label><label>มี Approver หรือใช้ “ส่งตรง HR / Owner”</label><label>บัญชี LINE อยู่ Workspace เดียวกับที่ HR กำลังแก้ข้อมูล</label></div>
+        </section>
+
+        <section class="help-section" data-help-content="hr">
+          <div class="help-section-title"><span>CONFIDENTIAL HR</span><h3>แจ้งเรื่องส่วนตัวถึง HR</h3><p>เรื่องที่พนักงานแจ้งจะไม่ปะปนกับแชตทั่วไป และเห็นเฉพาะผู้มีสิทธิ์ HR</p></div>
+          <div class="help-two-column">
+            <article class="help-guide-panel"><h4>ฝั่งพนักงาน</h4><ol><li>กด “แจ้ง HR” ใน LINE</li><li>กรอกหมวด หัวข้อ รายละเอียด ความเร่งด่วน</li><li>แนบหลักฐานได้</li><li>ส่งแล้วได้รับเลข Case ใน LINE</li></ol></article>
+            <article class="help-guide-panel"><h4>ฝั่ง HR</h4><ol><li>เข้าเมนู “แจ้ง HR” ใน Sidebar</li><li>เห็น Open / Urgent / Closed</li><li>เปิดอ่าน Timeline และไฟล์แนบ</li><li>เปลี่ยนสถานะ ใส่ HR Note ตอบกลับ และปิด Case</li></ol></article>
+          </div>
+          <div class="help-callout"><strong>ข้อมูลลับ</strong><span>ควรให้สิทธิ์ HR Inbox เฉพาะ Owner / HR Admin / HR ที่จำเป็นจริง</span></div>
+        </section>
+
+        <section class="help-section" data-help-content="access">
+          <div class="help-section-title"><span>WORKSPACE ACCESS</span><h3>เลือกสิทธิ์ตามหน้าที่ ไม่ใช่ตามตำแหน่งชื่อสวย ๆ</h3></div>
+          <div class="help-role-table">
+            <div><strong>Primary Owner</strong><span>เจ้าของหลัก · ลบบริษัท · Billing · โอนเจ้าของหลัก</span></div>
+            <div><strong>Co-Owner</strong><span>บริหาร Workspace ได้เกือบทั้งหมด และจัดการสิทธิ์ผู้ใช้งานได้</span></div>
+            <div><strong>HR Admin</strong><span>พนักงาน เวลา การลา Recruitment เอกสาร และงาน HR</span></div>
+            <div><strong>Payroll Admin</strong><span>เงินเดือน ภาษี ประกันสังคม Payslip และเอกสารเงินเดือน</span></div>
+            <div><strong>Manager</strong><span>ดูและจัดการทีมของตัวเองตามขอบเขตที่กำหนด</span></div>
+            <div><strong>Approver</strong><span>อนุมัติคำขอตาม Workflow โดยไม่ต้องมีสิทธิ์ HR ทั้งระบบ</span></div>
+            <div><strong>Employee</strong><span>เช็กอิน ลา ดูเอกสาร KPI แต้ม และบริการส่วนตัว</span></div>
+          </div>
+          <div class="help-warning"><strong>คนที่ได้รับสิทธิ์เข้าบริษัทเดิม</strong><span>ต้องเข้า Workspace เดิมจาก Invite/Access Card ไม่ต้องสร้างธุรกิจใหม่</span></div>
+        </section>
+
+        <section class="help-section" data-help-content="payroll">
+          <div class="help-section-title"><span>PAYROLL & DOCUMENTS</span><h3>จากข้อมูลพนักงานไปถึง Payslip</h3></div>
+          <div class="help-step-list compact">
+            <article><span>1</span><div><strong>ตั้งค่ารอบเงินเดือน</strong><p>กำหนดวันจ่าย การหัก และนโยบายที่ใช้จริงของบริษัท</p></div></article>
+            <article><span>2</span><div><strong>ตั้งเงินเดือนรายคน</strong><p>เงินเดือน ค่าคอม Incentive รายการเพิ่ม/หัก และข้อมูลภาษีที่เกี่ยวข้อง</p></div></article>
+            <article><span>3</span><div><strong>ตรวจ Attendance / Leave</strong><p>เช็กข้อมูลวันทำงานก่อนคำนวณ เพื่อไม่ให้รายการหักผิด</p></div></article>
+            <article><span>4</span><div><strong>สร้าง Payslip</strong><p>ออกเอกสาร เก็บใน Google Drive และส่งให้พนักงานทาง Mail/LINE ตามการตั้งค่า</p></div></article>
+          </div>
+          <div class="help-callout"><strong>ก่อน Production</strong><span>ควรให้ฝ่ายบัญชี/HR ตรวจสูตรภาษี ประกันสังคม และนโยบายหักเงินของบริษัทอีกครั้ง</span></div>
+        </section>
+
+        <section class="help-section" data-help-content="trouble">
+          <div class="help-section-title"><span>TROUBLESHOOTING</span><h3>เช็กตรงนี้ก่อนคิดว่าระบบพัง</h3></div>
+          <div class="help-faq">
+            <details open><summary>มือถือมีข้อมูล แต่คอมไม่มี</summary><p>เปิด Company Switcher แล้วเช็ก Workspace ID/จำนวนพนักงาน ถ้ามีบริษัทชื่อซ้ำ ให้เลือก Workspace เดียวกัน แล้วเชื่อม Google/LINE account ให้เป็นบัญชีเดียวกัน</p></details>
+            <details><summary>พนักงานเชื่อม LINE แล้ว แต่เพิ่มสิทธิ์ไม่ได้</summary><p>เปิด Modal เพิ่มสิทธิ์ใหม่อีกครั้ง ระบบจะโหลดรายชื่อจาก API สด ถ้ายังไม่ขึ้นให้ Refresh และตรวจว่าอยู่ Workspace เดียวกับหน้าพนักงาน</p></details>
+            <details><summary>Google redirect_uri_mismatch</summary><p>Authorized redirect URI ใน Google Cloud ต้องตรงกับ URL callback ของระบบแบบตัวอักษรต่ออักษร รวม https และ path</p></details>
+            <details><summary>หน้า LINE Web Form ขึ้น Load failed</summary><p>ลองใหม่บนเน็ตเสถียร ตรวจไฟล์แนบและขนาด ถ้า Case ถูกสร้างแล้วระบบจะไม่สร้างซ้ำ และจะพยายามอัปโหลดไฟล์แยกทีละไฟล์</p></details>
+            <details><summary>กดเมนูแล้วเหมือนยังเป็นเวอร์ชันเก่า</summary><p>เช็กเวอร์ชันด้านล่าง Sidebar /api/health แล้วปิด LINE Browser หรือ Refresh ใหม่ ถ้าเป็น Card LINE ให้พิมพ์ “เมนู” เพื่อรับ Card ล่าสุด</p></details>
+          </div>
+        </section>
+
+        <footer class="help-center-footer"><span>นากนะ HR · คู่มือภายในระบบ</span><button id="helpGoDashboardBtn" type="button">กลับหน้า Dashboard</button></footer>
+      </main>
+    </div>
+  </dialog>
 
   <dialog id="modal">
     <form method="dialog" id="modalForm">
