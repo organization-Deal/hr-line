@@ -475,6 +475,22 @@ CREATE TABLE IF NOT EXISTS hr_case_events (
   FOREIGN KEY (case_id) REFERENCES hr_cases(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_hr_case_events_case ON hr_case_events(case_id,created_at);
+CREATE TABLE IF NOT EXISTS hr_case_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  case_id INTEGER NOT NULL,
+  file_name TEXT NOT NULL,
+  content_type TEXT,
+  file_size INTEGER,
+  storage_provider TEXT,
+  drive_file_id TEXT,
+  drive_url TEXT,
+  storage_key TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  FOREIGN KEY (case_id) REFERENCES hr_cases(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_hr_case_attachments_case ON hr_case_attachments(case_id,created_at);
 CREATE TABLE IF NOT EXISTS broadcasts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   client_id INTEGER NOT NULL,
@@ -1426,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.24', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.25', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1500,6 +1516,16 @@ export default {
         await ensureV050Ready(env.DB);
         await ensureV100P4Ready(env.DB);
         return await submitPublicLeaveForm(request, env, publicLeaveMatch[1]);
+      }
+
+      const publicHrCaseMatch = url.pathname.match(/^\/api\/public\/hr-case\/([A-Za-z0-9_-]{32,})$/);
+      if (publicHrCaseMatch && request.method === 'GET') {
+        await ensureV100P2Ready(env.DB);
+        return await getPublicHrCaseForm(env, publicHrCaseMatch[1]);
+      }
+      if (publicHrCaseMatch && request.method === 'POST') {
+        await ensureV100P2Ready(env.DB);
+        return await submitPublicHrCaseForm(request, env, publicHrCaseMatch[1]);
       }
 
       const publicLearningMatch = url.pathname.match(/^\/api\/public\/learning\/([A-Za-z0-9_-]{32,})$/);
@@ -1692,7 +1718,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.24', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.25', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -2136,7 +2162,7 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/dashboard' && method === 'GET') {
-    return json(await getDashboard(env.DB, clientId));
+    return json(await getDashboard(env.DB, clientId, { includeHrCases: canManagePeopleAdmin(auth.role) }));
   }
 
   if (path === '/api/employees' && method === 'GET') {
@@ -2922,8 +2948,11 @@ async function handleApi(request, env, url, auth, ctx) {
       FROM hr_cases c JOIN employees e ON e.id=c.employee_id LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN users u ON u.id=c.assigned_user_id
       WHERE c.id=?1 AND c.client_id=?2`).bind(id,clientId).first();
     if(!row)return json({error:'ไม่พบเรื่องแจ้ง HR'},404);
-    const events=await env.DB.prepare('SELECT * FROM hr_case_events WHERE case_id=?1 ORDER BY created_at').bind(id).all();
-    return json({data:row,events:events.results||[]});
+    const [events,attachments]=await Promise.all([
+      env.DB.prepare('SELECT * FROM hr_case_events WHERE case_id=?1 ORDER BY created_at').bind(id).all(),
+      env.DB.prepare('SELECT id,file_name,content_type,file_size,storage_provider,drive_url,created_at FROM hr_case_attachments WHERE case_id=?1 ORDER BY created_at').bind(id).all()
+    ]);
+    return json({data:row,events:events.results||[],attachments:attachments.results||[]});
   }
   if(hrCaseDetailMatch && method==='PATCH'){
     if(!canManagePeopleAdmin(auth.role)) return json({error:'เฉพาะ HR เท่านั้นที่จัดการเรื่องนี้ได้'},403);
@@ -3158,7 +3187,7 @@ async function handleApi(request, env, url, auth, ctx) {
   return json({ error: 'API route not found' }, 404);
 }
 
-async function getDashboard(db, clientId) {
+async function getDashboard(db, clientId, { includeHrCases=false }={}) {
   const client = await getClient(db, clientId);
   if (!client) throw new Error('Client not found');
   const today = dateInBangkok();
@@ -3181,6 +3210,7 @@ async function getDashboard(db, clientId) {
   const leaves = leaveRes.results || [];
   const candidates = candidatesRes.results || [];
   const requests = requestsRes.results || [];
+  const hrCasesOpen = includeHrCases ? Number((await db.prepare(`SELECT COUNT(*) AS n FROM hr_cases WHERE client_id=?1 AND status NOT IN ('resolved','closed')`).bind(clientId).first().catch(()=>({n:0})))?.n||0) : 0;
   const attendanceByEmployee = new Map(attendance.map(a => [Number(a.employee_id), a]));
 
   const onLeaveTodayIds = new Set();
@@ -3227,6 +3257,7 @@ async function getDashboard(db, clientId) {
     { key: 'probation', level: 'purple', label: 'Probation ใกล้ครบ', count: probation.length },
     { key: 'contract', level: 'warning', label: 'สัญญาใกล้หมด', count: contracts.length },
     { key: 'candidate', level: 'purple', label: 'Candidate รอ Action > 3 วัน', count: staleCandidates.length },
+    { key: 'hr_private', level: 'danger', label: 'แจ้งเรื่องส่วนตัวถึง HR', count: hrCasesOpen },
     { key: 'request', level: 'info', label: 'HR Request ค้าง', count: requests.length },
   ].filter(x => x.count > 0);
 
@@ -3242,6 +3273,7 @@ async function getDashboard(db, clientId) {
     recruitment: stages,
     pending_leaves: leaves.slice(0, 6),
     requests: requests.slice(0, 6),
+    hr_cases_open: hrCasesOpen,
     recent_attendance: attendance.slice(0, 8),
   };
 }
@@ -3443,8 +3475,7 @@ async function processLineEvent(event, env, lineCtx) {
     if(['เรียน','เรียนรู้','onboarding','learning','kpi','kpi ของฉัน','เป้าหมาย'].includes(lower)) return sendLearningPortal(env,event.replyToken,emp,accessToken);
     if(['แต้ม','คะแนน','ของรางวัล','reward','rewards','points','อันดับ'].includes(lower)) return sendEngagementPortal(env,event.replyToken,emp,accessToken);
     if(['แจ้ง hr','แจ้งhr','hr','แจ้งปัญหา','ติดต่อ hr'].includes(lower)){
-      await setLineSession(env.DB,sessionKey,'hr_case_subject',{});
-      return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('แจ้งเรื่องส่วนตัวถึง HR','พิมพ์หัวข้อสั้น ๆ ของเรื่องที่ต้องการแจ้ง เช่น “ขอคุยเรื่องการทำงาน”\nเรื่องนี้จะเห็นเฉพาะ HR','teal')]);
+      return sendHrCaseForm(env,event.replyToken,emp,accessToken);
     }
     if(['เช็กอิน','checkin','check-in'].includes(lower)){
       const mustShareLocation=await employeeNeedsLocation(env.DB,emp);
@@ -3520,7 +3551,7 @@ async function processLineEvent(event, env, lineCtx) {
     if(action==='my_requests') return sendEmployeeServiceHistory(env,event.replyToken,emp,accessToken);
     if(action==='learning') return sendLearningPortal(env,event.replyToken,emp,accessToken);
     if(action==='rewards') return sendEngagementPortal(env,event.replyToken,emp,accessToken);
-    if(action==='hr_case'){ await setLineSession(env.DB,sessionKey,'hr_case_subject',{}); return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('แจ้งเรื่องส่วนตัวถึง HR','พิมพ์หัวข้อสั้น ๆ ของเรื่องที่ต้องการแจ้ง เรื่องนี้จะเห็นเฉพาะ HR','teal')]); }
+    if(action==='hr_case'){ return sendHrCaseForm(env,event.replyToken,emp,accessToken); }
     if(action==='leave_locked') return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('สิทธิ์ลายังถูกล็อก','สิทธิ์ประเภทนี้จะเปิดหลังผ่านทดลองงาน หรือติดต่อ HR หากต้องการให้เปิดเป็นกรณีพิเศษ','warning')]);
     if(action==='status'){ const a=await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(emp.id),dateInBangkok()).first(); return replyLineMessages(accessToken,event.replyToken,[buildEmployeeStatusFlex(emp,a)]); }
     if(action==='leave_type'){
@@ -4068,13 +4099,14 @@ async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId,preferredClien
 }
 
 async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
-  const [ownerAccess,leaveToken]=await Promise.all([
+  const [ownerAccess,portalToken]=await Promise.all([
     getLineOwnerDashboardAccess(env,lineCtx,lineUserId,Number(emp.client_id)).catch(()=>null),
     issueEmployeePortalToken(env.DB,Number(emp.client_id),Number(emp.id)).catch(()=>null),
   ]);
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
-  const leaveFormUrl=leaveToken?`${base}/leave.html?token=${encodeURIComponent(leaveToken)}`:null;
-  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl);
+  const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
+  const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
+  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl);
 }
 
 async function createCompanyForLineOwner(env,user,name,lineUserId){
@@ -4214,7 +4246,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.24',
+    version:'1.0-P7.25',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -4759,6 +4791,103 @@ async function autoAssignLearningForEmployee(db,clientId,employeeId,userId=null)
   for(const c of courses){if(c.audience_type==='probation'&&String(employee.people_status)!=='probation')continue;if(c.audience_type==='department'&&Number(c.audience_department_id)!==Number(employee.department_id||0))continue;const r=await db.prepare(`INSERT OR IGNORE INTO learning_assignments (client_id,course_id,employee_id,required,assigned_by_user_id) VALUES (?1,?2,?3,?4,?5)`).bind(Number(clientId),Number(c.id),Number(employeeId),Number(c.required||1),userId?Number(userId):null).run();if(Number(r.meta?.changes||0)>0)count++;} return count;
 }
 
+async function getPublicHrCaseForm(env,token){
+  const access=await getEmployeePortalAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์หมดอายุ กรุณากลับไปที่ LINE แล้วกด “แจ้ง HR” ใหม่'},401);
+  return json({
+    ok:true,
+    employee:{id:Number(access.employee_id),name:access.nickname||access.first_name,full_name:`${access.first_name||''} ${access.last_name||''}`.trim(),employee_code:access.employee_code||'',company_name:access.company_name||''},
+    categories:[
+      {code:'work',name:'งานและการทำงาน'},
+      {code:'manager',name:'หัวหน้า / การบริหารทีม'},
+      {code:'coworker',name:'เพื่อนร่วมงาน / ทีม'},
+      {code:'payroll',name:'เงินเดือน / สวัสดิการ'},
+      {code:'policy',name:'กฎระเบียบ / นโยบาย'},
+      {code:'safety',name:'ความปลอดภัย / การคุกคาม'},
+      {code:'system',name:'อุปกรณ์ / ระบบงาน'},
+      {code:'other',name:'อื่น ๆ'}
+    ],
+    max_files:3,max_file_mb:10
+  });
+}
+
+async function submitPublicHrCaseForm(request,env,token){
+  const access=await getEmployeePortalAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์หมดอายุ กรุณากลับไปที่ LINE แล้วกด “แจ้ง HR” ใหม่'},401);
+  let form;try{form=await request.formData();}catch{return json({error:'อ่านแบบฟอร์มไม่ได้ กรุณาลองใหม่'},400);}
+  const category=String(form.get('category')||'other').trim().slice(0,40);
+  const subject=String(form.get('subject')||'').trim().slice(0,120);
+  const detail=String(form.get('detail')||'').trim().slice(0,4000);
+  const urgency=String(form.get('urgency')||'normal');
+  const contactPreference=String(form.get('contact_preference')||'line').slice(0,30);
+  if(subject.length<3)return json({error:'กรุณาใส่หัวข้ออย่างน้อย 3 ตัวอักษร'},400);
+  if(detail.length<5)return json({error:'กรุณาเล่ารายละเอียดเพิ่มอีกนิด'},400);
+  const priority=['normal','high','urgent'].includes(urgency)?urgency:'normal';
+  const rawFiles=form.getAll('attachment').filter(f=>f&&typeof f==='object'&&typeof f.arrayBuffer==='function'&&Number(f.size||0)>0);
+  if(rawFiles.length>3)return json({error:'แนบไฟล์ได้สูงสุด 3 ไฟล์'},400);
+  const allowed=file=>String(file.type||'').startsWith('image/')||['application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(String(file.type||''));
+  for(const file of rawFiles){
+    if(Number(file.size||0)>10*1024*1024)return json({error:`ไฟล์ ${file.name||''} ใหญ่เกิน 10 MB`},413);
+    if(!allowed(file))return json({error:`ไฟล์ ${file.name||''} ไม่รองรับ กรุณาใช้รูป, PDF, DOC หรือ DOCX`},415);
+  }
+  const result=await env.DB.prepare(`INSERT INTO hr_cases(client_id,employee_id,subject,detail,category,priority,status,confidential,submitted_via,contact_preference) VALUES(?1,?2,?3,?4,?5,?6,'open',1,'line_web',?7)`).bind(Number(access.client_id),Number(access.employee_id),subject,detail,category,priority,contactPreference).run();
+  const caseId=Number(result.meta.last_row_id);
+  try{
+    for(const file of rawFiles) await storeHrCaseAttachmentBinary(env,{clientId:Number(access.client_id),caseId,bytes:await file.arrayBuffer(),fileName:String(file.name||`attachment-${Date.now()}`),contentType:String(file.type||'application/octet-stream'),fileSize:Number(file.size||0)});
+  }catch(error){
+    await env.DB.prepare('DELETE FROM hr_cases WHERE id=?1 AND client_id=?2').bind(caseId,Number(access.client_id)).run().catch(()=>{});
+    throw error;
+  }
+  await env.DB.prepare(`INSERT INTO hr_case_events(client_id,case_id,actor_type,actor_employee_id,action,message) VALUES(?1,?2,'employee',?3,'submitted',?4)`).bind(Number(access.client_id),caseId,Number(access.employee_id),detail).run();
+  await safeAudit(env.DB,Number(access.client_id),'employee',String(access.employee_id),'hr_case.create','hr_case',String(caseId),{subject,category,priority,submitted_via:'line_web'});
+  const row=await env.DB.prepare(`SELECT c.*,e.first_name,e.last_name,e.nickname,e.employee_code,e.line_user_id AS employee_line_user_id,e.line_provider_scope AS employee_line_provider_scope,cl.name AS company_name FROM hr_cases c JOIN employees e ON e.id=c.employee_id JOIN clients cl ON cl.id=c.client_id WHERE c.id=?1`).bind(caseId).first();
+  await notifyHrCaseRecipients(env,row).catch(error=>console.error(JSON.stringify({level:'error',event:'hr_case_notify_failed',case_id:caseId,message:String(error?.message||error)})));
+  await pushHrCaseSubmittedConfirmation(env,row).catch(()=>{});
+  return json({ok:true,case:{id:caseId,code:`HR-${String(caseId).padStart(4,'0')}`,subject,status:'open',attachments:rawFiles.length}},201);
+}
+
+async function storeHrCaseAttachmentBinary(env,{clientId,caseId,bytes,fileName,contentType,fileSize}){
+  const integration=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first().catch(()=>null);
+  if(integration?.drive_folder_id){
+    const accessToken=await getWorkspaceGoogleAccessToken(env,integration);
+    const root=await ensureDriveChildFolder(accessToken,integration.drive_folder_id,'HR Private Cases');
+    const folder=await ensureDriveChildFolder(accessToken,root,`HR-${String(caseId).padStart(4,'0')}`);
+    const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:folder,fileName,contentType,bytes:new Uint8Array(bytes)});
+    await env.DB.prepare(`INSERT INTO hr_case_attachments(client_id,case_id,file_name,content_type,file_size,storage_provider,drive_file_id,drive_url) VALUES(?1,?2,?3,?4,?5,'google_drive',?6,?7)`).bind(Number(clientId),Number(caseId),fileName,contentType,Number(fileSize||0),uploaded.id,uploaded.webViewLink||null).run();
+    return;
+  }
+  if(!env.EVIDENCE_BUCKET)throw httpError('ยังไม่ได้เชื่อม Google Drive และที่เก็บไฟล์สำรองยังไม่พร้อม กรุณาส่งโดยไม่แนบไฟล์หรือติดต่อ HR',503);
+  const key=`client-${clientId}/hr-case-${caseId}/${crypto.randomUUID()}-${String(fileName||'attachment').replace(/[^A-Za-z0-9._-]/g,'_')}`;
+  await env.EVIDENCE_BUCKET.put(key,bytes,{httpMetadata:{contentType}});
+  await env.DB.prepare(`INSERT INTO hr_case_attachments(client_id,case_id,file_name,content_type,file_size,storage_provider,storage_key) VALUES(?1,?2,?3,?4,?5,'r2',?6)`).bind(Number(clientId),Number(caseId),fileName,contentType,Number(fileSize||0),key).run();
+}
+
+function hrCaseCategoryLabel(code){return ({work:'งานและการทำงาน',manager:'หัวหน้า / การบริหารทีม',coworker:'เพื่อนร่วมงาน / ทีม',payroll:'เงินเดือน / สวัสดิการ',policy:'กฎระเบียบ / นโยบาย',safety:'ความปลอดภัย / การคุกคาม',system:'อุปกรณ์ / ระบบงาน',other:'อื่น ๆ'})[code]||'อื่น ๆ';}
+function hrCasePriorityLabel(priority){return ({normal:'ปกติ',high:'สำคัญ',urgent:'เร่งด่วน'})[priority]||'ปกติ';}
+
+async function notifyHrCaseRecipients(env,row){
+  if(!row?.client_id)return;
+  const recipients=(await env.DB.prepare(`SELECT DISTINCT u.id AS user_id,u.line_user_id,u.line_provider_scope,m.role FROM company_members m JOIN users u ON u.id=m.user_id WHERE m.client_id=?1 AND m.status='active' AND m.role IN ('owner','hr_admin','hr') AND u.status='active' AND u.line_user_id IS NOT NULL`).bind(Number(row.client_id)).all()).results||[];
+  const seen=new Set();
+  for(const recipient of recipients){
+    const scope=String(recipient.line_provider_scope||'default'),key=`${scope}:${recipient.line_user_id}`;if(seen.has(key))continue;seen.add(key);
+    const token=await getAccessTokenForProviderScope(env,Number(row.client_id),scope);if(!token)continue;
+    const dashboardUrl=await issueLineWebLoginLink(env,Number(recipient.user_id),{clientId:Number(row.client_id),purpose:'dashboard'}).catch(()=>null);
+    const name=row.nickname||row.first_name||'พนักงาน';
+    const body=[lineInfoCard([lineInfoRow('พนักงาน',name),lineInfoRow('หมวด',hrCaseCategoryLabel(row.category)),lineInfoRow('ความเร่งด่วน',hrCasePriorityLabel(row.priority)),lineInfoRow('หัวข้อ',row.subject)],row.priority==='urgent'?'coral':'teal'),lineText(String(row.detail||'').slice(0,220),'xs',LINE_CI.text)];
+    const footer=dashboardUrl?[linePrimaryButton('เปิด HR Dashboard',{type:'uri',label:'เปิด HR Dashboard',uri:dashboardUrl})]:[];
+    await pushLineMessages(token,recipient.line_user_id,[{type:'flex',altText:`มีเรื่องแจ้ง HR ใหม่จาก ${name}`,contents:lineBubble({eyebrow:`PRIVATE HR · #HR-${String(row.id).padStart(4,'0')}`,title:'มีเรื่องส่วนตัวแจ้งถึง HR',subtitle:row.company_name||'',status:hrCasePriorityLabel(row.priority),statusTone:row.priority==='urgent'?'error':'warning',body,footer})}]).catch(()=>{});
+  }
+}
+
+async function pushHrCaseSubmittedConfirmation(env,row){
+  if(!row?.employee_line_user_id)return false;
+  const token=await getAccessTokenForProviderScope(env,Number(row.client_id),row.employee_line_provider_scope);if(!token)return false;
+  const text=`✅ ส่งเรื่องถึง HR แล้ว\n#HR-${String(row.id).padStart(4,'0')} · ${row.subject}\nสถานะ: HR รับเรื่องแล้ว\nเรื่องนี้จะแสดงเฉพาะ Owner / HR ที่มีสิทธิ์`;
+  await pushLineMessages(token,row.employee_line_user_id,[{type:'text',text}]);
+  return true;
+}
+
 async function getPublicLeaveForm(env,token){
   const access=await getEmployeePortalAccess(env.DB,token);
   if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิด “ขอลางาน” จาก LINE ใหม่'},401);
@@ -5090,6 +5219,9 @@ async function ensureV100P2Ready(db){
   await ensureColumns(db,'employees',[['leave_access_override','INTEGER']]);
   await ensureColumns(db,'leave_policies',[['available_during_probation','INTEGER NOT NULL DEFAULT 0']]);
   await ensureColumns(db,'line_integrations',[['rich_menu_id','TEXT'],['rich_menu_updated_at','TEXT']]);
+  await ensureColumns(db,'hr_cases',[['category','TEXT'],['contact_preference','TEXT']]);
+  await db.prepare(`CREATE TABLE IF NOT EXISTS hr_case_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,case_id INTEGER NOT NULL,file_name TEXT NOT NULL,content_type TEXT,file_size INTEGER,storage_provider TEXT,drive_file_id TEXT,drive_url TEXT,storage_key TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,FOREIGN KEY (case_id) REFERENCES hr_cases(id) ON DELETE CASCADE)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_hr_case_attachments_case ON hr_case_attachments(case_id,created_at)`).run().catch(()=>{});
   SCHEMA_READY.add('p2');
 }
 
@@ -5761,7 +5893,7 @@ function buildWelcomeFlex(name,company){
     footer:[linePrimaryButton('เปิดเมนูพนักงาน',{type:'postback',label:'เปิดเมนูพนักงาน',data:'action=menu'})]
   })};
 }
-function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null){
+function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null){
   const name=emp.nickname||emp.first_name;
   const hasManagement=Boolean(ownerAccess?.dashboardUrl&&ownerAccess?.primary);
   const managementCompany=ownerAccess?.primary?.name||emp.company_name||'';
@@ -5784,7 +5916,7 @@ function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null){
       lineSecondaryButton('🗂  คำขอของฉัน',{type:'postback',label:'คำขอของฉัน',data:'action=my_requests'},'#F7F9F8'),
       lineSecondaryButton('🎓  Learning & KPI',{type:'postback',label:'Learning & KPI',data:'action=learning'},LINE_CI.mintSoft),
       lineSecondaryButton('🎁  แต้ม & ของรางวัล',{type:'postback',label:'แต้ม & ของรางวัล',data:'action=rewards'},'#FFF7E8'),
-      lineSecondaryButton('🔒  แจ้งเรื่องส่วนตัวถึง HR',{type:'postback',label:'แจ้ง HR',data:'action=hr_case'},LINE_CI.coralSoft),
+      lineSecondaryButton('🔒  แจ้งเรื่องส่วนตัวถึง HR',hrCaseFormUrl?{type:'uri',label:'แจ้ง HR',uri:hrCaseFormUrl}:{type:'postback',label:'แจ้ง HR',data:'action=hr_case'},LINE_CI.coralSoft),
     ],
     footer
   })};
@@ -5878,6 +6010,20 @@ function buildEmployeeStatusFlex(emp,a){
   }
   return {type:'flex',altText:'สถานะวันนี้',contents:lineBubble({eyebrow:'ATTENDANCE',title:'สถานะวันนี้',subtitle:emp.nickname||emp.first_name,status,statusTone:tone,body:[lineInfoCard(rows,tone)]})};
 }
+async function sendHrCaseForm(env,replyToken,emp,accessToken){
+  const token=await issueEmployeePortalToken(env.DB,Number(emp.client_id),Number(emp.id));
+  const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
+  const url=`${base}/hr-case.html?token=${encodeURIComponent(token)}`;
+  return replyLineMessages(accessToken,replyToken,[{type:'flex',altText:'เปิดแบบฟอร์มแจ้ง HR',contents:lineBubble({
+    eyebrow:'PRIVATE HR',title:'แจ้งเรื่องส่วนตัวถึง HR',subtitle:'กรอกในหน้าเดียว · เห็นเฉพาะ Owner / HR',
+    body:[lineInfoCard([
+      lineText('เลือกหมวด ใส่หัวข้อ รายละเอียด และแนบหลักฐานได้ในหน้าเดียว','sm',LINE_CI.text,'bold'),
+      lineText('ส่งเสร็จแล้วนากนะจะแจ้งเลขเรื่องกลับมาใน LINE อัตโนมัติ','xxs',LINE_CI.muted)
+    ],'teal')],
+    footer:[linePrimaryButton('เปิดแบบฟอร์มแจ้ง HR',{type:'uri',label:'เปิดแบบฟอร์มแจ้ง HR',uri:url})]
+  })}]);
+}
+
 async function sendLeaveTypeMenu(env,replyToken,emp,accessToken){
   const token=await issueEmployeePortalToken(env.DB,Number(emp.client_id),Number(emp.id));
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
@@ -6003,7 +6149,7 @@ async function sendDailyHrBrief(env) {
     `).bind(Number(client.id)).all();
     if (!(hrUsers.results || []).length) continue;
 
-    const dashboard = await getDashboard(env.DB, Number(client.id));
+    const dashboard = await getDashboard(env.DB, Number(client.id), { includeHrCases: true });
     const lines = [`☀️ HR Morning Brief — ${client.name}`, formatThaiShortDate(dashboard.today), ''];
 
     if (dashboard.attention.length) {
