@@ -2007,7 +2007,7 @@ function openSettingsCategory(category, { scroll = true } = {}) {
   if ($('#settingsDetailKicker')) $('#settingsDetailKicker').textContent = meta.kicker;
   if ($('#settingsDetailDescription')) $('#settingsDetailDescription').textContent = meta.description;
   syncSettingsSidebar();
-  if (category === 'approvals' && activeCompanyRole() === 'owner') loadCompanyAccess();
+  if (category === 'approvals' && ['owner','co_owner'].includes(String(activeCompanyRole()||''))) loadCompanyAccess();
   if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -2558,7 +2558,7 @@ function renderSetupOverview(){
 }
 
 async function loadCompanyAccess({ silent = true } = {}) {
-  if (!Boolean(state.me?.is_primary_owner)) {
+  if (!['owner','co_owner'].includes(String(activeCompanyRole()||''))) {
     state.companyAccess = { members: [], eligible_employees: [], current_user_id: null };
     renderCompanyAccess();
     return;
@@ -2575,9 +2575,9 @@ async function loadCompanyAccess({ silent = true } = {}) {
 function renderCompanyAccess() {
   const section = $('#companyAccessSection');
   if (!section) return;
-  const isOwner = Boolean(state.me?.is_primary_owner);
-  section.classList.toggle('hidden', !isOwner);
-  if (!isOwner) return;
+  const canManageAccess = ['owner','co_owner'].includes(String(activeCompanyRole()||''));
+  section.classList.toggle('hidden', !canManageAccess);
+  if (!canManageAccess) return;
   const data = state.companyAccess || { members: [], eligible_employees: [] };
   const members = data.members || [];
   if ($('#companyAccessCount')) $('#companyAccessCount').textContent = `${members.length} คน`;
