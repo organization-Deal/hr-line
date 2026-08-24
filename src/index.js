@@ -1426,7 +1426,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.13', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.14', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1676,7 +1676,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.13', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.14', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -1701,6 +1701,8 @@ async function handleApi(request, env, url, auth, ctx) {
     await env.DB.prepare(`UPDATE clients SET work_start=?1,work_end=?2 WHERE id=?3`).bind(workStart,workEnd,Number(created.id)).run();
     await env.DB.prepare(`INSERT INTO company_onboarding (client_id,owner_user_id,source,current_step,employee_estimate,legal_name,tax_id,phone,address,province,recruitment_gmail_enabled,recruitment_gmail_query) VALUES (?1,?2,?3,'google_workspace',?4,?5,?6,?7,?8,?9,1,'newer_than:30d {สมัคร resume CV "job application"}') ON CONFLICT(client_id) DO UPDATE SET owner_user_id=excluded.owner_user_id,source=excluded.source,current_step='google_workspace',employee_estimate=excluded.employee_estimate,legal_name=excluded.legal_name,tax_id=excluded.tax_id,phone=excluded.phone,address=excluded.address,province=excluded.province,completed_at=NULL,updated_at=CURRENT_TIMESTAMP`)
       .bind(Number(created.id),Number(auth.user.id),String(body.onboarding_source||'web'),employeeEstimate,String(body.legal_name||name).trim(),String(body.tax_id||'').trim()||null,String(body.phone||'').trim()||null,String(body.address||'').trim()||null,String(body.province||'').trim()||null).run();
+    await env.DB.prepare(`UPDATE auth_sessions SET selected_client_id=?1 WHERE user_id=?2 AND expires_at>CURRENT_TIMESTAMP`).bind(Number(created.id),Number(auth.user.id)).run();
+    AUTH_CACHE.clear();
     const response=json({ ok: true, company: created, onboarding: await getWebOnboardingStatus(env,{...auth,clientId:Number(created.id),role:'owner',setupMode:null}) }, 201);
     response.headers.append('Set-Cookie',companyCookie(created.id));
     response.headers.append('Set-Cookie',clearCookie('nakna_setup_mode'));
@@ -1725,8 +1727,11 @@ async function handleApi(request, env, url, auth, ctx) {
     const nextClientId = Number(body.client_id);
     const member = await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(Number(auth.user.id), nextClientId).first();
     if (!member) return json({ error: 'คุณไม่มีสิทธิ์เข้าบริษัทนี้' }, 403);
-    await env.DB.prepare('UPDATE auth_sessions SET selected_client_id=?1, last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=?2').bind(nextClientId, auth.sessionHash).run();
-    return withCookie(json({ ok: true, client_id: nextClientId }), companyCookie(nextClientId));
+    // Keep the selected workspace consistent across desktop/mobile sessions for the same account.
+    await env.DB.prepare(`UPDATE auth_sessions SET selected_client_id=?1, last_seen_at=CURRENT_TIMESTAMP WHERE user_id=?2 AND expires_at>CURRENT_TIMESTAMP`)
+      .bind(nextClientId, Number(auth.user.id)).run();
+    AUTH_CACHE.clear();
+    return withCookie(json({ ok: true, client_id: nextClientId, synced_sessions: true }), companyCookie(nextClientId));
   }
 
   if (path === '/api/company-profile' && method === 'GET') {
@@ -3852,7 +3857,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.13',
+    version:'1.0-P7.14',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -6464,12 +6469,17 @@ async function fetchGoogleProfile(accessToken) {
 
 async function getMemberships(db, userId) {
   const result = await db.prepare(`
-    SELECT c.id, c.name, c.code, m.role
+    SELECT c.id, c.name, c.code, m.role,
+           (SELECT COUNT(*) FROM employees e WHERE e.client_id=c.id AND e.status!='deleted') AS employee_count,
+           (SELECT COUNT(*) FROM departments d WHERE d.client_id=c.id) AS department_count
     FROM company_members m JOIN clients c ON c.id=m.client_id
     WHERE m.user_id=?1 AND m.status='active'
     ORDER BY m.id
   `).bind(Number(userId)).all();
-  return result.results || [];
+  const rows=result.results||[];
+  const counts=new Map();
+  for(const row of rows){const key=String(row.name||'').trim().toLowerCase();counts.set(key,(counts.get(key)||0)+1);}
+  return rows.map(row=>({...row,duplicate_name:(counts.get(String(row.name||'').trim().toLowerCase())||0)>1}));
 }
 
 async function getClaimableLegacyCompany(db) {
