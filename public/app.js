@@ -850,7 +850,7 @@ function renderIdentity() {
   $('#companyMenu').innerHTML = memberships.map(company => `
     <button class="company-menu-item ${Number(company.id) === Number(me.active_company_id) ? 'active' : ''}" data-company-id="${Number(company.id)}" role="menuitem">
       <span class="company-menu-avatar">${escapeHtml((company.name || 'N').slice(0,1).toUpperCase())}</span>
-      <span><strong>${escapeHtml(company.name)}</strong><small>${escapeHtml(roleLabel(company.role))}</small></span>
+      <span><strong>${escapeHtml(company.name)}</strong><small>${escapeHtml(roleLabel(company.role))} · ${Number(company.employee_count||0)} คน${company.duplicate_name?` · Workspace #${Number(company.id)}`:''}</small></span>
       ${Number(company.id) === Number(me.active_company_id) ? '<b>✓</b>' : ''}
     </button>`).join('');
   $$('[data-company-id]').forEach(button => {
