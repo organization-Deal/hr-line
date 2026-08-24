@@ -1426,7 +1426,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.19', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.20', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1680,7 +1680,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.19', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.20', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -2170,6 +2170,61 @@ async function handleApi(request, env, url, auth, ctx) {
     await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.create', 'employee', String(result.meta.last_row_id), { ...body, employee_code: employeeCode });
     await autoAssignLearningForEmployee(env.DB, clientId, Number(result.meta.last_row_id), Number(auth.user.id));
     return json({ ok: true, id: result.meta.last_row_id }, 201);
+  }
+
+  const employeeManageMatch = path.match(/^\/api\/employees\/(\d+)$/);
+  if (employeeManageMatch && method === 'PATCH') {
+    if (!canManagePeopleAdmin(auth.role)) return json({ error: 'ไม่มีสิทธิ์แก้ไขพนักงาน' }, 403);
+    const employeeId = Number(employeeManageMatch[1]);
+    const existing = await env.DB.prepare('SELECT * FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId, clientId).first();
+    if (!existing) return json({ error: 'ไม่พบพนักงาน' }, 404);
+    const body = await safeJson(request);
+    const firstName = String(body.first_name ?? existing.first_name ?? '').trim();
+    const lastName = String(body.last_name ?? existing.last_name ?? '').trim();
+    const startDate = String(body.start_date ?? existing.start_date ?? '').trim();
+    if (!firstName || !lastName || !startDate) return json({ error: 'กรุณากรอกชื่อ นามสกุล และวันเริ่มงานให้ครบ' }, 400);
+    const employeeCode = String(body.employee_code ?? existing.employee_code ?? '').trim();
+    if (!employeeCode) return json({ error: 'รหัสพนักงานต้องไม่ว่าง' }, 400);
+    const duplicate = await env.DB.prepare('SELECT id FROM employees WHERE client_id=?1 AND employee_code=?2 AND id<>?3').bind(clientId, employeeCode, employeeId).first();
+    if (duplicate) return json({ error: 'รหัสพนักงานนี้ถูกใช้แล้ว' }, 409);
+    const departmentId = body.department_id ? Number(body.department_id) : null;
+    const positionId = body.position_id ? Number(body.position_id) : null;
+    if (departmentId) {
+      const d = await env.DB.prepare('SELECT id FROM departments WHERE id=?1 AND client_id=?2').bind(departmentId, clientId).first();
+      if (!d) return json({ error: 'ไม่พบแผนกนี้ในบริษัท' }, 400);
+    }
+    if (positionId) {
+      const pos = await env.DB.prepare('SELECT id,department_id FROM positions WHERE id=?1 AND client_id=?2').bind(positionId, clientId).first();
+      if (!pos) return json({ error: 'ไม่พบตำแหน่งนี้ในบริษัท' }, 400);
+      if (departmentId && pos.department_id && Number(pos.department_id) !== departmentId) return json({ error: 'ตำแหน่งนี้ไม่ได้อยู่ในแผนกที่เลือก' }, 400);
+    }
+    await env.DB.prepare(`UPDATE employees SET
+      employee_code=?1, nickname=?2, first_name=?3, last_name=?4, email=?5, phone=?6,
+      birth_date=?7, start_date=?8, probation_end_date=?9, contract_end_date=?10,
+      department_id=?11, position_id=?12, updated_at=CURRENT_TIMESTAMP
+      WHERE id=?13 AND client_id=?14`).bind(
+        employeeCode, body.nickname || null, firstName, lastName, body.email || null, body.phone || null,
+        body.birth_date || null, startDate, body.probation_end_date || null, body.contract_end_date || null,
+        departmentId, positionId, employeeId, clientId
+      ).run();
+    await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.update', 'employee', String(employeeId), { before: existing, after: body });
+    return json({ ok: true, id: employeeId });
+  }
+
+  if (employeeManageMatch && method === 'DELETE') {
+    if (!canManagePeopleAdmin(auth.role)) return json({ error: 'ไม่มีสิทธิ์ลบพนักงาน' }, 403);
+    const employeeId = Number(employeeManageMatch[1]);
+    const existing = await env.DB.prepare('SELECT id,employee_code,first_name,last_name,nickname,line_user_id FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId, clientId).first();
+    if (!existing) return json({ error: 'ไม่พบพนักงาน' }, 404);
+    await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.delete', 'employee', String(employeeId), existing);
+    await env.DB.batch([
+      env.DB.prepare('UPDATE employees SET manager_employee_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND manager_employee_id=?2').bind(clientId, employeeId),
+      env.DB.prepare('UPDATE employees SET leave_approver_employee_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND leave_approver_employee_id=?2').bind(clientId, employeeId),
+      env.DB.prepare('UPDATE departments SET manager_employee_id=NULL WHERE client_id=?1 AND manager_employee_id=?2').bind(clientId, employeeId),
+      env.DB.prepare("UPDATE leave_requests SET approver_employee_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND approver_employee_id=?2 AND status='pending'").bind(clientId, employeeId),
+    ]);
+    await env.DB.prepare('DELETE FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId, clientId).run();
+    return json({ ok: true, deleted_id: employeeId });
   }
 
   const employeeLinkMatch = path.match(/^\/api\/employees\/(\d+)\/line-link-code$/);
@@ -4011,7 +4066,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.19',
+    version:'1.0-P7.20',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
