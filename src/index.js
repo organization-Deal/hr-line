@@ -6070,7 +6070,7 @@ async function finishGoogleWorkspaceConnection(request, env, ctx) {
   assertGoogleConfig(env);
   const key = integrationEncryptionKey(env);
   if (!key) return googleWorkspaceErrorRedirect(request, env, 'config');
-  const auth = await authorizeUser(request, env, { requireCompany: true });
+  let auth = await authorizeUser(request, env, { requireCompany: true });
   if (!auth.ok) return redirectResponse(`${appOrigin(request, env)}/?auth=required`);
   if (!canManageIntegrations(auth.role)) return googleWorkspaceErrorRedirect(request, env, 'permission');
   await ensureV063Ready(env.DB);
