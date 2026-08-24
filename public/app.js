@@ -34,6 +34,7 @@ const state = {
   leavePolicies: [],
   approverAccess: [],
   approverPermissionCatalog: [],
+  companyAccess: { members: [], eligible_employees: [], current_user_id: null },
   peopleCore: { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} },
   activeApproverEmployeeId: null,
   activeLeaveProfileEmployeeId: null,
@@ -412,6 +413,8 @@ function bindEvents() {
   $('#lineDisconnectBtn').onclick = disconnectLineIntegration;
   $('#lineIntegrationSaveBtn').onclick = saveLineIntegration;
   $('#approverAccessShortcut').onclick = () => document.querySelector('#approverAccessSection')?.scrollIntoView({behavior:'smooth',block:'start'});
+  $('#addCompanyAccessBtn').onclick = openCompanyAccessModal;
+  $('#companyAccessSaveBtn').onclick = saveCompanyAccess;
   $('#addApproverAccessBtn').onclick = () => openApproverAccessModal();
   $('#approverAccessSaveBtn').onclick = saveApproverAccess;
   $('#approverRolePreset').onchange = applyApproverRolePreset;
@@ -1945,11 +1948,12 @@ function openSettingsCategory(category, { scroll = true } = {}) {
   if ($('#settingsDetailKicker')) $('#settingsDetailKicker').textContent = meta.kicker;
   if ($('#settingsDetailDescription')) $('#settingsDetailDescription').textContent = meta.description;
   syncSettingsSidebar();
+  if (category === 'approvals' && activeCompanyRole() === 'owner') loadCompanyAccess();
   if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function syncSettingsSidebar() {
-  const open = Boolean(state.settingsNavExpanded || state.currentView === 'settings');
+  const open = Boolean(state.settingsNavExpanded);
   $('#settingsNavSection')?.classList.toggle('hidden', !open);
   const settingsButton = document.querySelector('[data-view="settings"]');
   settingsButton?.setAttribute('aria-expanded', String(open));
@@ -1975,7 +1979,11 @@ function renderSettingsSidebar() {
   if ($('#settingsSidebarWorktimeMeta')) $('#settingsSidebarWorktimeMeta').textContent = schedules.length ? `${schedules.length} กติกาเวลาทำงาน` : `${profile.work_start || '09:00'}–${profile.work_end || '18:00'} ค่าเริ่มต้น`;
   if ($('#settingsSidebarAttendanceMeta')) $('#settingsSidebarAttendanceMeta').textContent = locations.length ? `${locations.filter(x => Number(x.is_active) !== 0).length} จุดเช็กอิน` : 'ยังไม่มี Work location';
   if ($('#settingsSidebarLeaveMeta')) $('#settingsSidebarLeaveMeta').textContent = `${leavePolicies.length} ประเภทลา · ${holidays.length} วันหยุด`;
-  if ($('#settingsSidebarApprovalMeta')) $('#settingsSidebarApprovalMeta').textContent = approvers.length ? `${approvers.length} คนมีสิทธิ์อนุมัติ` : 'ยังไม่ได้กำหนดผู้อนุมัติ';
+  if ($('#settingsSidebarApprovalMeta')) {
+    const owners = (state.companyAccess?.members || []).filter(item => item.role === 'owner').length;
+    const ownerText = owners ? `${owners} Owner` : activeCompanyRole() === 'owner' ? '1+ Owner' : '';
+    $('#settingsSidebarApprovalMeta').textContent = [ownerText, approvers.length ? `${approvers.length} ผู้อนุมัติ` : 'ยังไม่มีผู้อนุมัติ'].filter(Boolean).join(' · ');
+  }
   if ($('#settingsSidebarIntegrationMeta')) $('#settingsSidebarIntegrationMeta').textContent = `${line.connected ? 'LINE ✓' : 'LINE default'} · ${google.connected ? 'Google ✓' : 'Google ยังไม่เชื่อม'}`;
   if ($('#settingsSidebarPayrollMeta')) $('#settingsSidebarPayrollMeta').textContent = `จ่ายวันที่ ${payroll.pay_day || 28} · ${Number(payroll.social_security_enabled ?? 1) ? 'SSO ✓' : 'SSO ปิด'}`;
   if ($('#settingsSidebarBillingMeta')) $('#settingsSidebarBillingMeta').textContent = subscription.plan?.name || subscription.plan_name || (subscription.trial ? 'Free Trial' : 'ยังไม่มีแพ็กเกจ');
@@ -2415,6 +2423,92 @@ function renderSetupOverview(){
   $('#statusGoogleBadge').className=`badge ${googleReady?'badge-success':'badge-neutral'}`;$('#statusGoogleBadge').textContent=googleReady?'เชื่อมแล้ว':'ยังไม่เชื่อม';$('#statusGoogleText').textContent=googleReady?`${google.integration?.email||'Google'} · Gmail ✓ Drive ✓ Sheets ✓`:'เชื่อมครั้งเดียวเพื่อเปิด Gmail, Drive และ HR Database Sheet';$('#statusGoogleAction').disabled=!canManageGoogleWorkspace();$('#statusGoogleAction').textContent=googleReady?'ดู Google':'เชื่อม Google';
   $('#statusGoogleAction').onclick=googleReady?()=>document.querySelector('#googleWorkspaceSection')?.scrollIntoView({behavior:'smooth'}):connectGoogleWorkspace;
 }
+
+async function loadCompanyAccess({ silent = true } = {}) {
+  if (activeCompanyRole() !== 'owner') {
+    state.companyAccess = { members: [], eligible_employees: [], current_user_id: null };
+    renderCompanyAccess();
+    return;
+  }
+  try {
+    state.companyAccess = await api('/api/company-access');
+    renderCompanyAccess();
+    renderSettingsSidebar();
+  } catch (error) {
+    if (!silent) toast(error.message, true);
+  }
+}
+
+function renderCompanyAccess() {
+  const section = $('#companyAccessSection');
+  if (!section) return;
+  const isOwner = activeCompanyRole() === 'owner';
+  section.classList.toggle('hidden', !isOwner);
+  if (!isOwner) return;
+  const data = state.companyAccess || { members: [], eligible_employees: [] };
+  const members = data.members || [];
+  if ($('#companyAccessCount')) $('#companyAccessCount').textContent = `${members.length} คน`;
+  const root = $('#companyAccessList');
+  if (!root) return;
+  root.innerHTML = members.length ? members.map(member => {
+    const role = String(member.role || '');
+    const provider = String(member.auth_provider || '').includes('line') && String(member.auth_provider || '').includes('google') ? 'Google + LINE' : String(member.auth_provider || '').includes('line') ? 'LINE' : 'Google';
+    return `<article class="company-access-card">
+      <div class="company-access-avatar">${member.picture_url ? `<img src="${escapeHtml(member.picture_url)}" alt="" />` : escapeHtml(String(member.name || member.email || '?').trim().charAt(0).toUpperCase())}</div>
+      <div class="company-access-copy"><strong>${escapeHtml(member.name || member.email || 'บัญชีนากนะ')}</strong><p>${escapeHtml(member.email || provider)} · ${provider}</p></div>
+      <span class="badge ${role === 'owner' ? 'badge-success' : 'badge-soft'}">${role === 'owner' ? 'Owner' : 'HR Admin'}</span>
+      ${member.is_me ? '<span class="company-access-self">บัญชีคุณ</span>' : `<button class="text-btn danger-text" type="button" onclick="window.revokeCompanyAccess(${Number(member.user_id)},'${escapeHtml(member.name || member.email || '')}')">ถอนสิทธิ์</button>`}
+    </article>`;
+  }).join('') : emptyState('ยังไม่มีผู้ดูแลเพิ่มเติม', 'เพิ่ม Owner ร่วมหรือ HR Admin เพื่อให้มีคนช่วยดูแล Workspace');
+}
+
+function openCompanyAccessModal() {
+  const data = state.companyAccess || { members: [], eligible_employees: [] };
+  const employees = data.eligible_employees || [];
+  const select = $('#companyAccessEmployeeSelect');
+  if (!select) return;
+  select.innerHTML = employees.length ? employees.map(employee => {
+    const name = employee.nickname || `${employee.first_name || ''} ${employee.last_name || ''}`.trim() || employee.employee_code;
+    const status = employee.current_role === 'owner' ? ' · Owner แล้ว' : employee.current_role === 'hr_admin' ? ' · HR Admin แล้ว' : employee.linked ? '' : ' · ยังไม่เชื่อมบัญชี';
+    return `<option value="${Number(employee.id)}" ${employee.linked ? '' : 'disabled'}>${escapeHtml(name)}${escapeHtml(status)}</option>`;
+  }).join('') : '<option value="">ยังไม่มีพนักงาน</option>';
+  const firstLinked = employees.find(item => item.linked && !item.current_role) || employees.find(item => item.linked);
+  if (firstLinked) select.value = String(firstLinked.id);
+  $('#companyAccessRoleSelect').value = 'owner';
+  $('#companyAccessEmployeeHint').textContent = employees.some(item => !item.linked) ? 'คนที่เป็นสีเทาต้องเชื่อม LINE หรือ Google ก่อนจึงเพิ่มสิทธิ์ได้' : 'เลือกคนที่ต้องการให้ช่วยดูแล Workspace';
+  $('#companyAccessModal').showModal();
+}
+
+async function saveCompanyAccess() {
+  const employeeId = Number($('#companyAccessEmployeeSelect').value || 0);
+  const role = $('#companyAccessRoleSelect').value;
+  if (!employeeId) return toast('กรุณาเลือกพนักงาน', true);
+  const button = $('#companyAccessSaveBtn');
+  button.disabled = true;
+  try {
+    await api('/api/company-access', { method: 'POST', body: JSON.stringify({ employee_id: employeeId, role }) });
+    $('#companyAccessModal').close();
+    await loadCompanyAccess({ silent: false });
+    await loadSessionOnly();
+    renderIdentity();
+    toast(role === 'owner' ? 'เพิ่ม Owner ร่วมแล้ว' : 'เพิ่ม HR Admin แล้ว');
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+window.revokeCompanyAccess = async (userId, name) => {
+  if (!confirm(`ถอนสิทธิ์ของ ${name || 'บัญชีนี้'} ออกจากการจัดการ Workspace ใช่ไหม?`)) return;
+  try {
+    await api(`/api/company-access/${Number(userId)}`, { method: 'DELETE', body: '{}' });
+    await loadCompanyAccess({ silent: false });
+    toast('ถอนสิทธิ์แล้ว');
+  } catch (error) {
+    toast(error.message, true);
+  }
+};
 
 function renderApproverAccess() {
   const section = $('#approverAccessSection');
