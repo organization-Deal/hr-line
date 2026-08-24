@@ -2543,13 +2543,13 @@ function openCompanyAccessModal() {
   if (!select) return;
   select.innerHTML = employees.length ? employees.map(employee => {
     const name = employee.nickname || `${employee.first_name || ''} ${employee.last_name || ''}`.trim() || employee.employee_code;
-    const status = employee.current_role === 'owner' ? ' · Owner แล้ว' : employee.current_role === 'hr_admin' ? ' · HR Admin แล้ว' : employee.linked ? '' : ' · ยังไม่เชื่อมบัญชี';
+    const status = employee.current_role === 'owner' ? ' · Owner แล้ว' : employee.current_role === 'hr_admin' ? ' · HR Admin แล้ว' : employee.linked ? (employee.account_backfill_needed ? ' · LINE เชื่อมแล้ว' : '') : ' · ยังไม่เชื่อมบัญชี';
     return `<option value="${Number(employee.id)}" ${employee.linked ? '' : 'disabled'}>${escapeHtml(name)}${escapeHtml(status)}</option>`;
   }).join('') : '<option value="">ยังไม่มีพนักงาน</option>';
   const firstLinked = employees.find(item => item.linked && !item.current_role) || employees.find(item => item.linked);
   if (firstLinked) select.value = String(firstLinked.id);
   $('#companyAccessRoleSelect').value = 'owner';
-  $('#companyAccessEmployeeHint').textContent = employees.some(item => !item.linked) ? 'คนที่เป็นสีเทาต้องเชื่อม LINE หรือ Google ก่อนจึงเพิ่มสิทธิ์ได้' : 'เลือกคนที่ต้องการให้ช่วยดูแล Workspace';
+  $('#companyAccessEmployeeHint').textContent = employees.some(item => !item.linked) ? 'พนักงานที่เชื่อม LINE แล้วเพิ่มสิทธิ์ได้ทันที ส่วนคนที่เป็นสีเทายังต้องเชื่อม LINE หรือ Google ก่อน' : 'เลือกคนที่ต้องการให้ช่วยดูแล Workspace · บัญชี LINE เก่าจะถูกผูกเป็นบัญชีนากนะให้อัตโนมัติ';
   $('#companyAccessModal').showModal();
 }
 
