@@ -1426,7 +1426,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.16', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.17', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1680,7 +1680,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.16', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.17', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -2369,7 +2369,19 @@ async function handleApi(request, env, url, auth, ctx) {
     const body=await safeJson(request);
     const approverId=body.leave_approver_employee_id ? Number(body.leave_approver_employee_id) : null;
     if(approverId){ const approver=await getEmployeeForClient(env.DB,approverId,clientId); if(!approver) return json({error:'ผู้อนุมัติไม่อยู่ในบริษัทนี้'},400); if(!await employeeHasPermission(env.DB,clientId,approverId,'leave.approve')) return json({error:'พนักงานคนนี้ยังไม่มีสิทธิ์ “อนุมัติการลา” กรุณาเพิ่มสิทธิ์ผู้อนุมัติก่อน'},409); }
-    const leaveAccessOverride = body.leave_access_override === null || body.leave_access_override === '' || body.leave_access_override === undefined ? null : (Number(body.leave_access_override) ? 1 : 0);
+    let leaveAccessOverride = body.leave_access_override === null || body.leave_access_override === '' || body.leave_access_override === undefined ? null : (Number(body.leave_access_override) ? 1 : 0);
+    let autoUnlocked=false;
+    // If HR explicitly changes a per-person entitlement, that is an intentional override.
+    // Do not leave the employee silently locked by the company probation rule.
+    if(leaveAccessOverride===null && Array.isArray(body.entitlements) && body.entitlements.length){
+      const policyRows=(await env.DB.prepare('SELECT id,default_entitlement_days FROM leave_policies WHERE client_id=?1').bind(clientId).all()).results||[];
+      const policyMap=new Map(policyRows.map(row=>[Number(row.id),row]));
+      const hasManualEntitlement=body.entitlements.some(item=>{
+        const policy=policyMap.get(Number(item.policy_id)); if(!policy)return false;
+        return Math.abs(num(item.entitlement_days,0)-num(policy.default_entitlement_days,0))>0.0001 || Math.abs(num(item.adjustment_days,0))>0.0001;
+      });
+      if(hasManualEntitlement){leaveAccessOverride=1;autoUnlocked=true;}
+    }
     await env.DB.prepare('UPDATE employees SET leave_approver_employee_id=?1,leave_access_override=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3 AND client_id=?4').bind(approverId,leaveAccessOverride,employeeId,clientId).run();
     if(approverId){
       const waiting=(await env.DB.prepare("SELECT id FROM leave_requests WHERE employee_id=?1 AND client_id=?2 AND status='pending' AND approver_employee_id IS NULL").bind(employeeId,clientId).all()).results||[];
@@ -2384,8 +2396,8 @@ async function handleApi(request, env, url, auth, ctx) {
         ON CONFLICT(employee_id,leave_policy_id,year) DO UPDATE SET entitlement_days=excluded.entitlement_days,adjustment_days=excluded.adjustment_days,note=excluded.note,updated_by_user_id=excluded.updated_by_user_id,updated_at=CURRENT_TIMESTAMP`)
         .bind(clientId,employeeId,policyId,year,num(item.entitlement_days,0),num(item.adjustment_days,0),item.note||null,Number(auth.user.id)).run();
     }
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'leave.entitlement.update','employee',String(employeeId),{year,approver_id:approverId});
-    return json({ok:true,profile:await getEmployeeLeaveProfile(env.DB,employeeId,clientId,year)});
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'leave.entitlement.update','employee',String(employeeId),{year,approver_id:approverId,auto_unlocked:autoUnlocked});
+    return json({ok:true,auto_unlocked:autoUnlocked,profile:await getEmployeeLeaveProfile(env.DB,employeeId,clientId,year)});
   }
 
   const evidenceMatch = path.match(/^\/api\/leave-evidence\/(\d+)$/);
@@ -3132,7 +3144,22 @@ async function processLineEvent(event, env, lineCtx) {
     if (lineCtx.clientId) {
       return env.DB.prepare(`SELECT e.*, c.name AS company_name FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.client_id=?1 AND e.line_user_id=?2 AND COALESCE(e.line_provider_scope,'default')=?3 AND e.status='active'`).bind(Number(lineCtx.clientId), lineUserId, providerScope).first();
     }
-    return env.DB.prepare(`SELECT e.*, c.name AS company_name FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.line_user_id=?1 AND COALESCE(e.line_provider_scope,'default')='default' AND e.status='active'`).bind(lineUserId).first();
+
+    // A LINE identity can legitimately exist in more than one Workspace.
+    // Always prefer the Workspace currently selected by the same Nakna account,
+    // otherwise the global OA can accidentally read leave balances from an old/duplicate Workspace.
+    const rows=(await env.DB.prepare(`SELECT e.*, c.name AS company_name FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.line_user_id=?1 AND COALESCE(e.line_provider_scope,'default')=?2 AND e.status='active' ORDER BY e.id DESC`).bind(lineUserId,providerScope).all()).results||[];
+    if(rows.length<=1) return rows[0]||null;
+    const user=await findLineBusinessUser(env.DB,providerScope,lineUserId).catch(()=>null);
+    if(user?.id){
+      const activeSession=await env.DB.prepare(`SELECT selected_client_id FROM auth_sessions WHERE user_id=?1 AND selected_client_id IS NOT NULL AND expires_at>CURRENT_TIMESTAMP ORDER BY last_seen_at DESC LIMIT 1`).bind(Number(user.id)).first();
+      const selectedId=Number(activeSession?.selected_client_id||0);
+      const selected=rows.find(row=>Number(row.client_id)===selectedId);
+      if(selected) return selected;
+      const memberships=(await env.DB.prepare(`SELECT client_id FROM company_members WHERE user_id=?1 AND status='active' ORDER BY id DESC`).bind(Number(user.id)).all()).results||[];
+      for(const membership of memberships){const match=rows.find(row=>Number(row.client_id)===Number(membership.client_id));if(match)return match;}
+    }
+    return rows[0]||null;
   };
 
   if (event.type === 'message' && event.message?.type === 'text') {
@@ -3884,7 +3911,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.16',
+    version:'1.0-P7.17',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -4917,15 +4944,15 @@ async function getEmployeeLeaveProfile(db,employeeId,clientId,year){
   const policies=(await db.prepare('SELECT * FROM leave_policies WHERE client_id=?1 AND is_active=1 ORDER BY sort_order,name').bind(clientId).all()).results||[];
   const ent=(await db.prepare('SELECT * FROM employee_leave_entitlements WHERE employee_id=?1 AND year=?2').bind(employeeId,year).all()).results||[];
   const requests=(await db.prepare(`SELECT policy_id,status,SUM(COALESCE(duration_days,0)) AS days FROM leave_requests WHERE employee_id=?1 AND substr(start_date,1,4)=?2 AND status IN ('approved','pending','awaiting_evidence') GROUP BY policy_id,status`).bind(employeeId,String(year)).all()).results||[];
-  const balances=policies.map(policy=>{
+  const balances=await Promise.all(policies.map(async policy=>{
     const override=ent.find(x=>Number(x.leave_policy_id)===Number(policy.id));
     const entitlement=override?num(override.entitlement_days):num(policy.default_entitlement_days); const adjustment=override?num(override.adjustment_days):0;
     const used=requests.filter(x=>Number(x.policy_id)===Number(policy.id)&&x.status==='approved').reduce((a,x)=>a+num(x.days),0);
     const pending=requests.filter(x=>Number(x.policy_id)===Number(policy.id)&&x.status!=='approved').reduce((a,x)=>a+num(x.days),0);
     const total=entitlement+adjustment; const remaining=Number(policy.is_unlimited)?null:Math.max(-999,total-used-pending);
-    const probationLocked = (Number(employee.leave_access_override)===0) || (Number(employee.leave_access_override)!==1 && String(employee.people_status||'')==='probation' && Number(employee.lock_leave_during_probation??1) && !Number(policy.available_during_probation||0));
-    return {...policy,entitlement_days:entitlement,adjustment_days:adjustment,total_days:total,used_days:used,pending_days:pending,remaining_days:remaining,note:override?.note||null,available_now:!probationLocked,locked_reason:probationLocked?'รอผ่านทดลองงาน':null};
-  });
+    const eligibility=await leaveEligibility(db,employee,policy);
+    return {...policy,entitlement_days:entitlement,adjustment_days:adjustment,total_days:total,used_days:used,pending_days:pending,remaining_days:remaining,note:override?.note||null,available_now:Boolean(eligibility.allowed),locked_reason:eligibility.allowed?null:eligibility.reason};
+  }));
   return {employee,year,balances,leave_access:{override:employee.leave_access_override,lock_during_probation:Boolean(Number(employee.lock_leave_during_probation??1))}};
 }
 
@@ -4954,7 +4981,8 @@ async function createLeaveRequest(env,{clientId,employeeId,policyId,leaveType,st
   const evidenceRequired=policy.evidence_required_after_days!=null && duration>=num(policy.evidence_required_after_days);
   let approverId=employee.leave_approver_employee_id||employee.manager_employee_id||null;
   if(approverId && !await employeeHasPermission(env.DB,clientId,Number(approverId),'leave.approve')) approverId=null;
-  if(submittedVia==='line' && !approverId) throw httpError('HR ยังไม่ได้กำหนดผู้อนุมัติที่มีสิทธิ์อนุมัติการลาให้คุณ กรุณาติดต่อ HR ก่อนส่งคำขอ',409);
+  // No named approver is valid: the request falls back to the Owner/HR dashboard queue.
+  // This matches Nakna's workflow where companies can choose manager approval OR direct HR approval.
   const status=evidenceRequired?'awaiting_evidence':'pending';
   const result=await env.DB.prepare(`INSERT INTO leave_requests (client_id,employee_id,leave_type,policy_id,start_date,end_date,reason,status,approver_employee_id,duration_days,day_part,evidence_required,evidence_count,submitted_via) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,?13)`)
     .bind(clientId,employeeId,policy.code,Number(policy.id),startDate,endDate,reason||null,status,approverId,duration,dayPart,evidenceRequired?1:0,submittedVia).run();
@@ -5040,7 +5068,8 @@ async function serveSharedEvidence(env,token){
 async function notifyLeaveApprover(env,requestId){
   const row=await getLeaveRequestDetail(env.DB,requestId); if(!row||row.status!=='pending') return;
   if(!row.approver_employee_id||!row.approver_line_user_id){
-    console.warn(JSON.stringify({level:'warn',event:'leave_approver_missing_line',request_id:requestId,approver_id:row.approver_employee_id||null})); return;
+    console.info(JSON.stringify({level:'info',event:'leave_routed_to_hr_dashboard',request_id:requestId,client_id:row.client_id}));
+    return;
   }
   const profile=await getEmployeeLeaveProfile(env.DB,Number(row.employee_id),Number(row.client_id),Number(String(row.start_date).slice(0,4)));
   const balance=profile.balances.find(x=>Number(x.id)===Number(row.policy_id));
@@ -5368,7 +5397,8 @@ async function sendLeaveTypeMenu(env,replyToken,emp,accessToken){
   })}]);
 }
 async function sendLeaveBalance(env,replyToken,emp,accessToken){
-  const profile=await getEmployeeLeaveProfile(env.DB,Number(emp.id),Number(emp.client_id),new Date().getFullYear());
+  const year=Number(dateInBangkok().slice(0,4));
+  const profile=await getEmployeeLeaveProfile(env.DB,Number(emp.id),Number(emp.client_id),year);
   const rows=(profile.balances||[]).map(b=>{
     const remaining=Number(b.is_unlimited)?'ไม่จำกัด':`${Number(b.remaining_days).toFixed(Number(b.remaining_days)%1?1:0)} วัน`;
     const locked=b.available_now===false; const tone=locked?'warning':(!Number(b.is_unlimited)&&Number(b.remaining_days)<2?'error':'teal');
@@ -5377,7 +5407,9 @@ async function sendLeaveBalance(env,replyToken,emp,accessToken){
       !Number(b.is_unlimited)?lineText(`ใช้แล้ว ${Number(b.used_days||0).toFixed(1).replace('.0','')} · รออนุมัติ ${Number(b.pending_days||0).toFixed(1).replace('.0','')} วัน`,'xxs',LINE_CI.muted):lineText('สิทธิ์ไม่จำกัดตามนโยบายบริษัท','xxs',LINE_CI.muted)
     ],'neutral');
   });
-  return replyLineMessages(accessToken,replyToken,[{type:'flex',altText:'สิทธิ์ลาคงเหลือ',contents:lineBubble({eyebrow:'LEAVE BALANCE',title:`สิทธิ์ลา ${profile.year}`,subtitle:emp.nickname||emp.first_name,body:rows})}]);
+  if(!rows.length) return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex('ยังไม่มีสิทธิ์ลาที่เปิดใช้งาน','HR สามารถตั้งประเภทลาและสิทธิ์รายคนจากหน้า พนักงาน → สิทธิ์ลา','warning')]);
+  const subtitle=[emp.nickname||emp.first_name,emp.company_name].filter(Boolean).join(' · ');
+  return replyLineMessages(accessToken,replyToken,[{type:'flex',altText:'สิทธิ์ลาคงเหลือ',contents:lineBubble({eyebrow:'LEAVE BALANCE',title:`สิทธิ์ลา ${profile.year}`,subtitle,body:rows})}]);
 }
 function buildDatePickerFlex(title,action,policyId,start=null){
   const data=`action=${action}&policy_id=${policyId}${start?`&start=${start}`:''}`;
