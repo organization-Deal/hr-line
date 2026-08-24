@@ -344,10 +344,25 @@ function bindEvents() {
     menu.classList.toggle('hidden', !willOpen);
     $('#companySwitcher').setAttribute('aria-expanded', String(willOpen));
   };
+  $('#accountMenuBtn').onclick = event => {
+    event.stopPropagation();
+    const menu=$('#accountMenu');
+    const willOpen=menu.classList.contains('hidden');
+    menu.classList.toggle('hidden',!willOpen);
+    $('#accountMenuBtn').setAttribute('aria-expanded',String(willOpen));
+    $('#companyMenu').classList.add('hidden');
+  };
+  $('#accountLinkGoogleBtn').onclick=()=>{window.location.href='/auth/google/start?link=1';};
+  $('#accountSwitchLoginBtn').onclick=async()=>{try{await fetch('/auth/logout',{method:'POST',credentials:'same-origin'});}catch{} window.location.href='/auth/google/start';};
+  $('#accountLogoutBtn').onclick=logout;
+  $('#deleteCompanySaveBtn').onclick=deleteCompanyConfirmed;
   document.addEventListener('click', () => {
     $('#companyMenu').classList.add('hidden');
     $('#companySwitcher').setAttribute('aria-expanded', 'false');
+    $('#accountMenu')?.classList.add('hidden');
+    $('#accountMenuBtn')?.setAttribute('aria-expanded','false');
   });
+  $('#accountMenu')?.addEventListener('click',event=>event.stopPropagation());
 
   // Universal close handler. Works for native <dialog> and fullscreen/custom viewers.
   // Capture phase prevents required-field validation or overlay layers from trapping the X/Cancel button.
@@ -827,6 +842,38 @@ async function switchCompany(clientId) {
   }
 }
 
+function openDeleteCompanyModal(clientId){
+  const company=(state.me?.companies||[]).find(item=>Number(item.id)===Number(clientId));
+  if(!company)return toast('ไม่พบบริษัท',true);
+  $('#deleteCompanyId').value=String(company.id);
+  $('#deleteCompanyName').textContent=company.name;
+  $('#deleteCompanyEmployeeCount').textContent=String(Number(company.employee_count||0));
+  $('#deleteCompanyConfirmName').value='';
+  $('#deleteCompanyConfirmName').placeholder=company.name;
+  $('#companyMenu').classList.add('hidden');
+  $('#deleteCompanyModal').showModal();
+  setTimeout(()=>$('#deleteCompanyConfirmName')?.focus(),120);
+}
+
+async function deleteCompanyConfirmed(){
+  const id=Number($('#deleteCompanyId').value||0);
+  const company=(state.me?.companies||[]).find(item=>Number(item.id)===id);
+  if(!company)return toast('ไม่พบบริษัท',true);
+  const confirmName=$('#deleteCompanyConfirmName').value.trim();
+  if(confirmName!==String(company.name||'').trim())return toast('พิมพ์ชื่อบริษัทให้ตรงก่อนลบ',true);
+  const button=$('#deleteCompanySaveBtn');button.disabled=true;
+  try{
+    await api(`/api/companies/${id}`,{method:'DELETE',body:JSON.stringify({confirm_name:confirmName})});
+    $('#deleteCompanyModal').close();
+    state.dashboardCache=null;
+    const ready=await loadSessionOnly({forceNewBusiness:false});
+    if(!ready){showLogin();return;}
+    if(state.me?.active_company_id){showAppShell();await loadAll({silent:true});}
+    else{await maybeRunOnboarding({forceNewBusiness:true});}
+    toast('ลบบริษัทออกจากนากนะแล้ว');
+  }catch(error){toast(error.message,true);}finally{button.disabled=false;}
+}
+
 function renderIdentity() {
   const me = state.me;
   if (!me?.user) return;
@@ -848,11 +895,14 @@ function renderIdentity() {
   }
 
   $('#companyMenu').innerHTML = memberships.map(company => `
-    <button class="company-menu-item ${Number(company.id) === Number(me.active_company_id) ? 'active' : ''}" data-company-id="${Number(company.id)}" role="menuitem">
-      <span class="company-menu-avatar">${escapeHtml((company.name || 'N').slice(0,1).toUpperCase())}</span>
-      <span><strong>${escapeHtml(company.name)}</strong><small>${escapeHtml(roleLabel(company.role))} · ${Number(company.employee_count||0)} คน${company.duplicate_name?` · Workspace #${Number(company.id)}`:''}</small></span>
-      ${Number(company.id) === Number(me.active_company_id) ? '<b>✓</b>' : ''}
-    </button>`).join('');
+    <div class="company-menu-row ${Number(company.id) === Number(me.active_company_id) ? 'active' : ''}">
+      <button class="company-menu-item" data-company-id="${Number(company.id)}" role="menuitem">
+        <span class="company-menu-avatar">${escapeHtml((company.name || 'N').slice(0,1).toUpperCase())}</span>
+        <span><strong>${escapeHtml(company.name)}</strong><small>${escapeHtml(roleLabel(company.role))} · ${Number(company.employee_count||0)} คน${company.duplicate_name?` · Workspace #${Number(company.id)}`:''}</small></span>
+        ${Number(company.id) === Number(me.active_company_id) ? '<b>✓</b>' : ''}
+      </button>
+      ${String(company.role)==='owner'?`<button class="company-delete-btn" type="button" data-delete-company-id="${Number(company.id)}" title="ลบบริษัท" aria-label="ลบ ${escapeHtml(company.name)}">⌫</button>`:''}
+    </div>`).join('');
   $$('[data-company-id]').forEach(button => {
     button.onclick = event => {
       event.stopPropagation();
@@ -860,6 +910,19 @@ function renderIdentity() {
       switchCompany(button.dataset.companyId);
     };
   });
+  $$('[data-delete-company-id]').forEach(button=>{
+    button.onclick=event=>{event.stopPropagation();openDeleteCompanyModal(Number(button.dataset.deleteCompanyId));};
+  });
+
+  const accountAvatar=$('#accountMenuAvatar');
+  $('#accountMenuName').textContent=user.name||user.email||'บัญชีนากนะ';
+  $('#accountMenuEmail').textContent=user.email||'เชื่อมผ่าน LINE';
+  $('#accountProviderBadge').textContent=user.google_connected&&user.line_connected?'Google + LINE':user.google_connected?'Google':'LINE';
+  $('#accountWorkspaceText').textContent=active?`${active.name} · ${roleLabel(active.role)}`:'ยังไม่มี Workspace';
+  $('#accountLinkGoogleTitle').textContent=user.google_connected?'บัญชี Google เชื่อมแล้ว':'เชื่อมบัญชี Google';
+  accountAvatar.textContent=(user.name||user.email||'U').trim().slice(0,1).toUpperCase();
+  accountAvatar.classList.toggle('has-photo',Boolean(user.picture_url));
+  accountAvatar.style.backgroundImage=user.picture_url?`url("${String(user.picture_url).replace(/"/g,'%22')}")`:'';
 }
 
 function roleLabel(role) {
@@ -945,6 +1008,8 @@ function handleReturnMessage() {
   const googleConnected = url.searchParams.get('google_workspace') === 'connected';
   if (googleConnected) toast('เชื่อม Gmail + Drive + Google Sheets เรียบร้อยแล้ว');
   if (url.searchParams.get('auth') === 'success') toast('เข้าสู่ระบบด้วย Google เรียบร้อยแล้ว');
+  if (url.searchParams.get('account') === 'linked') toast('เชื่อมบัญชี Google กับ LINE แล้ว · มือถือและคอมใช้บัญชีเดียวกัน');
+  if (url.searchParams.get('account_error') === 'link') toast('เชื่อมบัญชี Google ไม่สำเร็จ กรุณาลองใหม่', true);
   if (url.searchParams.get('auth') === 'line') toast(forceNewBusiness ? 'ยืนยัน LINE แล้ว · ตั้งค่าธุรกิจต่อบนเว็บได้เลย' : 'เข้าสู่ระบบผ่าน LINE เรียบร้อยแล้ว');
   if (url.searchParams.has('auth_error')) {
     const code = url.searchParams.get('auth_error');
@@ -955,7 +1020,7 @@ function handleReturnMessage() {
         : 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่');
   }
   if (url.searchParams.has('google_workspace_error')) toast(googleWorkspaceErrorText(url.searchParams.get('google_workspace_error')), true);
-  const cleanup = ['google_workspace','google_workspace_error','auth','auth_error','setup'];
+  const cleanup = ['google_workspace','google_workspace_error','auth','auth_error','account','account_error','setup'];
   if ([...url.searchParams.keys()].some(key => cleanup.includes(key))) {
     cleanup.forEach(key => url.searchParams.delete(key));
     const query = url.searchParams.toString();
