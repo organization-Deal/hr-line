@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#F3F8F6" />
+  <meta name="color-scheme" content="light" />
+  <title>ขอลางาน · นากนะ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/leave.css?v=1.0-p7.23" />
+</head>
+<body>
+  <main class="leave-shell">
+    <header class="leave-header">
+      <div class="brand-mark">น</div>
+      <div class="brand-copy"><strong>นากนะ</strong><span>Employee Leave</span></div>
+      <span class="secure-pill">LINE Secure</span>
+    </header>
+
+    <section id="loadingState" class="state-card state-card-center">
+      <div class="loader-ring" aria-hidden="true"></div>
+      <strong>กำลังเตรียมแบบฟอร์มลา</strong>
+      <span>ดึงสิทธิ์ลาและข้อมูลพนักงาน…</span>
+    </section>
+
+    <section id="errorState" class="state-card hidden">
+      <div class="state-icon error">!</div>
+      <h1>เปิดแบบฟอร์มไม่ได้</h1>
+      <p id="errorText">กรุณากลับไปที่ LINE แล้วกด “ขอลางาน” ใหม่</p>
+      <button id="retryBtn" class="primary-btn" type="button">ลองใหม่</button>
+    </section>
+
+    <section id="successState" class="success-panel hidden">
+      <div class="success-check">✓</div>
+      <p class="eyebrow">LEAVE SUBMITTED</p>
+      <h1>ส่งใบลาแล้ว</h1>
+      <p id="successSummary" class="success-copy">นากนะแจ้งยืนยันกลับไปใน LINE แล้ว</p>
+      <div id="successMeta" class="success-meta"></div>
+      <button id="backLineBtn" class="primary-btn" type="button">กลับไปที่ LINE</button>
+    </section>
+
+    <form id="leaveForm" class="leave-form hidden" novalidate>
+      <section class="hero-card">
+        <p class="eyebrow">LEAVE REQUEST</p>
+        <h1>ขอลางาน</h1>
+        <p>กรอกครั้งเดียวให้ครบ แล้วนากนะส่งต่อให้ผู้อนุมัติอัตโนมัติ</p>
+        <div class="employee-strip">
+          <div class="employee-avatar" id="employeeAvatar">น</div>
+          <div><strong id="employeeName">—</strong><span id="employeeCompany">—</span></div>
+        </div>
+      </section>
+
+      <section class="form-card">
+        <div class="section-head">
+          <div><span class="step-no">1</span><div><strong>ประเภทการลา</strong><small>ระบบจะแสดงสิทธิ์คงเหลือของคุณ</small></div></div>
+        </div>
+        <div id="policyList" class="policy-list"></div>
+        <input id="policyId" name="policy_id" type="hidden" />
+      </section>
+
+      <section class="form-card">
+        <div class="section-head">
+          <div><span class="step-no">2</span><div><strong>วันที่ลา</strong><small>เลือกวันเริ่มและวันสุดท้าย</small></div></div>
+        </div>
+        <div class="date-grid">
+          <label><span>วันเริ่มลา</span><input id="startDate" name="start_date" type="date" required /></label>
+          <label><span>วันสุดท้าย</span><input id="endDate" name="end_date" type="date" required /></label>
+        </div>
+        <div id="dayPartWrap" class="segmented-wrap">
+          <span class="field-label">รูปแบบวันลา</span>
+          <div class="segmented">
+            <label><input type="radio" name="day_part" value="full" checked /><span>เต็มวัน</span></label>
+            <label><input type="radio" name="day_part" value="am" /><span>ครึ่งวันเช้า</span></label>
+            <label><input type="radio" name="day_part" value="pm" /><span>ครึ่งวันบ่าย</span></label>
+          </div>
+        </div>
+      </section>
+
+      <section class="form-card">
+        <div class="section-head">
+          <div><span class="step-no">3</span><div><strong>เหตุผล</strong><small>เขียนสั้น ๆ ให้ผู้อนุมัติเข้าใจ</small></div></div>
+        </div>
+        <label class="textarea-label"><textarea id="reason" name="reason" rows="4" maxlength="500" placeholder="เช่น มีธุระครอบครัว / ไม่สบายและไปพบแพทย์" required></textarea><small><span id="reasonCount">0</span>/500</small></label>
+      </section>
+
+      <section class="form-card">
+        <div class="section-head">
+          <div><span class="step-no">4</span><div><strong>หลักฐานการลา</strong><small>แนบรูป, PDF, DOC หรือ DOCX ได้สูงสุด 3 ไฟล์</small></div></div>
+          <span id="evidenceBadge" class="optional-badge">ไม่บังคับ</span>
+        </div>
+        <label class="upload-box" for="evidenceInput">
+          <span class="upload-icon">＋</span>
+          <strong>เพิ่มรูปหรือไฟล์</strong>
+          <small>ถ่ายรูปจากมือถือ หรือเลือกเอกสาร · ไม่เกิน 10 MB/ไฟล์</small>
+        </label>
+        <input id="evidenceInput" name="evidence" type="file" accept="image/*,.pdf,.doc,.docx" multiple hidden />
+        <div id="fileList" class="file-list"></div>
+        <p id="evidenceHint" class="evidence-hint hidden"></p>
+      </section>
+
+      <section class="review-card">
+        <div><strong>ตรวจสอบก่อนส่ง</strong><span id="reviewText">เลือกประเภทลาและวันที่ให้ครบ</span></div>
+        <span id="reviewBalance" class="review-balance">—</span>
+      </section>
+
+      <div class="sticky-submit">
+        <button id="submitBtn" class="primary-btn submit-btn" type="submit">
+          <span class="btn-label">ส่งใบลา</span>
+          <i class="btn-spinner hidden" aria-hidden="true"></i>
+        </button>
+        <small>เมื่อส่งสำเร็จ คุณจะได้รับข้อความยืนยันใน LINE</small>
+      </div>
+    </form>
+  </main>
+
+  <script src="/leave.js?v=1.0-p7.23" defer></script>
+</body>
+</html>
