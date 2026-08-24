@@ -415,6 +415,7 @@ function bindEvents() {
   $('#approverAccessShortcut').onclick = () => document.querySelector('#approverAccessSection')?.scrollIntoView({behavior:'smooth',block:'start'});
   $('#addCompanyAccessBtn').onclick = openCompanyAccessModal;
   $('#companyAccessSaveBtn').onclick = saveCompanyAccess;
+  $('#companyAccessRoleSelect').onchange = renderCompanyAccessRoleHint;
   $('#addApproverAccessBtn').onclick = () => openApproverAccessModal();
   $('#approverAccessSaveBtn').onclick = saveApproverAccess;
   $('#approverRolePreset').onchange = applyApproverRolePreset;
@@ -719,7 +720,8 @@ async function createCompany() {
         phone: $('#onboardCompanyPhone').value.trim(),
         province: $('#onboardProvince').value.trim(),
         address: $('#onboardAddress').value.trim(),
-        onboarding_source: 'line_web'
+        onboarding_source: 'line_web',
+        confirm_new_workspace: true
       })
     });
     await loadSessionOnly();
@@ -929,7 +931,7 @@ function renderIdentity() {
 }
 
 function roleLabel(role) {
-  return ({ owner: 'Owner', hr_admin: 'HR Admin', hr: 'HR', manager: 'Manager', employee: 'Employee', viewer: 'Viewer' })[role] || role || 'Member';
+  return ({ owner:'Primary Owner', co_owner:'Co-Owner', hr_admin:'HR Admin', hr:'HR', payroll_admin:'Payroll Admin', manager:'Manager', approver:'Approver', employee:'Employee', viewer:'Viewer' })[role] || role || 'Member';
 }
 
 function activeCompanyRole() {
@@ -938,7 +940,7 @@ function activeCompanyRole() {
 }
 
 function canHrOverrideLeave() {
-  return ['owner','hr_admin','hr'].includes(String(activeCompanyRole() || ''));
+  return ['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole() || ''));
 }
 
 function activeCompany() {
@@ -950,8 +952,8 @@ function companyProfileCompleted(profile) {
   return Boolean(profile && String(profile.name || '').trim() && String(profile.work_start || '').trim() && String(profile.work_end || '').trim());
 }
 
-function canManageCompanyProfile() { return ['owner','hr_admin','hr'].includes(String(activeCompanyRole() || '')); }
-function canManageGoogleWorkspace() { return ['owner','hr_admin'].includes(String(activeCompanyRole() || '')); }
+function canManageCompanyProfile() { return ['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole() || '')); }
+function canManageGoogleWorkspace() { return ['owner','co_owner','hr_admin'].includes(String(activeCompanyRole() || '')); }
 
 function openCompanyProfileModal() {
   const profile = state.companyProfile || state.dashboard?.client || activeCompany() || {};
@@ -1009,11 +1011,13 @@ function handleReturnMessage() {
   const url = new URL(window.location.href);
   const forceNewBusiness = url.searchParams.get('setup') === 'new';
   const googleConnected = url.searchParams.get('google_workspace') === 'connected';
+  const joinedWorkspace = url.searchParams.get('workspace') === 'joined';
   if (googleConnected) toast('เชื่อม Gmail + Drive + Google Sheets เรียบร้อยแล้ว');
   if (url.searchParams.get('auth') === 'success') toast('เข้าสู่ระบบด้วย Google เรียบร้อยแล้ว');
   if (url.searchParams.get('account') === 'linked') toast('เชื่อมบัญชี Google กับ LINE แล้ว · มือถือและคอมใช้บัญชีเดียวกัน');
   if (url.searchParams.get('account_error') === 'link') toast('เชื่อมบัญชี Google ไม่สำเร็จ กรุณาลองใหม่', true);
-  if (url.searchParams.get('auth') === 'line') toast(forceNewBusiness ? 'ยืนยัน LINE แล้ว · ตั้งค่าธุรกิจต่อบนเว็บได้เลย' : 'เข้าสู่ระบบผ่าน LINE เรียบร้อยแล้ว');
+  if (joinedWorkspace) toast('เข้าร่วม Workspace เดิมเรียบร้อยแล้ว · ไม่ต้องสร้างธุรกิจใหม่');
+  if (url.searchParams.get('auth') === 'line') toast(forceNewBusiness ? 'ยืนยัน LINE แล้ว · กำลังสร้าง Workspace ใหม่' : joinedWorkspace ? 'เปิด Workspace ที่ได้รับสิทธิ์แล้ว' : 'เข้าสู่ระบบผ่าน LINE เรียบร้อยแล้ว');
   if (url.searchParams.has('auth_error')) {
     const code = url.searchParams.get('auth_error');
     showLoginError(code === 'line_token'
@@ -1023,13 +1027,13 @@ function handleReturnMessage() {
         : 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่');
   }
   if (url.searchParams.has('google_workspace_error')) toast(googleWorkspaceErrorText(url.searchParams.get('google_workspace_error')), true);
-  const cleanup = ['google_workspace','google_workspace_error','auth','auth_error','account','account_error','setup'];
+  const cleanup = ['google_workspace','google_workspace_error','auth','auth_error','account','account_error','setup','workspace'];
   if ([...url.searchParams.keys()].some(key => cleanup.includes(key))) {
     cleanup.forEach(key => url.searchParams.delete(key));
     const query = url.searchParams.toString();
     history.replaceState({}, '', `${url.pathname}${query ? `?${query}` : ''}${url.hash}`);
   }
-  return { forceNewBusiness, googleConnected };
+  return { forceNewBusiness, googleConnected, joinedWorkspace };
 }
 
 async function ensureWorkspaceReady() {
@@ -1073,9 +1077,10 @@ async function loadAll({ silent = false, background = false } = {}) {
 
   try {
     const role=String(activeCompanyRole()||'');
-    const isHr=['owner','hr_admin','hr'].includes(role);
-    const canReadBroadcasts=['owner','hr_admin','hr','manager'].includes(role);
-    const canViewPeople=['owner','hr_admin','hr','manager','viewer'].includes(role);
+    const isHr=['owner','co_owner','hr_admin','hr'].includes(role);
+    const canPayroll=isHr||role==='payroll_admin';
+    const canReadBroadcasts=['owner','co_owner','hr_admin','hr','manager'].includes(role);
+    const canViewPeople=['owner','co_owner','hr_admin','hr','manager','viewer'].includes(role);
     const [dashboard, companyProfile, peopleCore, employees, candidates, attendance, leaves, requests, employeeService, hrCases, broadcasts, payroll, documents, learning, performance, engagement, analytics, subscription, googleWorkspace, lineIntegration, invites, lookups, workLocations, leavePolicies, approverAccess, recruitmentGmail, benefits] = await runLoadPool([
       () => safeLoad('ภาพรวม', api('/api/dashboard'), () => state.dashboard || emptyDashboard()),
       () => safeLoad('ข้อมูลบริษัท', api('/api/company-profile'), () => ({company:state.companyProfile || activeCompany() || {}})),
@@ -1088,8 +1093,8 @@ async function loadAll({ silent = false, background = false } = {}) {
       () => safeLoad('Employee Service Center', api('/api/employee-service'), () => state.employeeService || {}),
       () => isHr ? safeLoad('HR Cases', api('/api/hr-cases'), () => ({data:state.hrCases || []})) : Promise.resolve({data:[]}),
       () => canReadBroadcasts ? safeLoad('ประกาศ', api('/api/broadcasts'), () => ({data:state.broadcasts || []})) : Promise.resolve({data:[]}),
-      () => isHr ? safeLoad('Payroll', api('/api/payroll/overview'), () => state.payroll) : Promise.resolve(null),
-      () => isHr ? safeLoad('เอกสาร', api('/api/documents'), () => state.documents || {data:[],payslips:[]}) : Promise.resolve({data:[],payslips:[]}),
+      () => canPayroll ? safeLoad('Payroll', api('/api/payroll/overview'), () => state.payroll) : Promise.resolve(null),
+      () => canPayroll ? safeLoad('เอกสาร', api('/api/documents'), () => state.documents || {data:[],payslips:[]}) : Promise.resolve({data:[],payslips:[]}),
       () => canReadBroadcasts ? safeLoad('Learning', api('/api/learning/overview'), () => state.learning || {courses:[],assignments:[],summary:{}}) : Promise.resolve({courses:[],assignments:[],summary:{}}),
       () => canReadBroadcasts ? safeLoad('Performance', api('/api/performance/overview'), () => state.performance || {cycles:[],goals:[],one_on_ones:[],probation_reviews:[],probation_due:[],summary:{}}) : Promise.resolve({cycles:[],goals:[],one_on_ones:[],probation_reviews:[],probation_due:[],summary:{}}),
       () => canViewPeople ? safeLoad('Engagement', api('/api/engagement/overview'), () => state.engagement || {rules:[],rewards:[],redemptions:[],leaderboard:[],recent_transactions:[],summary:{}}) : Promise.resolve({rules:[],rewards:[],redemptions:[],leaderboard:[],recent_transactions:[],summary:{}}),
@@ -1608,7 +1613,7 @@ function renderBenefits() {
     ['รายการลงทะเบียนทั้งหมด', enrollments.filter(x=>x.status==='active').length, 'RECORDS']
   ].map(([label,value,kicker])=>`<article><span>${kicker}</span><strong>${Number(value).toLocaleString('th-TH')}</strong><p>${label}</p></article>`).join('');
 
-  $('#addBenefitBtn').classList.toggle('hidden', !['owner','hr_admin','hr'].includes(String(activeCompanyRole()||'')));
+  $('#addBenefitBtn').classList.toggle('hidden', !['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||'')));
   $('#benefitProgramList').innerHTML = data.length ? data.map(item => `
     <article class="benefit-card">
       <div class="benefit-icon">${Number(item.is_statutory) ? '⚖️' : benefitIcon(item.benefit_type)}</div>
@@ -1619,7 +1624,7 @@ function renderBenefits() {
       </div>
       <div class="benefit-actions">
         <b>${Number(item.enrolled_count || 0)} คน</b>
-        ${['owner','hr_admin','hr'].includes(String(activeCompanyRole()||'')) ? `<button class="secondary-btn small-btn" onclick="window.enrollBenefit(${Number(item.id)})">จัดพนักงาน</button>` : ''}
+        ${['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||'')) ? `<button class="secondary-btn small-btn" onclick="window.enrollBenefit(${Number(item.id)})">จัดพนักงาน</button>` : ''}
       </div>
     </article>`).join('') : emptyState('ยังไม่มีสวัสดิการ','เพิ่มประกันสังคม ประกันกลุ่ม ค่ารักษาพยาบาล หรือสวัสดิการของบริษัท');
 
@@ -1814,7 +1819,7 @@ function renderEmployeeService(){
   const cases=state.hrCases||[];
   const broadcasts=state.broadcasts||[];
   const role=String(activeCompanyRole()||'');
-  const isHr=['owner','hr_admin','hr'].includes(role);
+  const isHr=['owner','co_owner','hr_admin','hr'].includes(role);
   const openCases=cases.filter(c=>!['resolved','closed'].includes(c.status)).length;
   $('#createBroadcastBtn').classList.toggle('hidden',!isHr);
   const totalInbox=openCases+Number(state.requests?.length||0);
@@ -1824,8 +1829,8 @@ function renderEmployeeService(){
   const rich=service.rich_menu||{};
   $('#richMenuStatusText').textContent=rich.configured?'พร้อมใช้':'ยังไม่ตั้ง';
   $('#setupRichMenuBtn').textContent=rich.configured?'อัปเดต Rich Menu':'ตั้ง Rich Menu ให้ LINE บริษัท';
-  $('#setupRichMenuBtn').disabled=!rich.dedicated_line || !['owner','hr_admin'].includes(String(activeCompanyRole()||''));
-  $('#removeRichMenuBtn').classList.toggle('hidden',!rich.configured || !['owner','hr_admin'].includes(String(activeCompanyRole()||'')));
+  $('#setupRichMenuBtn').disabled=!rich.dedicated_line || !['owner','co_owner','hr_admin'].includes(String(activeCompanyRole()||''));
+  $('#removeRichMenuBtn').classList.toggle('hidden',!rich.configured || !['owner','co_owner','hr_admin'].includes(String(activeCompanyRole()||'')));
 
   const root=$('#hrCasesList');
   if(root){
@@ -1980,8 +1985,8 @@ function renderSettingsSidebar() {
   if ($('#settingsSidebarAttendanceMeta')) $('#settingsSidebarAttendanceMeta').textContent = locations.length ? `${locations.filter(x => Number(x.is_active) !== 0).length} จุดเช็กอิน` : 'ยังไม่มี Work location';
   if ($('#settingsSidebarLeaveMeta')) $('#settingsSidebarLeaveMeta').textContent = `${leavePolicies.length} ประเภทลา · ${holidays.length} วันหยุด`;
   if ($('#settingsSidebarApprovalMeta')) {
-    const owners = (state.companyAccess?.members || []).filter(item => item.role === 'owner').length;
-    const ownerText = owners ? `${owners} Owner` : activeCompanyRole() === 'owner' ? '1+ Owner' : '';
+    const admins = (state.companyAccess?.members || []).length;
+    const ownerText = admins ? `${admins} ผู้ดูแล` : state.me?.is_primary_owner ? 'Primary Owner' : '';
     $('#settingsSidebarApprovalMeta').textContent = [ownerText, approvers.length ? `${approvers.length} ผู้อนุมัติ` : 'ยังไม่มีผู้อนุมัติ'].filter(Boolean).join(' · ');
   }
   if ($('#settingsSidebarIntegrationMeta')) $('#settingsSidebarIntegrationMeta').textContent = `${line.connected ? 'LINE ✓' : 'LINE default'} · ${google.connected ? 'Google ✓' : 'Google ยังไม่เชื่อม'}`;
@@ -2499,7 +2504,7 @@ function renderSetupOverview(){
 }
 
 async function loadCompanyAccess({ silent = true } = {}) {
-  if (activeCompanyRole() !== 'owner') {
+  if (!Boolean(state.me?.is_primary_owner)) {
     state.companyAccess = { members: [], eligible_employees: [], current_user_id: null };
     renderCompanyAccess();
     return;
@@ -2516,7 +2521,7 @@ async function loadCompanyAccess({ silent = true } = {}) {
 function renderCompanyAccess() {
   const section = $('#companyAccessSection');
   if (!section) return;
-  const isOwner = activeCompanyRole() === 'owner';
+  const isOwner = Boolean(state.me?.is_primary_owner);
   section.classList.toggle('hidden', !isOwner);
   if (!isOwner) return;
   const data = state.companyAccess || { members: [], eligible_employees: [] };
@@ -2530,10 +2535,24 @@ function renderCompanyAccess() {
     return `<article class="company-access-card">
       <div class="company-access-avatar">${member.picture_url ? `<img src="${escapeHtml(member.picture_url)}" alt="" />` : escapeHtml(String(member.name || member.email || '?').trim().charAt(0).toUpperCase())}</div>
       <div class="company-access-copy"><strong>${escapeHtml(member.name || member.email || 'บัญชีนากนะ')}</strong><p>${escapeHtml(member.email || provider)} · ${provider}</p></div>
-      <span class="badge ${role === 'owner' ? 'badge-success' : 'badge-soft'}">${role === 'owner' ? 'Owner' : 'HR Admin'}</span>
-      ${member.is_me ? '<span class="company-access-self">บัญชีคุณ</span>' : `<button class="text-btn danger-text" type="button" onclick="window.revokeCompanyAccess(${Number(member.user_id)},'${escapeHtml(member.name || member.email || '')}')">ถอนสิทธิ์</button>`}
+      <span class="badge ${member.is_primary_owner ? 'badge-success' : role === 'co_owner' ? 'badge-soft' : 'badge-neutral'}">${escapeHtml(roleLabel(role))}</span>
+      ${member.is_primary_owner ? '<span class="company-access-self">เจ้าของหลัก</span>' : member.is_me ? '<span class="company-access-self">บัญชีคุณ</span>' : `<button class="text-btn danger-text" type="button" onclick="window.revokeCompanyAccess(${Number(member.user_id)},'${escapeHtml(member.name || member.email || '')}')">ถอนสิทธิ์</button>`}
     </article>`;
-  }).join('') : emptyState('ยังไม่มีผู้ดูแลเพิ่มเติม', 'เพิ่ม Owner ร่วมหรือ HR Admin เพื่อให้มีคนช่วยดูแล Workspace');
+  }).join('') : emptyState('ยังไม่มีผู้ดูแลเพิ่มเติม', 'เพิ่ม Co-Owner, HR Admin, Payroll Admin, Manager หรือ Approver ให้เหมาะกับงาน');
+}
+
+function renderCompanyAccessRoleHint(){
+  const role=$('#companyAccessRoleSelect')?.value||'co_owner';
+  const catalog=state.companyAccess?.role_catalog||[];
+  const item=catalog.find(row=>row.value===role);
+  const hint=$('#companyAccessRoleHint');
+  if(hint) hint.textContent=item?.description||({
+    co_owner:'ดูแลได้เกือบทั้งหมด แต่ Billing / ลบบริษัท / โอนเจ้าของหลักยังเป็นของ Primary Owner',
+    hr_admin:'จัดการพนักงาน เวลา ลา Recruitment เอกสาร Learning และงาน HR',
+    payroll_admin:'เข้าถึง Payroll ภาษี SSO Payslip และเอกสารเงินเดือน',
+    manager:'ดูแลทีม เวลา KPI และคำขอของทีมตามขอบเขตที่ได้รับ',
+    approver:'อนุมัติคำขอที่ได้รับมอบหมาย โดยไม่แก้การตั้งค่าบริษัท'
+  }[role]||'เลือกสิทธิ์ตามหน้าที่จริง');
 }
 
 function openCompanyAccessModal() {
@@ -2543,13 +2562,17 @@ function openCompanyAccessModal() {
   if (!select) return;
   select.innerHTML = employees.length ? employees.map(employee => {
     const name = employee.nickname || `${employee.first_name || ''} ${employee.last_name || ''}`.trim() || employee.employee_code;
-    const status = employee.current_role === 'owner' ? ' · Owner แล้ว' : employee.current_role === 'hr_admin' ? ' · HR Admin แล้ว' : employee.linked ? (employee.account_backfill_needed ? ' · LINE เชื่อมแล้ว' : '') : ' · ยังไม่เชื่อมบัญชี';
+    const status = employee.current_role ? ` · ${roleLabel(employee.current_role)} แล้ว` : employee.linked ? (employee.account_backfill_needed ? ' · LINE เชื่อมแล้ว' : '') : ' · ยังไม่เชื่อมบัญชี';
     return `<option value="${Number(employee.id)}" ${employee.linked ? '' : 'disabled'}>${escapeHtml(name)}${escapeHtml(status)}</option>`;
   }).join('') : '<option value="">ยังไม่มีพนักงาน</option>';
   const firstLinked = employees.find(item => item.linked && !item.current_role) || employees.find(item => item.linked);
   if (firstLinked) select.value = String(firstLinked.id);
-  $('#companyAccessRoleSelect').value = 'owner';
+  const roleSelect=$('#companyAccessRoleSelect');
+  const catalog=data.role_catalog||[];
+  if(roleSelect&&catalog.length) roleSelect.innerHTML=catalog.map(item=>`<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join('');
+  if(roleSelect) roleSelect.value = 'co_owner';
   $('#companyAccessEmployeeHint').textContent = employees.some(item => !item.linked) ? 'พนักงานที่เชื่อม LINE แล้วเพิ่มสิทธิ์ได้ทันที ส่วนคนที่เป็นสีเทายังต้องเชื่อม LINE หรือ Google ก่อน' : 'เลือกคนที่ต้องการให้ช่วยดูแล Workspace · บัญชี LINE เก่าจะถูกผูกเป็นบัญชีนากนะให้อัตโนมัติ';
+  renderCompanyAccessRoleHint();
   $('#companyAccessModal').showModal();
 }
 
@@ -2565,7 +2588,7 @@ async function saveCompanyAccess() {
     await loadCompanyAccess({ silent: false });
     await loadSessionOnly();
     renderIdentity();
-    toast(role === 'owner' ? 'เพิ่ม Owner ร่วมแล้ว' : 'เพิ่ม HR Admin แล้ว');
+    toast(`เพิ่มสิทธิ์ ${roleLabel(role)} แล้ว · LINE ของผู้รับจะมีปุ่มเข้า Workspace เดิม`);
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -2587,7 +2610,7 @@ window.revokeCompanyAccess = async (userId, name) => {
 function renderApproverAccess() {
   const section = $('#approverAccessSection');
   if (!section) return;
-  const canManage = ['owner','hr_admin','hr'].includes(String(activeCompanyRole() || ''));
+  const canManage = ['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole() || ''));
   section.classList.toggle('hidden', !canManage);
   if (!canManage) return;
   const granted = (state.approverAccess || []).filter(item => (item.permissions || []).length);
@@ -2657,7 +2680,7 @@ function renderLineIntegration() {
   const logo = $('#lineCompanyLogo');
   const meta = $('#lineIntegrationMeta');
 
-  const canManage = ['owner','hr_admin'].includes(String(activeCompanyRole() || ''));
+  const canManage = ['owner','co_owner','hr_admin'].includes(String(activeCompanyRole() || ''));
   if (dedicated) {
     $('#sidebarLineTitle').textContent = info.bot_display_name || 'LINE OA บริษัท';
     $('#sidebarLineText').textContent = info.webhook_active ? 'เชื่อมกับ Workspace แล้ว' : 'รอเปิด Use webhook';
@@ -2894,15 +2917,15 @@ window.reviewPayroll=async id=>{try{await api(`/api/payroll/periods/${id}/review
 window.lockPayroll=async id=>{if(!confirm('Lock รอบเงินเดือนแล้วจะคำนวณใหม่/แก้รายการไม่ได้ ต้องการ Lock ใช่ไหม?'))return;try{await api(`/api/payroll/periods/${id}/lock`,{method:'POST',body:'{}'});await refreshPayroll();await loadPayrollPeriod(id);toast('Lock Payroll แล้ว');}catch(e){toast(e.message,true)}};
 window.publishPayroll=async id=>{if(!confirm('Publish แล้วระบบจะสร้าง PDF ลง Google Drive และแจ้งพนักงานทาง Mail/LINE ต้องการทำต่อไหม?'))return;try{const r=await api(`/api/payroll/periods/${id}/publish`,{method:'POST',body:'{}'});await refreshPayroll();await loadPayrollPeriod(id);toast(r.message||'เริ่ม Publish Payslip แล้ว');setTimeout(()=>refreshDocuments(),2500);}catch(e){toast(e.message,true)}};
 
-async function refreshPayroll(render=true){const role=String(activeCompanyRole()||'');if(!['owner','hr_admin','hr'].includes(role))return;state.payroll=await api('/api/payroll/overview');if(render)renderPayroll();}
+async function refreshPayroll(render=true){const role=String(activeCompanyRole()||'');if(!['owner','co_owner','hr_admin','hr','payroll_admin'].includes(role))return;state.payroll=await api('/api/payroll/overview');if(render)renderPayroll();}
 
-function renderDocuments(){const canHr=['owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));$('#generateDocumentBtn').classList.toggle('hidden',!canHr);const d=state.documents||{data:[],payslips:[]};const pays=d.payslips||[],docs=d.data||[];const emailCount=pays.filter(x=>x.email_sent_at).length,lineCount=pays.filter(x=>x.line_notified_at).length;$('#documentSummary').innerHTML=`<div><span>Payslip</span><strong>${pays.length}</strong></div><div><span>ส่ง Email</span><strong>${emailCount}</strong></div><div><span>แจ้ง LINE</span><strong>${lineCount}</strong></div><div><span>เอกสาร HR</span><strong>${docs.length}</strong></div>`;$('#payslipDocumentList').innerHTML=pays.length?pays.map(p=>{const share=p.share_token_value?`${location.origin}/payslip/${p.share_token_value}`:p.drive_url;return `<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(p.nickname||p.first_name)} · ${escapeHtml(p.period_key)}</strong><p>${escapeHtml(p.file_name)}</p><small>${p.email_sent_at?'✓ Email ':''}${p.line_notified_at?'✓ LINE ':''}· ${formatDateTime(p.created_at)}</small></div>${share?`<a class="secondary-btn" href="${escapeHtml(share)}" target="_blank" rel="noopener">เปิด</a>`:''}</article>`}).join(''):emptyState('ยังไม่มี Payslip','เมื่อ Lock และ Publish Payroll เอกสารจะมาอยู่ตรงนี้อัตโนมัติ');$('#employeeDocumentList').innerHTML=docs.length?docs.map(x=>`<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'เอกสารบริษัท')} · ${formatDate(x.document_date||x.created_at)}</p><small>${escapeHtml(x.document_type)}</small></div>${x.drive_url?`<a class="secondary-btn" href="${escapeHtml(x.drive_url)}" target="_blank" rel="noopener">Drive</a>`:''}</article>`).join(''):emptyState('ยังไม่มีเอกสาร','ออกหนังสือรับรองการทำงานหรือหนังสือรับรองเงินเดือนได้จากปุ่มด้านบน');}
+function renderDocuments(){const canHr=['owner','co_owner','hr_admin','hr','payroll_admin'].includes(String(activeCompanyRole()||''));$('#generateDocumentBtn').classList.toggle('hidden',!canHr);const d=state.documents||{data:[],payslips:[]};const pays=d.payslips||[],docs=d.data||[];const emailCount=pays.filter(x=>x.email_sent_at).length,lineCount=pays.filter(x=>x.line_notified_at).length;$('#documentSummary').innerHTML=`<div><span>Payslip</span><strong>${pays.length}</strong></div><div><span>ส่ง Email</span><strong>${emailCount}</strong></div><div><span>แจ้ง LINE</span><strong>${lineCount}</strong></div><div><span>เอกสาร HR</span><strong>${docs.length}</strong></div>`;$('#payslipDocumentList').innerHTML=pays.length?pays.map(p=>{const share=p.share_token_value?`${location.origin}/payslip/${p.share_token_value}`:p.drive_url;return `<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(p.nickname||p.first_name)} · ${escapeHtml(p.period_key)}</strong><p>${escapeHtml(p.file_name)}</p><small>${p.email_sent_at?'✓ Email ':''}${p.line_notified_at?'✓ LINE ':''}· ${formatDateTime(p.created_at)}</small></div>${share?`<a class="secondary-btn" href="${escapeHtml(share)}" target="_blank" rel="noopener">เปิด</a>`:''}</article>`}).join(''):emptyState('ยังไม่มี Payslip','เมื่อ Lock และ Publish Payroll เอกสารจะมาอยู่ตรงนี้อัตโนมัติ');$('#employeeDocumentList').innerHTML=docs.length?docs.map(x=>`<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'เอกสารบริษัท')} · ${formatDate(x.document_date||x.created_at)}</p><small>${escapeHtml(x.document_type)}</small></div>${x.drive_url?`<a class="secondary-btn" href="${escapeHtml(x.drive_url)}" target="_blank" rel="noopener">Drive</a>`:''}</article>`).join(''):emptyState('ยังไม่มีเอกสาร','ออกหนังสือรับรองการทำงานหรือหนังสือรับรองเงินเดือนได้จากปุ่มด้านบน');}
 async function refreshDocuments(){try{state.documents=await api('/api/documents');renderDocuments();}catch{}}
 function openDocumentGenerateModal(){const employees=state.employees.filter(e=>e.status==='active');$('#documentEmployee').innerHTML=employees.map(e=>`<option value="${e.id}">${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</option>`).join('');$('#documentType').value='employment_certificate';$('#documentNote').value='';$('#documentGenerateModal').showModal();}
 async function generateEmployeeDocument(){const button=$('#documentGenerateSaveBtn');button.disabled=true;button.textContent='กำลังสร้าง PDF…';try{const result=await api('/api/documents/generate',{method:'POST',body:JSON.stringify({employee_id:Number($('#documentEmployee').value),document_type:$('#documentType').value,note:$('#documentNote').value.trim()})});$('#documentGenerateModal').close();await refreshDocuments();toast('สร้างเอกสารลง Google Drive แล้ว');if(result.document?.drive_url)window.open(result.document.drive_url,'_blank','noopener');}catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='สร้าง PDF ลง Drive';}}
 
 function renderGrowth(){
-  const learning=state.learning||{courses:[],summary:{}}; const performance=state.performance||{goals:[],one_on_ones:[],probation_due:[],probation_reviews:[],summary:{}}; const canAdmin=['owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));
+  const learning=state.learning||{courses:[],summary:{}}; const performance=state.performance||{goals:[],one_on_ones:[],probation_due:[],probation_reviews:[],summary:{}}; const canAdmin=['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));
   for(const id of ['createCourseBtn','createPerformanceCycleBtn']){const el=$(`#${id}`);if(el)el.classList.toggle('hidden',!canAdmin);}
   const ls=learning.summary||{},ps=performance.summary||{};
   $('#performanceSummary').innerHTML=[['หลักสูตร',ls.published||0,'คอร์สที่ Publish'],['เรียนจบ',ls.completed||0,`จาก ${ls.assigned||0} Assignment`],['KPI Active',ps.active_goals||0,`${ps.kpi_on_track||0} อยู่ในเกณฑ์`],['1:1 รอคุย',ps.one_on_one_pending||0,'รายการ'],['Probation',ps.probation_due||0,'คนรอประเมิน']].map(([label,value,sub])=>`<div><span>${label}</span><strong>${value}</strong><small>${sub}</small></div>`).join('');
@@ -2929,7 +2952,7 @@ function oneStatusLabel(s){return ({scheduled:'นัดไว้',completed:'�
 function renderProbationReviews(){const due=state.performance?.probation_due||[], reviews=state.performance?.probation_reviews||[];const latest=new Map();for(const r of reviews){if(!latest.has(Number(r.employee_id)))latest.set(Number(r.employee_id),r);}$('#probationReviewList').innerHTML=due.length?due.map(e=>{const r=latest.get(Number(e.id));const days=e.probation_end_date?Math.ceil((new Date(`${e.probation_end_date}T12:00:00+07:00`)-new Date())/86400000):null;return `<article class="probation-card"><div><strong>${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</strong><p>ครบโปร ${formatDate(e.probation_end_date)}${days!=null?` · ${days>=0?`อีก ${days} วัน`:`เลยมา ${Math.abs(days)} วัน`}`:''}</p><small>${r?`ล่าสุด: ${reviewStatusLabel(r.status)}${r.score!=null?` · ${r.score}/100`:''}`:'ยังไม่มีผลประเมิน'}</small></div><button class="secondary-btn" onclick="window.openProbationReview(${e.id})">ประเมิน</button></article>`}).join(''):emptyState('ไม่มีคนรอประเมิน','พนักงานทดลองงานที่มีวันครบโปรจะขึ้นที่นี่');}
 function reviewStatusLabel(s){return ({pending:'รอประเมิน',submitted:'ส่งประเมิน',passed:'ผ่าน',extended:'ต่อโปร',not_passed:'ไม่ผ่าน'})[s]||s;}
 
-async function refreshGrowth(){const role=String(activeCompanyRole()||'');if(!['owner','hr_admin','hr','manager'].includes(role))return;try{const [learning,performance]=await Promise.all([api('/api/learning/overview'),api('/api/performance/overview')]);state.learning=learning;state.performance=performance;renderGrowth();}catch(e){toast(e.message,true);}}
+async function refreshGrowth(){const role=String(activeCompanyRole()||'');if(!['owner','co_owner','hr_admin','hr','manager'].includes(role))return;try{const [learning,performance]=await Promise.all([api('/api/learning/overview'),api('/api/performance/overview')]);state.learning=learning;state.performance=performance;renderGrowth();}catch(e){toast(e.message,true);}}
 
 function openCourseModal(){ $('#courseTitle').value='';$('#courseDescription').value='';$('#courseAudience').value='probation';$('#coursePassingScore').value=80;$('#courseEstimatedMinutes').value=30;$('#courseRequired').checked=true;$('#courseModal').showModal(); }
 async function saveCourse(){const button=$('#courseSaveBtn');button.disabled=true;try{await api('/api/learning/courses',{method:'POST',body:JSON.stringify({title:$('#courseTitle').value.trim(),description:$('#courseDescription').value.trim(),audience_type:$('#courseAudience').value,passing_score:Number($('#coursePassingScore').value||80),estimated_minutes:Number($('#courseEstimatedMinutes').value||0),required:$('#courseRequired').checked})});$('#courseModal').close();await refreshGrowth();toast('สร้างหลักสูตรแล้ว · เพิ่มบทเรียนต่อได้เลย');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
@@ -3041,7 +3064,7 @@ function toast(message, error = false, icon = null) {
 // ─────────────────────────────────────────────────────────────
 // Phase 5 — Engagement, Rewards, People Analytics & SaaS
 // ─────────────────────────────────────────────────────────────
-function canManageEngagementUi(){return ['owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));}
+function canManageEngagementUi(){return ['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));}
 function isOwnerUi(){return String(activeCompanyRole()||'')==='owner';}
 function phase5EmployeeOptions(selected=''){return state.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}" ${String(selected)===String(e.id)?'selected':''}>${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code||'')}</option>`).join('');}
 function openPhase5Form({eyebrow='NAKNA',title,subtitle='',html,onSave,saveText='บันทึก'}){
@@ -3050,7 +3073,7 @@ function openPhase5Form({eyebrow='NAKNA',title,subtitle='',html,onSave,saveText=
 }
 
 async function refreshPhase5(){
-  const role=String(activeCompanyRole()||'');const canView=['owner','hr_admin','hr','manager','viewer'].includes(role);
+  const role=String(activeCompanyRole()||'');const canView=['owner','co_owner','hr_admin','hr','manager','viewer'].includes(role);
   if(canView){const [engagement,analytics]=await Promise.all([api('/api/engagement/overview'),api('/api/analytics/overview')]);state.engagement=engagement;state.analytics=analytics;}
   state.subscription=await api('/api/subscription');
   if(state.subscription?.saas_admin){try{state.saasAdmin=await api('/api/admin/saas/overview')}catch{state.saasAdmin=null}}

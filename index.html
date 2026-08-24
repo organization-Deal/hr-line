@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.25" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.27" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -88,12 +88,12 @@
       <div class="onboarding-topbar">
         <div class="brand-lockup onboarding-brand">
           <div class="brand-mark">น</div>
-          <div class="brand-wordmark"><strong>นากนะ</strong><span>Business Setup Center</span></div>
+          <div class="brand-wordmark"><strong>นากนะ</strong><span>New Workspace Setup</span></div>
         </div>
         <button id="onboardingLogoutBtn" class="text-btn" type="button">ออกจากบัญชี</button>
       </div>
 
-      <div class="setup-steps" aria-label="ขั้นตอนตั้งค่าธุรกิจ">
+      <div class="setup-steps" aria-label="ขั้นตอนสร้าง Workspace ใหม่">
         <div class="setup-step active" data-setup-indicator="company"><b>1</b><span>ธุรกิจ</span></div>
         <div class="setup-step" data-setup-indicator="google_workspace"><b>2</b><span>Google</span></div>
         <div class="setup-step" data-setup-indicator="recruitment_gmail"><b>3</b><span>ผู้สมัคร</span></div>
@@ -102,8 +102,8 @@
 
       <div id="onboardingStepCompany" class="setup-panel" data-setup-panel="company">
         <p class="kicker">STEP 1 · BUSINESS</p>
-        <h2>สร้างธุรกิจบน Dashboard</h2>
-        <p class="muted">LINE ใช้สำหรับยืนยันตัวตนและเปิดลิงก์เข้าระบบ ส่วนข้อมูลบริษัทและการเชื่อมบริการทั้งหมดทำบนเว็บตรงนี้</p>
+        <h2>สร้าง Workspace ใหม่</h2>
+        <p class="muted">หน้านี้ใช้เฉพาะตอนตั้งใจสร้างบริษัทใหม่เท่านั้น ถ้าคุณได้รับสิทธิ์จากบริษัทที่มีอยู่ ระบบจะพาเข้า Workspace นั้นโดยตรงและจะไม่แสดงขั้นตอนนี้</p>
 
         <button id="claimCompanyBtn" class="claim-company-card hidden" type="button">
           <span class="claim-icon">↗</span>
@@ -122,7 +122,7 @@
           <div class="field full"><label>ที่อยู่บริษัท</label><textarea id="onboardAddress" rows="2" placeholder="ใส่ทีหลังได้"></textarea></div>
         </div>
         <div class="setup-note-card"><strong>Free Trial 30 วัน</strong><span>เริ่มนับทันทีเมื่อสร้าง Workspace · ใช้ฟีเจอร์หลักได้เต็มก่อนเลือกแพ็กเกจตาม Active Employee Seat</span></div>
-        <button id="createCompanyBtn" class="primary-btn wide-btn" type="button">สร้างธุรกิจและไปขั้นต่อไป</button>
+        <button id="createCompanyBtn" class="primary-btn wide-btn" type="button">สร้าง Workspace ใหม่และไปขั้นต่อไป</button>
       </div>
 
       <div id="onboardingStepGoogle" class="setup-panel hidden" data-setup-panel="google_workspace">
@@ -223,7 +223,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.26</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.9</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -601,9 +601,9 @@
                   <div class="section-action-group"><span id="companyAccessCount" class="badge badge-soft">0 คน</span><button id="addCompanyAccessBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มสิทธิ์</button></div>
                 </div>
                 <div class="access-role-guide">
-                  <div><strong>Owner</strong><span>จัดการทุกอย่าง รวม Billing, Integration และ Owner คนอื่น</span></div>
-                  <div><strong>HR Admin</strong><span>จัดการงาน HR หลัก แต่เพิ่ม/ถอน Owner ไม่ได้</span></div>
-                  <div><strong>บัญชีต้องเชื่อม</strong><span>พนักงานต้องเชื่อม LINE หรือ Google ก่อนจึงเพิ่มสิทธิ์ได้</span></div>
+                  <div><strong>Primary Owner</strong><span>เจ้าของหลัก 1 คน · Billing · ลบบริษัท · จัดการสิทธิ์ระดับ Workspace</span></div>
+                  <div><strong>Co-Owner / HR Admin</strong><span>ช่วยบริหารบริษัทและงาน HR โดยไม่เข้า Flow สร้างธุรกิจใหม่</span></div>
+                  <div><strong>Payroll / Manager / Approver</strong><span>ให้เฉพาะสิทธิ์ตามหน้าที่ ลดการเห็นข้อมูลเกินจำเป็น</span></div>
                 </div>
                 <div id="companyAccessList" class="company-access-list"></div>
               </div>
@@ -766,7 +766,7 @@
   </dialog>
 
   <dialog id="positionModal">
-    <form method="dialog"><div class="modal-head"><div><p class="kicker">POSITION</p><h3>เพิ่มตำแหน่ง</h3><p>ผูกตำแหน่งกับแผนกเพื่อใช้ตอน Invite และจัด People Database</p></div><button type="button" class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>ชื่อตำแหน่ง <em>*</em></label><input id="positionName"/></div><div class="field full"><label>แผนก</label><select id="positionDepartment"></select><div id="positionDepartmentHelp" class="field-help">เลือกแผนกที่ตำแหน่งนี้สังกัด</div><button id="positionCreateDepartmentBtn" class="inline-create-btn" type="button">+ สร้างแผนกใหม่</button></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="positionSaveBtn" class="primary-btn">เพิ่มตำแหน่ง</button></div></form>
+    <form method="dialog"><div class="modal-head"><div><p class="kicker">POSITION</p><h3>เพิ่มตำแหน่ง</h3><p>ผูกตำแหน่งกับแผนกเพื่อใช้ตอน Invite และจัด People Database</p></div><button type="button" class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>ชื่อตำแหน่ง <em>*</em></label><input id="positionName"/></div><div class="field full"><label>แผนก</label><select id="positionDepartment"></select></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="positionSaveBtn" class="primary-btn">เพิ่มตำแหน่ง</button></div></form>
   </dialog>
 
   <dialog id="scheduleModal">
@@ -837,13 +837,13 @@
   <dialog id="companyAccessModal">
     <form method="dialog">
       <div class="modal-head">
-        <div><p class="kicker">WORKSPACE ACCESS</p><h3>เพิ่ม Owner / HR Admin</h3><p>เลือกพนักงานที่เชื่อมบัญชีนากนะแล้ว แล้วกำหนดสิทธิ์ระดับ Workspace</p></div>
+        <div><p class="kicker">WORKSPACE ACCESS</p><h3>เพิ่มสิทธิ์ผู้ดูแล Workspace</h3><p>เลือกพนักงานที่เชื่อม LINE/Google แล้วกำหนดบทบาทให้เหมาะกับงาน โดยผู้รับจะเข้าร่วมบริษัทเดิมทันที ไม่ต้องสร้างธุรกิจใหม่</p></div>
         <button type="button" class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
       <div class="modal-fields single-column">
         <div class="field"><label>พนักงาน <em>*</em></label><select id="companyAccessEmployeeSelect"></select><small id="companyAccessEmployeeHint" class="field-help">ต้องเชื่อม LINE หรือ Google ก่อนจึงให้สิทธิ์ได้</small></div>
-        <div class="field"><label>สิทธิ์ <em>*</em></label><select id="companyAccessRoleSelect"><option value="owner">Owner · เจ้าของร่วม</option><option value="hr_admin">HR Admin · ผู้ดูแล HR</option></select></div>
-        <div class="access-warning-card"><strong>Owner เข้าถึงข้อมูลสำคัญทั้งหมด</strong><span>รวม Payroll, เอกสาร, Integration, Billing และสิทธิ์การจัดการบริษัท กรุณาให้เฉพาะคนที่ไว้ใจ</span></div>
+        <div class="field"><label>สิทธิ์ <em>*</em></label><select id="companyAccessRoleSelect"><option value="co_owner">Co-Owner · เจ้าของร่วม</option><option value="hr_admin">HR Admin · ผู้ดูแล HR</option><option value="payroll_admin">Payroll Admin · ผู้ดูแลเงินเดือน</option><option value="manager">Manager · หัวหน้าทีม</option><option value="approver">Approver · ผู้อนุมัติ</option></select><small id="companyAccessRoleHint" class="field-help">Co-Owner ดูแลได้เกือบทั้งหมด แต่ Billing / ลบบริษัทยังเป็นของ Primary Owner</small></div>
+        <div class="access-warning-card"><strong>ผู้รับจะเข้าร่วม Workspace เดิมทันที</strong><span>หลังเพิ่มสิทธิ์ LINE จะส่งปุ่มเข้า Dashboard ของบริษัทนี้โดยตรง ระบบจะไม่พาไปหน้า “สร้าง Workspace ใหม่”</span></div>
       </div>
       <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="companyAccessSaveBtn" class="primary-btn">เพิ่มสิทธิ์</button></div>
     </form>
@@ -954,7 +954,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.25" type="module"></script>
+  <script src="/app.js?v=1.0-p7.27" type="module"></script>
 
   <dialog id="positionAssignModal" class="modal position-assign-modal">
     <div class="modal-head">
