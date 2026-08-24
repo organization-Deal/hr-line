@@ -1364,7 +1364,7 @@ function renderEmployees(query = '') {
         </td>
         <td data-label="แผนก"><strong class="table-primary">${escapeHtml(employee.department_name || '—')}</strong><small class="table-secondary">${employee.manager_employee_id ? `หัวหน้า ${escapeHtml(employee.manager_nickname || employee.manager_first_name || 'กำหนดแล้ว')}` : 'ยังไม่กำหนดหัวหน้า'}</small></td>
         <td data-label="Work Location">${employee.work_location_names ? `<span class="location-inline">📍 ${escapeHtml(employee.work_location_names)}</span>` : '<span class="muted">ทุก Location</span>'}</td>
-        <td data-label="ผู้อนุมัติลา">${employee.leave_approver_employee_id ? `<div class="approver-inline"><strong>${escapeHtml(employee.leave_approver_nickname || employee.leave_approver_first_name || 'กำหนดแล้ว')}</strong><small>LINE Approval</small></div>` : '<span class="badge badge-warning">ยังไม่กำหนด</span>'}</td>
+        <td data-label="ผู้อนุมัติลา">${employee.leave_approver_employee_id ? `<div class="approver-inline"><strong>${escapeHtml(employee.leave_approver_nickname || employee.leave_approver_first_name || 'กำหนดแล้ว')}</strong><small>LINE Approval</small></div>` : '<span class="badge badge-soft">HR / Owner</span>'}</td>
         <td data-label="LINE">${employee.line_user_id
           ? `<div class="line-connected"><span class="badge badge-success"><span class="status-dot"></span> เชื่อมแล้ว</span><small>${escapeHtml(employee.line_display_name || 'LINE account')}</small></div>`
           : '<span class="badge badge-neutral">ยังไม่เชื่อม</span>'}</td>
@@ -2259,7 +2259,8 @@ function localDateKey(date) {
 window.openLeaveProfile = (id) => openLeaveProfile(id);
 async function openLeaveProfile(employeeId, keepOpen = false) {
   state.activeLeaveProfileEmployeeId = Number(employeeId);
-  const year = Number($('#leaveProfileYear')?.value || new Date().getFullYear());
+  const currentYear = Number(localDateKey(new Date()).slice(0,4));
+  const year = keepOpen ? Number($('#leaveProfileYear')?.value || currentYear) : currentYear;
   try {
     const result = await api(`/api/employees/${employeeId}/leave-profile?year=${year}`);
     const employee = result.employee;
@@ -2268,7 +2269,7 @@ async function openLeaveProfile(employeeId, keepOpen = false) {
     const years=[year-1,year,year+1];
     $('#leaveProfileYear').innerHTML=years.map(y=>`<option value="${y}" ${y===result.year?'selected':''}>${y+543}</option>`).join('');
     const leaveApproverIds=new Set((state.approverAccess||[]).filter(item=>(item.permissions||[]).includes('leave.approve')).map(item=>Number(item.id)));
-    $('#leaveApproverSelect').innerHTML = `<option value="">ยังไม่กำหนด</option>${state.employees.filter(e=>Number(e.id)!==Number(employeeId) && (leaveApproverIds.has(Number(e.id)) || Number(e.id)===Number(employee.leave_approver_employee_id))).map(e=>`<option value="${e.id}" ${Number(e.id)===Number(employee.leave_approver_employee_id)?'selected':''}>${escapeHtml(e.nickname || e.first_name)}${e.department_name?` · ${escapeHtml(e.department_name)}`:''}${e.line_user_id?' · LINE✓':''} · ผู้อนุมัติ✓</option>`).join('')}`;
+    $('#leaveApproverSelect').innerHTML = `<option value="">ส่งตรง HR / Owner</option>${state.employees.filter(e=>Number(e.id)!==Number(employeeId) && (leaveApproverIds.has(Number(e.id)) || Number(e.id)===Number(employee.leave_approver_employee_id))).map(e=>`<option value="${e.id}" ${Number(e.id)===Number(employee.leave_approver_employee_id)?'selected':''}>${escapeHtml(e.nickname || e.first_name)}${e.department_name?` · ${escapeHtml(e.department_name)}`:''}${e.line_user_id?' · LINE✓':''} · ผู้อนุมัติ✓</option>`).join('')}`;
     $('#leaveAccessOverride').value = employee.leave_access_override == null ? '' : String(Number(employee.leave_access_override));
     $('#leaveEntitlementRows').innerHTML=result.balances.map(b=>`
       <div class="entitlement-row" data-policy-id="${b.id}">
@@ -2287,8 +2288,11 @@ async function saveLeaveProfile() {
   try{
     const entitlements=$$('#leaveEntitlementRows .entitlement-row').map(row=>({policy_id:Number(row.dataset.policyId),entitlement_days:Number(row.querySelector('[data-field="entitlement"]')?.value||0),adjustment_days:Number(row.querySelector('[data-field="adjustment"]')?.value||0)}));
     const leaveAccessRaw=$('#leaveAccessOverride').value;
-    await api(`/api/employees/${employeeId}/leave-profile`,{method:'PUT',body:JSON.stringify({year:Number($('#leaveProfileYear').value),leave_approver_employee_id:$('#leaveApproverSelect').value||null,leave_access_override:leaveAccessRaw===''?null:Number(leaveAccessRaw),entitlements})});
-    $('#leaveProfileModal').close(); await loadAll({silent:true}); toast('บันทึกผู้อนุมัติและสิทธิ์ลาแล้ว');
+    const result=await api(`/api/employees/${employeeId}/leave-profile`,{method:'PUT',body:JSON.stringify({year:Number($('#leaveProfileYear').value),leave_approver_employee_id:$('#leaveApproverSelect').value||null,leave_access_override:leaveAccessRaw===''?null:Number(leaveAccessRaw),entitlements})});
+    const employee=state.employees.find(e=>Number(e.id)===Number(employeeId));
+    if(employee && result.profile?.employee){employee.leave_access_override=result.profile.employee.leave_access_override;employee.leave_approver_employee_id=result.profile.employee.leave_approver_employee_id;}
+    $('#leaveProfileModal').close(); await loadAll({silent:true});
+    toast(result.auto_unlocked?'บันทึกสิทธิ์ลาแล้ว · เปิดสิทธิ์รายคนให้อัตโนมัติ':'บันทึกสิทธิ์ลาแล้ว');
   }catch(error){toast(error.message,true);}finally{button.disabled=false;}
 }
 
