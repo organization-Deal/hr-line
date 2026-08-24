@@ -1448,3 +1448,17 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
 .settings-category-icon,.settings-guide-icon,.settings-action-icon,.status-icon{background:#eaf5f2!important;color:#147f80!important;box-shadow:none!important}
 .settings-category-card{box-shadow:none!important;border-color:#e1eae7!important}.settings-category-card:hover{background:#fbfdfc!important;border-color:#bfdad4!important}
 .settings-category-copy em{display:none!important}
+
+/* P7.31 — Nakna monochrome icon system + cleaner settings IA */
+.nakna-metric-icon{width:44px!important;height:44px!important;border-radius:14px!important;background:var(--primary-soft)!important;color:var(--primary)!important;display:grid!important;place-items:center!important}
+.nakna-metric-icon svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+.service-summary-card{grid-template-columns:44px minmax(0,1fr);gap:13px;border-radius:18px;box-shadow:0 1px 0 rgba(18,60,74,.02)}
+.service-summary-card small{font-size:9px;font-weight:550;letter-spacing:.01em}
+.service-summary-card strong{font-weight:650;letter-spacing:-.025em}
+.settings-nav-section{gap:3px!important;margin-top:5px!important;padding-top:5px!important}
+.settings-nav-section .nav-subitem{display:flex!important;align-items:center!important;min-height:36px!important;padding:8px 12px!important}
+.settings-nav-section .nav-subitem span{font-size:10.5px!important;font-weight:550!important}
+.settings-nav-section .nav-subitem small{display:none!important}
+.people-config-item svg{stroke-width:1.55!important}
+.people-config-item span{font-weight:500}
+@media(max-width:720px){.nakna-metric-icon{width:40px!important;height:40px!important;border-radius:13px!important}.nakna-metric-icon svg{width:19px;height:19px}.service-summary-card{grid-template-columns:40px minmax(0,1fr)}}
