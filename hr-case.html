@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#F3F8F6" />
+  <meta name="color-scheme" content="light" />
+  <title>แจ้ง HR · นากนะ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/hr-case.css?v=1.0-p7.26" />
+</head>
+<body>
+  <main class="case-shell">
+    <header class="case-header">
+      <div class="brand-mark">น</div>
+      <div class="brand-copy"><strong>นากนะ</strong><span>Private HR Inbox</span></div>
+      <span class="secure-pill">ส่วนตัว</span>
+    </header>
+
+    <section id="loadingState" class="state-card state-card-center">
+      <div class="loader-ring" aria-hidden="true"></div>
+      <strong>กำลังเปิดแบบฟอร์ม</strong>
+      <span>ตรวจสอบบัญชีพนักงานและบริษัท…</span>
+    </section>
+
+    <section id="errorState" class="state-card hidden">
+      <div class="state-icon error">!</div>
+      <h1>เปิดแบบฟอร์มไม่ได้</h1>
+      <p id="errorText">กรุณากลับไปที่ LINE แล้วกด “แจ้ง HR” ใหม่</p>
+      <button id="retryBtn" class="primary-btn" type="button">ลองใหม่</button>
+    </section>
+
+    <section id="successState" class="success-panel hidden">
+      <div class="success-check">✓</div>
+      <p class="eyebrow">SENT TO HR</p>
+      <h1>ส่งเรื่องให้ HR แล้ว</h1>
+      <p id="successSummary" class="success-copy">นากนะแจ้งยืนยันกลับไปใน LINE แล้ว</p>
+      <div id="successMeta" class="success-meta"></div>
+      <button id="backLineBtn" class="primary-btn" type="button">กลับไปที่ LINE</button>
+    </section>
+
+    <form id="caseForm" class="case-form hidden" novalidate>
+      <section class="hero-card">
+        <p class="eyebrow">CONFIDENTIAL HR</p>
+        <h1>แจ้งเรื่องส่วนตัวถึง HR</h1>
+        <p>กรอกครั้งเดียวให้ครบ เรื่องนี้จะแสดงเฉพาะ Owner / HR ที่มีสิทธิ์เท่านั้น</p>
+        <div class="employee-strip">
+          <div class="employee-avatar" id="employeeAvatar">น</div>
+          <div><strong id="employeeName">—</strong><span id="employeeCompany">—</span></div>
+        </div>
+      </section>
+
+      <section class="form-card">
+        <div class="section-head"><div><span class="step-no">1</span><div><strong>เรื่องที่ต้องการแจ้ง</strong><small>เลือกหมวดเพื่อให้ HR รับเรื่องได้เร็วขึ้น</small></div></div></div>
+        <div id="categoryList" class="category-list"></div>
+        <input id="category" name="category" type="hidden" />
+      </section>
+
+      <section class="form-card">
+        <div class="section-head"><div><span class="step-no">2</span><div><strong>หัวข้อและรายละเอียด</strong><small>เขียนให้ HR เข้าใจสิ่งที่เกิดขึ้นและสิ่งที่ต้องการความช่วยเหลือ</small></div></div></div>
+        <label class="field"><span>หัวข้อ</span><input id="subject" name="subject" type="text" maxlength="120" placeholder="เช่น ขอคุยเรื่องตารางงาน / มีปัญหากับการจ่ายเงิน" required /></label>
+        <label class="textarea-label"><textarea id="detail" name="detail" rows="7" maxlength="4000" placeholder="เล่ารายละเอียด เหตุการณ์ วันที่ หรือสิ่งที่อยากให้ HR ช่วยจัดการ" required></textarea><small><span id="detailCount">0</span>/4000</small></label>
+      </section>
+
+      <section class="form-card">
+        <div class="section-head"><div><span class="step-no">3</span><div><strong>ความเร่งด่วน</strong><small>ช่วย HR เรียงลำดับเรื่องที่ต้องจัดการ</small></div></div></div>
+        <div class="segmented urgency-group">
+          <label><input type="radio" name="urgency" value="normal" checked /><span>ปกติ</span></label>
+          <label><input type="radio" name="urgency" value="high" /><span>สำคัญ</span></label>
+          <label><input type="radio" name="urgency" value="urgent" /><span>เร่งด่วน</span></label>
+        </div>
+        <label class="field compact"><span>ต้องการให้ HR ติดต่อกลับทาง</span><select id="contactPreference" name="contact_preference"><option value="line">LINE</option><option value="email">Email</option><option value="meeting">นัดคุยส่วนตัว</option></select></label>
+      </section>
+
+      <section class="form-card">
+        <div class="section-head"><div><span class="step-no">4</span><div><strong>หลักฐาน / เอกสาร</strong><small>ไม่บังคับ · แนบรูป, PDF, DOC หรือ DOCX ได้สูงสุด 3 ไฟล์</small></div></div><span class="optional-badge">ไม่บังคับ</span></div>
+        <label class="upload-box" for="attachmentInput"><span class="upload-icon">＋</span><strong>เพิ่มรูปหรือไฟล์</strong><small>ถ่ายรูปจากมือถือ หรือเลือกเอกสาร · ไม่เกิน 10 MB/ไฟล์</small></label>
+        <input id="attachmentInput" name="attachment" type="file" accept="image/*,.pdf,.doc,.docx" multiple hidden />
+        <div id="fileList" class="file-list"></div>
+      </section>
+
+      <section class="privacy-card"><strong>🔒 เป็นความลับ</strong><p>เรื่องนี้ไม่แสดงให้หัวหน้าทั่วไปหรือพนักงานคนอื่นเห็น จะแสดงเฉพาะ Owner / HR ที่มีสิทธิ์จัดการ Employee Service</p></section>
+
+      <div id="submitError" class="submit-error hidden" role="alert"></div>
+
+      <div class="sticky-submit">
+        <button id="submitBtn" class="primary-btn submit-btn" type="submit"><span class="btn-label">ส่งเรื่องให้ HR</span><i class="btn-spinner hidden" aria-hidden="true"></i></button>
+        <small>เมื่อส่งสำเร็จ คุณจะได้รับเลขเรื่องและสถานะกลับไปใน LINE</small>
+      </div>
+    </form>
+  </main>
+  <script src="/hr-case.js?v=1.0-p7.26" defer></script>
+</body>
+</html>

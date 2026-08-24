@@ -223,7 +223,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.9</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.26</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -766,7 +766,7 @@
   </dialog>
 
   <dialog id="positionModal">
-    <form method="dialog"><div class="modal-head"><div><p class="kicker">POSITION</p><h3>เพิ่มตำแหน่ง</h3><p>ผูกตำแหน่งกับแผนกเพื่อใช้ตอน Invite และจัด People Database</p></div><button type="button" class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>ชื่อตำแหน่ง <em>*</em></label><input id="positionName"/></div><div class="field full"><label>แผนก</label><select id="positionDepartment"></select></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="positionSaveBtn" class="primary-btn">เพิ่มตำแหน่ง</button></div></form>
+    <form method="dialog"><div class="modal-head"><div><p class="kicker">POSITION</p><h3>เพิ่มตำแหน่ง</h3><p>ผูกตำแหน่งกับแผนกเพื่อใช้ตอน Invite และจัด People Database</p></div><button type="button" class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>ชื่อตำแหน่ง <em>*</em></label><input id="positionName"/></div><div class="field full"><label>แผนก</label><select id="positionDepartment"></select><div id="positionDepartmentHelp" class="field-help">เลือกแผนกที่ตำแหน่งนี้สังกัด</div><button id="positionCreateDepartmentBtn" class="inline-create-btn" type="button">+ สร้างแผนกใหม่</button></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="positionSaveBtn" class="primary-btn">เพิ่มตำแหน่ง</button></div></form>
   </dialog>
 
   <dialog id="scheduleModal">
