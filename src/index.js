@@ -1426,7 +1426,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.22', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.23', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1488,6 +1488,18 @@ export default {
       if (payslipShareMatch && request.method === 'GET') {
         await ensureV100P3Ready(env.DB);
         return await serveSharedPayrollDocument(env, payslipShareMatch[1]);
+      }
+
+      const publicLeaveMatch = url.pathname.match(/^\/api\/public\/leave\/([A-Za-z0-9_-]{32,})$/);
+      if (publicLeaveMatch && request.method === 'GET') {
+        await ensureV050Ready(env.DB);
+        await ensureV100P4Ready(env.DB);
+        return await getPublicLeaveForm(env, publicLeaveMatch[1]);
+      }
+      if (publicLeaveMatch && request.method === 'POST') {
+        await ensureV050Ready(env.DB);
+        await ensureV100P4Ready(env.DB);
+        return await submitPublicLeaveForm(request, env, publicLeaveMatch[1]);
       }
 
       const publicLearningMatch = url.pathname.match(/^\/api\/public\/learning\/([A-Za-z0-9_-]{32,})$/);
@@ -1680,7 +1692,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.22', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.23', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -4027,8 +4039,13 @@ async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId){
 }
 
 async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
-  const ownerAccess=await getLineOwnerDashboardAccess(env,lineCtx,lineUserId).catch(()=>null);
-  return buildEmployeeMenuFlex(emp,ownerAccess);
+  const [ownerAccess,leaveToken]=await Promise.all([
+    getLineOwnerDashboardAccess(env,lineCtx,lineUserId).catch(()=>null),
+    issueEmployeePortalToken(env.DB,Number(emp.client_id),Number(emp.id)).catch(()=>null),
+  ]);
+  const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
+  const leaveFormUrl=leaveToken?`${base}/leave.html?token=${encodeURIComponent(leaveToken)}`:null;
+  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl);
 }
 
 async function createCompanyForLineOwner(env,user,name,lineUserId){
@@ -4168,7 +4185,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.22',
+    version:'1.0-P7.23',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -4711,6 +4728,87 @@ async function autoAssignLearningForEmployee(db,clientId,employeeId,userId=null)
   await ensureV100P4Ready(db); const employee=await db.prepare(`SELECT * FROM employees WHERE id=?1 AND client_id=?2`).bind(Number(employeeId),Number(clientId)).first(); if(!employee)return 0;
   const courses=(await db.prepare(`SELECT * FROM learning_courses WHERE client_id=?1 AND status='published' AND audience_type IN ('all','probation','department')`).bind(Number(clientId)).all()).results||[]; let count=0;
   for(const c of courses){if(c.audience_type==='probation'&&String(employee.people_status)!=='probation')continue;if(c.audience_type==='department'&&Number(c.audience_department_id)!==Number(employee.department_id||0))continue;const r=await db.prepare(`INSERT OR IGNORE INTO learning_assignments (client_id,course_id,employee_id,required,assigned_by_user_id) VALUES (?1,?2,?3,?4,?5)`).bind(Number(clientId),Number(c.id),Number(employeeId),Number(c.required||1),userId?Number(userId):null).run();if(Number(r.meta?.changes||0)>0)count++;} return count;
+}
+
+async function getPublicLeaveForm(env,token){
+  const access=await getEmployeePortalAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิด “ขอลางาน” จาก LINE ใหม่'},401);
+  await ensureDefaultLeavePolicies(env.DB,Number(access.client_id));
+  const year=Number(dateInBangkok().slice(0,4));
+  const profile=await getEmployeeLeaveProfile(env.DB,Number(access.employee_id),Number(access.client_id),year);
+  const policies=(profile.balances||[]).map(b=>({
+    id:Number(b.id),code:b.code,name:b.name,is_unlimited:Boolean(Number(b.is_unlimited)),
+    entitlement_days:Number(b.entitlement_days||0),adjustment_days:Number(b.adjustment_days||0),
+    used_days:Number(b.used_days||0),pending_days:Number(b.pending_days||0),remaining_days:Number(b.remaining_days||0),
+    available_now:b.available_now!==false,lock_reason:b.lock_reason||null,requires_reason:Boolean(Number(b.requires_reason)),
+    evidence_required_after_days:b.evidence_required_after_days==null?null:Number(b.evidence_required_after_days),
+    notice_days:Number(b.notice_days||0),allow_negative:Boolean(Number(b.allow_negative)),
+  }));
+  return json({ok:true,employee:{id:Number(access.employee_id),name:access.nickname||access.first_name,full_name:`${access.first_name||''} ${access.last_name||''}`.trim(),employee_code:access.employee_code||'',company_name:access.company_name||''},year,policies,today:dateInBangkok(),max_files:3,max_file_mb:10});
+}
+
+async function submitPublicLeaveForm(request,env,token){
+  const access=await getEmployeePortalAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิด “ขอลางาน” จาก LINE ใหม่'},401);
+  let form;
+  try{form=await request.formData();}catch{return json({error:'อ่านแบบฟอร์มไม่ได้ กรุณาลองใหม่'},400);}
+  const policyId=Number(form.get('policy_id')||0);
+  const startDate=String(form.get('start_date')||'').trim();
+  const endDate=String(form.get('end_date')||startDate).trim();
+  const dayPart=String(form.get('day_part')||'full');
+  const reason=String(form.get('reason')||'').trim();
+  const policy=await resolveLeavePolicy(env.DB,Number(access.client_id),policyId,null);
+  if(!policy)return json({error:'ไม่พบประเภทลาที่เลือก'},400);
+  const employee=await getEmployeeForClient(env.DB,Number(access.employee_id),Number(access.client_id));
+  if(!employee)return json({error:'ไม่พบข้อมูลพนักงาน'},404);
+  let duration;
+  try{duration=await calculateEmployeeLeaveDuration(env.DB,employee,startDate,endDate,dayPart);}catch(e){return json({error:e.message},e.status||400);}
+  const evidenceRequired=policy.evidence_required_after_days!=null&&duration>=Number(policy.evidence_required_after_days||0);
+  const rawFiles=form.getAll('evidence').filter(f=>f&&typeof f==='object'&&typeof f.arrayBuffer==='function'&&Number(f.size||0)>0);
+  if(rawFiles.length>3)return json({error:'แนบหลักฐานได้สูงสุด 3 ไฟล์'},400);
+  const allowed=(file)=>String(file.type||'').startsWith('image/')||['application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(String(file.type||''));
+  for(const file of rawFiles){
+    if(Number(file.size||0)>10*1024*1024)return json({error:`ไฟล์ ${file.name||''} ใหญ่เกิน 10 MB`},413);
+    if(!allowed(file))return json({error:`ไฟล์ ${file.name||''} ไม่รองรับ กรุณาใช้รูป, PDF, DOC หรือ DOCX`},415);
+  }
+  if(evidenceRequired&&!rawFiles.length)return json({error:`${policy.name} ${duration} วัน ต้องแนบหลักฐานตามนโยบายบริษัท`},400);
+  let row;
+  try{
+    row=await createLeaveRequest(env,{clientId:Number(access.client_id),employeeId:Number(access.employee_id),policyId,startDate,endDate,dayPart,reason,submittedVia:'line'});
+    try{
+      for(const file of rawFiles){
+        await storeLeaveEvidenceBinary(env,{clientId:Number(access.client_id),requestId:Number(row.id),employeeId:Number(access.employee_id),bytes:await file.arrayBuffer(),fileName:String(file.name||`evidence-${Date.now()}`),contentType:String(file.type||'application/octet-stream'),fileSize:Number(file.size||0),source:'line_web'});
+      }
+    }catch(uploadError){
+      // Do not leave a half-created request that blocks the employee from retrying the same dates.
+      await env.DB.batch([
+        env.DB.prepare(`DELETE FROM leave_ledger WHERE reference_type='leave_request' AND reference_id=?1`).bind(Number(row.id)),
+        env.DB.prepare('DELETE FROM leave_requests WHERE id=?1 AND client_id=?2').bind(Number(row.id),Number(access.client_id)),
+      ]).catch(()=>{});
+      throw uploadError;
+    }
+    if(rawFiles.length){
+      await env.DB.prepare("UPDATE leave_requests SET status=CASE WHEN status='awaiting_evidence' THEN 'pending' ELSE status END,evidence_count=(SELECT COUNT(*) FROM leave_request_evidence WHERE leave_request_id=?1),updated_at=CURRENT_TIMESTAMP WHERE id=?1").bind(Number(row.id)).run();
+    }
+    row=await hydrateLeaveBalance(env.DB,await getLeaveRequestDetail(env.DB,Number(row.id),Number(access.client_id)));
+    await notifyLeaveApprover(env,Number(row.id)).catch(error=>console.error(JSON.stringify({level:'error',event:'leave_web_notify_approver_failed',request_id:Number(row.id),message:String(error?.message||error)})));
+    await pushLeaveWebSubmittedConfirmation(env,row).catch(error=>console.error(JSON.stringify({level:'error',event:'leave_web_confirmation_failed',request_id:Number(row.id),message:String(error?.message||error)})));
+    return json({ok:true,request:{id:Number(row.id),code:`LV-${String(row.id).padStart(4,'0')}`,status:row.status,leave_type:row.leave_type_name||row.leave_type,start_date:row.start_date,end_date:row.end_date,duration_days:Number(row.duration_days||0),evidence_count:Number(row.evidence_count||0)}} ,201);
+  }catch(e){
+    return json({error:e.message||'ส่งใบลาไม่สำเร็จ'},e.status||400);
+  }
+}
+
+async function pushLeaveWebSubmittedConfirmation(env,row){
+  if(!row?.employee_line_user_id)return false;
+  const accessToken=await getAccessTokenForProviderScope(env,Number(row.client_id),row.employee_line_provider_scope);
+  if(!accessToken)return false;
+  const range=formatLeaveRange(row);
+  const duration=Number(row.duration_days||0).toFixed(Number(row.duration_days||0)%1?1:0);
+  const status=row.status==='pending'?'รออนุมัติ':row.status==='awaiting_evidence'?'รอหลักฐาน':'ส่งแล้ว';
+  const message=`✅ ส่งใบลาแล้ว\n#LV-${String(row.id).padStart(4,'0')} · ${row.leave_type_name||row.leave_type}\n${range} · ${duration} วัน\nสถานะ: ${status}`;
+  await pushLineMessages(accessToken,row.employee_line_user_id,[{type:'text',text:message}]);
+  return true;
 }
 
 async function issueEmployeePortalToken(db,clientId,employeeId){
@@ -5596,13 +5694,9 @@ function lineInfoRow(label,value,valueColor=LINE_CI.text){
   ]};
 }
 function lineActionWithTapFeedback(label, action) {
-  if (!action || typeof action !== 'object') return action;
-  if (action.type !== 'postback' || action.displayText || action.text) return action;
-  const cleanLabel = String(action.label || label || 'ดำเนินการ').replace(/^\s*[\p{Extended_Pictographic}\uFE0F]+\s*/u,'').trim();
-  return {
-    ...action,
-    displayText: `⏳ ${cleanLabel || 'กำลังดำเนินการ'} · กดแล้ว รอประมาณ 3 วินาที`,
-  };
+  // Keep chat clean: do not echo a visible "กดแล้ว รอ 3 วินาที" message.
+  // Postback actions still get LINE's native loading animation in processLineEvent().
+  return action;
 }
 function linePrimaryButton(label,action){return {type:'button',style:'primary',height:'sm',color:LINE_CI.primary,action:lineActionWithTapFeedback(label,action)};}
 function lineSecondaryButton(label,action,color=LINE_CI.mintSoft){return {type:'button',style:'secondary',height:'sm',color,action:lineActionWithTapFeedback(label,action)};}
@@ -5638,7 +5732,7 @@ function buildWelcomeFlex(name,company){
     footer:[linePrimaryButton('เปิดเมนูพนักงาน',{type:'postback',label:'เปิดเมนูพนักงาน',data:'action=menu'})]
   })};
 }
-function buildEmployeeMenuFlex(emp,ownerAccess=null){
+function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null){
   const name=emp.nickname||emp.first_name;
   const isOwner=Boolean(ownerAccess?.dashboardUrl&&ownerAccess?.primary);
   const ownerCompany=ownerAccess?.primary?.name||'';
@@ -5653,13 +5747,9 @@ function buildEmployeeMenuFlex(emp,ownerAccess=null){
         lineText('บัญชี LINE นี้เป็นได้ทั้ง Owner และพนักงาน โดยไม่ต้องถอดสิทธิ์พนักงาน','xxs',LINE_CI.muted)
       ],'teal')]:[]),
       lineText('จัดการเรื่องงานประจำวันได้จากตรงนี้','sm',LINE_CI.muted),
-      lineInfoCard([
-        lineText('แตะปุ่มแล้ว LINE จะแสดง ⏳ ทันที','xs',LINE_CI.text,'bold'),
-        lineText('รอผลประมาณ 1–3 วินาที · ถ้างานใช้เวลานาน LINE จะแสดงสถานะกำลังโหลดให้','xxs',LINE_CI.muted)
-      ],'teal'),
       linePrimaryButton('📍  เช็กอิน',{type:'postback',label:'เช็กอิน',data:'action=checkin'}),
       lineSecondaryButton('🏠  เช็กเอาต์',{type:'postback',label:'เช็กเอาต์',data:'action=checkout'}),
-      lineSecondaryButton('🏖  ขอลางาน',{type:'postback',label:'ขอลางาน',data:'action=leave_menu'},'#F1F7F5'),
+      lineSecondaryButton('🏖  ขอลางาน',leaveFormUrl?{type:'uri',label:'ขอลางาน',uri:leaveFormUrl}:{type:'postback',label:'ขอลางาน',data:'action=leave_menu'},'#F1F7F5'),
       lineSecondaryButton('📅  สิทธิ์ลา',{type:'postback',label:'สิทธิ์ลา',data:'action=leave_balance'},'#F7F9F8'),
       lineSecondaryButton('🎉  วันหยุดบริษัท',{type:'postback',label:'วันหยุดบริษัท',data:'action=holidays'},'#F7F9F8'),
       lineSecondaryButton('🗂  คำขอของฉัน',{type:'postback',label:'คำขอของฉัน',data:'action=my_requests'},'#F7F9F8'),
@@ -5759,19 +5849,16 @@ function buildEmployeeStatusFlex(emp,a){
   return {type:'flex',altText:'สถานะวันนี้',contents:lineBubble({eyebrow:'ATTENDANCE',title:'สถานะวันนี้',subtitle:emp.nickname||emp.first_name,status,statusTone:tone,body:[lineInfoCard(rows,tone)]})};
 }
 async function sendLeaveTypeMenu(env,replyToken,emp,accessToken){
-  await ensureDefaultLeavePolicies(env.DB,Number(emp.client_id));
-  const policies=(await env.DB.prepare('SELECT * FROM leave_policies WHERE client_id=?1 AND is_active=1 ORDER BY sort_order,name').bind(Number(emp.client_id)).all()).results||[];
-  const profile=await getEmployeeLeaveProfile(env.DB,Number(emp.id),Number(emp.client_id),new Date().getFullYear());
-  const balanceMap=new Map((profile.balances||[]).map(b=>[Number(b.id),b]));
-  const buttons=policies.slice(0,8).map(p=>{
-    const b=balanceMap.get(Number(p.id));
-    const balance=b?(Number(b.is_unlimited)?'ไม่จำกัด':`${Number(b.remaining_days||0).toFixed(Number(b.remaining_days||0)%1?1:0)} วัน`):'';
-    const suffix=balance?` · ${balance}`:'';
-    const locked=b && b.available_now===false;
-    return lineSecondaryButton(`${leavePolicyIcon(p)}  ${p.name}${locked?' · 🔒':suffix}`,{type:'postback',label:p.name,data:locked?'action=leave_locked':`action=leave_type&policy_id=${p.id}`},locked?'#F3F5F4':LINE_CI.mintSoft);
-  });
-  return replyLineMessages(accessToken,replyToken,[{type:'flex',altText:'เลือกประเภทการลา',contents:lineBubble({
-    eyebrow:'LEAVE',title:'ขอลางาน',subtitle:'เลือกประเภทการลาที่ต้องการ',body:buttons.length?buttons:[lineInfoCard([lineText('ยังไม่มีประเภทการลาที่เปิดใช้งาน','sm',LINE_CI.muted)],'neutral')]
+  const token=await issueEmployeePortalToken(env.DB,Number(emp.client_id),Number(emp.id));
+  const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
+  const url=`${base}/leave.html?token=${encodeURIComponent(token)}`;
+  return replyLineMessages(accessToken,replyToken,[{type:'flex',altText:'เปิดแบบฟอร์มขอลางาน',contents:lineBubble({
+    eyebrow:'LEAVE',title:'ขอลางาน',subtitle:'กรอกครั้งเดียวในหน้าเว็บ · แนบรูปหรือไฟล์ได้',
+    body:[lineInfoCard([
+      lineText('เลือกประเภทลา วันที่ เหตุผล และแนบหลักฐานในหน้าเดียว','sm',LINE_CI.text,'bold'),
+      lineText('ส่งเสร็จแล้วนากนะจะแจ้งยืนยันกลับมาใน LINE อัตโนมัติ','xxs',LINE_CI.muted)
+    ],'teal')],
+    footer:[linePrimaryButton('เปิดแบบฟอร์มลางาน',{type:'uri',label:'เปิดแบบฟอร์มลางาน',uri:url})]
   })}]);
 }
 async function sendLeaveBalance(env,replyToken,emp,accessToken){
