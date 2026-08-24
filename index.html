@@ -595,6 +595,18 @@
             </div>
 
             <div class="settings-category-panel hidden" data-settings-category="approvals">
+              <div id="companyAccessSection" class="company-access-section">
+                <div class="page-intro compact">
+                  <div><p class="kicker">OWNER & ADMIN ACCESS</p><h2>เจ้าของร่วม & ผู้ดูแลระบบ</h2><p>เพิ่มคนที่ไว้ใจให้เข้าจัดการ Workspace เดียวกันได้ โดยไม่ต้องใช้บัญชี Owner คนเดียว</p></div>
+                  <div class="section-action-group"><span id="companyAccessCount" class="badge badge-soft">0 คน</span><button id="addCompanyAccessBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มสิทธิ์</button></div>
+                </div>
+                <div class="access-role-guide">
+                  <div><strong>Owner</strong><span>จัดการทุกอย่าง รวม Billing, Integration และ Owner คนอื่น</span></div>
+                  <div><strong>HR Admin</strong><span>จัดการงาน HR หลัก แต่เพิ่ม/ถอน Owner ไม่ได้</span></div>
+                  <div><strong>บัญชีต้องเชื่อม</strong><span>พนักงานต้องเชื่อม LINE หรือ Google ก่อนจึงเพิ่มสิทธิ์ได้</span></div>
+                </div>
+                <div id="companyAccessList" class="company-access-list"></div>
+              </div>
               <div class="settings-subsection">
                 <article id="approverAccessShortcut" class="setting-card setting-card-action settings-wide-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.5 8.2 8 9 4.5-.8 8-4 8-9V7l-8-4Z"/><path d="m9 12 2 2 4-4"/></svg></div><div><strong>สิทธิ์ผู้อนุมัติ</strong><p>กำหนดให้หัวหน้าหรือ HR อนุมัติการลา เวลา และคำขอต่าง ๆ</p></div><span>→</span></article>
               </div>
@@ -819,6 +831,21 @@
         <div class="field full"><label>Webhook ของ Workspace</label><div class="copy-field"><input id="lineWebhookPreview" readonly value="ระบบจะสร้างหลังเชื่อม" /><button id="copyLineWebhookModalBtn" type="button" class="secondary-btn">คัดลอก</button></div><small>หลังเชื่อมแล้ว ให้เปิด “Use webhook” ใน LINE Developers ถ้ายังปิดอยู่</small></div>
       </div>
       <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="lineIntegrationSaveBtn" class="primary-btn">เชื่อมและตั้ง Webhook</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="companyAccessModal">
+    <form method="dialog">
+      <div class="modal-head">
+        <div><p class="kicker">WORKSPACE ACCESS</p><h3>เพิ่ม Owner / HR Admin</h3><p>เลือกพนักงานที่เชื่อมบัญชีนากนะแล้ว แล้วกำหนดสิทธิ์ระดับ Workspace</p></div>
+        <button type="button" class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="modal-fields single-column">
+        <div class="field"><label>พนักงาน <em>*</em></label><select id="companyAccessEmployeeSelect"></select><small id="companyAccessEmployeeHint" class="field-help">ต้องเชื่อม LINE หรือ Google ก่อนจึงให้สิทธิ์ได้</small></div>
+        <div class="field"><label>สิทธิ์ <em>*</em></label><select id="companyAccessRoleSelect"><option value="owner">Owner · เจ้าของร่วม</option><option value="hr_admin">HR Admin · ผู้ดูแล HR</option></select></div>
+        <div class="access-warning-card"><strong>Owner เข้าถึงข้อมูลสำคัญทั้งหมด</strong><span>รวม Payroll, เอกสาร, Integration, Billing และสิทธิ์การจัดการบริษัท กรุณาให้เฉพาะคนที่ไว้ใจ</span></div>
+      </div>
+      <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="companyAccessSaveBtn" class="primary-btn">เพิ่มสิทธิ์</button></div>
     </form>
   </dialog>
 
