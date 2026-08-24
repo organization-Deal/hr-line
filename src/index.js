@@ -1426,7 +1426,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.18', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.19', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1680,7 +1680,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.18', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.19', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -3207,12 +3207,38 @@ async function handleLineWebhook(request, env, ctx, integration = null) {
   return json({ ok: true, events: events.length });
 }
 
+async function showLineLoadingAnimation(accessToken, lineUserId, seconds=5) {
+  if (!accessToken || !lineUserId) return false;
+  const loadingSeconds = Math.max(5, Math.min(60, Number(seconds) || 5));
+  try {
+    const response = await fetch('https://api.line.me/v2/bot/chat/loading/start', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ chatId: lineUserId, loadingSeconds }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function processLineEvent(event, env, lineCtx) {
   const lineUserId = event?.source?.userId;
   if (!lineUserId || !event.replyToken) return;
   const accessToken = lineCtx.accessToken;
   const providerScope = lineCtx.providerScope || 'default';
   const sessionKey = lineSessionKey(providerScope, lineUserId);
+
+  // Flex Message buttons use postback actions. LINE's reply can take a moment while
+  // D1 / permission / leave calculations run, so show LINE's native loading indicator
+  // immediately after the tap. The API supports 5-60 seconds and disappears early
+  // as soon as Nakna sends the next message.
+  if (event.type === 'postback' && event.source?.type === 'user') {
+    await showLineLoadingAnimation(accessToken, lineUserId, 5);
+  }
 
   const employee = async () => {
     if (lineCtx.clientId) {
@@ -3985,7 +4011,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.18',
+    version:'1.0-P7.19',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -5362,9 +5388,18 @@ function lineInfoRow(label,value,valueColor=LINE_CI.text){
     lineText(value,'xs',valueColor,'bold',{flex:3,align:'end'}),
   ]};
 }
-function linePrimaryButton(label,action){return {type:'button',style:'primary',height:'sm',color:LINE_CI.primary,action};}
-function lineSecondaryButton(label,action,color=LINE_CI.mintSoft){return {type:'button',style:'secondary',height:'sm',color,action};}
-function lineDangerButton(label,action){return {type:'button',style:'secondary',height:'sm',color:LINE_CI.errorSoft,action};}
+function lineActionWithTapFeedback(label, action) {
+  if (!action || typeof action !== 'object') return action;
+  if (action.type !== 'postback' || action.displayText || action.text) return action;
+  const cleanLabel = String(action.label || label || 'ดำเนินการ').replace(/^\s*[\p{Extended_Pictographic}\uFE0F]+\s*/u,'').trim();
+  return {
+    ...action,
+    displayText: `⏳ ${cleanLabel || 'กำลังดำเนินการ'} · กดแล้ว รอประมาณ 3 วินาที`,
+  };
+}
+function linePrimaryButton(label,action){return {type:'button',style:'primary',height:'sm',color:LINE_CI.primary,action:lineActionWithTapFeedback(label,action)};}
+function lineSecondaryButton(label,action,color=LINE_CI.mintSoft){return {type:'button',style:'secondary',height:'sm',color,action:lineActionWithTapFeedback(label,action)};}
+function lineDangerButton(label,action){return {type:'button',style:'secondary',height:'sm',color:LINE_CI.errorSoft,action:lineActionWithTapFeedback(label,action)};}
 function lineBubble({eyebrow='นากนะ',title,subtitle='',body=[],footer=[],status=null,statusTone='teal',size='mega'}){
   const bodyContents=[];
   if(status) bodyContents.push({type:'box',layout:'horizontal',contents:[lineChip(status,statusTone)]});
@@ -5411,6 +5446,10 @@ function buildEmployeeMenuFlex(emp,ownerAccess=null){
         lineText('บัญชี LINE นี้เป็นได้ทั้ง Owner และพนักงาน โดยไม่ต้องถอดสิทธิ์พนักงาน','xxs',LINE_CI.muted)
       ],'teal')]:[]),
       lineText('จัดการเรื่องงานประจำวันได้จากตรงนี้','sm',LINE_CI.muted),
+      lineInfoCard([
+        lineText('แตะปุ่มแล้ว LINE จะแสดง ⏳ ทันที','xs',LINE_CI.text,'bold'),
+        lineText('รอผลประมาณ 1–3 วินาที · ถ้างานใช้เวลานาน LINE จะแสดงสถานะกำลังโหลดให้','xxs',LINE_CI.muted)
+      ],'teal'),
       linePrimaryButton('📍  เช็กอิน',{type:'postback',label:'เช็กอิน',data:'action=checkin'}),
       lineSecondaryButton('🏠  เช็กเอาต์',{type:'postback',label:'เช็กเอาต์',data:'action=checkout'}),
       lineSecondaryButton('🏖  ขอลางาน',{type:'postback',label:'ขอลางาน',data:'action=leave_menu'},'#F1F7F5'),
