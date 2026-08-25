@@ -1442,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.45', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.46', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1727,7 +1727,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.45', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.46', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -3145,6 +3145,76 @@ async function handleApi(request, env, url, auth, ctx) {
     try{await deleteWorkspaceRichMenu(env,integration);return json({ok:true});}catch(e){return json({error:`ลบ Rich Menu ไม่สำเร็จ: ${e.message}`},400);}
   }
 
+
+  if (path === '/api/leave-report' && method === 'GET') {
+    const url = new URL(request.url);
+    const monthRaw = String(url.searchParams.get('month') || '').trim();
+    const nowBkk = new Date(Date.now() + 7 * 60 * 60 * 1000);
+    const fallbackMonth = `${nowBkk.getUTCFullYear()}-${String(nowBkk.getUTCMonth()+1).padStart(2,'0')}`;
+    const month = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : fallbackMonth;
+    const [yy,mm] = month.split('-').map(Number);
+    if (mm < 1 || mm > 12) return json({error:'รูปแบบเดือนไม่ถูกต้อง'},400);
+    const startDate = `${yy}-${String(mm).padStart(2,'0')}-01`;
+    const nextY = mm === 12 ? yy + 1 : yy;
+    const nextM = mm === 12 ? 1 : mm + 1;
+    const nextMonth = `${nextY}-${String(nextM).padStart(2,'0')}-01`;
+    const endObj = new Date(Date.UTC(nextY,nextM-1,1)); endObj.setUTCDate(endObj.getUTCDate()-1);
+    const endDate = `${endObj.getUTCFullYear()}-${String(endObj.getUTCMonth()+1).padStart(2,'0')}-${String(endObj.getUTCDate()).padStart(2,'0')}`;
+
+    const result = await env.DB.prepare(`
+      SELECT l.*,e.first_name,e.last_name,e.nickname,e.employee_code,
+             d.name AS department_name,p.name AS position_name,
+             lp.name AS leave_type_name,
+             ap.nickname AS approver_nickname,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name
+      FROM leave_requests l
+      JOIN employees e ON e.id=l.employee_id
+      LEFT JOIN departments d ON d.id=e.department_id
+      LEFT JOIN positions p ON p.id=e.position_id
+      LEFT JOIN leave_policies lp ON lp.id=l.policy_id
+      LEFT JOIN employees ap ON ap.id=l.approver_employee_id
+      WHERE l.client_id=?1
+        AND l.start_date < ?3
+        AND l.end_date >= ?2
+      ORDER BY l.start_date DESC,l.id DESC
+    `).bind(clientId,startDate,nextMonth).all();
+    const rows = result.results || [];
+    const approved = rows.filter(r => r.status === 'approved');
+    const employeesWithLeave = new Set(approved.map(r => Number(r.employee_id))).size;
+    const approvedDays = approved.reduce((sum,r)=>sum+Number(r.duration_days||0),0);
+    const pendingRequests = rows.filter(r=>r.status==='pending'||r.status==='awaiting_evidence').length;
+
+    const typeMap = new Map();
+    for (const r of approved) {
+      const key = r.leave_type_name || r.leave_type || 'ไม่ระบุ';
+      const item = typeMap.get(key) || {name:key,days:0,requests:0};
+      item.days += Number(r.duration_days||0); item.requests += 1; typeMap.set(key,item);
+    }
+    const personMap = new Map();
+    for (const r of approved) {
+      const key = Number(r.employee_id);
+      const item = personMap.get(key) || {employee_id:key,first_name:r.first_name,last_name:r.last_name,nickname:r.nickname,employee_code:r.employee_code,department_name:r.department_name,days:0,requests:0};
+      item.days += Number(r.duration_days||0); item.requests += 1; personMap.set(key,item);
+    }
+    const monthLabel = new Intl.DateTimeFormat('th-TH',{month:'long',year:'numeric',timeZone:'Asia/Bangkok'}).format(new Date(`${startDate}T12:00:00+07:00`));
+    return json({
+      month,
+      start_date:startDate,
+      end_date:endDate,
+      range_label:monthLabel,
+      summary:{
+        employees_with_leave:employeesWithLeave,
+        requests:rows.length,
+        approved_requests:approved.length,
+        approved_days:Math.round(approvedDays*100)/100,
+        pending_requests:pendingRequests,
+        rejected_requests:rows.filter(r=>r.status==='rejected').length
+      },
+      by_type:[...typeMap.values()].sort((a,b)=>b.days-a.days),
+      top_people:[...personMap.values()].sort((a,b)=>b.days-a.days).slice(0,8),
+      rows
+    });
+  }
+
   if (path === '/api/leaves' && method === 'GET') {
     const result = await env.DB.prepare(`
       SELECT l.*, e.first_name,e.last_name,e.nickname,e.employee_code,
@@ -4430,7 +4500,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.45',
+    version:'1.0-P7.46',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
