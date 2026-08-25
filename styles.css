@@ -1504,3 +1504,44 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
 
 .document-count-btn{border:1px solid rgba(18,125,127,.14);background:#F1F8F6;color:var(--brand);border-radius:999px;padding:6px 10px;font:inherit;font-weight:600;cursor:pointer;white-space:nowrap}.document-count-btn:hover{background:#E8F4F1}.document-count-btn span{font-variant-numeric:tabular-nums}.employee-documents-modal{width:min(920px,calc(100vw - 28px));max-width:none}.employee-documents-box{width:100%;max-width:none}.employee-doc-upload-grid{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:12px;padding:18px 0}.employee-doc-upload-grid label{display:flex;flex-direction:column;gap:7px;font-size:12px;color:var(--text-secondary)}.employee-doc-upload-grid input,.employee-doc-upload-grid select{height:44px;border:1px solid var(--border);border-radius:12px;background:#fff;padding:0 12px;font:inherit;color:var(--text-primary)}.employee-doc-file-field{grid-column:1/-1}.employee-doc-file-field input{height:auto;padding:10px}.employee-doc-upload-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:2px 0 18px;border-bottom:1px solid var(--border)}.employee-doc-upload-actions small{color:var(--text-tertiary)}.employee-documents-list{display:flex;flex-direction:column;gap:8px;padding-top:16px;max-height:430px;overflow:auto}.employee-document-row{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:#fff}.employee-document-icon{width:42px;height:42px;border-radius:12px;background:#EEF7F5;color:var(--brand);display:grid;place-items:center}.employee-document-icon svg{width:20px;height:20px}.employee-document-copy{min-width:0;display:flex;flex-direction:column;gap:3px}.employee-document-copy strong{font-size:13px}.employee-document-copy span,.employee-document-copy small{font-size:11px;color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.employee-document-actions{display:flex;gap:10px;align-items:center}.employee-doc-loading{padding:30px;text-align:center;color:var(--text-tertiary)}
 @media(max-width:700px){.employee-doc-upload-grid{grid-template-columns:1fr}.employee-doc-file-field{grid-column:auto}.employee-doc-upload-actions{align-items:stretch;flex-direction:column}.employee-document-row{grid-template-columns:38px minmax(0,1fr)}.employee-document-actions{grid-column:2;justify-content:flex-start}}
+
+
+/* P7.46 · Monthly Leave Log */
+.leave-monthly-report-panel{margin-top:18px;overflow:hidden}
+.leave-report-head{align-items:flex-start;gap:20px}
+.leave-report-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.leave-report-controls input[type="month"],.leave-report-controls select{height:40px;border:1px solid var(--line,#dfe8e5);border-radius:12px;background:#fff;padding:0 12px;color:var(--ink,#173f48);font:inherit}
+.leave-report-controls .icon-btn{width:40px;height:40px;border:1px solid var(--line,#dfe8e5);border-radius:12px;background:#fff;font-size:24px;line-height:1;color:var(--brand,#168b8d);cursor:pointer}
+.leave-report-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}
+.leave-report-summary article{border:1px solid var(--line,#dfe8e5);border-radius:16px;padding:15px 16px;background:linear-gradient(180deg,#fff,#fbfdfc)}
+.leave-report-summary small{display:block;color:var(--muted,#8a9998);font-size:12px}
+.leave-report-summary strong{display:inline-block;margin-top:6px;font-size:28px;line-height:1;color:var(--ink,#173f48)}
+.leave-report-summary span{margin-left:5px;color:var(--muted,#8a9998);font-size:12px}
+.leave-report-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.leave-report-chart-card{border:1px solid var(--line,#dfe8e5);border-radius:16px;padding:16px;background:#fff;min-height:150px}
+.mini-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.mini-section-head small{color:var(--muted,#8a9998)}
+.leave-type-bars,.leave-top-people{display:grid;gap:10px}
+.leave-type-bar{display:grid;grid-template-columns:minmax(100px,180px) 1fr auto;gap:10px;align-items:center}
+.leave-type-bar label{font-size:13px;color:var(--ink,#173f48);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.leave-type-track{height:8px;background:#eef5f3;border-radius:99px;overflow:hidden}
+.leave-type-fill{height:100%;background:var(--brand,#168b8d);border-radius:99px}
+.leave-type-bar b{font-size:12px;color:var(--muted,#758684);font-weight:600}
+.leave-top-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #edf2f0}.leave-top-row:last-child{border-bottom:0}
+.leave-top-row .person-mini{display:flex;align-items:center;gap:9px;min-width:0}.leave-top-row .avatar-mini{width:30px;height:30px;border-radius:9px;background:#e9f5f2;display:grid;place-items:center;color:var(--brand,#168b8d);font-weight:700;flex:0 0 auto}
+.leave-top-row strong{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.leave-top-row small{display:block;color:var(--muted,#8a9998);margin-top:2px}
+.leave-top-row b{font-size:13px;color:var(--brand,#168b8d);white-space:nowrap}
+.leave-report-table-wrap{overflow:auto;border:1px solid var(--line,#dfe8e5);border-radius:16px;background:#fff}
+.leave-report-table{width:100%;min-width:1250px;border-collapse:collapse}
+.leave-report-table th,.leave-report-table td{padding:12px 14px;border-bottom:1px solid #edf2f0;text-align:left;vertical-align:top;font-size:12px}
+.leave-report-table th{position:sticky;top:0;background:#f9fcfb;color:#83918f;font-weight:500;z-index:1}
+.leave-report-table td strong{font-size:13px;color:var(--ink,#173f48)}.leave-report-table td small{display:block;color:var(--muted,#8a9998);margin-top:3px}
+.leave-report-empty{padding:30px;text-align:center;color:var(--muted,#8a9998)}
+@media(max-width:900px){
+  .leave-report-head{display:block}.leave-report-controls{justify-content:flex-start;margin-top:14px}
+  .leave-report-summary{grid-template-columns:1fr 1fr}.leave-report-grid{grid-template-columns:1fr}
+}
+@media(max-width:520px){
+  .leave-report-summary{grid-template-columns:1fr 1fr}
+  .leave-report-controls input[type="month"]{flex:1;min-width:130px}
+  .leave-report-controls select{width:100%}
+}
