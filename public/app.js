@@ -1376,7 +1376,7 @@ function renderDashboard() {
 function renderEmployees(query = '') {
   const normalized = query.trim().toLowerCase();
   const employees = normalized
-    ? state.employees.filter(employee => [employee.nickname,employee.first_name,employee.last_name,employee.employee_code,employee.department_name,employee.position_name,employee.line_display_name,employee.work_location_names].some(value => String(value || '').toLowerCase().includes(normalized)))
+    ? state.employees.filter(employee => [employee.nickname,employee.first_name,employee.last_name,employee.employee_code,employee.department_name,employee.position_name,employee.line_display_name,employee.work_location_names,employee.phone,employee.email,employee.national_id,employee.bank_name,employee.bank_account_no].some(value => String(value || '').toLowerCase().includes(normalized)))
     : state.employees;
 
   $('#employeeCountText').textContent = `${employees.length} คน`;
@@ -1386,26 +1386,42 @@ function renderEmployees(query = '') {
   $('#peopleLinePending').textContent = Math.max(0, state.employees.length - connected);
   $('#peopleActiveInvites').textContent = state.invites.filter(invite => invite.status === 'active' && new Date(invite.expires_at).getTime() > Date.now() && Number(invite.used_count) < Number(invite.max_uses)).length;
 
+  const maskNationalId = value => {
+    const digits = String(value || '').replace(/\D/g,'');
+    if (!digits) return '—';
+    return digits.length >= 13 ? `${digits.slice(0,1)}-${digits.slice(1,5)}-${digits.slice(5,10)}-${digits.slice(10,12)}-${digits.slice(12)}` : escapeHtml(value);
+  };
+  const salaryText = value => Number(value || 0) > 0 ? Number(value).toLocaleString('th-TH',{maximumFractionDigits:0}) : 'ยังไม่ตั้ง';
+
   $('#employeesBody').innerHTML = employees.length
     ? employees.map(employee => `
       <tr>
-        <td data-label="พนักงาน">
+        <td data-label="พนักงาน" class="employee-sticky-name">
           <div class="person">
             <div class="avatar ${employee.line_picture_url ? 'avatar-photo' : ''}" ${employee.line_picture_url ? `style="background-image:url('${escapeHtml(employee.line_picture_url)}')"` : ''}>${employee.line_picture_url ? '' : initial(employee)}</div>
-            <div><strong>${escapeHtml(employee.nickname || employee.first_name)} ${escapeHtml(employee.last_name)}</strong><small>${escapeHtml(employee.employee_code)}${employee.position_name ? ` · ${escapeHtml(employee.position_name)}` : ''}</small><span class="people-status ${peopleStatusTone(employee.people_status)}">${escapeHtml(peopleStatusLabel(employee.people_status))}</span></div>
+            <div><strong>${escapeHtml(employee.nickname || employee.first_name)} ${escapeHtml(employee.last_name)}</strong><small>${escapeHtml(employee.employee_code)}</small><span class="people-status ${peopleStatusTone(employee.people_status)}">${escapeHtml(peopleStatusLabel(employee.people_status))}</span></div>
           </div>
         </td>
-        <td data-label="แผนก"><strong class="table-primary">${escapeHtml(employee.department_name || '—')}</strong><small class="table-secondary">${employee.manager_employee_id ? `หัวหน้า ${escapeHtml(employee.manager_nickname || employee.manager_first_name || 'กำหนดแล้ว')}` : 'ยังไม่กำหนดหัวหน้า'}</small></td>
-        <td data-label="Work Location">${employee.work_location_names ? `<span class="location-inline">📍 ${escapeHtml(employee.work_location_names)}</span>` : '<span class="muted">ทุก Location</span>'}</td>
+        <td data-label="แผนก">${escapeHtml(employee.department_name || '—')}</td>
+        <td data-label="ตำแหน่ง">${escapeHtml(employee.position_name || '—')}</td>
+        <td data-label="เบอร์โทร">${escapeHtml(employee.phone || '—')}</td>
+        <td data-label="อีเมล">${escapeHtml(employee.email || '—')}</td>
+        <td data-label="วันเกิด">${employee.birth_date ? formatDate(employee.birth_date) : '—'}</td>
+        <td data-label="บัตรประชาชน"><span class="mono-data">${maskNationalId(employee.national_id)}</span></td>
+        <td data-label="ธนาคาร">${escapeHtml(employee.bank_name || '—')}</td>
+        <td data-label="ชื่อบัญชี">${escapeHtml(employee.bank_account_name || '—')}</td>
+        <td data-label="เลขบัญชี"><span class="mono-data">${escapeHtml(employee.bank_account_no || '—')}</span></td>
+        <td data-label="เงินเดือน"><strong class="salary-cell">${salaryText(employee.base_salary)}</strong></td>
+        <td data-label="วันเริ่มงาน">${employee.start_date ? formatDate(employee.start_date) : '—'}</td>
+        <td data-label="Work Location">${employee.work_location_names ? `<span class="location-inline">${escapeHtml(employee.work_location_names)}</span>` : '<span class="muted">ทุก Location</span>'}</td>
         <td data-label="ผู้อนุมัติลา">${employee.leave_approver_employee_id ? `<div class="approver-inline"><strong>${escapeHtml(employee.leave_approver_nickname || employee.leave_approver_first_name || 'กำหนดแล้ว')}</strong><small>LINE Approval</small></div>` : '<span class="badge badge-soft">HR / Owner</span>'}</td>
         <td data-label="LINE">${employee.line_user_id
           ? `<div class="line-connected"><span class="badge badge-success"><span class="status-dot"></span> เชื่อมแล้ว</span><small>${escapeHtml(employee.line_display_name || 'LINE account')}</small></div>`
           : '<span class="badge badge-neutral">ยังไม่เชื่อม</span>'}</td>
-        <td data-label="จัดการ"><div class="employee-row-actions"><button class="text-btn" onclick="window.openEmployeeEdit(${Number(employee.id)})">แก้ไข</button><button class="text-btn" onclick="window.openPeopleProfile(${Number(employee.id)})">โปรไฟล์</button><button class="text-btn" onclick="window.openLeaveProfile(${Number(employee.id)})">สิทธิ์ลา</button><button class="text-btn danger-text" onclick="window.deleteEmployee(${Number(employee.id)})">ลบ</button></div></td>
+        <td data-label="จัดการ" class="employee-sticky-actions"><div class="employee-row-actions"><button class="text-btn" onclick="window.openEmployeeEdit(${Number(employee.id)})">แก้ไข</button><button class="text-btn" onclick="window.openPeopleProfile(${Number(employee.id)})">โปรไฟล์</button><button class="text-btn" onclick="window.openLeaveProfile(${Number(employee.id)})">สิทธิ์ลา</button><button class="text-btn danger-text" onclick="window.deleteEmployee(${Number(employee.id)})">ลบ</button></div></td>
       </tr>`).join('')
-    : `<tr><td colspan="6">${emptyState('ไม่พบพนักงาน', 'ลองค้นหาด้วยชื่อ รหัสพนักงาน แผนก หรือ LINE อีกครั้ง')}</td></tr>`;
+    : `<tr><td colspan="16">${emptyState('ไม่พบพนักงาน', 'ลองค้นหาด้วยชื่อ รหัสพนักงาน แผนก เบอร์โทร บัญชีธนาคาร หรือ LINE อีกครั้ง')}</td></tr>`;
 }
-
 function peopleStatusLabel(status){return ({candidate:'Candidate',interview:'รอสัมภาษณ์',offer:'Offer',probation:'ทดลองงาน',employee:'พนักงาน',leave_of_absence:'พักงาน',resigned:'ลาออก',terminated:'เลิกจ้าง',alumni:'อดีตพนักงาน',inactive:'Inactive'})[status]||'พนักงาน';}
 function peopleStatusTone(status){return ['employee'].includes(status)?'ok':['probation','offer','interview'].includes(status)?'wait':['resigned','terminated','alumni','inactive'].includes(status)?'off':'info';}
 
@@ -2230,6 +2246,11 @@ function openEmployeeModal() {
     ['email', 'อีเมล', 'email'],
     ['phone', 'เบอร์โทร', 'text'],
     ['birth_date', 'วันเกิด', 'date'],
+    ['national_id', 'เลขบัตรประชาชน', 'text'],
+    ['bank_name', 'ธนาคาร', 'text'],
+    ['bank_account_name', 'ชื่อบัญชี', 'text'],
+    ['bank_account_no', 'เลขบัญชีธนาคาร', 'text'],
+    ['base_salary', 'เงินเดือนฐาน', 'number'],
     ['start_date', 'วันเริ่มงาน', 'date', true],
     ['probation_end_date', 'วันครบ Probation', 'date'],
     ['contract_end_date', 'วันสิ้นสุดสัญญา', 'date'],
@@ -2279,6 +2300,11 @@ window.openEmployeeEdit = id => {
     ['email', 'อีเมล', 'email'],
     ['phone', 'เบอร์โทร', 'text'],
     ['birth_date', 'วันเกิด', 'date'],
+    ['national_id', 'เลขบัตรประชาชน', 'text'],
+    ['bank_name', 'ธนาคาร', 'text'],
+    ['bank_account_name', 'ชื่อบัญชี', 'text'],
+    ['bank_account_no', 'เลขบัญชีธนาคาร', 'text'],
+    ['base_salary', 'เงินเดือนฐาน', 'number'],
     ['start_date', 'วันเริ่มงาน', 'date', true],
     ['probation_end_date', 'วันครบ Probation', 'date'],
     ['contract_end_date', 'วันสิ้นสุดสัญญา', 'date'],
@@ -2315,6 +2341,11 @@ window.openEmployeeEdit = id => {
     email: employee.email,
     phone: employee.phone,
     birth_date: employee.birth_date,
+    national_id: employee.national_id,
+    bank_name: employee.bank_name,
+    bank_account_name: employee.bank_account_name,
+    bank_account_no: employee.bank_account_no,
+    base_salary: employee.base_salary,
     start_date: employee.start_date,
     probation_end_date: employee.probation_end_date,
     contract_end_date: employee.contract_end_date,

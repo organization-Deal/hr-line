@@ -1472,3 +1472,31 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
 .company-profile-inline-fields .field.full{grid-column:1/-1;}
 .company-profile-inline-actions{display:flex;justify-content:flex-end;padding-top:22px;margin-top:22px;border-top:1px solid rgba(18,92,89,.1);}
 @media(max-width:720px){.company-profile-inline-card{padding:20px;border-radius:20px}.company-profile-inline-fields{grid-template-columns:1fr}.company-profile-inline-fields .field.full{grid-column:auto}.company-profile-inline-actions .primary-btn{width:100%}}
+
+
+/* P7.40 — Payroll-ready employee master table */
+.employee-master-table-card{position:relative;overflow:auto;overscroll-behavior-x:contain;scrollbar-gutter:stable}
+.employee-master-table{min-width:2450px;table-layout:auto}
+.employee-master-table th,.employee-master-table td{white-space:nowrap}
+.employee-master-table th{z-index:3}
+.employee-master-table .employee-sticky-name{position:sticky;left:0;z-index:4;min-width:280px;background:#fff;box-shadow:8px 0 18px rgba(18,60,74,.035)}
+.employee-master-table thead .employee-sticky-name{background:#FAFCFB;z-index:6}
+.employee-master-table .employee-sticky-actions{position:sticky;right:0;z-index:4;min-width:250px;background:#fff;box-shadow:-8px 0 18px rgba(18,60,74,.035)}
+.employee-master-table thead .employee-sticky-actions{background:#FAFCFB;z-index:6}
+.employee-master-table tbody tr:hover .employee-sticky-name,.employee-master-table tbody tr:hover .employee-sticky-actions{background:#FBFCFB}
+.employee-master-table td[data-label="อีเมล"]{max-width:240px;overflow:hidden;text-overflow:ellipsis}
+.employee-master-table td[data-label="Work Location"]{max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.mono-data{font-family:var(--font-en);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.salary-cell{color:var(--primary-dark);font-family:var(--font-en);font-variant-numeric:tabular-nums}
+.employee-master-table-card::after{content:"เลื่อนแนวนอนเพื่อดูข้อมูล Payroll เพิ่มเติม →";position:sticky;left:14px;bottom:8px;display:block;width:max-content;margin:8px 12px 10px;padding:5px 8px;border-radius:999px;background:rgba(244,249,247,.94);color:var(--text-tertiary);font-size:8.5px;pointer-events:none}
+@media(max-width:680px){
+  .employee-master-table-card{overflow:auto;border:1px solid var(--border);border-radius:15px;background:#fff}
+  .employee-master-table{min-width:2200px;border-collapse:separate;border-spacing:0}
+  .employee-master-table thead{display:table-header-group}
+  .employee-master-table tbody{display:table-row-group}
+  .employee-master-table tr{display:table-row;width:auto;margin:0;border:0;border-radius:0}
+  .employee-master-table td,.employee-master-table th{display:table-cell;width:auto;min-height:0;padding:11px 13px;border-bottom:1px solid #EEF2F0;text-align:left}
+  .employee-master-table td::before{display:none}
+  .employee-master-table .employee-sticky-name{min-width:230px}
+  .employee-master-table .employee-sticky-actions{min-width:220px}
+}
