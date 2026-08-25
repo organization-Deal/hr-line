@@ -1442,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.38', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.40', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -2211,12 +2211,14 @@ async function handleApi(request, env, url, auth, ctx) {
       SELECT e.*, d.name AS department_name, p.name AS position_name,
              mgr.nickname AS manager_nickname, mgr.first_name AS manager_first_name, mgr.last_name AS manager_last_name,
              ap.nickname AS leave_approver_nickname, ap.first_name AS leave_approver_first_name, ap.last_name AS leave_approver_last_name,
+             pp.base_salary, pp.bank_name, pp.bank_account_name, pp.bank_account_no, pp.social_security_enabled, pp.tax_enabled,
              GROUP_CONCAT(DISTINCT wl.name) AS work_location_names, GROUP_CONCAT(DISTINCT wl.id) AS work_location_ids
       FROM employees e
       LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN positions p ON p.id = e.position_id
       LEFT JOIN employees mgr ON mgr.id=e.manager_employee_id
       LEFT JOIN employees ap ON ap.id=e.leave_approver_employee_id
+      LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id AND pp.client_id=e.client_id
       LEFT JOIN employee_work_locations ewl ON ewl.employee_id=e.id
       LEFT JOIN work_locations wl ON wl.id=ewl.location_id AND wl.is_active=1
       WHERE e.client_id = ?1
@@ -2285,12 +2287,20 @@ async function handleApi(request, env, url, auth, ctx) {
     await env.DB.prepare(`UPDATE employees SET
       employee_code=?1, nickname=?2, first_name=?3, last_name=?4, email=?5, phone=?6,
       birth_date=?7, start_date=?8, probation_end_date=?9, contract_end_date=?10,
-      department_id=?11, position_id=?12, updated_at=CURRENT_TIMESTAMP
-      WHERE id=?13 AND client_id=?14`).bind(
+      department_id=?11, position_id=?12, national_id=?13, updated_at=CURRENT_TIMESTAMP
+      WHERE id=?14 AND client_id=?15`).bind(
         employeeCode, body.nickname || null, firstName, lastName, body.email || null, body.phone || null,
         body.birth_date || null, startDate, body.probation_end_date || null, body.contract_end_date || null,
-        departmentId, positionId, employeeId, clientId
+        departmentId, positionId, body.national_id || null, employeeId, clientId
       ).run();
+    if (['bank_name','bank_account_name','bank_account_no','base_salary'].some(key => Object.prototype.hasOwnProperty.call(body,key))) {
+      const currentPayroll = await env.DB.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1 AND client_id=?2').bind(employeeId,clientId).first();
+      const baseSalary = body.base_salary === '' || body.base_salary == null ? Number(currentPayroll?.base_salary || 0) : Math.max(0, Number(body.base_salary || 0));
+      await env.DB.prepare(`INSERT INTO employee_payroll_profiles (client_id,employee_id,base_salary,social_security_enabled,tax_enabled,personal_allowance,extra_annual_deductions,monthly_tax_override,bank_name,bank_account_name,bank_account_no,payroll_note,effective_from)
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+        ON CONFLICT(employee_id) DO UPDATE SET base_salary=excluded.base_salary,bank_name=excluded.bank_name,bank_account_name=excluded.bank_account_name,bank_account_no=excluded.bank_account_no,updated_at=CURRENT_TIMESTAMP`)
+        .bind(clientId,employeeId,baseSalary,Number(currentPayroll?.social_security_enabled ?? 1),Number(currentPayroll?.tax_enabled ?? 1),Number(currentPayroll?.personal_allowance ?? 60000),Number(currentPayroll?.extra_annual_deductions ?? 0),currentPayroll?.monthly_tax_override ?? null,body.bank_name ?? currentPayroll?.bank_name ?? null,body.bank_account_name ?? currentPayroll?.bank_account_name ?? null,body.bank_account_no ?? currentPayroll?.bank_account_no ?? null,currentPayroll?.payroll_note ?? null,currentPayroll?.effective_from ?? startDate).run();
+    }
     await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.update', 'employee', String(employeeId), { before: existing, after: body });
     return json({ ok: true, id: employeeId });
   }
@@ -4347,7 +4357,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.38',
+    version:'1.0-P7.40',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -6426,7 +6436,7 @@ async function ensureCoreSchema(db) {
   await ensureColumns(db,'employee_invites',[['token_value','TEXT']]);
   await ensureColumns(db,'employees',[
     ['line_display_name','TEXT'],['line_picture_url','TEXT'],['line_linked_at','TEXT'],['onboarding_source','TEXT'],
-    ['emergency_contact_name','TEXT'],['emergency_contact_phone','TEXT']
+    ['emergency_contact_name','TEXT'],['emergency_contact_phone','TEXT'],['national_id','TEXT']
   ]);
   await ensureColumns(db,'attendance',[
     ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
