@@ -1,17 +1,4 @@
-
-function dedupeBroadcastSidebar(){
-  const sidebar = document.querySelector('.sidebar, aside, #sidebar');
-  if(!sidebar) return;
-  const candidates = [...sidebar.querySelectorAll('button, a')].filter(el => {
-    const label = (el.textContent || '').replace(/\s+/g,'').trim();
-    return el.id === 'broadcastNav' || el.dataset?.view === 'broadcast' || label === 'ประกาศ';
-  });
-  if(candidates.length <= 1) return;
-  const keep = candidates.find(el => el.id === 'broadcastNav') || candidates[0];
-  candidates.forEach(el => { if(el !== keep) el.remove(); });
-}
-dedupeBroadcastSidebar();
-new MutationObserver(() => dedupeBroadcastSidebar()).observe(document.body, {childList:true, subtree:true});
+function dedupeBroadcastSidebar(){const sidebar=document.querySelector('.sidebar');if(!sidebar)return;const xs=[...sidebar.querySelectorAll('button,a')].filter(el=>el.id==='broadcastNav'||el.dataset?.view==='broadcast'||(el.textContent||'').replace(/\s+/g,'').trim()==='ประกาศ');const keep=xs.find(el=>el.id==='broadcastNav')||xs[0];xs.forEach(el=>{if(keep&&el!==keep)el.remove();});}
 
 const state = {
   me: null,
