@@ -1442,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.49', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.50', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1727,7 +1727,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.49', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.50', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -4561,7 +4561,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.49',
+    version:'1.0-P7.50',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -4702,8 +4702,8 @@ async function getPayrollPeriodDetail(db,clientId,periodId){
   const period=await db.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(Number(periodId),Number(clientId)).first();
   if(!period)return {period:null,items:[],adjustments:[]};
   const [items,adjustments,documents]=await db.batch([
-    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,d.name AS department_name,pp.bank_name,pp.bank_account_no
-      FROM payroll_items pi JOIN employees e ON e.id=pi.employee_id LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id
+    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,d.name AS department_name,pos.name AS position_name,pp.bank_name,pp.bank_account_no
+      FROM payroll_items pi JOIN employees e ON e.id=pi.employee_id LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions pos ON pos.id=e.position_id LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id
       WHERE pi.period_id=?1 AND pi.client_id=?2 ORDER BY e.first_name,e.last_name`).bind(Number(periodId),Number(clientId)),
     db.prepare(`SELECT a.*,e.employee_code,e.first_name,e.last_name,e.nickname FROM payroll_adjustments a JOIN employees e ON e.id=a.employee_id WHERE a.period_id=?1 AND a.client_id=?2 ORDER BY a.employee_id,a.id`).bind(Number(periodId),Number(clientId)),
     db.prepare(`SELECT * FROM payroll_documents WHERE period_id=?1 AND client_id=?2`).bind(Number(periodId),Number(clientId)),
@@ -4790,13 +4790,14 @@ async function recalculatePayrollPeriod(env,clientId,periodId){
       if(date<=cutoff && !att?.check_in_at){ const leave=leaveByEmployeeDate.get(`${employee.id}:${date}`); if(!leave || String(leave.policy_code||'').toLowerCase().includes('unpaid')) absentDays+=leave&&leave.start_date===leave.end_date&&['am','pm','half'].includes(String(leave.day_part||''))?.5:1; }
     }
     let attendanceDeduction=0; if(Number(settings?.absence_deduction_enabled))attendanceDeduction+=roundMoney((salary/divisor)*absentDays); if(Number(settings?.late_deduction_enabled))attendanceDeduction+=roundMoney(lateMinutes*Number(settings?.late_deduction_per_minute||0));
-    let overtime=0,commission=0,incentive=0,allowance=0,bonus=0,otherEarnings=0,otherDeductions=0,taxableAdjustments=0,ssoAdjustments=0;
-    for(const a of adjustmentsByEmployee.get(Number(employee.id))||[]){const amt=Number(a.amount||0); if(a.adjustment_type==='deduction'){otherDeductions+=amt;continue;} if(Number(a.taxable))taxableAdjustments+=amt;if(Number(a.sso_contributable))ssoAdjustments+=amt; switch(String(a.category)){case'overtime':overtime+=amt;break;case'commission':commission+=amt;break;case'incentive':incentive+=amt;break;case'allowance':allowance+=amt;break;case'bonus':bonus+=amt;break;default:otherEarnings+=amt;}}
+    let overtime=0,commission=0,incentive=0,allowance=0,bonus=0,otherEarnings=0,otherDeductions=0,taxableAdjustments=0,ssoAdjustments=0,taxManualAdjust=0;
+    for(const a of adjustmentsByEmployee.get(Number(employee.id))||[]){const amt=Number(a.amount||0); const category=String(a.category||'other'); if(category==='tax_add'){taxManualAdjust+=amt;continue;} if(category==='tax_reduce'){taxManualAdjust-=amt;continue;} if(a.adjustment_type==='deduction'){otherDeductions+=amt;continue;} if(Number(a.taxable))taxableAdjustments+=amt;if(Number(a.sso_contributable))ssoAdjustments+=amt; switch(category){case'overtime':overtime+=amt;break;case'commission':commission+=amt;break;case'kpi':otherEarnings+=amt;break;case'incentive':incentive+=amt;break;case'allowance':allowance+=amt;break;case'bonus':bonus+=amt;break;default:otherEarnings+=amt;}}
     const gross=roundMoney(prorated+overtime+commission+incentive+allowance+bonus+otherEarnings); const taxableMonthly=Math.max(0,roundMoney(prorated+taxableAdjustments-attendanceDeduction));
     let sso=0; if(Number(settings?.social_security_enabled)&&Number(profile.social_security_enabled??1)){const contributable=Math.max(Number(rules.sso.wage_floor||0),Math.min(Number(rules.sso.wage_ceiling||17500),Math.max(0,prorated+ssoAdjustments))); if(prorated>0)sso=roundMoney(contributable*Number(rules.sso.employee_rate||.05));}
     let withholding=0; if(Number(settings?.tax_enabled)&&Number(profile.tax_enabled??1)){
       if(profile.monthly_tax_override!=null)withholding=Math.max(0,roundMoney(profile.monthly_tax_override)); else {const prior=ytd.get(Number(employee.id))||{}; const projectedIncome=Number(prior.ytd_taxable||0)+taxableMonthly*monthsRemaining; const projectedSso=Number(prior.ytd_sso||0)+sso*monthsRemaining; const expense=Math.min(projectedIncome*Number(rules.tax.expense_rate||.5),Number(rules.tax.expense_cap||100000)); const personal=Math.max(0,Number(profile.personal_allowance??rules.tax.personal_allowance??60000)); const extra=Math.max(0,Number(profile.extra_annual_deductions||0)); const netTaxable=Math.max(0,projectedIncome-expense-personal-extra-projectedSso); const annualTax=payrollTaxFromBrackets(netTaxable,rules.tax.brackets); withholding=roundMoney(Math.max(0,annualTax-Number(prior.ytd_tax||0))/monthsRemaining);}
     }
+    withholding=Math.max(0,roundMoney(withholding+taxManualAdjust));
     const deductions=roundMoney(attendanceDeduction+sso+withholding+otherDeductions); const netPay=roundMoney(Math.max(0,gross-deductions)); const breakdown={scheduled_days:scheduledDays,active_calendar_days:activeCalendarDays,tax_rule:rules.tax_version,sso_rule:rules.sso_version,taxable_monthly:taxableMonthly};
     statements.push(db.prepare(`INSERT INTO payroll_items (client_id,period_id,employee_id,base_salary,prorated_salary,absent_days,late_minutes,attendance_deduction,overtime,commission,incentive,allowance,bonus,other_earnings,gross_income,social_security,withholding_tax,other_deductions,total_deductions,net_pay,breakdown_json,calculation_note,status) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,'preview')`).bind(Number(clientId),Number(periodId),Number(employee.id),salary,prorated,absentDays,lateMinutes,attendanceDeduction,overtime,commission,incentive,allowance,bonus,otherEarnings,gross,sso,withholding,otherDeductions,deductions,netPay,JSON.stringify(breakdown),'ภาษีเป็นประมาณการรายเดือนแบบ annualized; HR/Payroll ต้องตรวจสอบก่อน Lock'));
     totals.gross+=gross;totals.deductions+=deductions;totals.net+=netPay;totals.count++;
