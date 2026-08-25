@@ -400,7 +400,7 @@ function bindEvents() {
     const custom = document.querySelector('[data-modal-root]:not(.hidden), [role="dialog"]:not(.hidden), .modal-overlay:not(.hidden), .fullscreen-modal:not(.hidden), .chart-modal:not(.hidden), .organization-chart-modal:not(.hidden), .org-chart-modal:not(.hidden)');
     if (custom) { custom.classList.add('hidden'); custom.setAttribute('aria-hidden','true'); custom.style.display='none'; }
   });
-  $('#companyProfileShortcut').onclick = openCompanyProfileModal;
+  if ($('#companyProfileShortcut')) $('#companyProfileShortcut').onclick = openCompanyProfileModal;
   $('#statusCompanyAction').onclick = openCompanyProfileModal;
   $('#companyProfileSaveBtn').onclick = saveCompanyProfile;
   $('#companyLogoFile').onchange = handleCompanyLogoFile;
@@ -948,16 +948,22 @@ function companyProfileCompleted(profile) {
 function canManageCompanyProfile() { return ['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole() || '')); }
 function canManageGoogleWorkspace() { return ['owner','co_owner','hr_admin'].includes(String(activeCompanyRole() || '')); }
 
-function openCompanyProfileModal() {
+function fillCompanyProfileForm() {
   const profile = state.companyProfile || state.dashboard?.client || activeCompany() || {};
-  $('#companyProfileName').value = profile.name || '';
-  $('#companyProfileWorkStart').value = profile.work_start || '09:00';
-  $('#companyProfileWorkEnd').value = profile.work_end || '18:00';
-  $('#companyProfileLateGrace').value = profile.late_grace_minutes ?? 10;
-  $('#companyProfileTimezone').value = profile.timezone || 'Asia/Bangkok';
+  if ($('#companyProfileName')) $('#companyProfileName').value = profile.name || '';
+  if ($('#companyProfileWorkStart')) $('#companyProfileWorkStart').value = profile.work_start || '09:00';
+  if ($('#companyProfileWorkEnd')) $('#companyProfileWorkEnd').value = profile.work_end || '18:00';
+  if ($('#companyProfileLateGrace')) $('#companyProfileLateGrace').value = profile.late_grace_minutes ?? 10;
+  if ($('#companyProfileTimezone')) $('#companyProfileTimezone').value = profile.timezone || 'Asia/Bangkok';
   if ($('#companyLogoFile')) $('#companyLogoFile').value='';
   renderCompanyLogoEditor(profile.logo_data_url || '');
-  $('#companyProfileModal').showModal();
+}
+
+function openCompanyProfileModal() {
+  showView('settings');
+  openSettingsCategory('company', { scroll: false });
+  fillCompanyProfileForm();
+  requestAnimationFrame(() => document.querySelector('#companyProfileInline')?.scrollIntoView({behavior:'smooth',block:'start'}));
 }
 
 function renderCompanyLogoEditor(dataUrl='') {
@@ -988,7 +994,7 @@ async function saveCompanyProfile() {
   const body={name:$('#companyProfileName').value.trim(),work_start:$('#companyProfileWorkStart').value,work_end:$('#companyProfileWorkEnd').value,late_grace_minutes:Number($('#companyProfileLateGrace').value||0),timezone:$('#companyProfileTimezone').value.trim()||'Asia/Bangkok'};
   if(body.name.length<2)return toast('กรุณาใส่ชื่อบริษัท',true);
   const button=$('#companyProfileSaveBtn');button.disabled=true;button.textContent='กำลังบันทึก…';
-  try{let result=await api('/api/company-profile',{method:'PATCH',body:JSON.stringify(body)});const pending=$('#companyLogoPreview')?.dataset?.pending||'';if(pending){const logoResult=await api('/api/company-logo',{method:'PUT',body:JSON.stringify({data_url:pending})});result.company.logo_data_url=logoResult.logo_data_url||pending;delete $('#companyLogoPreview').dataset.pending;}state.companyProfile=result.company;const active=activeCompany();if(active){active.name=result.company.name;active.logo_data_url=result.company.logo_data_url||active.logo_data_url||'';}$('#companyProfileModal').close();renderIdentity();renderSettings();toast('บันทึกข้อมูลบริษัทแล้ว');}
+  try{let result=await api('/api/company-profile',{method:'PATCH',body:JSON.stringify(body)});const pending=$('#companyLogoPreview')?.dataset?.pending||'';if(pending){const logoResult=await api('/api/company-logo',{method:'PUT',body:JSON.stringify({data_url:pending})});result.company.logo_data_url=logoResult.logo_data_url||pending;delete $('#companyLogoPreview').dataset.pending;}state.companyProfile=result.company;const active=activeCompany();if(active){active.name=result.company.name;active.logo_data_url=result.company.logo_data_url||active.logo_data_url||'';}renderIdentity();renderSettings();fillCompanyProfileForm();toast('บันทึกข้อมูลบริษัทแล้ว');}
   catch(error){toast(error.message,true);}finally{button.disabled=false;button.textContent='บันทึกข้อมูลบริษัท';}
 }
 
@@ -2007,6 +2013,7 @@ function openSettingsCategory(category, { scroll = true } = {}) {
   if ($('#settingsDetailKicker')) $('#settingsDetailKicker').textContent = meta.kicker;
   if ($('#settingsDetailDescription')) $('#settingsDetailDescription').textContent = meta.description;
   syncSettingsSidebar();
+  if (category === 'company') fillCompanyProfileForm();
   if (category === 'approvals' && ['owner','co_owner'].includes(String(activeCompanyRole()||''))) loadCompanyAccess();
   if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
 }

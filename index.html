@@ -225,7 +225,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.38</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.39</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -558,11 +558,22 @@
 
           <div id="settingsDetail" class="settings-detail hidden">
             <div class="settings-category-panel hidden" data-settings-category="company">
-              <div class="settings-subsection settings-company-profile">
-                <div class="page-intro compact"><div><p class="kicker">COMPANY PROFILE</p><h2>ข้อมูลบริษัท</h2><p>ค่าพื้นฐานของ Workspace เช่น ชื่อบริษัท เวลาเริ่มงาน และ Timezone</p></div></div>
-                <article id="companyProfileShortcut" class="setting-card setting-card-action settings-wide-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h6M9 14h6"/></svg></div><div><strong id="settingsCompanyName">ข้อมูลบริษัท</strong><p id="settingsCompanyProfileText">กดเพื่อแก้ไขข้อมูลหลักของบริษัท</p></div><span>→</span></article>
-              </div>
-
+              <section id="companyProfileInline" class="company-profile-inline">
+                  <div class="company-profile-inline-head">
+                    <div><p class="kicker">COMPANY PROFILE</p><h2>ข้อมูลบริษัท</h2><p>แก้ไขข้อมูลบริษัทได้จากหน้านี้ทันที ไม่ต้องเปิดหน้าต่างเพิ่ม</p></div>
+                  </div>
+                  <div class="company-profile-inline-card">
+                    <div class="modal-fields company-profile-inline-fields">
+                      <div class="field full company-logo-field"><label>โลโก้บริษัท</label><div class="company-logo-editor"><div id="companyLogoPreview" class="company-logo-preview"><span>โลโก้</span></div><div class="company-logo-actions"><input id="companyLogoFile" type="file" accept="image/png,image/jpeg,image/webp"/><small>PNG, JPG หรือ WebP · ไม่เกิน 512 KB · แนะนำภาพสี่เหลี่ยม</small><button id="companyLogoRemoveBtn" class="text-btn danger-text hidden" type="button">ลบโลโก้</button></div></div></div>
+                      <div class="field full"><label>ชื่อบริษัท <em>*</em></label><input id="companyProfileName" /></div>
+                      <div class="field"><label>เวลาเริ่มงาน</label><input id="companyProfileWorkStart" type="time" /></div>
+                      <div class="field"><label>เวลาเลิกงาน</label><input id="companyProfileWorkEnd" type="time" /></div>
+                      <div class="field"><label>Grace period สาย</label><div class="input-suffix"><input id="companyProfileLateGrace" type="number" min="0" max="180" /><span>นาที</span></div></div>
+                      <div class="field"><label>Timezone</label><input id="companyProfileTimezone" placeholder="Asia/Bangkok" /></div>
+                    </div>
+                    <div class="company-profile-inline-actions"><button type="button" id="companyProfileSaveBtn" class="primary-btn">บันทึกข้อมูลบริษัท</button></div>
+                  </div>
+                </section>
             </div>
 
             <div class="settings-category-panel hidden" data-settings-category="worktime">
@@ -887,15 +898,6 @@
       <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="locationSaveBtn" class="primary-btn">บันทึก Location</button></div>
     </form>
   </dialog>
-
-  <dialog id="companyProfileModal" class="company-profile-modal">
-    <form method="dialog" id="companyProfileForm">
-      <div class="modal-head"><div><p class="kicker">COMPANY PROFILE</p><h3>ข้อมูลบริษัท</h3><p>กำหนดค่าพื้นฐานที่ใช้กับ Attendance และข้อมูลบริษัทใน Workspace</p></div><button type="button" class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
-      <div class="modal-fields"><div class="field full company-logo-field"><label>โลโก้บริษัท</label><div class="company-logo-editor"><div id="companyLogoPreview" class="company-logo-preview"><span>โลโก้</span></div><div class="company-logo-actions"><input id="companyLogoFile" type="file" accept="image/png,image/jpeg,image/webp"/><small>PNG, JPG หรือ WebP · ไม่เกิน 512 KB · แนะนำภาพสี่เหลี่ยม</small><button id="companyLogoRemoveBtn" class="text-btn danger-text hidden" type="button">ลบโลโก้</button></div></div></div><div class="field full"><label>ชื่อบริษัท <em>*</em></label><input id="companyProfileName" /></div><div class="field"><label>เวลาเริ่มงาน</label><input id="companyProfileWorkStart" type="time" /></div><div class="field"><label>เวลาเลิกงาน</label><input id="companyProfileWorkEnd" type="time" /></div><div class="field"><label>Grace period สาย</label><div class="input-suffix"><input id="companyProfileLateGrace" type="number" min="0" max="180" /><span>นาที</span></div></div><div class="field"><label>Timezone</label><input id="companyProfileTimezone" placeholder="Asia/Bangkok" /></div></div>
-      <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="companyProfileSaveBtn" class="primary-btn">บันทึกข้อมูลบริษัท</button></div>
-    </form>
-  </dialog>
-
   <dialog id="departmentModal">
     <form method="dialog">
       <div class="modal-head"><div><p class="kicker">ORGANIZATION</p><h3 id="departmentModalTitle">เพิ่มแผนก</h3><p>กำหนดหัวหน้าและแผนกแม่เพื่อสร้าง Organization Chart</p></div><button type="button" class="close-btn" value="cancel">×</button></div>
@@ -1094,7 +1096,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.27" type="module"></script>
+  <script src="/app.js?v=1.0-p7.39" type="module"></script>
 
   <dialog id="positionAssignModal" class="modal position-assign-modal">
     <div class="modal-head">
