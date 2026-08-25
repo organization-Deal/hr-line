@@ -167,6 +167,7 @@ const viewMeta = {
   attendance: ['เวลาเข้างาน', 'WORKDAY'],
   leave: ['การลา', 'LEAVE'],
   requests: ['Employee Service', 'EMPLOYEE SERVICE'],
+  broadcast: ['ประกาศ', 'BROADCAST'],
   payroll: ['Payroll', 'PAYROLL'],
   documents: ['เอกสาร', 'DOCUMENTS'],
   performance: ['Learning & KPI', 'GROWTH OS'],
@@ -428,6 +429,7 @@ function bindEvents() {
   $('#createBroadcastBtn').onclick = openBroadcastModal;
   $('#broadcastAudience').onchange = renderBroadcastAudienceFields;
   $('#broadcastSendBtn').onclick = sendBroadcast;
+  if ($('#createBroadcastPageBtn')) $('#createBroadcastPageBtn').onclick = openBroadcastModal;
   $('#setupRichMenuBtn').onclick = setupRichMenu;
   $('#removeRichMenuBtn').onclick = removeRichMenu;
   $('#hrCaseSaveBtn').onclick = saveHrCase;
@@ -1893,7 +1895,28 @@ function renderEmployeeService(){
 
   const broadcastRoot=$('#broadcastList');
   if(broadcastRoot) broadcastRoot.innerHTML=broadcasts.length?broadcasts.slice(0,8).map(b=>`<article class="broadcast-row"><div><strong>${escapeHtml(b.title)}</strong><p>${escapeHtml(b.message)}</p><small>${formatDateTime(b.created_at)} · ${escapeHtml(b.audience_type==='all'?'ทุกคน':b.audience_type==='department'?'เฉพาะแผนก':'เลือกพนักงาน')}</small></div><div class="broadcast-stats"><span class="badge ${b.status==='sent'?'badge-success':b.status==='partial'?'badge-warning':'badge-neutral'}">${escapeHtml(b.status)}</span><small>${Number(b.delivered_count||0)}/${Number(b.total_recipients||0)} ส่งสำเร็จ</small>${b.status==='draft'?`<button class="text-btn" onclick="window.sendBroadcastById(${Number(b.id)})">ส่งตอนนี้</button>`:''}</div></article>`).join(''):emptyState('ยังไม่มีประกาศ','ส่งประกาศจาก HR เข้า LINE ของพนักงานได้จากปุ่มด้านบน');
+  renderBroadcastPage();
   renderHrInbox();
+}
+
+function renderBroadcastPage(){
+  const role=String(activeCompanyRole()||'');
+  const canRead=['owner','primary_owner','co_owner','hr_admin','hr','manager'].includes(role);
+  const canSend=['owner','primary_owner','co_owner','hr_admin','hr'].includes(role);
+  const nav=$('#broadcastNav');
+  if(nav) nav.classList.toggle('hidden',!canRead);
+  const createBtn=$('#createBroadcastPageBtn');
+  if(createBtn) createBtn.classList.toggle('hidden',!canSend);
+  if(!canRead) return;
+  const broadcasts=state.broadcasts||[];
+  const totalDelivered=broadcasts.reduce((sum,b)=>sum+Number(b.delivered_count||0),0);
+  const totalFailed=broadcasts.reduce((sum,b)=>sum+Number(b.failed_count||0),0);
+  if($('#broadcastPageTotal')) $('#broadcastPageTotal').textContent=String(broadcasts.length);
+  if($('#broadcastPageDelivered')) $('#broadcastPageDelivered').textContent=String(totalDelivered);
+  if($('#broadcastPageFailed')) $('#broadcastPageFailed').textContent=String(totalFailed);
+  const root=$('#broadcastPageList');
+  if(!root) return;
+  root.innerHTML=broadcasts.length?broadcasts.map(b=>`<article class="broadcast-row"><div><strong>${escapeHtml(b.title)}</strong><p>${escapeHtml(b.message)}</p><small>${formatDateTime(b.created_at)} · ${escapeHtml(b.audience_type==='all'?'พนักงานทั้งหมด':b.audience_type==='department'?'เฉพาะแผนก':'เลือกพนักงาน')} · ${escapeHtml(b.created_by_name||'HR')}</small></div><div class="broadcast-stats"><span class="badge ${b.status==='sent'?'badge-success':b.status==='partial'?'badge-warning':'badge-neutral'}">${escapeHtml(({draft:'แบบร่าง',sending:'กำลังส่ง',sent:'ส่งแล้ว',partial:'ส่งบางส่วน'})[b.status]||b.status)}</span><small>${Number(b.delivered_count||0)}/${Number(b.total_recipients||0)} ส่งสำเร็จ</small>${b.status==='draft'&&canSend?`<button class="text-btn" onclick="window.sendBroadcastById(${Number(b.id)})">ส่งตอนนี้</button>`:''}</div></article>`).join(''):emptyState('ยังไม่มีประกาศ','กด “สร้างประกาศ” เพื่อส่งข้อความเข้า LINE ของพนักงาน');
 }
 
 function renderHrInbox(){
