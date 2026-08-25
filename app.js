@@ -1376,7 +1376,7 @@ function renderDashboard() {
 function renderEmployees(query = '') {
   const normalized = query.trim().toLowerCase();
   const employees = normalized
-    ? state.employees.filter(employee => [employee.nickname,employee.first_name,employee.last_name,employee.employee_code,employee.department_name,employee.position_name,employee.line_display_name,employee.work_location_names,employee.phone,employee.email,employee.national_id,employee.bank_name,employee.bank_account_no].some(value => String(value || '').toLowerCase().includes(normalized)))
+    ? state.employees.filter(employee => [employee.nickname,employee.first_name,employee.last_name,employee.employee_code,employee.department_name,employee.position_name,employee.line_display_name,employee.work_location_names,employee.phone,employee.email,employee.national_id,employee.bank_name,employee.bank_account_no,employee.contract_type,employee.contract_number].some(value => String(value || '').toLowerCase().includes(normalized)))
     : state.employees;
 
   $('#employeeCountText').textContent = `${employees.length} คน`;
@@ -1392,6 +1392,7 @@ function renderEmployees(query = '') {
     return digits.length >= 13 ? `${digits.slice(0,1)}-${digits.slice(1,5)}-${digits.slice(5,10)}-${digits.slice(10,12)}-${digits.slice(12)}` : escapeHtml(value);
   };
   const salaryText = value => Number(value || 0) > 0 ? Number(value).toLocaleString('th-TH',{maximumFractionDigits:0}) : 'ยังไม่ตั้ง';
+  const contractTypeLabel = value => ({permanent:'ประจำ',fixed_term:'มีกำหนด',probation:'ทดลองงาน',part_time:'พาร์ทไทม์',intern:'ฝึกงาน',freelance:'ฟรีแลนซ์',consultant:'ที่ปรึกษา'})[String(value||'')] || '—';
 
   $('#employeesBody').innerHTML = employees.length
     ? employees.map(employee => `
@@ -1412,15 +1413,21 @@ function renderEmployees(query = '') {
         <td data-label="ชื่อบัญชี">${escapeHtml(employee.bank_account_name || '—')}</td>
         <td data-label="เลขบัญชี"><span class="mono-data">${escapeHtml(employee.bank_account_no || '—')}</span></td>
         <td data-label="เงินเดือน"><strong class="salary-cell">${salaryText(employee.base_salary)}</strong></td>
+        <td data-label="ประเภทสัญญา"><span class="badge badge-soft">${escapeHtml(contractTypeLabel(employee.contract_type))}</span></td>
+        <td data-label="เลขที่สัญญา"><span class="mono-data">${escapeHtml(employee.contract_number || '—')}</span></td>
+        <td data-label="เริ่มสัญญา">${employee.contract_start_date ? formatDate(employee.contract_start_date) : '—'}</td>
+        <td data-label="วันที่เซ็น">${employee.contract_signed_date ? formatDate(employee.contract_signed_date) : '—'}</td>
+        <td data-label="สิ้นสุดสัญญา">${employee.contract_end_date ? formatDate(employee.contract_end_date) : '<span class="muted">ไม่กำหนด</span>'}</td>
+        <td data-label="เอกสาร"><button class="document-count-btn" type="button" onclick="window.openEmployeeDocuments(${Number(employee.id)})"><span>${Number(employee.document_count||0)}</span> ไฟล์</button></td>
         <td data-label="วันเริ่มงาน">${employee.start_date ? formatDate(employee.start_date) : '—'}</td>
         <td data-label="Work Location">${employee.work_location_names ? `<span class="location-inline">${escapeHtml(employee.work_location_names)}</span>` : '<span class="muted">ทุก Location</span>'}</td>
         <td data-label="ผู้อนุมัติลา">${employee.leave_approver_employee_id ? `<div class="approver-inline"><strong>${escapeHtml(employee.leave_approver_nickname || employee.leave_approver_first_name || 'กำหนดแล้ว')}</strong><small>LINE Approval</small></div>` : '<span class="badge badge-soft">HR / Owner</span>'}</td>
         <td data-label="LINE">${employee.line_user_id
           ? `<div class="line-connected"><span class="badge badge-success"><span class="status-dot"></span> เชื่อมแล้ว</span><small>${escapeHtml(employee.line_display_name || 'LINE account')}</small></div>`
           : '<span class="badge badge-neutral">ยังไม่เชื่อม</span>'}</td>
-        <td data-label="จัดการ" class="employee-sticky-actions"><div class="employee-row-actions"><button class="text-btn" onclick="window.openEmployeeEdit(${Number(employee.id)})">แก้ไข</button><button class="text-btn" onclick="window.openPeopleProfile(${Number(employee.id)})">โปรไฟล์</button><button class="text-btn" onclick="window.openLeaveProfile(${Number(employee.id)})">สิทธิ์ลา</button><button class="text-btn danger-text" onclick="window.deleteEmployee(${Number(employee.id)})">ลบ</button></div></td>
+        <td data-label="จัดการ" class="employee-sticky-actions"><div class="employee-row-actions"><button class="text-btn" onclick="window.openEmployeeEdit(${Number(employee.id)})">แก้ไข</button><button class="text-btn" onclick="window.openPeopleProfile(${Number(employee.id)})">โปรไฟล์</button><button class="text-btn" onclick="window.openLeaveProfile(${Number(employee.id)})">สิทธิ์ลา</button><button class="text-btn" onclick="window.openEmployeeDocuments(${Number(employee.id)})">เอกสาร</button><button class="text-btn danger-text" onclick="window.deleteEmployee(${Number(employee.id)})">ลบ</button></div></td>
       </tr>`).join('')
-    : `<tr><td colspan="16">${emptyState('ไม่พบพนักงาน', 'ลองค้นหาด้วยชื่อ รหัสพนักงาน แผนก เบอร์โทร บัญชีธนาคาร หรือ LINE อีกครั้ง')}</td></tr>`;
+    : `<tr><td colspan="22">${emptyState('ไม่พบพนักงาน', 'ลองค้นหาด้วยชื่อ รหัสพนักงาน แผนก เบอร์โทร บัญชีธนาคาร หรือ LINE อีกครั้ง')}</td></tr>`;
 }
 function peopleStatusLabel(status){return ({candidate:'Candidate',interview:'รอสัมภาษณ์',offer:'Offer',probation:'ทดลองงาน',employee:'พนักงาน',leave_of_absence:'พักงาน',resigned:'ลาออก',terminated:'เลิกจ้าง',alumni:'อดีตพนักงาน',inactive:'Inactive'})[status]||'พนักงาน';}
 function peopleStatusTone(status){return ['employee'].includes(status)?'ok':['probation','offer','interview'].includes(status)?'wait':['resigned','terminated','alumni','inactive'].includes(status)?'off':'info';}
@@ -2253,6 +2260,10 @@ function openEmployeeModal() {
     ['base_salary', 'เงินเดือนฐาน', 'number'],
     ['start_date', 'วันเริ่มงาน', 'date', true],
     ['probation_end_date', 'วันครบ Probation', 'date'],
+    ['contract_type', 'ประเภทสัญญา', 'select'],
+    ['contract_number', 'เลขที่สัญญา', 'text'],
+    ['contract_start_date', 'วันเริ่มสัญญา', 'date'],
+    ['contract_signed_date', 'วันที่เซ็นสัญญา', 'date'],
     ['contract_end_date', 'วันสิ้นสุดสัญญา', 'date'],
   ], async data => {
     data.department_id = data.department_id || null;
@@ -2266,6 +2277,8 @@ function openEmployeeModal() {
   if (start && !start.value) start.value = localDateKey(new Date());
   const department = $('#field-department_id');
   const position = $('#field-position_id');
+  const contractType = $('#field-contract_type');
+  if (contractType) contractType.innerHTML = `<option value="">ยังไม่ระบุ</option><option value="permanent">พนักงานประจำ</option><option value="fixed_term">สัญญามีกำหนด</option><option value="probation">ทดลองงาน</option><option value="part_time">พาร์ทไทม์</option><option value="intern">ฝึกงาน</option><option value="freelance">ฟรีแลนซ์</option><option value="consultant">ที่ปรึกษา</option>`;
   const departments = state.peopleCore?.departments || state.lookups?.departments || [];
   const positions = state.peopleCore?.positions || state.lookups?.positions || [];
   if (department) {
@@ -2279,6 +2292,8 @@ function openEmployeeModal() {
   };
   if (department) department.onchange = renderPositionOptions;
   renderPositionOptions();
+  const contractStart = $('#field-contract_start_date');
+  if (contractStart && !contractStart.value) contractStart.value = start?.value || localDateKey(new Date());
   if (!departments.length) {
     const hint = document.createElement('div');
     hint.className = 'modal-inline-hint full';
@@ -2307,6 +2322,10 @@ window.openEmployeeEdit = id => {
     ['base_salary', 'เงินเดือนฐาน', 'number'],
     ['start_date', 'วันเริ่มงาน', 'date', true],
     ['probation_end_date', 'วันครบ Probation', 'date'],
+    ['contract_type', 'ประเภทสัญญา', 'select'],
+    ['contract_number', 'เลขที่สัญญา', 'text'],
+    ['contract_start_date', 'วันเริ่มสัญญา', 'date'],
+    ['contract_signed_date', 'วันที่เซ็นสัญญา', 'date'],
     ['contract_end_date', 'วันสิ้นสุดสัญญา', 'date'],
   ], async data => {
     data.department_id = data.department_id || null;
@@ -2320,6 +2339,8 @@ window.openEmployeeEdit = id => {
   const positions = state.peopleCore?.positions || state.lookups?.positions || [];
   const department = $('#field-department_id');
   const position = $('#field-position_id');
+  const contractType = $('#field-contract_type');
+  if (contractType) contractType.innerHTML = `<option value="">ยังไม่ระบุ</option><option value="permanent">พนักงานประจำ</option><option value="fixed_term">สัญญามีกำหนด</option><option value="probation">ทดลองงาน</option><option value="part_time">พาร์ทไทม์</option><option value="intern">ฝึกงาน</option><option value="freelance">ฟรีแลนซ์</option><option value="consultant">ที่ปรึกษา</option>`;
   if (department) department.innerHTML = `<option value="">ยังไม่ระบุแผนก</option>${departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}`;
   const renderPositionOptions = (selectedPositionId = null) => {
     if (!position) return;
@@ -2348,10 +2369,96 @@ window.openEmployeeEdit = id => {
     base_salary: employee.base_salary,
     start_date: employee.start_date,
     probation_end_date: employee.probation_end_date,
+    contract_type: employee.contract_type,
+    contract_number: employee.contract_number,
+    contract_start_date: employee.contract_start_date,
+    contract_signed_date: employee.contract_signed_date,
     contract_end_date: employee.contract_end_date,
   };
   Object.entries(values).forEach(([key,value]) => { const field = $(`#field-${key}`); if (field) field.value = value || ''; });
   $('#modalSave').textContent = 'บันทึกการแก้ไข';
+};
+
+
+function ensureEmployeeDocumentsDialog(){
+  let dialog = $('#employeeDocumentsModal');
+  if (dialog) return dialog;
+  dialog = document.createElement('dialog');
+  dialog.id = 'employeeDocumentsModal';
+  dialog.className = 'modal employee-documents-modal';
+  dialog.innerHTML = `<div class="modal-box employee-documents-box">
+    <div class="modal-head"><div><p class="kicker">EMPLOYEE FILES</p><h3 id="employeeDocumentsTitle">เอกสารพนักงาน</h3><p>สัญญาจ้าง บัตรประชาชน สมุดบัญชี ประกันสังคม และเอกสารประกอบ Payroll</p></div><button type="button" class="icon-btn" data-close-employee-docs>×</button></div>
+    <input type="hidden" id="employeeDocumentsEmployeeId" />
+    <div class="employee-doc-upload-grid">
+      <label><span>ประเภทเอกสาร</span><select id="employeeDocumentType"><option value="employment_contract">สัญญาจ้างงาน</option><option value="id_card_copy">สำเนาบัตรประชาชน</option><option value="bank_book_copy">หน้าสมุดบัญชี</option><option value="social_security">เอกสารประกันสังคม</option><option value="tax_document">เอกสารภาษี</option><option value="education_certificate">วุฒิการศึกษา</option><option value="other">เอกสารอื่น</option></select></label>
+      <label><span>วันที่เอกสาร</span><input id="employeeDocumentDate" type="date" /></label>
+      <label><span>วันหมดอายุ (ถ้ามี)</span><input id="employeeDocumentExpires" type="date" /></label>
+      <label class="employee-doc-file-field"><span>ไฟล์</span><input id="employeeDocumentFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx" /></label>
+    </div>
+    <div class="employee-doc-upload-actions"><small>PDF / รูป / Word · สูงสุด 10 MB · เก็บใน Google Drive ของบริษัท</small><button id="employeeDocumentUploadBtn" class="btn primary" type="button">อัปโหลดไฟล์</button></div>
+    <div id="employeeDocumentsList" class="employee-documents-list"></div>
+  </div>`;
+  document.body.appendChild(dialog);
+  dialog.querySelector('[data-close-employee-docs]').onclick = () => dialog.close();
+  $('#employeeDocumentUploadBtn').onclick = uploadEmployeeDocument;
+  return dialog;
+}
+
+const employeeDocumentTypeLabel = type => ({employment_contract:'สัญญาจ้างงาน',id_card_copy:'สำเนาบัตรประชาชน',bank_book_copy:'หน้าสมุดบัญชี',social_security:'เอกสารประกันสังคม',tax_document:'เอกสารภาษี',education_certificate:'วุฒิการศึกษา',other:'เอกสารอื่น'})[type] || 'เอกสาร';
+
+async function loadEmployeeDocuments(employeeId){
+  const result = await api(`/api/employees/${employeeId}/documents`);
+  const list = $('#employeeDocumentsList');
+  const docs = result.data || [];
+  list.innerHTML = docs.length ? docs.map(doc => `<div class="employee-document-row">
+    <div class="employee-document-icon">${iconSvg('document')}</div>
+    <div class="employee-document-copy"><strong>${escapeHtml(doc.title || employeeDocumentTypeLabel(doc.document_type))}</strong><span>${escapeHtml(employeeDocumentTypeLabel(doc.document_type))} · ${doc.document_date ? formatDate(doc.document_date) : formatDate(String(doc.created_at||'').slice(0,10))}${doc.expires_at ? ` · หมดอายุ ${formatDate(doc.expires_at)}` : ''}</span><small>${escapeHtml(doc.file_name || '')}</small></div>
+    <div class="employee-document-actions">${doc.drive_url ? `<a class="text-btn" href="${escapeHtml(doc.drive_url)}" target="_blank" rel="noopener">เปิดไฟล์</a>` : ''}<button type="button" class="text-btn danger-text" onclick="window.deleteEmployeeDocument(${Number(doc.id)},${Number(employeeId)})">ลบ</button></div>
+  </div>`).join('') : emptyState('ยังไม่มีเอกสาร', 'อัปโหลดสัญญาจ้าง สำเนาบัตรประชาชน หน้าสมุดบัญชี หรือเอกสาร Payroll ได้จากด้านบน');
+  return result;
+}
+
+window.openEmployeeDocuments = async id => {
+  const employee = state.employees.find(item => Number(item.id) === Number(id));
+  if (!employee) return toast('ไม่พบข้อมูลพนักงาน', true);
+  const dialog = ensureEmployeeDocumentsDialog();
+  $('#employeeDocumentsEmployeeId').value = String(id);
+  $('#employeeDocumentsTitle').textContent = `เอกสาร · ${employee.nickname || employee.first_name}`;
+  $('#employeeDocumentDate').value = localDateKey(new Date());
+  $('#employeeDocumentExpires').value = '';
+  $('#employeeDocumentFile').value = '';
+  $('#employeeDocumentsList').innerHTML = `<div class="employee-doc-loading">กำลังโหลดเอกสาร…</div>`;
+  dialog.showModal();
+  try { await loadEmployeeDocuments(id); } catch (error) { $('#employeeDocumentsList').innerHTML = emptyState('โหลดเอกสารไม่สำเร็จ', error.message); }
+};
+
+async function uploadEmployeeDocument(){
+  const employeeId = Number($('#employeeDocumentsEmployeeId').value || 0);
+  const file = $('#employeeDocumentFile').files?.[0];
+  if (!employeeId || !file) return toast('กรุณาเลือกไฟล์ก่อน', true);
+  if (file.size > 10 * 1024 * 1024) return toast('ไฟล์ต้องไม่เกิน 10 MB', true);
+  const button = $('#employeeDocumentUploadBtn');
+  button.disabled = true; button.textContent = 'กำลังอัปโหลด…';
+  const tracked = beginMutationStatus(`/api/employees/${employeeId}/documents`,'POST',false);
+  try {
+    const form = new FormData();
+    form.append('file',file); form.append('document_type',$('#employeeDocumentType').value); form.append('document_date',$('#employeeDocumentDate').value); form.append('expires_at',$('#employeeDocumentExpires').value); form.append('visibility','hr_only');
+    const res = await fetch(`/api/employees/${employeeId}/documents`,{method:'POST',credentials:'same-origin',body:form});
+    let data={}; try{data=await res.json();}catch{}
+    if (!res.ok) throw new Error(data.error || `HTTP_${res.status}`);
+    endMutationStatus(tracked,true);
+    $('#employeeDocumentFile').value='';
+    await loadEmployeeDocuments(employeeId);
+    await loadAll({silent:true});
+    toast('อัปโหลดเอกสารแล้ว');
+  } catch(error) { endMutationStatus(tracked,false); toast(error.message || 'อัปโหลดเอกสารไม่สำเร็จ',true); }
+  finally { button.disabled=false; button.textContent='อัปโหลดไฟล์'; }
+}
+
+window.deleteEmployeeDocument = async (documentId,employeeId) => {
+  if (!window.confirm('ลบรายการเอกสารนี้ออกจาก Nakna HR?\nไฟล์ต้นฉบับใน Google Drive จะไม่ถูกลบอัตโนมัติ')) return;
+  try { await api(`/api/employee-documents/${documentId}`,{method:'DELETE',body:'{}'}); await loadEmployeeDocuments(employeeId); await loadAll({silent:true}); toast('ลบรายการเอกสารแล้ว'); }
+  catch(error){ toast(error.message || 'ลบเอกสารไม่สำเร็จ',true); }
 };
 
 window.deleteEmployee = async id => {

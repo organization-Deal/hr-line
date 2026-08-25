@@ -1476,7 +1476,7 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
 
 /* P7.40 — Payroll-ready employee master table */
 .employee-master-table-card{position:relative;overflow:auto;overscroll-behavior-x:contain;scrollbar-gutter:stable}
-.employee-master-table{min-width:2450px;table-layout:auto}
+.employee-master-table{min-width:3300px;table-layout:auto}
 .employee-master-table th,.employee-master-table td{white-space:nowrap}
 .employee-master-table th{z-index:3}
 .employee-master-table .employee-sticky-name{position:sticky;left:0;z-index:4;min-width:280px;background:#fff;box-shadow:8px 0 18px rgba(18,60,74,.035)}
@@ -1491,7 +1491,7 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
 .employee-master-table-card::after{content:"เลื่อนแนวนอนเพื่อดูข้อมูล Payroll เพิ่มเติม →";position:sticky;left:14px;bottom:8px;display:block;width:max-content;margin:8px 12px 10px;padding:5px 8px;border-radius:999px;background:rgba(244,249,247,.94);color:var(--text-tertiary);font-size:8.5px;pointer-events:none}
 @media(max-width:680px){
   .employee-master-table-card{overflow:auto;border:1px solid var(--border);border-radius:15px;background:#fff}
-  .employee-master-table{min-width:2200px;border-collapse:separate;border-spacing:0}
+  .employee-master-table{min-width:3000px;border-collapse:separate;border-spacing:0}
   .employee-master-table thead{display:table-header-group}
   .employee-master-table tbody{display:table-row-group}
   .employee-master-table tr{display:table-row;width:auto;margin:0;border:0;border-radius:0}
@@ -1500,3 +1500,7 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
   .employee-master-table .employee-sticky-name{min-width:230px}
   .employee-master-table .employee-sticky-actions{min-width:220px}
 }
+
+
+.document-count-btn{border:1px solid rgba(18,125,127,.14);background:#F1F8F6;color:var(--brand);border-radius:999px;padding:6px 10px;font:inherit;font-weight:600;cursor:pointer;white-space:nowrap}.document-count-btn:hover{background:#E8F4F1}.document-count-btn span{font-variant-numeric:tabular-nums}.employee-documents-modal{width:min(920px,calc(100vw - 28px));max-width:none}.employee-documents-box{width:100%;max-width:none}.employee-doc-upload-grid{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:12px;padding:18px 0}.employee-doc-upload-grid label{display:flex;flex-direction:column;gap:7px;font-size:12px;color:var(--text-secondary)}.employee-doc-upload-grid input,.employee-doc-upload-grid select{height:44px;border:1px solid var(--border);border-radius:12px;background:#fff;padding:0 12px;font:inherit;color:var(--text-primary)}.employee-doc-file-field{grid-column:1/-1}.employee-doc-file-field input{height:auto;padding:10px}.employee-doc-upload-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:2px 0 18px;border-bottom:1px solid var(--border)}.employee-doc-upload-actions small{color:var(--text-tertiary)}.employee-documents-list{display:flex;flex-direction:column;gap:8px;padding-top:16px;max-height:430px;overflow:auto}.employee-document-row{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:#fff}.employee-document-icon{width:42px;height:42px;border-radius:12px;background:#EEF7F5;color:var(--brand);display:grid;place-items:center}.employee-document-icon svg{width:20px;height:20px}.employee-document-copy{min-width:0;display:flex;flex-direction:column;gap:3px}.employee-document-copy strong{font-size:13px}.employee-document-copy span,.employee-document-copy small{font-size:11px;color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.employee-document-actions{display:flex;gap:10px;align-items:center}.employee-doc-loading{padding:30px;text-align:center;color:var(--text-tertiary)}
+@media(max-width:700px){.employee-doc-upload-grid{grid-template-columns:1fr}.employee-doc-file-field{grid-column:auto}.employee-doc-upload-actions{align-items:stretch;flex-direction:column}.employee-document-row{grid-template-columns:38px minmax(0,1fr)}.employee-document-actions{grid-column:2;justify-content:flex-start}}
