@@ -1442,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.46', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.47', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1727,7 +1727,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.46', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.47', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -2200,6 +2200,51 @@ async function handleApi(request, env, url, auth, ctx) {
   if(hireCandidateMatch && method==='POST'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์รับพนักงาน'},403); const candidate=await env.DB.prepare('SELECT * FROM candidates WHERE id=?1 AND client_id=?2').bind(Number(hireCandidateMatch[1]),clientId).first(); if(!candidate)return json({error:'ไม่พบผู้สมัคร'},404); const body=await safeJson(request); const code=String(body.employee_code||'').trim() || await generateEmployeeCode(env.DB,clientId); const start=body.start_date||dateInBangkok();
     await assertSeatCapacity(env.DB,clientId,1); const result=await env.DB.prepare(`INSERT INTO employees(client_id,employee_code,first_name,last_name,nickname,email,phone,start_date,probation_end_date,department_id,position_id,employment_type,status,people_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'active','probation')`).bind(clientId,code,candidate.first_name,candidate.last_name,candidate.nickname,candidate.email,candidate.phone,start,body.probation_end_date||null,body.department_id||null,body.position_id||null,body.employment_type||'full_time').run(); await env.DB.prepare(`UPDATE candidates SET stage='hired',updated_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(candidate.id)).run(); await autoAssignLearningForEmployee(env.DB,clientId,Number(result.meta.last_row_id),Number(auth.user.id)); return json({ok:true,employee_id:result.meta.last_row_id},201);
+  }
+
+
+  if (path === '/api/team-work-log' && method === 'GET') {
+    const url = new URL(request.url);
+    const modeRaw = String(url.searchParams.get('mode') || 'today').trim();
+    const mode = ['today','day','week'].includes(modeRaw) ? modeRaw : 'today';
+    const today = dateInBangkok();
+    let anchor = String(url.searchParams.get('date') || today).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) anchor = today;
+    if (mode === 'today') anchor = today;
+    const [ay,am,ad] = anchor.split('-').map(Number);
+    let start = anchor, end = anchor;
+    if (mode === 'week') {
+      const dt = new Date(Date.UTC(ay,am-1,ad));
+      const jsDay = dt.getUTCDay();
+      const back = (jsDay + 6) % 7;
+      const monday = new Date(dt); monday.setUTCDate(dt.getUTCDate()-back);
+      const sunday = new Date(monday); sunday.setUTCDate(monday.getUTCDate()+6);
+      const key = d => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+      start = key(monday); end = key(sunday);
+    }
+    const employeeRes = await env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,e.position_id,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.id`).bind(clientId).all();
+    const attendanceRes = await env.DB.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 ORDER BY work_date,employee_id`).bind(clientId,start,end).all();
+    const leaveRes = await env.DB.prepare(`SELECT lr.*,lp.name AS leave_name FROM leave_requests lr LEFT JOIN leave_policies lp ON lp.id=lr.policy_id WHERE lr.client_id=?1 AND lr.start_date<=?3 AND lr.end_date>=?2 AND lr.status IN ('approved','pending','awaiting_evidence') ORDER BY lr.id DESC`).bind(clientId,start,end).all();
+    const attendanceMap = new Map((attendanceRes.results||[]).map(r=>[`${Number(r.employee_id)}|${r.work_date}`,r]));
+    const leaves = leaveRes.results||[];
+    const dates=[]; const cursor=new Date(`${start}T00:00:00Z`), endDt=new Date(`${end}T00:00:00Z`);
+    const dateKey=d=>`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+    while(cursor<=endDt){dates.push(dateKey(cursor));cursor.setUTCDate(cursor.getUTCDate()+1);}
+    const dayNames=['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
+    const rows=[];
+    for (const date of dates) {
+      const dateObj=new Date(`${date}T00:00:00Z`);
+      for (const e of (employeeRes.results||[])) {
+        const a=attendanceMap.get(`${Number(e.id)}|${date}`)||{};
+        const lr=leaves.find(x=>Number(x.employee_id)===Number(e.id)&&date>=x.start_date&&date<=x.end_date)||null;
+        const isFuture=date>today;
+        rows.push({...e,work_date:date,day_label:dayNames[dateObj.getUTCDay()],check_in_at:a.check_in_at||null,check_out_at:a.check_out_at||null,attendance_status:a.status||null,late_minutes:Number(a.late_minutes||0),leave_name:lr?.leave_name||lr?.leave_type||null,leave_status:lr?.status||null,approved_leave:lr?.status==='approved',is_future:isFuture});
+      }
+    }
+    const effectiveRows=rows.filter(r=>!r.is_future);
+    const summary={checked_in:effectiveRows.filter(r=>r.check_in_at).length,late:effectiveRows.filter(r=>r.check_in_at&&Number(r.late_minutes)>0).length,leave:effectiveRows.filter(r=>r.approved_leave&&!r.check_in_at).length,missing:effectiveRows.filter(r=>!r.check_in_at&&!r.approved_leave).length};
+    const thDate=d=>new Intl.DateTimeFormat('th-TH',{day:'numeric',month:'short',year:'numeric',timeZone:'Asia/Bangkok'}).format(new Date(`${d}T12:00:00+07:00`));
+    return json({mode,date:anchor,start_date:start,end_date:end,range_label:start===end?thDate(start):`${thDate(start)} – ${thDate(end)}`,summary,rows});
   }
 
   if (path === '/api/dashboard' && method === 'GET') {
@@ -4500,7 +4545,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.46',
+    version:'1.0-P7.47',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
