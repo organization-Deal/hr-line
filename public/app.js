@@ -15,6 +15,7 @@ const state = {
   candidates: [],
   attendance: [],
   leaves: [],
+  leaveMonthlyReport: null,
   requests: [],
   employeeService: null,
   hrCases: [],
@@ -516,6 +517,14 @@ function bindEvents() {
   $('#attendancePolicyToggle').onchange = saveAttendancePolicy;
   $('#peopleProfileSaveBtn').onclick = savePeopleProfile;
   $('#addLeaveBtn').onclick = openLeaveRequestModal;
+  if ($('#leaveReportMonth')) {
+    $('#leaveReportMonth').value = currentBangkokMonth();
+    $('#leaveReportMonth').onchange = () => loadLeaveMonthlyReport($('#leaveReportMonth').value);
+  }
+  if ($('#leaveReportStatus')) $('#leaveReportStatus').onchange = renderLeaveMonthlyReport;
+  if ($('#leaveReportPrevBtn')) $('#leaveReportPrevBtn').onclick = () => loadLeaveMonthlyReport(shiftMonthKey($('#leaveReportMonth').value,-1));
+  if ($('#leaveReportNextBtn')) $('#leaveReportNextBtn').onclick = () => loadLeaveMonthlyReport(shiftMonthKey($('#leaveReportMonth').value,1));
+  if ($('#leaveReportExportBtn')) $('#leaveReportExportBtn').onclick = exportLeaveMonthlyReportCsv;
   $('#addLeavePolicyBtn').onclick = () => openLeavePolicyModal();
   $('#leaveProfileSaveBtn').onclick = saveLeaveProfile;
   $('#leaveRequestSaveBtn').onclick = saveLeaveRequest;
@@ -1280,6 +1289,7 @@ function renderAll() {
   renderBenefits();
   renderAttendance();
   renderLeaves();
+  if ($('#leaveReportMonth') && !state.leaveMonthlyReport) loadLeaveMonthlyReport($('#leaveReportMonth').value || currentBangkokMonth());
   renderRequests();
   renderEmployeeService();
   renderInviteCenter();
@@ -1757,6 +1767,73 @@ function renderAttendance() {
         <td data-label="สถานะ">${attendanceStatus(attendance)}</td>
       </tr>`).join('')
     : `<tr><td colspan="5">${emptyState('ยังไม่มีข้อมูลเวลาเข้างานวันนี้', 'พนักงานทั้งหมดจะแสดงตรงนี้ และเมื่อเช็กอินผ่าน LINE จะเห็น Location ที่ใช้ด้วย')}</td></tr>`;
+}
+
+
+function currentBangkokMonth(){
+  return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit'}).format(new Date()).slice(0,7);
+}
+function shiftMonthKey(monthKey, delta){
+  const [y,m]=String(monthKey||currentBangkokMonth()).split('-').map(Number);
+  const d=new Date(Date.UTC(y,m-1+delta,1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
+}
+async function loadLeaveMonthlyReport(monthKey){
+  const month = monthKey || $('#leaveReportMonth')?.value || currentBangkokMonth();
+  if ($('#leaveReportMonth')) $('#leaveReportMonth').value = month;
+  try{
+    const result=await api(`/api/leave-report?month=${encodeURIComponent(month)}`);
+    state.leaveMonthlyReport=result||{month,summary:{},by_type:[],top_people:[],rows:[]};
+    renderLeaveMonthlyReport();
+  }catch(error){
+    const body=$('#leaveReportBody');
+    if(body) body.innerHTML=`<tr><td colspan="9"><div class="leave-report-empty">${escapeHtml(error.message||'โหลดรายงานการลาไม่สำเร็จ')}</div></td></tr>`;
+  }
+}
+function renderLeaveMonthlyReport(){
+  const report=state.leaveMonthlyReport||{};
+  const summary=report.summary||{};
+  const status=$('#leaveReportStatus')?.value||'all';
+  const rows=(report.rows||[]).filter(r=>status==='all'||String(r.status)===status);
+  if($('#leaveReportRangeLabel')) $('#leaveReportRangeLabel').textContent=report.range_label||report.month||'—';
+  if($('#leaveReportSummary')) $('#leaveReportSummary').innerHTML=`
+    <article><small>พนักงานที่ลา</small><strong>${Number(summary.employees_with_leave||0).toLocaleString('th-TH')}</strong><span>คน</span></article>
+    <article><small>คำขอลา</small><strong>${Number(summary.requests||0).toLocaleString('th-TH')}</strong><span>รายการ</span></article>
+    <article><small>วันลาอนุมัติ</small><strong>${Number(summary.approved_days||0).toLocaleString('th-TH',{maximumFractionDigits:1})}</strong><span>วัน</span></article>
+    <article><small>รออนุมัติ</small><strong>${Number(summary.pending_requests||0).toLocaleString('th-TH')}</strong><span>รายการ</span></article>`;
+  const maxType=Math.max(1,...(report.by_type||[]).map(x=>Number(x.days||0)));
+  if($('#leaveReportByType')) $('#leaveReportByType').innerHTML=(report.by_type||[]).length
+    ? report.by_type.map(x=>`<div class="leave-type-bar"><label>${escapeHtml(x.name||'ไม่ระบุ')}</label><div class="leave-type-track"><div class="leave-type-fill" style="width:${Math.max(3,Math.round(Number(x.days||0)/maxType*100))}%"></div></div><b>${Number(x.days||0).toLocaleString('th-TH',{maximumFractionDigits:1})} วัน · ${Number(x.requests||0)} ครั้ง</b></div>`).join('')
+    : '<div class="leave-report-empty">เดือนนี้ยังไม่มีการลา</div>';
+  if($('#leaveReportTopPeople')) $('#leaveReportTopPeople').innerHTML=(report.top_people||[]).length
+    ? report.top_people.map((x,i)=>`<div class="leave-top-row"><div class="person-mini"><span class="avatar-mini">${escapeHtml((x.nickname||x.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml(x.nickname||x.first_name||'—')} ${escapeHtml(x.last_name||'')}</strong><small>${escapeHtml(x.department_name||'ยังไม่ระบุแผนก')}</small></div></div><b>${Number(x.days||0).toLocaleString('th-TH',{maximumFractionDigits:1})} วัน</b></div>`).join('')
+    : '<div class="leave-report-empty">ยังไม่มีวันลาที่อนุมัติ</div>';
+  if($('#leaveReportBody')) $('#leaveReportBody').innerHTML=rows.length?rows.map(r=>`
+    <tr>
+      <td><strong>${escapeHtml(r.nickname||r.first_name||'—')} ${escapeHtml(r.last_name||'')}</strong><small>${escapeHtml(r.employee_code||'')}</small></td>
+      <td><strong>${escapeHtml(r.department_name||'—')}</strong><small>${escapeHtml(r.position_name||'ยังไม่ระบุตำแหน่ง')}</small></td>
+      <td><strong>${escapeHtml(r.leave_type_name||r.leave_type||'—')}</strong><small>#LV-${String(r.id).padStart(4,'0')}</small></td>
+      <td><strong>${formatDate(r.start_date)}${r.start_date!==r.end_date?` – ${formatDate(r.end_date)}`:''}</strong><small>${escapeHtml(r.day_part==='am'?'ครึ่งวันเช้า':r.day_part==='pm'?'ครึ่งวันบ่าย':'เต็มวัน')}</small></td>
+      <td><strong>${Number(r.duration_days||0).toLocaleString('th-TH',{maximumFractionDigits:1})} วัน</strong></td>
+      <td><span>${escapeHtml(r.reason||'—')}</span></td>
+      <td>${statusBadge(r.status)}</td>
+      <td><strong>${escapeHtml(r.approver_nickname||r.approver_first_name||'HR / Owner')}</strong><small>${r.decision_reason?escapeHtml(r.decision_reason):''}</small></td>
+      <td><strong>${formatDate(r.created_at)}</strong><small>${r.approved_at?`อนุมัติ ${formatDate(r.approved_at)}`:''}</small></td>
+    </tr>`).join(''):`<tr><td colspan="9"><div class="leave-report-empty">ไม่มีรายการตามตัวกรองนี้</div></td></tr>`;
+}
+function exportLeaveMonthlyReportCsv(){
+  const report=state.leaveMonthlyReport||{};
+  const status=$('#leaveReportStatus')?.value||'all';
+  const rows=(report.rows||[]).filter(r=>status==='all'||String(r.status)===status);
+  if(!rows.length) return toast('ไม่มีข้อมูลสำหรับ Export',true);
+  const headers=['รหัสพนักงาน','ชื่อ','แผนก','ตำแหน่ง','ประเภทลา','วันเริ่ม','วันสิ้นสุด','จำนวนวัน','เหตุผล','สถานะ','ผู้อนุมัติ','วันที่ส่ง','วันที่อนุมัติ'];
+  const csv=[headers,...rows.map(r=>[
+    r.employee_code||'',`${r.nickname||r.first_name||''} ${r.last_name||''}`.trim(),r.department_name||'',r.position_name||'',r.leave_type_name||r.leave_type||'',
+    r.start_date||'',r.end_date||'',r.duration_days||0,r.reason||'',r.status||'',r.approver_nickname||r.approver_first_name||'HR / Owner',r.created_at||'',r.approved_at||''
+  ])].map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a');
+  a.href=url;a.download=`nakna-leave-${report.month||currentBangkokMonth()}.csv`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
 }
 
 function renderLeaves() {

@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.45" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.46" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -228,7 +228,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.45</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.46</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -408,6 +408,66 @@
             <div id="leaveCalendar" class="leave-calendar"></div>
           </article>
         </div>
+
+        <article class="panel leave-monthly-report-panel">
+          <div class="panel-head leave-report-head">
+            <div>
+              <p class="kicker">MONTHLY LEAVE LOG</p>
+              <h3>สรุปการลารายเดือน</h3>
+              <p class="panel-subtitle">ดูย้อนหลังว่าในรอบเดือนใครลาอะไร กี่วัน อนุมัติหรือไม่ และใช้ประกอบ Payroll ได้</p>
+            </div>
+            <div class="leave-report-controls">
+              <button id="leaveReportPrevBtn" class="icon-btn" type="button" aria-label="เดือนก่อน">‹</button>
+              <input id="leaveReportMonth" type="month" />
+              <button id="leaveReportNextBtn" class="icon-btn" type="button" aria-label="เดือนถัดไป">›</button>
+              <select id="leaveReportStatus">
+                <option value="all">ทุกสถานะ</option>
+                <option value="approved">อนุมัติแล้ว</option>
+                <option value="pending">รออนุมัติ</option>
+                <option value="awaiting_evidence">รอหลักฐาน</option>
+                <option value="rejected">ไม่อนุมัติ</option>
+              </select>
+              <button id="leaveReportExportBtn" class="secondary-btn" type="button">Export CSV</button>
+            </div>
+          </div>
+
+          <div id="leaveReportSummary" class="leave-report-summary">
+            <article><small>พนักงานที่ลา</small><strong>0</strong><span>คน</span></article>
+            <article><small>คำขอลา</small><strong>0</strong><span>รายการ</span></article>
+            <article><small>วันลาอนุมัติ</small><strong>0</strong><span>วัน</span></article>
+            <article><small>รออนุมัติ</small><strong>0</strong><span>รายการ</span></article>
+          </div>
+
+          <div class="leave-report-grid">
+            <div class="leave-report-chart-card">
+              <div class="mini-section-head"><strong>แยกตามประเภทลา</strong><small id="leaveReportRangeLabel">—</small></div>
+              <div id="leaveReportByType" class="leave-type-bars"></div>
+            </div>
+            <div class="leave-report-chart-card">
+              <div class="mini-section-head"><strong>พนักงานที่ใช้วันลาสูงสุด</strong><small>Approved</small></div>
+              <div id="leaveReportTopPeople" class="leave-top-people"></div>
+            </div>
+          </div>
+
+          <div class="leave-report-table-wrap">
+            <table class="leave-report-table">
+              <thead>
+                <tr>
+                  <th>พนักงาน</th>
+                  <th>แผนก / ตำแหน่ง</th>
+                  <th>ประเภทลา</th>
+                  <th>ช่วงวันที่</th>
+                  <th>จำนวน</th>
+                  <th>เหตุผล</th>
+                  <th>สถานะ</th>
+                  <th>ผู้อนุมัติ</th>
+                  <th>วันที่ส่ง</th>
+                </tr>
+              </thead>
+              <tbody id="leaveReportBody"></tbody>
+            </table>
+          </div>
+        </article>
       </section>
 
       <section id="view-hr-inbox" class="view">
@@ -1115,7 +1175,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.45" type="module"></script>
+  <script src="/app.js?v=1.0-p7.46" type="module"></script>
 
   <dialog id="positionAssignModal" class="modal position-assign-modal">
     <div class="modal-head">
