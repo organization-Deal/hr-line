@@ -1566,3 +1566,16 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
 .worklog-time{font-variant-numeric:tabular-nums;color:var(--ink,#173f48);font-weight:600}.worklog-late{color:#b47719}.worklog-leave{display:inline-flex;align-items:center;border-radius:99px;padding:5px 8px;background:#edf7f5;color:var(--brand,#168b8d);font-size:11px}.worklog-status{display:inline-flex;align-items:center;border-radius:99px;padding:5px 8px;font-size:11px;background:#f1f4f3;color:#73817f}.worklog-status.ok{background:#eaf7ef;color:#27835a}.worklog-status.warn{background:#fff5e4;color:#a96d10}.worklog-status.leave{background:#edf5ff;color:#4276c9}.worklog-status.danger{background:#fff0ee;color:#c5574d}.worklog-status.future{background:#f3f5f4;color:#8a9694}
 @media(max-width:900px){.team-worklog-head{display:block}.team-worklog-controls{justify-content:flex-start;margin-top:14px}.team-worklog-summary{grid-template-columns:1fr 1fr}.team-worklog-summary>div:nth-child(2){border-right:0}.team-worklog-summary>div:nth-child(-n+2){border-bottom:1px solid var(--line,#dfe8e5)}}
 @media(max-width:520px){.team-worklog-controls{display:grid;grid-template-columns:auto 1fr auto;gap:7px}.team-worklog-controls .segmented-control{grid-column:1/-1;width:100%}.team-worklog-controls .segmented-control button{flex:1}.team-worklog-controls input[type=date]{width:100%;min-width:0}.team-worklog-summary strong{font-size:22px}}
+
+
+/* P7.48 · Team Work Log month + custom range */
+.team-worklog-date-controls{display:flex;align-items:center;gap:8px}
+.team-worklog-controls input[type=month],.team-worklog-custom-range input[type=date]{height:40px;border:1px solid var(--line,#dfe8e5);border-radius:12px;background:#fff;padding:0 12px;color:var(--ink,#173f48);font:inherit}
+.team-worklog-month{min-width:150px}
+.team-worklog-custom-range{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+.team-worklog-custom-range[hidden],.team-worklog-month[hidden],.team-worklog-date-controls[hidden]{display:none!important}
+.team-worklog-custom-range label{display:grid;gap:4px}
+.team-worklog-custom-range label span{font-size:10px;color:var(--muted,#879593);padding-left:3px}
+.team-worklog-custom-range .range-separator{height:40px;display:grid;place-items:center;color:var(--muted,#879593)}
+.compact-btn{height:40px;padding:0 14px;border-radius:12px}
+@media(max-width:760px){.team-worklog-custom-range{width:100%;display:grid;grid-template-columns:1fr auto 1fr}.team-worklog-custom-range .compact-btn{grid-column:1/-1;width:100%}.team-worklog-month{width:100%}}

@@ -334,9 +334,12 @@ function bindEvents() {
     if (await ensureWorkspaceReady()) await loadAll();
   };
   $$('[data-worklog-mode]').forEach(btn=>btn.onclick=()=>setTeamWorkLogMode(btn.dataset.worklogMode));
-  if ($('#teamWorkLogDate')) $('#teamWorkLogDate').onchange=()=>{ if(teamWorkLogMode()==='today') state.teamWorkLogMode='day'; $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode)); loadTeamWorkLog(); };
-  if ($('#teamWorkLogPrevBtn')) $('#teamWorkLogPrevBtn').onclick=()=>{const step=teamWorkLogMode()==='week'?-7:-1; $('#teamWorkLogDate').value=shiftDateKey($('#teamWorkLogDate').value||currentBangkokDateKey(),step); if(teamWorkLogMode()==='today') state.teamWorkLogMode='day'; $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode)); loadTeamWorkLog();};
-  if ($('#teamWorkLogNextBtn')) $('#teamWorkLogNextBtn').onclick=()=>{const step=teamWorkLogMode()==='week'?7:1; $('#teamWorkLogDate').value=shiftDateKey($('#teamWorkLogDate').value||currentBangkokDateKey(),step); if(teamWorkLogMode()==='today') state.teamWorkLogMode='day'; $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode)); loadTeamWorkLog();};
+  if ($('#teamWorkLogDate')) $('#teamWorkLogDate').onchange=()=>{ if(teamWorkLogMode()==='today') state.teamWorkLogMode='day'; syncTeamWorkLogControls(); $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode)); loadTeamWorkLog(); };
+  if ($('#teamWorkLogPrevBtn')) $('#teamWorkLogPrevBtn').onclick=()=>{const step=teamWorkLogMode()==='week'?-7:-1; $('#teamWorkLogDate').value=shiftDateKey($('#teamWorkLogDate').value||currentBangkokDateKey(),step); if(teamWorkLogMode()==='today') state.teamWorkLogMode='day'; syncTeamWorkLogControls(); $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode)); loadTeamWorkLog();};
+  if ($('#teamWorkLogNextBtn')) $('#teamWorkLogNextBtn').onclick=()=>{const step=teamWorkLogMode()==='week'?7:1; $('#teamWorkLogDate').value=shiftDateKey($('#teamWorkLogDate').value||currentBangkokDateKey(),step); if(teamWorkLogMode()==='today') state.teamWorkLogMode='day'; syncTeamWorkLogControls(); $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode)); loadTeamWorkLog();};
+  if ($('#teamWorkLogMonth')) $('#teamWorkLogMonth').onchange=()=>loadTeamWorkLog();
+  if ($('#teamWorkLogApplyRangeBtn')) $('#teamWorkLogApplyRangeBtn').onclick=()=>loadTeamWorkLog();
+  if ($('#teamWorkLogStartDate')) $('#teamWorkLogStartDate').onchange=()=>{if($('#teamWorkLogEndDate')&&$('#teamWorkLogEndDate').value<$('#teamWorkLogStartDate').value) $('#teamWorkLogEndDate').value=$('#teamWorkLogStartDate').value;};
   $('#logoutBtn').onclick = logout;
   $('#onboardingLogoutBtn').onclick = logout;
   $('#createCompanyBtn').onclick = createCompany;
@@ -1325,19 +1328,50 @@ function shiftDateKey(dateKey,delta){
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-${String(dt.getUTCDate()).padStart(2,'0')}`;
 }
 function teamWorkLogMode(){return state.teamWorkLogMode||'today';}
+function currentBangkokMonthKey(){return currentBangkokDateKey().slice(0,7);}
+function monthBounds(monthKey){
+  const [y,m]=String(monthKey||currentBangkokMonthKey()).split('-').map(Number);
+  const last=new Date(Date.UTC(y,m,0));
+  return {start:`${y}-${String(m).padStart(2,'0')}-01`,end:`${y}-${String(m).padStart(2,'0')}-${String(last.getUTCDate()).padStart(2,'0')}`};
+}
+function syncTeamWorkLogControls(){
+  const mode=teamWorkLogMode();
+  const single=$('#teamWorkLogSingleDateControls'), month=$('#teamWorkLogMonth'), range=$('#teamWorkLogRangeControls');
+  if(single) single.hidden=mode==='month'||mode==='range';
+  if(month) month.hidden=mode!=='month';
+  if(range) range.hidden=mode!=='range';
+  if(mode==='month'&&month&&!month.value) month.value=currentBangkokMonthKey();
+  if(mode==='range'){
+    const today=currentBangkokDateKey();
+    if($('#teamWorkLogStartDate')&&!$('#teamWorkLogStartDate').value) $('#teamWorkLogStartDate').value=shiftDateKey(today,-29);
+    if($('#teamWorkLogEndDate')&&!$('#teamWorkLogEndDate').value) $('#teamWorkLogEndDate').value=today;
+  }
+}
 function setTeamWorkLogMode(mode){
-  state.teamWorkLogMode=['today','day','week'].includes(mode)?mode:'today';
+  state.teamWorkLogMode=['today','day','week','month','range'].includes(mode)?mode:'today';
   $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode));
   if(state.teamWorkLogMode==='today' && $('#teamWorkLogDate')) $('#teamWorkLogDate').value=currentBangkokDateKey();
+  syncTeamWorkLogControls();
   loadTeamWorkLog();
 }
 async function loadTeamWorkLog(){
   const mode=teamWorkLogMode();
-  const date=mode==='today'?currentBangkokDateKey():($('#teamWorkLogDate')?.value||currentBangkokDateKey());
-  if($('#teamWorkLogDate')) $('#teamWorkLogDate').value=date;
+  let params=new URLSearchParams({mode});
+  if(mode==='month'){
+    const month=$('#teamWorkLogMonth')?.value||currentBangkokMonthKey(); if($('#teamWorkLogMonth')) $('#teamWorkLogMonth').value=month; params.set('month',month);
+  }else if(mode==='range'){
+    const start=$('#teamWorkLogStartDate')?.value||shiftDateKey(currentBangkokDateKey(),-29);
+    const end=$('#teamWorkLogEndDate')?.value||currentBangkokDateKey();
+    if(start>end){toast('วันที่เริ่มต้องไม่มากกว่าวันสิ้นสุด',true);return;}
+    params.set('start',start);params.set('end',end);
+  }else{
+    const date=mode==='today'?currentBangkokDateKey():($('#teamWorkLogDate')?.value||currentBangkokDateKey());
+    if($('#teamWorkLogDate')) $('#teamWorkLogDate').value=date; params.set('date',date);
+  }
+  syncTeamWorkLogControls();
   const body=$('#teamWorkLogBody'); if(body) body.innerHTML=`<tr><td colspan="7"><div class="leave-report-empty">กำลังโหลดเวลาเข้างานของทีม…</div></td></tr>`;
   try{
-    state.teamWorkLog=await api(`/api/team-work-log?mode=${encodeURIComponent(mode)}&date=${encodeURIComponent(date)}`,{timeoutMs:12000});
+    state.teamWorkLog=await api(`/api/team-work-log?${params.toString()}`,{timeoutMs:15000});
     renderTeamWorkLog();
   }catch(e){if(body) body.innerHTML=`<tr><td colspan="7"><div class="leave-report-empty">${escapeHtml(e.message||'โหลดข้อมูลไม่สำเร็จ')}</div></td></tr>`;}
 }
