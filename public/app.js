@@ -1,3 +1,18 @@
+
+function dedupeBroadcastSidebar(){
+  const sidebar = document.querySelector('.sidebar, aside, #sidebar');
+  if(!sidebar) return;
+  const candidates = [...sidebar.querySelectorAll('button, a')].filter(el => {
+    const label = (el.textContent || '').replace(/\s+/g,'').trim();
+    return el.id === 'broadcastNav' || el.dataset?.view === 'broadcast' || label === 'ประกาศ';
+  });
+  if(candidates.length <= 1) return;
+  const keep = candidates.find(el => el.id === 'broadcastNav') || candidates[0];
+  candidates.forEach(el => { if(el !== keep) el.remove(); });
+}
+dedupeBroadcastSidebar();
+new MutationObserver(() => dedupeBroadcastSidebar()).observe(document.body, {childList:true, subtree:true});
+
 const state = {
   me: null,
   onboardingConfig: null,
