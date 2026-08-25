@@ -1545,3 +1545,24 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
   .leave-report-controls input[type="month"]{flex:1;min-width:130px}
   .leave-report-controls select{width:100%}
 }
+
+
+/* P7.47 · Dashboard Team Work Log */
+.team-worklog-panel{margin:16px 0 18px;overflow:hidden}
+.team-worklog-head{align-items:flex-start;gap:20px}
+.team-worklog-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.segmented-control{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--line,#dfe8e5);background:#f6faf9;border-radius:13px}
+.segmented-control button{height:34px;border:0;background:transparent;border-radius:10px;padding:0 13px;color:var(--muted,#70817f);font:inherit;font-size:12px;cursor:pointer}
+.segmented-control button.active{background:#fff;color:var(--brand,#168b8d);box-shadow:0 1px 4px rgba(20,62,70,.08);font-weight:600}
+.team-worklog-controls input[type=date]{height:40px;border:1px solid var(--line,#dfe8e5);border-radius:12px;background:#fff;padding:0 12px;color:var(--ink,#173f48);font:inherit}
+.team-worklog-controls .icon-btn{width:40px;height:40px;border:1px solid var(--line,#dfe8e5);border-radius:12px;background:#fff;font-size:24px;line-height:1;color:var(--brand,#168b8d);cursor:pointer}
+.team-worklog-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line,#dfe8e5);border-radius:16px;overflow:hidden;margin:16px 0 12px;background:#fff}
+.team-worklog-summary>div{padding:14px 16px;border-right:1px solid var(--line,#dfe8e5)}.team-worklog-summary>div:last-child{border-right:0}
+.team-worklog-summary span{display:block;color:var(--muted,#879593);font-size:11px}.team-worklog-summary strong{display:inline-block;margin-top:5px;color:var(--ink,#173f48);font-size:25px;line-height:1}.team-worklog-summary small{margin-left:4px;color:var(--muted,#879593);font-size:11px}
+.team-worklog-range{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:10px 2px;color:var(--ink,#173f48);font-size:12px}.team-worklog-range span{color:var(--muted,#879593)}
+.team-worklog-table-wrap{overflow:auto;border:1px solid var(--line,#dfe8e5);border-radius:16px;background:#fff;max-height:460px}
+.team-worklog-table{width:100%;min-width:1060px;border-collapse:collapse}.team-worklog-table th,.team-worklog-table td{padding:11px 13px;border-bottom:1px solid #edf2f0;text-align:left;vertical-align:middle;font-size:12px}.team-worklog-table th{position:sticky;top:0;z-index:2;background:#f9fcfb;color:#879593;font-weight:500}.team-worklog-table tr:last-child td{border-bottom:0}
+.team-worklog-person{display:flex;align-items:center;gap:9px}.team-worklog-avatar{width:30px;height:30px;border-radius:9px;background:#eaf5f2;color:var(--brand,#168b8d);display:grid;place-items:center;font-weight:700;flex:0 0 auto}.team-worklog-person strong{display:block;color:var(--ink,#173f48);font-size:12px}.team-worklog-person small,.team-worklog-cell small{display:block;color:var(--muted,#879593);margin-top:2px}
+.worklog-time{font-variant-numeric:tabular-nums;color:var(--ink,#173f48);font-weight:600}.worklog-late{color:#b47719}.worklog-leave{display:inline-flex;align-items:center;border-radius:99px;padding:5px 8px;background:#edf7f5;color:var(--brand,#168b8d);font-size:11px}.worklog-status{display:inline-flex;align-items:center;border-radius:99px;padding:5px 8px;font-size:11px;background:#f1f4f3;color:#73817f}.worklog-status.ok{background:#eaf7ef;color:#27835a}.worklog-status.warn{background:#fff5e4;color:#a96d10}.worklog-status.leave{background:#edf5ff;color:#4276c9}.worklog-status.danger{background:#fff0ee;color:#c5574d}.worklog-status.future{background:#f3f5f4;color:#8a9694}
+@media(max-width:900px){.team-worklog-head{display:block}.team-worklog-controls{justify-content:flex-start;margin-top:14px}.team-worklog-summary{grid-template-columns:1fr 1fr}.team-worklog-summary>div:nth-child(2){border-right:0}.team-worklog-summary>div:nth-child(-n+2){border-bottom:1px solid var(--line,#dfe8e5)}}
+@media(max-width:520px){.team-worklog-controls{display:grid;grid-template-columns:auto 1fr auto;gap:7px}.team-worklog-controls .segmented-control{grid-column:1/-1;width:100%}.team-worklog-controls .segmented-control button{flex:1}.team-worklog-controls input[type=date]{width:100%;min-width:0}.team-worklog-summary strong{font-size:22px}}
