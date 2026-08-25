@@ -1442,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.47', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.48', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1727,7 +1727,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.47', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.48', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -2206,21 +2206,37 @@ async function handleApi(request, env, url, auth, ctx) {
   if (path === '/api/team-work-log' && method === 'GET') {
     const url = new URL(request.url);
     const modeRaw = String(url.searchParams.get('mode') || 'today').trim();
-    const mode = ['today','day','week'].includes(modeRaw) ? modeRaw : 'today';
+    const mode = ['today','day','week','month','range'].includes(modeRaw) ? modeRaw : 'today';
     const today = dateInBangkok();
+    const datePattern=/^\d{4}-\d{2}-\d{2}$/;
+    const key = d => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
     let anchor = String(url.searchParams.get('date') || today).trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) anchor = today;
+    if (!datePattern.test(anchor)) anchor = today;
     if (mode === 'today') anchor = today;
-    const [ay,am,ad] = anchor.split('-').map(Number);
     let start = anchor, end = anchor;
+    const [ay,am,ad] = anchor.split('-').map(Number);
     if (mode === 'week') {
       const dt = new Date(Date.UTC(ay,am-1,ad));
       const jsDay = dt.getUTCDay();
       const back = (jsDay + 6) % 7;
       const monday = new Date(dt); monday.setUTCDate(dt.getUTCDate()-back);
       const sunday = new Date(monday); sunday.setUTCDate(monday.getUTCDate()+6);
-      const key = d => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
       start = key(monday); end = key(sunday);
+    } else if (mode === 'month') {
+      let month = String(url.searchParams.get('month') || today.slice(0,7)).trim();
+      if (!/^\d{4}-\d{2}$/.test(month)) month=today.slice(0,7);
+      const [my,mm]=month.split('-').map(Number);
+      if(mm<1||mm>12)return json({error:'เดือนไม่ถูกต้อง'},400);
+      start=`${my}-${String(mm).padStart(2,'0')}-01`;
+      const last=new Date(Date.UTC(my,mm,0)); end=key(last); anchor=start;
+    } else if (mode === 'range') {
+      start=String(url.searchParams.get('start')||'').trim(); end=String(url.searchParams.get('end')||'').trim();
+      if(!datePattern.test(start)||!datePattern.test(end))return json({error:'กรุณาระบุช่วงวันที่ให้ครบ'},400);
+      if(start>end)return json({error:'วันที่เริ่มต้องไม่มากกว่าวันสิ้นสุด'},400);
+      const startDt=new Date(`${start}T00:00:00Z`), endDtCheck=new Date(`${end}T00:00:00Z`);
+      const days=Math.floor((endDtCheck-startDt)/86400000)+1;
+      if(days>366)return json({error:'เลือกช่วงวันที่ได้สูงสุด 366 วัน'},400);
+      anchor=start;
     }
     const employeeRes = await env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,e.position_id,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.id`).bind(clientId).all();
     const attendanceRes = await env.DB.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 ORDER BY work_date,employee_id`).bind(clientId,start,end).all();
@@ -4545,7 +4561,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.47',
+    version:'1.0-P7.48',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
