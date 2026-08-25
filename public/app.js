@@ -11,6 +11,8 @@ const state = {
   googleWorkspace: null,
   lineIntegration: null,
   dashboard: null,
+  teamWorkLog: null,
+  teamWorkLogMode: 'today',
   employees: [],
   candidates: [],
   attendance: [],
@@ -331,6 +333,10 @@ function bindEvents() {
   $('#retryDataLoadBtn').onclick = async () => {
     if (await ensureWorkspaceReady()) await loadAll();
   };
+  $$('[data-worklog-mode]').forEach(btn=>btn.onclick=()=>setTeamWorkLogMode(btn.dataset.worklogMode));
+  if ($('#teamWorkLogDate')) $('#teamWorkLogDate').onchange=()=>{ if(teamWorkLogMode()==='today') state.teamWorkLogMode='day'; $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode)); loadTeamWorkLog(); };
+  if ($('#teamWorkLogPrevBtn')) $('#teamWorkLogPrevBtn').onclick=()=>{const step=teamWorkLogMode()==='week'?-7:-1; $('#teamWorkLogDate').value=shiftDateKey($('#teamWorkLogDate').value||currentBangkokDateKey(),step); if(teamWorkLogMode()==='today') state.teamWorkLogMode='day'; $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode)); loadTeamWorkLog();};
+  if ($('#teamWorkLogNextBtn')) $('#teamWorkLogNextBtn').onclick=()=>{const step=teamWorkLogMode()==='week'?7:1; $('#teamWorkLogDate').value=shiftDateKey($('#teamWorkLogDate').value||currentBangkokDateKey(),step); if(teamWorkLogMode()==='today') state.teamWorkLogMode='day'; $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode)); loadTeamWorkLog();};
   $('#logoutBtn').onclick = logout;
   $('#onboardingLogoutBtn').onclick = logout;
   $('#createCompanyBtn').onclick = createCompany;
@@ -1279,6 +1285,7 @@ function renderLoadingState() {
   $('#birthdayList').innerHTML = Array.from({ length: 3 }, () => '<div class="loading-row skeleton"></div>').join('');
   $('#recruitmentPipeline').innerHTML = Array.from({ length: 6 }, () => '<div class="pipe-item"><div class="skeleton" style="height:25px;width:35px"></div><div class="skeleton" style="height:8px;width:60px;margin-top:7px"></div></div>').join('');
   $('#upcomingList').innerHTML = Array.from({ length: 3 }, () => '<div class="loading-row skeleton"></div>').join('');
+  if ($('#teamWorkLogBody')) $('#teamWorkLogBody').innerHTML = Array.from({length:4},()=>'<tr><td colspan="7"><div class="loading-row skeleton"></div></td></tr>').join('');
 }
 
 function renderAll() {
@@ -1308,8 +1315,64 @@ function renderAll() {
   $('#sidebarCompany').textContent = state.dashboard.client?.name || 'บริษัทของคุณ';
 }
 
+
+function currentBangkokDateKey(){
+  return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+}
+function shiftDateKey(dateKey,delta){
+  const [y,m,d]=String(dateKey||currentBangkokDateKey()).split('-').map(Number);
+  const dt=new Date(Date.UTC(y,m-1,d+delta));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-${String(dt.getUTCDate()).padStart(2,'0')}`;
+}
+function teamWorkLogMode(){return state.teamWorkLogMode||'today';}
+function setTeamWorkLogMode(mode){
+  state.teamWorkLogMode=['today','day','week'].includes(mode)?mode:'today';
+  $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode));
+  if(state.teamWorkLogMode==='today' && $('#teamWorkLogDate')) $('#teamWorkLogDate').value=currentBangkokDateKey();
+  loadTeamWorkLog();
+}
+async function loadTeamWorkLog(){
+  const mode=teamWorkLogMode();
+  const date=mode==='today'?currentBangkokDateKey():($('#teamWorkLogDate')?.value||currentBangkokDateKey());
+  if($('#teamWorkLogDate')) $('#teamWorkLogDate').value=date;
+  const body=$('#teamWorkLogBody'); if(body) body.innerHTML=`<tr><td colspan="7"><div class="leave-report-empty">กำลังโหลดเวลาเข้างานของทีม…</div></td></tr>`;
+  try{
+    state.teamWorkLog=await api(`/api/team-work-log?mode=${encodeURIComponent(mode)}&date=${encodeURIComponent(date)}`,{timeoutMs:12000});
+    renderTeamWorkLog();
+  }catch(e){if(body) body.innerHTML=`<tr><td colspan="7"><div class="leave-report-empty">${escapeHtml(e.message||'โหลดข้อมูลไม่สำเร็จ')}</div></td></tr>`;}
+}
+function workLogStatus(row){
+  if(row.is_future) return '<span class="worklog-status future">ยังไม่ถึงวัน</span>';
+  if(row.approved_leave && !row.check_in_at) return '<span class="worklog-status leave">ลา</span>';
+  if(row.check_in_at && Number(row.late_minutes||0)>0) return `<span class="worklog-status warn">สาย ${Number(row.late_minutes)} นาที</span>`;
+  if(row.check_in_at) return '<span class="worklog-status ok">มาทำงาน</span>';
+  return '<span class="worklog-status danger">ยังไม่เช็กอิน</span>';
+}
+function renderTeamWorkLog(){
+  const report=state.teamWorkLog||{}; const s=report.summary||{}; const rows=report.rows||[];
+  if($('#teamWorkLogRangeLabel')) $('#teamWorkLogRangeLabel').textContent=report.range_label||'—';
+  if($('#teamWorkLogRowCount')) $('#teamWorkLogRowCount').textContent=`${rows.length.toLocaleString('th-TH')} รายการ`;
+  if($('#teamWorkLogSummary')) $('#teamWorkLogSummary').innerHTML=`
+    <div><span>เช็กอินแล้ว</span><strong>${Number(s.checked_in||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
+    <div><span>มาสาย</span><strong>${Number(s.late||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
+    <div><span>ลา</span><strong>${Number(s.leave||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
+    <div><span>ยังไม่เช็กอิน</span><strong>${Number(s.missing||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>`;
+  const body=$('#teamWorkLogBody'); if(!body)return;
+  body.innerHTML=rows.length?rows.map(r=>`
+    <tr>
+      <td class="team-worklog-cell"><strong>${formatDate(r.work_date)}</strong><small>${escapeHtml(r.day_label||'')}</small></td>
+      <td><div class="team-worklog-person"><span class="team-worklog-avatar">${escapeHtml((r.nickname||r.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml(r.nickname||r.first_name||'—')} ${escapeHtml(r.last_name||'')}</strong><small>${escapeHtml(r.employee_code||'')}</small></div></div></td>
+      <td class="team-worklog-cell"><strong>${escapeHtml(r.department_name||'—')}</strong><small>${escapeHtml(r.position_name||'ยังไม่ระบุตำแหน่ง')}</small></td>
+      <td>${r.check_in_at?`<span class="worklog-time ${Number(r.late_minutes||0)>0?'worklog-late':''}">${time(r.check_in_at)}</span>${Number(r.late_minutes||0)>0?`<small>สาย ${Number(r.late_minutes)} นาที</small>`:''}`:'—'}</td>
+      <td>${r.check_out_at?`<span class="worklog-time">${time(r.check_out_at)}</span>`:'—'}</td>
+      <td>${r.leave_name?`<span class="worklog-leave">${escapeHtml(r.leave_name)}</span>${r.leave_status&&r.leave_status!=='approved'?`<small>${escapeHtml(({pending:'รออนุมัติ',awaiting_evidence:'รอหลักฐาน',rejected:'ไม่อนุมัติ'})[r.leave_status]||r.leave_status)}</small>`:''}`:'—'}</td>
+      <td>${workLogStatus(r)}</td>
+    </tr>`).join(''):`<tr><td colspan="7"><div class="leave-report-empty">ยังไม่มีข้อมูลในช่วงเวลานี้</div></td></tr>`;
+}
+
 function renderDashboard() {
   const d = state.dashboard;
+  if (!state.teamWorkLog && $('#teamWorkLogBody')) setTimeout(()=>loadTeamWorkLog(),0);
   const total = d.attention.reduce((sum, item) => sum + item.count, 0);
 
   $('#attentionTotal').textContent = total;
