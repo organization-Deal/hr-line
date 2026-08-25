@@ -1442,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.40', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.41', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -2207,8 +2207,11 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/employees' && method === 'GET') {
+    await ensureV100P3Ready(env.DB);
     const result = await env.DB.prepare(`
       SELECT e.*, d.name AS department_name, p.name AS position_name,
+             (SELECT COUNT(*) FROM employee_documents ed WHERE ed.client_id=e.client_id AND ed.employee_id=e.id) AS document_count,
+             (SELECT COUNT(*) FROM employee_documents ed WHERE ed.client_id=e.client_id AND ed.employee_id=e.id AND ed.document_type='employment_contract') AS contract_document_count,
              mgr.nickname AS manager_nickname, mgr.first_name AS manager_first_name, mgr.last_name AS manager_last_name,
              ap.nickname AS leave_approver_nickname, ap.first_name AS leave_approver_first_name, ap.last_name AS leave_approver_last_name,
              pp.base_salary, pp.bank_name, pp.bank_account_name, pp.bank_account_no, pp.social_security_enabled, pp.tax_enabled,
@@ -2243,19 +2246,30 @@ async function handleApi(request, env, url, auth, ctx) {
       INSERT INTO employees (
         client_id, employee_code, first_name, last_name, nickname, email, phone,
         birth_date, start_date, probation_end_date, contract_end_date,
+        contract_type, contract_number, contract_start_date, contract_signed_date,
         department_id, position_id, employment_type, status, people_status
-      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,'active',?15)
+      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,'active',?19)
     `).bind(
       clientId, employeeCode, body.first_name, body.last_name, body.nickname || null,
       body.email || null, body.phone || null, body.birth_date || null, body.start_date,
       body.probation_end_date || null, body.contract_end_date || null,
+      body.contract_type || null, body.contract_number || null, body.contract_start_date || body.start_date || null, body.contract_signed_date || null,
       departmentId, positionId, body.employment_type || 'full_time',
       body.people_status || (body.probation_end_date ? 'probation' : 'employee')
     ).run();
 
-    await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.create', 'employee', String(result.meta.last_row_id), { ...body, employee_code: employeeCode });
-    await autoAssignLearningForEmployee(env.DB, clientId, Number(result.meta.last_row_id), Number(auth.user.id));
-    return json({ ok: true, id: result.meta.last_row_id }, 201);
+    const newEmployeeId = Number(result.meta.last_row_id);
+    if (body.national_id) await env.DB.prepare('UPDATE employees SET national_id=?1 WHERE id=?2 AND client_id=?3').bind(String(body.national_id).trim() || null,newEmployeeId,clientId).run();
+    if (['bank_name','bank_account_name','bank_account_no','base_salary'].some(key => body[key] != null && body[key] !== '')) {
+      await ensureV100P3Ready(env.DB);
+      await env.DB.prepare(`INSERT INTO employee_payroll_profiles (client_id,employee_id,base_salary,social_security_enabled,tax_enabled,personal_allowance,extra_annual_deductions,bank_name,bank_account_name,bank_account_no,effective_from)
+        VALUES (?1,?2,?3,1,1,60000,0,?4,?5,?6,?7)
+        ON CONFLICT(employee_id) DO UPDATE SET base_salary=excluded.base_salary,bank_name=excluded.bank_name,bank_account_name=excluded.bank_account_name,bank_account_no=excluded.bank_account_no,updated_at=CURRENT_TIMESTAMP`)
+        .bind(clientId,newEmployeeId,Math.max(0,Number(body.base_salary||0)),body.bank_name||null,body.bank_account_name||null,body.bank_account_no||null,body.contract_start_date||body.start_date).run();
+    }
+    await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.create', 'employee', String(newEmployeeId), { ...body, employee_code: employeeCode });
+    await autoAssignLearningForEmployee(env.DB, clientId, newEmployeeId, Number(auth.user.id));
+    return json({ ok: true, id: newEmployeeId }, 201);
   }
 
   const employeeManageMatch = path.match(/^\/api\/employees\/(\d+)$/);
@@ -2287,11 +2301,15 @@ async function handleApi(request, env, url, auth, ctx) {
     await env.DB.prepare(`UPDATE employees SET
       employee_code=?1, nickname=?2, first_name=?3, last_name=?4, email=?5, phone=?6,
       birth_date=?7, start_date=?8, probation_end_date=?9, contract_end_date=?10,
-      department_id=?11, position_id=?12, national_id=?13, updated_at=CURRENT_TIMESTAMP
-      WHERE id=?14 AND client_id=?15`).bind(
+      department_id=?11, position_id=?12, national_id=?13,
+      contract_type=?14, contract_number=?15, contract_start_date=?16, contract_signed_date=?17,
+      updated_at=CURRENT_TIMESTAMP
+      WHERE id=?18 AND client_id=?19`).bind(
         employeeCode, body.nickname || null, firstName, lastName, body.email || null, body.phone || null,
         body.birth_date || null, startDate, body.probation_end_date || null, body.contract_end_date || null,
-        departmentId, positionId, body.national_id || null, employeeId, clientId
+        departmentId, positionId, body.national_id || null,
+        body.contract_type || null, body.contract_number || null, body.contract_start_date || startDate || null, body.contract_signed_date || null,
+        employeeId, clientId
       ).run();
     if (['bank_name','bank_account_name','bank_account_no','base_salary'].some(key => Object.prototype.hasOwnProperty.call(body,key))) {
       const currentPayroll = await env.DB.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1 AND client_id=?2').bind(employeeId,clientId).first();
@@ -2319,6 +2337,61 @@ async function handleApi(request, env, url, auth, ctx) {
     ]);
     await env.DB.prepare('DELETE FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId, clientId).run();
     return json({ ok: true, deleted_id: employeeId });
+  }
+
+
+  const employeeDocumentsMatch = path.match(/^\/api\/employees\/(\d+)\/documents$/);
+  if (employeeDocumentsMatch && method === 'GET') {
+    if (!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role)) return json({ error: 'ไม่มีสิทธิ์ดูเอกสารพนักงาน' }, 403);
+    await ensureV100P3Ready(env.DB);
+    const employeeId = Number(employeeDocumentsMatch[1]);
+    const employee = await env.DB.prepare('SELECT id,employee_code,first_name,last_name,nickname FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId,clientId).first();
+    if (!employee) return json({ error: 'ไม่พบพนักงาน' }, 404);
+    const rows = await env.DB.prepare(`SELECT id,document_type,title,file_name,storage_provider,drive_url,content_type,document_date,expires_at,visibility,note,created_at FROM employee_documents WHERE client_id=?1 AND employee_id=?2 ORDER BY created_at DESC`).bind(clientId,employeeId).all();
+    return json({ employee, data: rows.results || [] });
+  }
+
+  if (employeeDocumentsMatch && method === 'POST') {
+    if (!canManagePeopleAdmin(auth.role)) return json({ error: 'ไม่มีสิทธิ์เพิ่มเอกสารพนักงาน' }, 403);
+    await ensureV100P3Ready(env.DB);
+    const employeeId = Number(employeeDocumentsMatch[1]);
+    const employee = await env.DB.prepare('SELECT id,employee_code,first_name,last_name,nickname FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId,clientId).first();
+    if (!employee) return json({ error: 'ไม่พบพนักงาน' }, 404);
+    const form = await request.formData();
+    const file = form.get('file');
+    if (!file || typeof file.arrayBuffer !== 'function' || !file.name) return json({ error: 'กรุณาเลือกไฟล์' }, 400);
+    if (Number(file.size || 0) > 10 * 1024 * 1024) return json({ error: 'ไฟล์ต้องไม่เกิน 10 MB' }, 413);
+    const allowedTypes = new Set(['employment_contract','id_card_copy','bank_book_copy','social_security','tax_document','education_certificate','other']);
+    const documentType = allowedTypes.has(String(form.get('document_type') || '')) ? String(form.get('document_type')) : 'other';
+    const labels = {employment_contract:'สัญญาจ้างงาน',id_card_copy:'สำเนาบัตรประชาชน',bank_book_copy:'หน้าสมุดบัญชี',social_security:'เอกสารประกันสังคม',tax_document:'เอกสารภาษี',education_certificate:'วุฒิการศึกษา',other:'เอกสารพนักงาน'};
+    const title = String(form.get('title') || '').trim() || labels[documentType] || 'เอกสารพนักงาน';
+    const documentDate = String(form.get('document_date') || '').trim() || null;
+    const expiresAt = String(form.get('expires_at') || '').trim() || null;
+    const note = String(form.get('note') || '').trim() || null;
+    const visibility = ['employee','hr_only','manager'].includes(String(form.get('visibility'))) ? String(form.get('visibility')) : 'hr_only';
+    const workspace = await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
+    if (!workspace?.drive_folder_id) return json({ error: 'กรุณาเชื่อม Google Drive ก่อนอัปโหลดเอกสารพนักงาน' }, 409);
+    const accessToken = await getWorkspaceGoogleAccessToken(env,workspace);
+    const rootFolder = await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Employee Documents');
+    const empFolder = await ensureDriveChildFolder(accessToken,rootFolder,`${employee.employee_code} - ${employee.nickname || employee.first_name}`);
+    const privateFolder = await ensureDriveChildFolder(accessToken,empFolder,'HR & Contracts');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const uploaded = await uploadGoogleDriveFile(accessToken,{folderId:privateFolder,fileName:file.name,contentType:file.type || 'application/octet-stream',bytes});
+    const result = await env.DB.prepare(`INSERT INTO employee_documents (client_id,employee_id,document_type,title,file_name,storage_provider,drive_file_id,drive_url,content_type,document_date,expires_at,visibility,note,created_by_user_id) VALUES (?1,?2,?3,?4,?5,'google_drive',?6,?7,?8,?9,?10,?11,?12,?13)`).bind(clientId,employeeId,documentType,title,file.name,uploaded.id,uploaded.webViewLink || null,file.type || 'application/octet-stream',documentDate,expiresAt,visibility,note,Number(auth.user.id)).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.upload','employee',String(employeeId),{document_type:documentType,file_name:file.name});
+    return json({ ok:true, id:Number(result.meta.last_row_id), drive_url:uploaded.webViewLink || null },201);
+  }
+
+  const employeeDocumentDeleteMatch = path.match(/^\/api\/employee-documents\/(\d+)$/);
+  if (employeeDocumentDeleteMatch && method === 'DELETE') {
+    if (!canManagePeopleAdmin(auth.role)) return json({ error: 'ไม่มีสิทธิ์ลบเอกสารพนักงาน' }, 403);
+    await ensureV100P3Ready(env.DB);
+    const id = Number(employeeDocumentDeleteMatch[1]);
+    const row = await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if (!row) return json({ error:'ไม่พบเอกสาร' },404);
+    await env.DB.prepare('DELETE FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.delete','employee_document',String(id),{employee_id:row.employee_id,file_name:row.file_name});
+    return json({ok:true});
   }
 
   const employeeLinkMatch = path.match(/^\/api\/employees\/(\d+)\/line-link-code$/);
@@ -4357,7 +4430,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.40',
+    version:'1.0-P7.41',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -6436,7 +6509,8 @@ async function ensureCoreSchema(db) {
   await ensureColumns(db,'employee_invites',[['token_value','TEXT']]);
   await ensureColumns(db,'employees',[
     ['line_display_name','TEXT'],['line_picture_url','TEXT'],['line_linked_at','TEXT'],['onboarding_source','TEXT'],
-    ['emergency_contact_name','TEXT'],['emergency_contact_phone','TEXT'],['national_id','TEXT']
+    ['emergency_contact_name','TEXT'],['emergency_contact_phone','TEXT'],['national_id','TEXT'],
+    ['contract_type','TEXT'],['contract_number','TEXT'],['contract_start_date','TEXT'],['contract_signed_date','TEXT']
   ]);
   await ensureColumns(db,'attendance',[
     ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
