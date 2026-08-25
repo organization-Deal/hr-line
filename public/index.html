@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.48" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.49" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -228,7 +228,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.48</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.49</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -313,10 +313,10 @@
             <div><span>ลา</span><strong>0</strong><small>คน</small></div>
             <div><span>ยังไม่เช็กอิน</span><strong>0</strong><small>คน</small></div>
           </div>
-          <div class="team-worklog-range"><strong id="teamWorkLogRangeLabel">วันนี้</strong><span id="teamWorkLogRowCount">0 รายการ</span></div>
-          <div class="team-worklog-table-wrap">
-            <table class="team-worklog-table">
-              <thead><tr><th>วันที่</th><th>พนักงาน</th><th>แผนก / ตำแหน่ง</th><th>เช็กอิน</th><th>เช็กเอาต์</th><th>การลา</th><th>สถานะ</th></tr></thead>
+          <div class="team-worklog-range"><strong id="teamWorkLogRangeLabel">วันนี้</strong><span id="teamWorkLogRowCount">0 คน</span></div>
+          <div class="team-worklog-matrix-wrap">
+            <table class="team-worklog-matrix">
+              <thead id="teamWorkLogHead"><tr><th class="worklog-person-col">พนักงาน</th></tr></thead>
               <tbody id="teamWorkLogBody"></tbody>
             </table>
           </div>
@@ -1220,7 +1220,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.48" type="module"></script>
+  <script src="/app.js?v=1.0-p7.49" type="module"></script>
 
   <dialog id="positionAssignModal" class="modal position-assign-modal">
     <div class="modal-head">
