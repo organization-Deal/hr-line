@@ -1442,7 +1442,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.41', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.42', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -4430,7 +4430,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.41',
+    version:'1.0-P7.42',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
