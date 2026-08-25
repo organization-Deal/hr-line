@@ -1382,26 +1382,57 @@ function workLogStatus(row){
   if(row.check_in_at) return '<span class="worklog-status ok">มาทำงาน</span>';
   return '<span class="worklog-status danger">ยังไม่เช็กอิน</span>';
 }
+function workLogMatrixCell(r){
+  if(!r) return '<div class="worklog-day-card empty"><span>—</span></div>';
+  if(r.is_future) return '<div class="worklog-day-card future"><small>ยังไม่ถึงวัน</small></div>';
+  const parts=[];
+  if(r.check_in_at){
+    parts.push(`<div class="worklog-line"><span>เข้า</span><strong class="${Number(r.late_minutes||0)>0?'late':''}">${time(r.check_in_at)}</strong></div>`);
+  }
+  if(r.check_out_at){
+    parts.push(`<div class="worklog-line"><span>ออก</span><strong>${time(r.check_out_at)}</strong></div>`);
+  }
+  if(Number(r.late_minutes||0)>0) parts.push(`<div class="worklog-note late-note">สาย ${Number(r.late_minutes)} นาที</div>`);
+  if(r.leave_name){
+    const leaveState=r.leave_status&&r.leave_status!=='approved'?` · ${escapeHtml(({pending:'รออนุมัติ',awaiting_evidence:'รอหลักฐาน',rejected:'ไม่อนุมัติ'})[r.leave_status]||r.leave_status)}`:'';
+    parts.push(`<div class="worklog-leave-note">${escapeHtml(r.leave_name)}${leaveState}</div>`);
+  }
+  if(!parts.length){
+    return `<div class="worklog-day-card missing"><small>ยังไม่เช็กอิน</small></div>`;
+  }
+  return `<div class="worklog-day-card ${r.leave_name?'has-leave':''}">${parts.join('')}</div>`;
+}
 function renderTeamWorkLog(){
   const report=state.teamWorkLog||{}; const s=report.summary||{}; const rows=report.rows||[];
   if($('#teamWorkLogRangeLabel')) $('#teamWorkLogRangeLabel').textContent=report.range_label||'—';
-  if($('#teamWorkLogRowCount')) $('#teamWorkLogRowCount').textContent=`${rows.length.toLocaleString('th-TH')} รายการ`;
   if($('#teamWorkLogSummary')) $('#teamWorkLogSummary').innerHTML=`
     <div><span>เช็กอินแล้ว</span><strong>${Number(s.checked_in||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
     <div><span>มาสาย</span><strong>${Number(s.late||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
     <div><span>ลา</span><strong>${Number(s.leave||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
     <div><span>ยังไม่เช็กอิน</span><strong>${Number(s.missing||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>`;
+
+  const dateKeys=[...new Set(rows.map(r=>r.work_date).filter(Boolean))].sort();
+  const employeeMap=new Map();
+  rows.forEach(r=>{
+    const key=String(r.employee_id||r.employee_code||`${r.first_name}-${r.last_name}`);
+    if(!employeeMap.has(key)) employeeMap.set(key,{key,employee_id:r.employee_id,employee_code:r.employee_code,first_name:r.first_name,last_name:r.last_name,nickname:r.nickname,department_name:r.department_name,position_name:r.position_name,days:new Map()});
+    employeeMap.get(key).days.set(r.work_date,r);
+  });
+  const people=[...employeeMap.values()];
+  if($('#teamWorkLogRowCount')) $('#teamWorkLogRowCount').textContent=`${people.length.toLocaleString('th-TH')} คน · ${dateKeys.length.toLocaleString('th-TH')} วัน`;
+
+  const head=$('#teamWorkLogHead');
+  if(head){
+    head.innerHTML=`<tr><th class="worklog-person-col">พนักงาน</th>${dateKeys.map(d=>{
+      const sample=rows.find(r=>r.work_date===d)||{};
+      return `<th class="worklog-date-col"><strong>${formatDate(d)}</strong><small>${escapeHtml(sample.day_label||'')}</small></th>`;
+    }).join('')}</tr>`;
+  }
   const body=$('#teamWorkLogBody'); if(!body)return;
-  body.innerHTML=rows.length?rows.map(r=>`
-    <tr>
-      <td class="team-worklog-cell"><strong>${formatDate(r.work_date)}</strong><small>${escapeHtml(r.day_label||'')}</small></td>
-      <td><div class="team-worklog-person"><span class="team-worklog-avatar">${escapeHtml((r.nickname||r.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml(r.nickname||r.first_name||'—')} ${escapeHtml(r.last_name||'')}</strong><small>${escapeHtml(r.employee_code||'')}</small></div></div></td>
-      <td class="team-worklog-cell"><strong>${escapeHtml(r.department_name||'—')}</strong><small>${escapeHtml(r.position_name||'ยังไม่ระบุตำแหน่ง')}</small></td>
-      <td>${r.check_in_at?`<span class="worklog-time ${Number(r.late_minutes||0)>0?'worklog-late':''}">${time(r.check_in_at)}</span>${Number(r.late_minutes||0)>0?`<small>สาย ${Number(r.late_minutes)} นาที</small>`:''}`:'—'}</td>
-      <td>${r.check_out_at?`<span class="worklog-time">${time(r.check_out_at)}</span>`:'—'}</td>
-      <td>${r.leave_name?`<span class="worklog-leave">${escapeHtml(r.leave_name)}</span>${r.leave_status&&r.leave_status!=='approved'?`<small>${escapeHtml(({pending:'รออนุมัติ',awaiting_evidence:'รอหลักฐาน',rejected:'ไม่อนุมัติ'})[r.leave_status]||r.leave_status)}</small>`:''}`:'—'}</td>
-      <td>${workLogStatus(r)}</td>
-    </tr>`).join(''):`<tr><td colspan="7"><div class="leave-report-empty">ยังไม่มีข้อมูลในช่วงเวลานี้</div></td></tr>`;
+  body.innerHTML=people.length?people.map(p=>`<tr>
+    <td class="worklog-person-col"><div class="team-worklog-person"><span class="team-worklog-avatar">${escapeHtml((p.nickname||p.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml(p.nickname||p.first_name||'—')} ${escapeHtml(p.last_name||'')}</strong><small>${escapeHtml(p.employee_code||'')}</small><small class="worklog-role">${escapeHtml(p.department_name||'—')} · ${escapeHtml(p.position_name||'ยังไม่ระบุตำแหน่ง')}</small></div></div></td>
+    ${dateKeys.map(d=>`<td class="worklog-date-col">${workLogMatrixCell(p.days.get(d))}</td>`).join('')}
+  </tr>`).join(''):`<tr><td><div class="leave-report-empty">ยังไม่มีข้อมูลในช่วงเวลานี้</div></td></tr>`;
 }
 
 function renderDashboard() {
