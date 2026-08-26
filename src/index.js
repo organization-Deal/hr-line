@@ -560,6 +560,7 @@ CREATE TABLE IF NOT EXISTS payroll_settings (
   late_deduction_per_minute REAL NOT NULL DEFAULT 0,
   social_security_enabled INTEGER NOT NULL DEFAULT 1,
   tax_enabled INTEGER NOT NULL DEFAULT 1,
+  auto_payslip_on_lock INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
@@ -1442,7 +1443,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.51', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.52', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1727,7 +1728,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.51', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.52', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -2901,7 +2902,33 @@ async function handleApi(request, env, url, auth, ctx) {
     const count=await env.DB.prepare('SELECT COUNT(*) AS n FROM payroll_items WHERE period_id=?1').bind(id).first(); if(!Number(count?.n||0))return json({error:'ยังไม่มีรายการ Payroll ให้ Lock'},409);
     await env.DB.prepare(`UPDATE payroll_periods SET status='locked',locked_by_user_id=?1,locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(Number(auth.user.id),id,clientId).run();
     await env.DB.prepare(`UPDATE payroll_items SET status='locked',updated_at=CURRENT_TIMESTAMP WHERE period_id=?1`).bind(id).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.lock','payroll_period',String(id),null); return json({ok:true});
+    const settings=await env.DB.prepare(`SELECT * FROM payroll_settings WHERE client_id=?1`).bind(clientId).first();
+    let payslipQueued=false,payslipWarning=null;
+    if(Number(settings?.auto_payslip_on_lock ?? 1)===1){
+      const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
+      if(workspace?.drive_folder_id){
+        const task=publishPayrollPeriod(env,clientId,id,{notify:false}).catch(error=>console.error(JSON.stringify({level:'error',event:'payroll_auto_payslip_failed',period_id:id,message:String(error?.message||error)})));
+        if(ctx?.waitUntil)ctx.waitUntil(task); else await task;
+        payslipQueued=true;
+      }else payslipWarning='Lock สำเร็จ แต่ยังไม่ได้สร้างสลิปอัตโนมัติ เพราะยังไม่ได้เชื่อม Google Drive';
+    }
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.lock','payroll_period',String(id),{auto_payslip:payslipQueued});
+    return json({ok:true,payslip_queued:payslipQueued,warning:payslipWarning});
+  }
+
+
+  const payrollGeneratePayslipMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/generate-payslips$/);
+  if(payrollGeneratePayslipMatch && method==='POST'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์สร้าง Payslip'},403);
+    const id=Number(payrollGeneratePayslipMatch[1]);
+    const period=await env.DB.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404);
+    if(!['locked','published'].includes(period.status))return json({error:'ต้อง Lock Payroll ก่อนสร้าง Payslip'},409);
+    const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
+    if(!workspace?.drive_folder_id)return json({error:'กรุณาเชื่อม Google Drive ก่อนสร้าง Payslip'},409);
+    const task=publishPayrollPeriod(env,clientId,id,{notify:false}).catch(error=>console.error(JSON.stringify({level:'error',event:'payroll_generate_payslip_failed',period_id:id,message:String(error?.message||error)})));
+    if(ctx?.waitUntil)ctx.waitUntil(task); else await task;
+    return json({ok:true,queued:true,message:'กำลังสร้าง Payslip อัตโนมัติลง Google Drive'});
   }
 
   const payrollPublishMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/publish$/);
@@ -4561,7 +4588,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.51',
+    version:'1.0-P7.52',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -4840,7 +4867,7 @@ function buildPayslipReadyFlex(employee,period,netPay,shareUrl){
   return lineBubble({eyebrow:'PAYROLL',title:'สลิปเงินเดือนพร้อมแล้ว',subtitle:`รอบ ${period.period_key}`,status:'พร้อมดู',statusTone:'success',body:[lineInfoCard([lineInfoRow('พนักงาน',displayName(employee)),lineInfoRow('รับสุทธิ',`${Number(netPay||0).toLocaleString('th-TH',{minimumFractionDigits:2})} บาท`,LINE_CI.success)],'success'),lineText('เอกสารเป็นข้อมูลส่วนตัว กรุณาอย่าส่งต่อลิงก์นี้','xxs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดสลิปเงินเดือน',{type:'uri',label:'เปิดสลิปเงินเดือน',uri:shareUrl})]});
 }
 
-async function publishPayrollPeriod(env,clientId,periodId){
+async function publishPayrollPeriod(env,clientId,periodId,{notify=true}={}){
   await ensureV100P3Ready(env.DB); const db=env.DB; const detail=await getPayrollPeriodDetail(db,clientId,periodId); if(!detail.period)throw new Error('Payroll period not found'); const client=await getClient(db,clientId); const workspace=await db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(); if(!workspace)throw new Error('Google not connected');
   const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const fontBytes=await fetchNaknaPdfFont(env); const payrollRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Payroll'); const periodFolder=await ensureDriveChildFolder(accessToken,payrollRoot,detail.period.period_key); const lineCtx=await getEffectiveLineContextForClient(env,clientId); const canEmail=String(workspace.scopes||'').includes('gmail.send');
   for(const item of detail.items){
@@ -4849,8 +4876,11 @@ async function publishPayrollPeriod(env,clientId,periodId){
       if(existing){await db.prepare(`UPDATE payroll_documents SET payroll_item_id=?1,file_name=?2,drive_file_id=?3,drive_url=?4,sha256=?5,share_token_hash=?6,share_token_value=?7,created_at=CURRENT_TIMESTAMP WHERE id=?8`).bind(Number(item.id),fileName,uploaded.id,uploaded.webViewLink||null,sha,tokenHash,token,Number(existing.id)).run();}
       else await db.prepare(`INSERT INTO payroll_documents (client_id,period_id,payroll_item_id,employee_id,file_name,drive_file_id,drive_url,sha256,share_token_hash,share_token_value) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`).bind(Number(clientId),Number(periodId),Number(item.id),Number(employee.id),fileName,uploaded.id,uploaded.webViewLink||null,sha,tokenHash,token).run();
       const shareUrl=`${env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev'}/payslip/${token}`;
-      let emailSent=false,lineSent=false; if(employee.email&&canEmail){try{await sendGmailAttachment(accessToken,{to:employee.email,subject:`สลิปเงินเดือน ${detail.period.period_key} · ${client.name}`,html:`<div style="font-family:Arial,sans-serif"><h2>สลิปเงินเดือน ${detail.period.period_key}</h2><p>สวัสดี ${employee.nickname||employee.first_name}</p><p>สลิปเงินเดือนของคุณพร้อมแล้ว เอกสาร PDF แนบมากับอีเมลนี้</p><p>เปิดเอกสารออนไลน์: <a href="${shareUrl}">ดูสลิปเงินเดือน</a></p><p>— Nakna HR</p></div>`,fileName,contentType:'application/pdf',bytes:pdfBytes});emailSent=true;}catch(error){console.error(JSON.stringify({level:'warn',event:'payslip_email_failed',employee_id:employee.id,message:String(error?.message||error)}));}}
-      if(employee.line_user_id&&lineCtx?.accessToken){try{await pushLineMessages(lineCtx.accessToken,employee.line_user_id,[buildPayslipReadyFlex(employee,detail.period,item.net_pay,shareUrl)]);lineSent=true;}catch{}}
+      let emailSent=false,lineSent=false;
+      if(notify){
+        if(employee.email&&canEmail){try{await sendGmailAttachment(accessToken,{to:employee.email,subject:`สลิปเงินเดือน ${detail.period.period_key} · ${client.name}`,html:`<div style="font-family:Arial,sans-serif"><h2>สลิปเงินเดือน ${detail.period.period_key}</h2><p>สวัสดี ${employee.nickname||employee.first_name}</p><p>สลิปเงินเดือนของคุณพร้อมแล้ว เอกสาร PDF แนบมากับอีเมลนี้</p><p>เปิดเอกสารออนไลน์: <a href="${shareUrl}">ดูสลิปเงินเดือน</a></p><p>— Nakna HR</p></div>`,fileName,contentType:'application/pdf',bytes:pdfBytes});emailSent=true;}catch(error){console.error(JSON.stringify({level:'warn',event:'payslip_email_failed',employee_id:employee.id,message:String(error?.message||error)}));}}
+        if(employee.line_user_id&&lineCtx?.accessToken){try{await pushLineMessages(lineCtx.accessToken,employee.line_user_id,[buildPayslipReadyFlex(employee,detail.period,item.net_pay,shareUrl)]);lineSent=true;}catch{}}
+      }
       await db.prepare(`UPDATE payroll_documents SET email_sent_at=CASE WHEN ?1=1 THEN CURRENT_TIMESTAMP ELSE email_sent_at END,line_notified_at=CASE WHEN ?2=1 THEN CURRENT_TIMESTAMP ELSE line_notified_at END WHERE period_id=?3 AND employee_id=?4`).bind(emailSent?1:0,lineSent?1:0,Number(periodId),Number(employee.id)).run();
     }catch(error){console.error(JSON.stringify({level:'error',event:'payslip_generate_failed',period_id:periodId,employee_id:item.employee_id,message:String(error?.message||error)}));}
   }
@@ -5597,6 +5627,7 @@ async function ensureV100P3Ready(db){
     const statements=V100P3_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
     for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}}
   }
+  await db.prepare(`ALTER TABLE payroll_settings ADD COLUMN auto_payslip_on_lock INTEGER NOT NULL DEFAULT 1`).run().catch(()=>{});
   SCHEMA_READY.add('p3');
 }
 
