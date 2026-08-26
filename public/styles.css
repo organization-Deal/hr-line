@@ -1604,3 +1604,253 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
 
 /* P7.50 · Payroll Board */
 .payroll-workspace{display:grid;grid-template-columns:260px minmax(0,1fr);gap:14px;align-items:start}.payroll-period-panel{position:sticky;top:82px;max-height:calc(100vh - 110px);overflow:auto}.payroll-detail-panel{min-width:0}.payroll-sheet-hint{display:flex;justify-content:space-between;gap:16px;padding:10px 12px;margin:12px 0;background:#f3f8f7;border-radius:12px;color:#6f817f;font-size:12px}.payroll-sheet-wrap{overflow:auto;border:1px solid #dfe8e5;border-radius:16px;background:#fff;max-height:62vh}.payroll-sheet{border-collapse:separate;border-spacing:0;min-width:1850px;width:100%;font-size:12px}.payroll-sheet th,.payroll-sheet td{padding:11px 12px;border-right:1px solid #edf2f0;border-bottom:1px solid #edf2f0;text-align:right;vertical-align:middle;white-space:nowrap}.payroll-sheet th{position:sticky;top:0;z-index:4;background:#f7faf9;color:#788987;font-weight:600}.payroll-sheet td small{display:block;color:#9aa7a5;font-size:10px;margin-top:3px}.payroll-sheet .sticky-col{position:sticky;left:0;z-index:3;text-align:left;background:#fff}.payroll-sheet th.sticky-col{z-index:6;background:#f7faf9}.payroll-sheet .employee-col{min-width:230px;max-width:230px}.payroll-sheet .sticky-action{position:sticky;right:0;z-index:3;background:#fff;text-align:left;min-width:125px}.payroll-sheet th.sticky-action{z-index:6;background:#f7faf9}.payroll-sheet tfoot td{position:sticky;bottom:0;background:#f8fbfa;font-weight:600;z-index:2}.payroll-sheet tfoot .sticky-col,.payroll-sheet tfoot .sticky-action{z-index:5;background:#f8fbfa}.payroll-person{display:flex;align-items:center;gap:9px}.payroll-person-avatar{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:#e8f5f2;color:#168b8d;font-weight:700;flex:none}.payroll-person strong{display:block;color:#173f48}.payroll-person small{margin:2px 0 0}.payroll-sheet .gross-col{background:#fbf9f0}.payroll-sheet .deduct-col{background:#fff8f5}.payroll-sheet .net-col{background:#f0faf5;color:#125d46}.payroll-sheet th.gross-col{background:#f8f4e6}.payroll-sheet th.deduct-col{background:#fff2ed}.payroll-sheet th.net-col{background:#e8f7ef}.payroll-adjust-btn{border:0;border-radius:9px;background:#168b8d;color:#fff;padding:7px 10px;font:inherit;font-weight:600;cursor:pointer;margin-right:5px}.tax-plus{color:#c75a45!important}.tax-minus{color:#168b8d!important}.payroll-adjustment-log{margin-top:14px;border:1px solid #dfe8e5;border-radius:14px;background:#fff}.payroll-adjustment-log summary{cursor:pointer;padding:13px 15px;font-weight:600;color:#173f48}.payroll-adjustment-log summary span{color:#8a9998;font-weight:400;margin-left:6px}.payroll-adjustment-list{border-top:1px solid #edf2f0}.payroll-adjustment-list>div{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:10px 14px;border-bottom:1px solid #edf2f0}.payroll-adjustment-list>div:last-child{border-bottom:0}.payroll-adjustment-list small{display:block;color:#8a9998;margin-top:2px}.payroll-adjustment-list b{font-size:13px}.text-btn.danger{color:#d66555}@media(max-width:1100px){.payroll-workspace{grid-template-columns:1fr}.payroll-period-panel{position:relative;top:auto;max-height:none}.payroll-period-list{display:flex;gap:8px;overflow:auto}.payroll-period-row{min-width:220px}.payroll-sheet-wrap{max-height:58vh}}@media(max-width:700px){.payroll-sheet-hint{display:block}.payroll-sheet-hint span{display:block;margin:3px 0}.payroll-detail-totals{grid-template-columns:1fr 1fr!important}}
+
+
+/* P7.51 · Mobile Team Work Log matrix fix */
+@media (max-width: 700px) {
+  .team-worklog-panel{
+    padding:14px 12px;
+    margin:12px 0 14px;
+    border-radius:18px;
+  }
+
+  .team-worklog-head{
+    display:block;
+  }
+
+  .team-worklog-controls{
+    display:block;
+    margin-top:12px;
+  }
+
+  .team-worklog-controls .segmented-control{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:4px;
+    width:100%;
+    padding:4px;
+    border-radius:14px;
+    overflow:visible;
+  }
+
+  .team-worklog-controls .segmented-control button{
+    min-width:0;
+    min-height:44px;
+    padding:7px 3px;
+    white-space:normal;
+    line-height:1.15;
+    font-size:11px;
+    border-radius:10px;
+  }
+
+  .team-worklog-date-controls{
+    display:grid;
+    grid-template-columns:44px minmax(0,1fr) 44px;
+    gap:7px;
+    margin-top:10px;
+    width:100%;
+  }
+
+  .team-worklog-date-controls .icon-btn{
+    width:44px;
+    height:44px;
+  }
+
+  .team-worklog-date-controls input[type=date],
+  .team-worklog-month{
+    width:100%;
+    height:44px;
+    min-width:0;
+  }
+
+  .team-worklog-custom-range{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+    width:100%;
+    margin-top:10px;
+  }
+
+  .team-worklog-custom-range .range-separator{
+    display:none;
+  }
+
+  .team-worklog-custom-range label{
+    min-width:0;
+  }
+
+  .team-worklog-custom-range input[type=date]{
+    width:100%;
+    min-width:0;
+  }
+
+  .team-worklog-custom-range .compact-btn{
+    grid-column:1/-1;
+    width:100%;
+    min-height:42px;
+  }
+
+  .team-worklog-summary{
+    grid-template-columns:repeat(4,minmax(82px,1fr));
+    overflow-x:auto;
+    border-radius:14px;
+    margin:12px 0 10px;
+    scrollbar-width:none;
+  }
+  .team-worklog-summary::-webkit-scrollbar{display:none}
+  .team-worklog-summary>div{
+    min-width:82px;
+    padding:11px 10px;
+    border-bottom:0!important;
+  }
+  .team-worklog-summary>div:nth-child(2){border-right:1px solid var(--line,#dfe8e5)!important}
+  .team-worklog-summary strong{font-size:20px}
+  .team-worklog-summary span{font-size:10px}
+  .team-worklog-summary small{font-size:9px}
+
+  .team-worklog-range{
+    margin:8px 2px;
+    font-size:11px;
+  }
+
+  /* Override the generic mobile "table becomes cards" rule */
+  .team-worklog-matrix{
+    display:table!important;
+    width:max-content!important;
+    min-width:100%!important;
+    border-collapse:separate!important;
+    border-spacing:0!important;
+  }
+  .team-worklog-matrix thead{
+    display:table-header-group!important;
+  }
+  .team-worklog-matrix tbody{
+    display:table-row-group!important;
+    width:auto!important;
+  }
+  .team-worklog-matrix tr{
+    display:table-row!important;
+    width:auto!important;
+    margin:0!important;
+    border:0!important;
+    border-radius:0!important;
+    background:transparent!important;
+    overflow:visible!important;
+  }
+  .team-worklog-matrix th,
+  .team-worklog-matrix td{
+    display:table-cell!important;
+    width:auto!important;
+    min-height:0!important;
+    padding:0!important;
+    border-bottom:1px solid #edf2f0!important;
+    text-align:left!important;
+  }
+  .team-worklog-matrix td::before{
+    display:none!important;
+    content:none!important;
+  }
+
+  .team-worklog-matrix-wrap{
+    max-height:60dvh;
+    margin-inline:-2px;
+    border-radius:14px;
+    -webkit-overflow-scrolling:touch;
+    scroll-snap-type:x proximity;
+  }
+
+  .team-worklog-matrix .worklog-person-col{
+    width:142px!important;
+    min-width:142px!important;
+    max-width:142px!important;
+    padding:10px 9px!important;
+    box-shadow:2px 0 8px rgba(23,63,72,.05);
+  }
+
+  .team-worklog-matrix thead .worklog-person-col{
+    font-size:10px;
+  }
+
+  .team-worklog-matrix .team-worklog-person{
+    gap:7px;
+    align-items:flex-start;
+  }
+
+  .team-worklog-matrix .team-worklog-avatar{
+    width:28px;
+    height:28px;
+    border-radius:8px;
+    font-size:11px;
+  }
+
+  .team-worklog-matrix .team-worklog-person strong{
+    font-size:11px;
+    line-height:1.25;
+    max-width:92px;
+  }
+
+  .team-worklog-matrix .team-worklog-person small{
+    font-size:8px;
+    line-height:1.25;
+  }
+
+  .team-worklog-matrix .worklog-role{
+    margin-top:4px!important;
+    max-width:92px;
+    font-size:8px!important;
+  }
+
+  .team-worklog-matrix .worklog-date-col{
+    width:108px!important;
+    min-width:108px!important;
+    max-width:108px!important;
+    scroll-snap-align:start;
+  }
+
+  .team-worklog-matrix thead .worklog-date-col{
+    padding:8px 6px!important;
+    text-align:center!important;
+  }
+
+  .team-worklog-matrix thead .worklog-date-col strong{
+    font-size:10px;
+  }
+
+  .team-worklog-matrix thead .worklog-date-col small{
+    margin-top:2px;
+    font-size:8px;
+  }
+
+  .worklog-day-card{
+    min-height:66px;
+    padding:8px 7px;
+    gap:4px;
+  }
+
+  .worklog-line{
+    gap:5px;
+    font-size:8px;
+  }
+
+  .worklog-line strong{
+    font-size:11px;
+  }
+
+  .worklog-note,
+  .worklog-leave-note{
+    font-size:8px;
+  }
+
+  .worklog-day-card.missing small,
+  .worklog-day-card.future small{
+    font-size:8px;
+    max-width:80px;
+    line-height:1.25;
+  }
+
+  .team-worklog-matrix th:first-child,
+  .team-worklog-matrix td:first-child{
+    position:sticky!important;
+    left:0!important;
+  }
+}
