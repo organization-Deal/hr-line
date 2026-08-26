@@ -1854,3 +1854,185 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
     left:0!important;
   }
 }
+
+
+/* P7.52 · Mobile Payroll redesign */
+@media (max-width:700px){
+  #view-payroll{padding-bottom:28px}
+  .payroll-page-intro{
+    padding-top:2px;
+    display:block!important;
+  }
+  .payroll-page-intro .kicker{font-size:11px;letter-spacing:.16em}
+  .payroll-page-intro h1{font-size:34px;line-height:1.05;margin:6px 0 8px}
+  .payroll-page-intro p{font-size:13px;line-height:1.55;max-width:95%}
+  .payroll-page-intro .page-actions{
+    display:grid!important;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+    margin-top:14px;
+    width:100%;
+  }
+  .payroll-page-intro .page-actions button{
+    min-height:46px;
+    width:100%;
+    padding:0 12px;
+    font-size:12px;
+    border-radius:14px;
+  }
+  .payroll-page-intro .page-actions button svg{width:17px;height:17px}
+
+  .payroll-summary{
+    display:grid!important;
+    grid-template-columns:1fr 1fr!important;
+    gap:9px;
+    margin:14px 0 12px;
+  }
+  .payroll-summary-card{
+    min-height:92px;
+    padding:15px 14px;
+    border-radius:18px;
+  }
+  .payroll-summary-card span{font-size:11px}
+  .payroll-summary-card strong{font-size:22px;margin-top:9px}
+  .payroll-summary-card:last-child{
+    grid-column:1/-1!important;
+    min-height:78px;
+  }
+
+  .payroll-workspace{
+    display:block!important;
+  }
+  .payroll-period-panel{
+    position:relative!important;
+    top:auto!important;
+    max-height:none!important;
+    margin-bottom:12px;
+    padding:15px 14px;
+    border-radius:18px;
+  }
+  .payroll-period-panel .panel-head{margin-bottom:10px}
+  .payroll-period-list{
+    display:flex!important;
+    overflow-x:auto;
+    gap:8px;
+    padding-bottom:2px;
+    scroll-snap-type:x proximity;
+    scrollbar-width:none;
+  }
+  .payroll-period-list::-webkit-scrollbar{display:none}
+  .payroll-period-row{
+    min-width:205px!important;
+    max-width:205px;
+    padding:12px;
+    border-radius:14px;
+    scroll-snap-align:start;
+  }
+
+  .payroll-detail-panel{
+    padding:15px 12px;
+    border-radius:18px;
+  }
+  .payroll-detail-empty{
+    min-height:210px;
+    padding:18px 8px;
+  }
+  .payroll-detail-empty h3{font-size:17px}
+  .payroll-detail-empty p{font-size:11px;max-width:280px}
+
+  .embedded-head{
+    text-align:left;
+  }
+  .salary-setup-list{gap:8px}
+  .salary-setup-row{
+    grid-template-columns:minmax(0,1fr) auto!important;
+    padding:12px 13px;
+    border-radius:14px;
+  }
+  .salary-setup-row strong{font-size:12px;line-height:1.3}
+  .salary-setup-row small,.salary-setup-row em{font-size:9px}
+  .salary-setup-row b{font-size:12px}
+
+  .payroll-detail-head{
+    display:block!important;
+    margin-bottom:12px;
+  }
+  .payroll-detail-head h2{font-size:23px}
+  .payroll-status-line{flex-wrap:wrap}
+  .payroll-detail-head .page-actions{
+    display:grid!important;
+    grid-template-columns:1fr 1fr;
+    gap:7px;
+    margin-top:12px;
+  }
+  .payroll-detail-head .page-actions button{
+    width:100%;
+    min-height:42px;
+    border-radius:12px;
+    font-size:10px!important;
+    padding:0 8px;
+  }
+
+  .payroll-detail-totals{
+    display:grid!important;
+    grid-template-columns:1fr 1fr!important;
+    gap:0;
+    border-radius:15px;
+  }
+  .payroll-detail-totals>div{
+    min-width:0;
+    padding:13px;
+  }
+  .payroll-detail-totals>div:nth-child(odd){border-left:0!important}
+  .payroll-detail-totals>div:nth-child(n+3){border-top:1px solid var(--border)}
+  .payroll-detail-totals span{font-size:9px}
+  .payroll-detail-totals strong{font-size:15px}
+
+  .payroll-sheet-hint{
+    padding:9px 10px;
+    border-radius:12px;
+    font-size:9px;
+  }
+  .payroll-sheet-hint span+span{display:none}
+
+  /* keep spreadsheet behavior on mobile */
+  .payroll-sheet-wrap{
+    max-height:62dvh!important;
+    border-radius:14px;
+    -webkit-overflow-scrolling:touch;
+  }
+  .payroll-sheet{
+    min-width:1620px!important;
+    font-size:10px;
+  }
+  .payroll-sheet th,.payroll-sheet td{
+    padding:9px 9px;
+    font-size:9px;
+  }
+  .payroll-sheet .employee-col{
+    min-width:154px!important;
+    max-width:154px!important;
+  }
+  .payroll-sheet .sticky-action{min-width:92px!important}
+  .payroll-person{gap:6px}
+  .payroll-person-avatar{width:27px;height:27px;border-radius:8px}
+  .payroll-person strong{font-size:10px;white-space:normal;line-height:1.2}
+  .payroll-person small{font-size:8px}
+  .payroll-adjust-btn{padding:6px 8px;font-size:9px}
+
+  .payroll-adjustment-log summary{font-size:11px}
+  .payroll-adjustment-list>div{
+    grid-template-columns:1fr auto;
+    gap:8px;
+    padding:10px;
+  }
+  .payroll-adjustment-list>div button{grid-column:1/-1;justify-self:end}
+  .payroll-footnote{font-size:8px}
+
+  .payroll-auto-slip-toggle{
+    padding:12px;
+    border:1px solid #d6e9e3;
+    border-radius:13px;
+    background:#f4faf8;
+  }
+}
