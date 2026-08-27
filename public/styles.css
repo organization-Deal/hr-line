@@ -2036,3 +2036,204 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
     background:#f4faf8;
   }
 }
+
+
+/* P7.53 · Mobile Employee Master — readable card layout */
+@media (max-width: 700px) {
+  .employee-master-table-card{
+    overflow:visible!important;
+    border:0!important;
+    background:transparent!important;
+    border-radius:0!important;
+    box-shadow:none!important;
+  }
+
+  .employee-master-table-card::after{
+    display:none!important;
+    content:none!important;
+  }
+
+  .employee-master-table{
+    display:block!important;
+    min-width:0!important;
+    width:100%!important;
+    border:0!important;
+  }
+
+  .employee-master-table thead{
+    display:none!important;
+  }
+
+  .employee-master-table tbody{
+    display:grid!important;
+    width:100%!important;
+    gap:12px;
+  }
+
+  .employee-master-table tr{
+    display:block!important;
+    width:100%!important;
+    margin:0!important;
+    overflow:hidden!important;
+    border:1px solid var(--border,#dfe8e5)!important;
+    border-radius:18px!important;
+    background:#fff!important;
+    box-shadow:0 1px 0 rgba(16,54,61,.02)!important;
+  }
+
+  .employee-master-table td{
+    position:static!important;
+    display:grid!important;
+    grid-template-columns:112px minmax(0,1fr)!important;
+    align-items:start!important;
+    gap:10px!important;
+    width:100%!important;
+    min-width:0!important;
+    max-width:none!important;
+    min-height:0!important;
+    padding:10px 14px!important;
+    white-space:normal!important;
+    overflow:visible!important;
+    text-overflow:clip!important;
+    border:0!important;
+    border-bottom:1px solid #edf2f0!important;
+    background:#fff!important;
+    box-shadow:none!important;
+    text-align:right!important;
+    font-size:12px!important;
+    line-height:1.35!important;
+  }
+
+  .employee-master-table td:last-child{
+    border-bottom:0!important;
+  }
+
+  .employee-master-table td::before{
+    display:block!important;
+    content:attr(data-label)!important;
+    color:var(--text-tertiary,#8a9998)!important;
+    font-size:10px!important;
+    font-weight:500!important;
+    text-align:left!important;
+    letter-spacing:0!important;
+  }
+
+  .employee-master-table .employee-sticky-name{
+    display:block!important;
+    padding:14px!important;
+    border-bottom:1px solid #e6eeeb!important;
+    background:linear-gradient(180deg,#fff,#fbfdfc)!important;
+  }
+
+  .employee-master-table .employee-sticky-name::before{
+    display:none!important;
+    content:none!important;
+  }
+
+  .employee-master-table .employee-sticky-name .person{
+    display:flex!important;
+    align-items:center!important;
+    gap:11px!important;
+    text-align:left!important;
+  }
+
+  .employee-master-table .employee-sticky-name .avatar{
+    width:46px!important;
+    height:46px!important;
+    min-width:46px!important;
+    border-radius:14px!important;
+  }
+
+  .employee-master-table .employee-sticky-name .person strong{
+    display:block!important;
+    font-size:15px!important;
+    line-height:1.25!important;
+    color:var(--text-primary,#173f48)!important;
+  }
+
+  .employee-master-table .employee-sticky-name .person small{
+    display:block!important;
+    margin-top:3px!important;
+    font-size:10px!important;
+  }
+
+  .employee-master-table .employee-sticky-name .people-status{
+    display:inline-flex!important;
+    margin-top:7px!important;
+  }
+
+  .employee-master-table td[data-label="อีเมล"],
+  .employee-master-table td[data-label="Work Location"]{
+    max-width:none!important;
+    overflow-wrap:anywhere!important;
+    word-break:break-word!important;
+  }
+
+  .employee-master-table td[data-label="เงินเดือน"] .salary-cell{
+    color:var(--brand,#168b8d)!important;
+    font-size:14px!important;
+  }
+
+  .employee-master-table td[data-label="LINE"] .line-connected{
+    align-items:flex-end!important;
+  }
+
+  .employee-master-table .employee-sticky-actions{
+    display:block!important;
+    padding:12px 14px 14px!important;
+    background:#fbfdfc!important;
+    text-align:left!important;
+  }
+
+  .employee-master-table .employee-sticky-actions::before{
+    display:block!important;
+    content:"จัดการ"!important;
+    margin-bottom:9px!important;
+    color:var(--text-tertiary,#8a9998)!important;
+    font-size:10px!important;
+    font-weight:500!important;
+  }
+
+  .employee-master-table .employee-row-actions{
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:8px!important;
+    width:100%!important;
+  }
+
+  .employee-master-table .employee-row-actions .text-btn{
+    display:flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+    min-height:42px!important;
+    width:100%!important;
+    padding:0 10px!important;
+    margin:0!important;
+    border:1px solid #dbe8e4!important;
+    border-radius:12px!important;
+    background:#fff!important;
+    color:var(--brand,#168b8d)!important;
+    font-size:12px!important;
+    font-weight:600!important;
+  }
+
+  .employee-master-table .employee-row-actions .danger-text{
+    grid-column:1/-1!important;
+    border-color:#f0d3cd!important;
+    background:#fff9f7!important;
+    color:#cf5a49!important;
+  }
+
+  .employee-master-table .document-count-btn{
+    justify-self:end!important;
+  }
+
+  .employee-master-table .badge,
+  .employee-master-table .location-inline,
+  .employee-master-table .approver-inline,
+  .employee-master-table .mono-data{
+    max-width:100%!important;
+    white-space:normal!important;
+    overflow-wrap:anywhere!important;
+  }
+}
