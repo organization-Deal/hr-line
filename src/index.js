@@ -3422,24 +3422,88 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/engagement/rules' && method === 'POST') {
-    if (!canManageEngagement(auth.role)) return json({error:'ไม่มีสิทธิ์สร้างกติกาแต้ม'},403);
-    await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const name=String(body.name||'').trim();
-    if(name.length<2)return json({error:'กรุณาใส่ชื่อกติกา'},400); const eventType=['attendance_streak','learning_complete','kpi_complete','birthday','work_anniversary','manual','custom'].includes(String(body.event_type))?String(body.event_type):'manual';
-    const code=(String(body.code||name).toLowerCase().replace(/[^a-z0-9ก-๙]+/g,'-').replace(/^-|-$/g,'').slice(0,50)||`rule-${Date.now()}`);
-    try{const r=await env.DB.prepare(`INSERT INTO point_rules (client_id,code,name,description,event_type,points,cash_value,threshold_count,window_days,is_active,effective_from,created_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`)
-      .bind(clientId,code,name,String(body.description||'').trim()||null,eventType,Math.max(0,num(body.points,0)),Math.max(0,num(body.cash_value,0)),Math.max(1,Math.floor(num(body.threshold_count,1))),body.window_days?Math.max(1,Math.floor(num(body.window_days,30))):null,body.is_active?1:0,body.effective_from||dateInBangkok(),Number(auth.user.id)).run(); return json({ok:true,id:Number(r.meta.last_row_id)},201);}catch(e){if(/UNIQUE/i.test(String(e?.message||e)))return json({error:'รหัสกติกาซ้ำ'},409);throw e;}
+    if (!canManageEngagement(auth.role)) return json({error:'ไม่มีสิทธิ์สร้างกิจกรรม'},403);
+    await ensurePhase5Defaults(env.DB,clientId);
+    const body=await safeJson(request), name=String(body.name||'').trim();
+    if(name.length<2)return json({error:'กรุณาใส่ชื่อกิจกรรม'},400);
+    const triggerKey=normalizeEngagementTrigger(body.trigger_key||body.event_type);
+    const eventType=legacyEventTypeForTrigger(triggerKey);
+    const audience=normalizeEngagementAudience(body.audience_type,body.audience_ids);
+    const repeatMode=normalizeEngagementRepeat(body.repeat_mode,triggerKey);
+    const approvalMode=normalizeEngagementApproval(body.approval_mode,triggerKey);
+    const code=(String(body.code||name).toLowerCase().replace(/[^a-z0-9ก-๙]+/g,'-').replace(/^-|-$/g,'').slice(0,50)||`activity-${Date.now()}`);
+    const points=Math.max(0,num(body.points,0)), cash=Math.max(0,num(body.cash_value,0));
+    if(points<=0&&cash<=0)return json({error:'กิจกรรมต้องมีรางวัลอย่างน้อย 1 อย่าง'},400);
+    try{
+      const r=await env.DB.prepare(`INSERT INTO point_rules (
+        client_id,code,name,description,event_type,trigger_key,points,cash_value,threshold_count,window_days,is_active,effective_from,
+        audience_type,audience_ids_json,approval_mode,repeat_mode,max_awards_per_employee,requires_evidence,starts_at,ends_at,template_key,config_json,created_by_user_id
+      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)`)
+        .bind(clientId,code,name,String(body.description||'').trim()||null,eventType,triggerKey,points,cash,
+          Math.max(1,Math.floor(num(body.threshold_count,1))),body.window_days?Math.max(1,Math.floor(num(body.window_days,30))):null,body.is_active?1:0,
+          body.effective_from||body.starts_at||dateInBangkok(),audience.type,JSON.stringify(audience.ids),approvalMode,repeatMode,
+          body.max_awards_per_employee===''||body.max_awards_per_employee==null?null:Math.max(1,Math.floor(num(body.max_awards_per_employee,1))),
+          body.requires_evidence?1:0,normalizeOptionalDate(body.starts_at),normalizeOptionalDate(body.ends_at),String(body.template_key||'').trim()||null,
+          JSON.stringify(body.config&&typeof body.config==='object'?body.config:{}),Number(auth.user.id)).run();
+      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.activity.create','point_rule',String(r.meta.last_row_id),{name,trigger_key:triggerKey,audience_type:audience.type});
+      return json({ok:true,id:Number(r.meta.last_row_id)},201);
+    }catch(e){if(/UNIQUE/i.test(String(e?.message||e)))return json({error:'ชื่อหรือรหัสกิจกรรมซ้ำ กรุณาเปลี่ยนชื่อ'},409);throw e;}
   }
 
   const engagementRuleMatch=path.match(/^\/api\/engagement\/rules\/(\d+)$/);
   if(engagementRuleMatch && method==='PATCH'){
-    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์แก้กติกาแต้ม'},403); await ensurePhase5Defaults(env.DB,clientId); const id=Number(engagementRuleMatch[1]); const row=await env.DB.prepare('SELECT * FROM point_rules WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!row)return json({error:'ไม่พบกติกา'},404); const body=await safeJson(request);
-    await env.DB.prepare(`UPDATE point_rules SET name=?1,description=?2,event_type=?3,points=?4,cash_value=?5,threshold_count=?6,window_days=?7,is_active=?8,effective_from=?9,updated_at=CURRENT_TIMESTAMP WHERE id=?10 AND client_id=?11`)
-      .bind(String(body.name??row.name).trim(),String(body.description??row.description??'').trim()||null,['attendance_streak','learning_complete','kpi_complete','birthday','work_anniversary','manual','custom'].includes(String(body.event_type))?String(body.event_type):row.event_type,Math.max(0,num(body.points,row.points)),Math.max(0,num(body.cash_value,row.cash_value)),Math.max(1,Math.floor(num(body.threshold_count,row.threshold_count||1))),body.window_days===null?null:(body.window_days===undefined?row.window_days:Math.max(1,Math.floor(num(body.window_days,row.window_days||30)))),body.is_active===undefined?Number(row.is_active):(body.is_active?1:0),body.effective_from||row.effective_from||dateInBangkok(),id,clientId).run(); return json({ok:true});
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์แก้กิจกรรม'},403);
+    await ensurePhase5Defaults(env.DB,clientId);
+    const id=Number(engagementRuleMatch[1]), row=await env.DB.prepare('SELECT * FROM point_rules WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if(!row)return json({error:'ไม่พบกิจกรรม'},404);
+    const body=await safeJson(request), triggerKey=normalizeEngagementTrigger(body.trigger_key??row.trigger_key??row.event_type), eventType=legacyEventTypeForTrigger(triggerKey);
+    const existingAudienceIds=safeJsonParse(row.audience_ids_json,[]), audience=normalizeEngagementAudience(body.audience_type??row.audience_type,body.audience_ids??existingAudienceIds);
+    const repeatMode=normalizeEngagementRepeat(body.repeat_mode??row.repeat_mode,triggerKey), approvalMode=normalizeEngagementApproval(body.approval_mode??row.approval_mode,triggerKey);
+    await env.DB.prepare(`UPDATE point_rules SET
+      name=?1,description=?2,event_type=?3,trigger_key=?4,points=?5,cash_value=?6,threshold_count=?7,window_days=?8,is_active=?9,effective_from=?10,
+      audience_type=?11,audience_ids_json=?12,approval_mode=?13,repeat_mode=?14,max_awards_per_employee=?15,requires_evidence=?16,starts_at=?17,ends_at=?18,
+      template_key=?19,config_json=?20,updated_at=CURRENT_TIMESTAMP WHERE id=?21 AND client_id=?22`)
+      .bind(String(body.name??row.name).trim(),String(body.description??row.description??'').trim()||null,eventType,triggerKey,
+        Math.max(0,num(body.points,row.points)),Math.max(0,num(body.cash_value,row.cash_value)),Math.max(1,Math.floor(num(body.threshold_count,row.threshold_count||1))),
+        body.window_days===null?null:(body.window_days===undefined?row.window_days:Math.max(1,Math.floor(num(body.window_days,row.window_days||30)))),
+        body.is_active===undefined?Number(row.is_active):(body.is_active?1:0),body.effective_from||body.starts_at||row.effective_from||dateInBangkok(),
+        audience.type,JSON.stringify(audience.ids),approvalMode,repeatMode,
+        body.max_awards_per_employee===undefined?row.max_awards_per_employee:(body.max_awards_per_employee===''||body.max_awards_per_employee==null?null:Math.max(1,Math.floor(num(body.max_awards_per_employee,1)))),
+        body.requires_evidence===undefined?Number(row.requires_evidence||0):(body.requires_evidence?1:0),
+        body.starts_at===undefined?row.starts_at:normalizeOptionalDate(body.starts_at),body.ends_at===undefined?row.ends_at:normalizeOptionalDate(body.ends_at),
+        body.template_key===undefined?row.template_key:(String(body.template_key||'').trim()||null),
+        body.config===undefined?(row.config_json||'{}'):JSON.stringify(body.config&&typeof body.config==='object'?body.config:{}),id,clientId).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.activity.update','point_rule',String(id),{trigger_key:triggerKey,is_active:body.is_active});
+    return json({ok:true});
+  }
+
+  if(engagementRuleMatch && method==='DELETE'){
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ลบกิจกรรม'},403);
+    await ensurePhase5Defaults(env.DB,clientId); const id=Number(engagementRuleMatch[1]);
+    const row=await env.DB.prepare('SELECT id,name FROM point_rules WHERE id=?1 AND client_id=?2 AND archived_at IS NULL').bind(id,clientId).first();
+    if(!row)return json({error:'ไม่พบกิจกรรม'},404);
+    await env.DB.prepare(`UPDATE point_rules SET is_active=0,archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.activity.archive','point_rule',String(id),{name:row.name});
+    return json({ok:true});
+  }
+
+  const engagementCompleteMatch=path.match(/^\/api\/engagement\/rules\/(\d+)\/complete$/);
+  if(engagementCompleteMatch && method==='POST'){
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์บันทึกกิจกรรม'},403);
+    await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request), id=Number(engagementCompleteMatch[1]), employeeId=Number(body.employee_id);
+    const rule=await env.DB.prepare('SELECT * FROM point_rules WHERE id=?1 AND client_id=?2 AND archived_at IS NULL').bind(id,clientId).first();
+    if(!rule)return json({error:'ไม่พบกิจกรรม'},404); if(!Number(rule.is_active))return json({error:'กิจกรรมนี้ยังปิดอยู่'},409);
+    const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+    try{
+      const result=await completeEngagementRule(env.DB,{clientId,employeeId,rule,note:String(body.note||'').trim(),evidenceUrl:String(body.evidence_url||'').trim(),createdByUserId:Number(auth.user.id)});
+      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.activity.complete','employee',String(employeeId),{rule_id:id,points:Number(rule.points||0),cash_value:Number(rule.cash_value||0)});
+      return json({ok:true,...result},201);
+    }catch(e){return json({error:e.message},e.status||400);}
   }
 
   if(path==='/api/engagement/award' && method==='POST'){
-    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ให้แต้ม'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const employeeId=Number(body.employee_id); const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404); const points=num(body.points,0); if(!points)return json({error:'กรุณาระบุแต้ม'},400);
-    const result=await addPointTransaction(env.DB,{clientId,employeeId,transactionType:points>=0?'earn':'adjust',points,cashValue:Math.max(0,num(body.cash_value,0)),referenceType:'manual',referenceId:null,idempotencyKey:null,note:String(body.note||'HR ให้แต้ม').trim(),createdByUserId:Number(auth.user.id)}); await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.points.manual','employee',String(employeeId),{points,cash_value:Number(body.cash_value||0)}); return json({ok:true,...result},201);
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ให้รางวัล'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const employeeId=Number(body.employee_id); const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404); const points=num(body.points,0),cash=Math.max(0,num(body.cash_value,0)); if(!points&&!cash)return json({error:'กรุณาระบุแต้ม หรือเงินรางวัล'},400);
+    const result=await addPointTransaction(env.DB,{clientId,employeeId,transactionType:points>=0?'earn':'adjust',points,cashValue:cash,referenceType:'manual',referenceId:null,idempotencyKey:null,note:String(body.note||'HR ให้รางวัล').trim(),createdByUserId:Number(auth.user.id)}); await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.points.manual','employee',String(employeeId),{points,cash_value:cash}); return json({ok:true,...result},201);
   }
 
   if(path==='/api/engagement/run-rules' && method==='POST'){
@@ -3447,12 +3511,14 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if(path==='/api/engagement/rewards' && method==='POST'){
-    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์เพิ่มของรางวัล'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const title=String(body.title||'').trim(); if(title.length<2)return json({error:'กรุณาใส่ชื่อของรางวัล'},400); const type=['gift','cash','leave','perk','custom'].includes(String(body.reward_type))?String(body.reward_type):'gift'; const r=await env.DB.prepare(`INSERT INTO reward_catalog (client_id,title,description,reward_type,points_cost,cash_value,stock_qty,status,created_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,'active',?8)`).bind(clientId,title,String(body.description||'').trim()||null,type,Math.max(0,num(body.points_cost,0)),Math.max(0,num(body.cash_value,0)),body.stock_qty===''||body.stock_qty==null?null:Math.max(0,Math.floor(num(body.stock_qty,0))),Number(auth.user.id)).run(); return json({ok:true,id:Number(r.meta.last_row_id)},201);
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์เพิ่มของรางวัล'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const title=String(body.title||'').trim(); if(title.length<2)return json({error:'กรุณาใส่ชื่อของรางวัล'},400); const type=['gift','cash','leave','perk','custom'].includes(String(body.reward_type))?String(body.reward_type):'gift';
+    const r=await env.DB.prepare(`INSERT INTO reward_catalog (client_id,title,description,reward_type,points_cost,cash_value,stock_qty,status,requires_date,fulfillment_label,approval_mode,created_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,'active',?8,?9,?10,?11)`).bind(clientId,title,String(body.description||'').trim()||null,type,Math.max(0,num(body.points_cost,0)),Math.max(0,num(body.cash_value,0)),body.stock_qty===''||body.stock_qty==null?null:Math.max(0,Math.floor(num(body.stock_qty,0))),body.requires_date?1:0,String(body.fulfillment_label||'').trim()||null,body.approval_mode==='auto'?'auto':'hr',Number(auth.user.id)).run(); return json({ok:true,id:Number(r.meta.last_row_id)},201);
   }
 
   const rewardMatch=path.match(/^\/api\/engagement\/rewards\/(\d+)$/);
   if(rewardMatch && method==='PATCH'){
-    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์แก้ของรางวัล'},403); const id=Number(rewardMatch[1]); const row=await env.DB.prepare('SELECT * FROM reward_catalog WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!row)return json({error:'ไม่พบของรางวัล'},404); const body=await safeJson(request); await env.DB.prepare(`UPDATE reward_catalog SET title=?1,description=?2,reward_type=?3,points_cost=?4,cash_value=?5,stock_qty=?6,status=?7,updated_at=CURRENT_TIMESTAMP WHERE id=?8 AND client_id=?9`).bind(String(body.title??row.title).trim(),String(body.description??row.description??'').trim()||null,['gift','cash','leave','perk','custom'].includes(String(body.reward_type))?String(body.reward_type):row.reward_type,Math.max(0,num(body.points_cost,row.points_cost)),Math.max(0,num(body.cash_value,row.cash_value)),body.stock_qty===undefined?row.stock_qty:(body.stock_qty===''||body.stock_qty==null?null:Math.max(0,Math.floor(num(body.stock_qty,0)))),['active','inactive','archived'].includes(String(body.status))?String(body.status):row.status,id,clientId).run(); return json({ok:true});
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์แก้ของรางวัล'},403); const id=Number(rewardMatch[1]); const row=await env.DB.prepare('SELECT * FROM reward_catalog WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!row)return json({error:'ไม่พบของรางวัล'},404); const body=await safeJson(request);
+    await env.DB.prepare(`UPDATE reward_catalog SET title=?1,description=?2,reward_type=?3,points_cost=?4,cash_value=?5,stock_qty=?6,status=?7,requires_date=?8,fulfillment_label=?9,approval_mode=?10,updated_at=CURRENT_TIMESTAMP WHERE id=?11 AND client_id=?12`).bind(String(body.title??row.title).trim(),String(body.description??row.description??'').trim()||null,['gift','cash','leave','perk','custom'].includes(String(body.reward_type))?String(body.reward_type):row.reward_type,Math.max(0,num(body.points_cost,row.points_cost)),Math.max(0,num(body.cash_value,row.cash_value)),body.stock_qty===undefined?row.stock_qty:(body.stock_qty===''||body.stock_qty==null?null:Math.max(0,Math.floor(num(body.stock_qty,0)))),['active','inactive','archived'].includes(String(body.status))?String(body.status):row.status,body.requires_date===undefined?Number(row.requires_date||0):(body.requires_date?1:0),body.fulfillment_label===undefined?row.fulfillment_label:(String(body.fulfillment_label||'').trim()||null),body.approval_mode===undefined?(row.approval_mode||'hr'):(body.approval_mode==='auto'?'auto':'hr'),id,clientId).run(); return json({ok:true});
   }
 
   const redemptionDecisionMatch=path.match(/^\/api\/engagement\/redemptions\/(\d+)\/(approve|reject|deliver)$/);
@@ -3955,6 +4021,9 @@ async function checkIn(db, employeeId, lat, lng, source) {
   await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_in', 'attendance', `${employeeId}:${workDate}`, {
     lat, lng, late_minutes: lateMinutes, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
   });
+  if(schedule.is_workday && lateMinutes===0){
+    try{await awardEventRules(db,Number(employee.client_id),Number(employeeId),'attendance_on_time',workDate,`เช็กอินตรงเวลา · ${workDate}`);}catch(error){console.warn('attendance engagement award failed',error);}
+  }
   return {
     check_in_at: nowIso, work_date: workDate, status, late_minutes: lateMinutes,
     distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
@@ -4936,6 +5005,73 @@ async function generateEmployeeCertificate(env,clientId,employeeId,type,userId,n
 function wrapTextSimple(text,maxChars){const words=String(text||'').split(/\s+/);const lines=[];let line='';for(const word of words){if((line+' '+word).trim().length>maxChars&&line){lines.push(line);line=word;}else line=(line+' '+word).trim();}if(line)lines.push(line);return lines;}
 
 
+
+function normalizeEngagementTrigger(value){
+  const v=String(value||'manual').trim();
+  const allowed=['attendance_on_time','attendance_streak','learning_complete','kpi_complete','birthday','work_anniversary','social_share','social_engagement','manual','custom'];
+  return allowed.includes(v)?v:'custom';
+}
+function legacyEventTypeForTrigger(trigger){
+  return ['attendance_streak','learning_complete','kpi_complete','birthday','work_anniversary','manual'].includes(String(trigger))?String(trigger):'custom';
+}
+function normalizeEngagementRepeat(value,trigger='manual'){
+  const v=String(value||'').trim(); const allowed=['event','once','daily','weekly','monthly','unlimited'];
+  if(allowed.includes(v))return v;
+  return ['birthday','work_anniversary'].includes(String(trigger))?'event':['attendance_on_time','learning_complete','kpi_complete','attendance_streak'].includes(String(trigger))?'event':'once';
+}
+function normalizeEngagementApproval(value,trigger='manual'){
+  const v=String(value||'').trim();
+  if(['auto','hr'].includes(v))return v;
+  return ['social_share','social_engagement','manual','custom'].includes(String(trigger))?'hr':'auto';
+}
+function normalizeEngagementAudience(type,ids){
+  const t=['all','department','employees'].includes(String(type))?String(type):'all';
+  const raw=Array.isArray(ids)?ids:(ids==null?[]:[ids]);
+  const clean=[...new Set(raw.map(Number).filter(Number.isFinite).filter(x=>x>0))];
+  return {type:t,ids:t==='all'?[]:clean};
+}
+function normalizeOptionalDate(v){const x=String(v||'').trim();return /^\d{4}-\d{2}-\d{2}$/.test(x)?x:null;}
+function engagementTriggerKey(rule){return normalizeEngagementTrigger(rule?.trigger_key||rule?.event_type);}
+function engagementRuleScheduleAllows(rule,dateKey=dateInBangkok()){
+  const d=String(dateKey||dateInBangkok()).slice(0,10); if(rule?.archived_at)return false;
+  if(rule?.starts_at&&d<String(rule.starts_at).slice(0,10))return false;
+  if(rule?.ends_at&&d>String(rule.ends_at).slice(0,10))return false;
+  return true;
+}
+async function employeeMatchesEngagementAudience(db,rule,clientId,employeeId){
+  const type=String(rule?.audience_type||'all'); if(type==='all')return true;
+  const ids=(safeJsonParse(rule?.audience_ids_json,[])||[]).map(Number);
+  if(type==='employees')return ids.includes(Number(employeeId));
+  if(type==='department'){
+    const row=await db.prepare('SELECT department_id FROM employees WHERE id=?1 AND client_id=?2').bind(Number(employeeId),Number(clientId)).first();
+    return ids.includes(Number(row?.department_id||0));
+  }
+  return true;
+}
+function engagementPeriodKey(repeatMode,dateKey=dateInBangkok()){
+  const d=String(dateKey||dateInBangkok()).slice(0,10); if(repeatMode==='daily')return d; if(repeatMode==='monthly')return d.slice(0,7);
+  if(repeatMode==='weekly'){
+    const dt=new Date(`${d}T12:00:00+07:00`), day=(dt.getUTCDay()+6)%7; dt.setUTCDate(dt.getUTCDate()-day);
+    return dt.toISOString().slice(0,10);
+  }
+  if(repeatMode==='once')return 'once'; return null;
+}
+async function completeEngagementRule(db,{clientId,employeeId,rule,note='',evidenceUrl='',createdByUserId=null}){
+  const cid=Number(clientId),eid=Number(employeeId),today=dateInBangkok();
+  const setting=await db.prepare('SELECT points_enabled FROM engagement_settings WHERE client_id=?1').bind(cid).first(); if(Number(setting?.points_enabled??1)!==1)throw httpError('ระบบแต้มและรางวัลถูกปิดอยู่',409);
+  if(!engagementRuleScheduleAllows(rule,today))throw httpError('กิจกรรมนี้อยู่นอกช่วงเวลาที่กำหนด',409);
+  if(!await employeeMatchesEngagementAudience(db,rule,cid,eid))throw httpError('พนักงานคนนี้ไม่ได้อยู่ในกลุ่มของกิจกรรม',409);
+  if(Number(rule.requires_evidence||0)&&!String(evidenceUrl||'').trim()&&!String(note||'').trim())throw httpError('กิจกรรมนี้ต้องมีหลักฐานหรือหมายเหตุ',400);
+  const max=rule.max_awards_per_employee==null?null:Math.max(1,Number(rule.max_awards_per_employee));
+  if(max){const n=Number((await db.prepare('SELECT COUNT(*) AS n FROM point_transactions WHERE client_id=?1 AND employee_id=?2 AND rule_id=?3').bind(cid,eid,Number(rule.id)).first())?.n||0);if(n>=max)throw httpError(`กิจกรรมนี้รับรางวัลได้สูงสุด ${max} ครั้งต่อคน`,409);}
+  const repeat=normalizeEngagementRepeat(rule.repeat_mode,engagementTriggerKey(rule)),period=engagementPeriodKey(repeat,today);
+  const key=repeat==='event'||repeat==='unlimited'?`rule:${rule.id}:manual:${eid}:${Date.now()}:${Math.random().toString(36).slice(2,8)}`:`rule:${rule.id}:manual:${eid}:${period}`;
+  const detail=[note,evidenceUrl?`หลักฐาน: ${evidenceUrl}`:''].filter(Boolean).join(' · ')||rule.name;
+  const result=await addPointTransaction(db,{clientId:cid,employeeId:eid,ruleId:Number(rule.id),transactionType:'earn',points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'engagement_activity',referenceId:period||today,idempotencyKey:key,note:detail,createdByUserId});
+  if(result.duplicate)throw httpError('พนักงานได้รับรางวัลจากกิจกรรมนี้ในรอบที่กำหนดแล้ว',409);
+  return result;
+}
+
 function canViewEngagement(role){ return ['owner','co_owner','hr_admin','hr','manager','viewer'].includes(String(role||'')); }
 function canManageEngagement(role){ return ['owner','co_owner','hr_admin','hr'].includes(String(role||'')); }
 function canViewAnalytics(role){ return ['owner','co_owner','hr_admin','hr','manager','viewer'].includes(String(role||'')); }
@@ -4972,37 +5108,50 @@ async function addPointTransaction(db,{clientId,employeeId,ruleId=null,transacti
 
 async function awardEventRules(db,clientId,employeeId,eventType,referenceId,note){
   await ensurePhase5Defaults(db,clientId);
-  const rules=(await db.prepare(`SELECT * FROM point_rules WHERE client_id=?1 AND is_active=1 AND event_type=?2 ORDER BY id`).bind(Number(clientId),String(eventType)).all()).results||[];
+  const setting=await db.prepare('SELECT points_enabled FROM engagement_settings WHERE client_id=?1').bind(Number(clientId)).first(); if(Number(setting?.points_enabled??1)!==1)return 0;
+  const cid=Number(clientId),eid=Number(employeeId),trigger=normalizeEngagementTrigger(eventType),today=dateInBangkok();
+  const rules=(await db.prepare(`SELECT * FROM point_rules WHERE client_id=?1 AND is_active=1 AND archived_at IS NULL AND COALESCE(NULLIF(trigger_key,''),event_type)=?2 ORDER BY id`).bind(cid,trigger).all()).results||[];
   let awarded=0;
   for(const rule of rules){
-    const key=`rule:${rule.id}:${eventType}:${employeeId}:${referenceId}`;
-    const r=await addPointTransaction(db,{clientId,employeeId,ruleId:rule.id,transactionType:'earn',points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:eventType,referenceId,idempotencyKey:key,note:note||rule.name});
+    if(!engagementRuleScheduleAllows(rule,today))continue;
+    if(!await employeeMatchesEngagementAudience(db,rule,cid,eid))continue;
+    const repeat=normalizeEngagementRepeat(rule.repeat_mode,trigger), period=engagementPeriodKey(repeat,today);
+    let suffix=String(referenceId??today);
+    if(repeat==='once'||repeat==='daily'||repeat==='weekly'||repeat==='monthly')suffix=period;
+    const max=rule.max_awards_per_employee==null?null:Math.max(1,Number(rule.max_awards_per_employee));
+    if(max){const n=Number((await db.prepare('SELECT COUNT(*) AS n FROM point_transactions WHERE client_id=?1 AND employee_id=?2 AND rule_id=?3').bind(cid,eid,Number(rule.id)).first())?.n||0);if(n>=max)continue;}
+    const key=`rule:${rule.id}:${trigger}:${eid}:${suffix}`;
+    const r=await addPointTransaction(db,{clientId:cid,employeeId:eid,ruleId:rule.id,transactionType:'earn',points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:trigger,referenceId:suffix,idempotencyKey:key,note:note||rule.name});
     if(!r.duplicate)awarded++;
   }
   return awarded;
 }
 
 async function runEngagementAutomationForClient(db,clientId){
-  await ensurePhase5Defaults(db,clientId); const cid=Number(clientId),today=dateInBangkok(),year=today.slice(0,4);
-  const rules=(await db.prepare(`SELECT * FROM point_rules WHERE client_id=?1 AND is_active=1 ORDER BY id`).bind(cid).all()).results||[];
-  const employees=(await db.prepare(`SELECT id,birth_date,start_date,first_name,last_name,nickname FROM employees WHERE client_id=?1 AND status='active' AND COALESCE(people_status,'employee') IN ('probation','employee','leave_of_absence')`).bind(cid).all()).results||[];
+  await ensurePhase5Defaults(db,clientId); const setting=await db.prepare('SELECT points_enabled FROM engagement_settings WHERE client_id=?1').bind(Number(clientId)).first(); if(Number(setting?.points_enabled??1)!==1)return {awarded:0}; const cid=Number(clientId),today=dateInBangkok(),year=today.slice(0,4);
+  const rules=(await db.prepare(`SELECT * FROM point_rules WHERE client_id=?1 AND is_active=1 AND archived_at IS NULL ORDER BY id`).bind(cid).all()).results||[];
+  const employees=(await db.prepare(`SELECT id,department_id,birth_date,start_date,first_name,last_name,nickname FROM employees WHERE client_id=?1 AND status='active' AND COALESCE(people_status,'employee') IN ('probation','employee','leave_of_absence')`).bind(cid).all()).results||[];
   let awarded=0;
   for(const rule of rules){
-    if(rule.event_type==='attendance_streak'){
-      const threshold=Math.max(1,Number(rule.threshold_count||1)); const effective=rule.effective_from||'2000-01-01';
+    if(!engagementRuleScheduleAllows(rule,today))continue;
+    const trigger=engagementTriggerKey(rule);
+    if(trigger==='attendance_streak'){
+      const threshold=Math.max(1,Number(rule.threshold_count||1)); const effective=rule.starts_at||rule.effective_from||'2000-01-01';
       for(const emp of employees){
+        if(!await employeeMatchesEngagementAudience(db,rule,cid,emp.id))continue;
         const countRow=await db.prepare(`SELECT COUNT(*) AS n FROM attendance WHERE client_id=?1 AND employee_id=?2 AND work_date>=?3 AND work_date<=?4 AND check_in_at IS NOT NULL AND COALESCE(late_minutes,0)=0 AND COALESCE(status,'present') NOT IN ('leave','absent')`).bind(cid,Number(emp.id),effective,today).first();
         const blocks=Math.floor(Number(countRow?.n||0)/threshold);
         for(let b=1;b<=blocks;b++){
+          const max=rule.max_awards_per_employee==null?null:Math.max(1,Number(rule.max_awards_per_employee)); if(max&&b>max)break;
           const r=await addPointTransaction(db,{clientId:cid,employeeId:emp.id,ruleId:rule.id,points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'attendance_streak',referenceId:`block-${b}`,idempotencyKey:`rule:${rule.id}:attendance:${emp.id}:block:${b}`,note:`${rule.name} · ครั้งที่ ${b*threshold}`}); if(!r.duplicate)awarded++;
         }
       }
     }
-    if(rule.event_type==='birthday'){
-      for(const emp of employees){if(!emp.birth_date||String(emp.birth_date).slice(5)!==today.slice(5))continue;const r=await addPointTransaction(db,{clientId:cid,employeeId:emp.id,ruleId:rule.id,points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'birthday',referenceId:year,idempotencyKey:`rule:${rule.id}:birthday:${emp.id}:${year}`,note:`${rule.name} ${emp.nickname||emp.first_name}`});if(!r.duplicate)awarded++;}
+    if(trigger==='birthday'){
+      for(const emp of employees){if(!await employeeMatchesEngagementAudience(db,rule,cid,emp.id))continue;if(!emp.birth_date||String(emp.birth_date).slice(5)!==today.slice(5))continue;const r=await addPointTransaction(db,{clientId:cid,employeeId:emp.id,ruleId:rule.id,points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'birthday',referenceId:year,idempotencyKey:`rule:${rule.id}:birthday:${emp.id}:${year}`,note:`${rule.name} ${emp.nickname||emp.first_name}`});if(!r.duplicate)awarded++;}
     }
-    if(rule.event_type==='work_anniversary'){
-      for(const emp of employees){if(!emp.start_date||String(emp.start_date).slice(5)!==today.slice(5)||String(emp.start_date).slice(0,4)>=year)continue;const years=Number(year)-Number(String(emp.start_date).slice(0,4));const r=await addPointTransaction(db,{clientId:cid,employeeId:emp.id,ruleId:rule.id,points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'work_anniversary',referenceId:year,idempotencyKey:`rule:${rule.id}:anniversary:${emp.id}:${year}`,note:`${rule.name} · ${years} ปี`});if(!r.duplicate)awarded++;}
+    if(trigger==='work_anniversary'){
+      for(const emp of employees){if(!await employeeMatchesEngagementAudience(db,rule,cid,emp.id))continue;if(!emp.start_date||String(emp.start_date).slice(5)!==today.slice(5)||String(emp.start_date).slice(0,4)>=year)continue;const years=Number(year)-Number(String(emp.start_date).slice(0,4));const r=await addPointTransaction(db,{clientId:cid,employeeId:emp.id,ruleId:rule.id,points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'work_anniversary',referenceId:year,idempotencyKey:`rule:${rule.id}:anniversary:${emp.id}:${year}`,note:`${rule.name} · ${years} ปี`});if(!r.duplicate)awarded++;}
     }
   }
   return {awarded};
@@ -5012,7 +5161,7 @@ async function getEngagementOverview(db,clientId){
   const cid=Number(clientId); await ensurePhase5Defaults(db,cid); await runEngagementAutomationForClient(db,cid);
   const [settings,rules,rewards,redemptions,leaderboard,tx,pendingCash]=await Promise.all([
     db.prepare('SELECT * FROM engagement_settings WHERE client_id=?1').bind(cid).first(),
-    db.prepare('SELECT * FROM point_rules WHERE client_id=?1 ORDER BY is_active DESC,id').bind(cid).all(),
+    db.prepare('SELECT * FROM point_rules WHERE client_id=?1 AND archived_at IS NULL ORDER BY is_active DESC,id DESC').bind(cid).all(),
     db.prepare('SELECT * FROM reward_catalog WHERE client_id=?1 ORDER BY status,id DESC').bind(cid).all(),
     db.prepare(`SELECT rr.*,rc.title AS reward_title,rc.reward_type,e.employee_code,e.first_name,e.last_name,e.nickname FROM reward_redemptions rr JOIN reward_catalog rc ON rc.id=rr.reward_id JOIN employees e ON e.id=rr.employee_id WHERE rr.client_id=?1 ORDER BY rr.requested_at DESC LIMIT 100`).bind(cid).all(),
     db.prepare(`SELECT w.*,e.employee_code,e.first_name,e.last_name,e.nickname,d.name AS department_name FROM employee_point_wallets w JOIN employees e ON e.id=w.employee_id LEFT JOIN departments d ON d.id=e.department_id WHERE w.client_id=?1 AND e.status='active' ORDER BY w.balance DESC,w.lifetime_earned DESC LIMIT 30`).bind(cid).all(),
@@ -5020,16 +5169,22 @@ async function getEngagementOverview(db,clientId){
     db.prepare(`SELECT COALESCE(SUM(cash_value),0) AS amount,COUNT(*) AS n FROM point_transactions WHERE client_id=?1 AND cash_value>0 AND payroll_adjustment_id IS NULL`).bind(cid).first(),
   ]);
   const leaderboardRows=leaderboard.results||[]; const wallets=await db.prepare('SELECT COALESCE(SUM(balance),0) AS outstanding,COALESCE(SUM(lifetime_earned),0) AS earned FROM employee_point_wallets WHERE client_id=?1').bind(cid).first();
-  return {settings,rules:rules.results||[],rewards:rewards.results||[],redemptions:redemptions.results||[],leaderboard:leaderboardRows,recent_transactions:tx.results||[],summary:{points_outstanding:Number(wallets?.outstanding||0),lifetime_earned:Number(wallets?.earned||0),active_rewards:(rewards.results||[]).filter(x=>x.status==='active').length,pending_redemptions:(redemptions.results||[]).filter(x=>x.status==='pending').length,pending_cash_payroll:Number(pendingCash?.amount||0),pending_cash_count:Number(pendingCash?.n||0)}};
+  return {settings,rules:rules.results||[],rewards:rewards.results||[],redemptions:redemptions.results||[],leaderboard:leaderboardRows,recent_transactions:tx.results||[],summary:{points_outstanding:Number(wallets?.outstanding||0),lifetime_earned:Number(wallets?.earned||0),active_activities:(rules.results||[]).filter(x=>Number(x.is_active)&&engagementRuleScheduleAllows(x)).length,total_activities:(rules.results||[]).length,active_rewards:(rewards.results||[]).filter(x=>x.status==='active').length,pending_redemptions:(redemptions.results||[]).filter(x=>x.status==='pending').length,pending_cash_payroll:Number(pendingCash?.amount||0),pending_cash_count:Number(pendingCash?.n||0)}};
 }
 
-async function requestRewardRedemption(db,clientId,employeeId,rewardId,note=''){
+async function requestRewardRedemption(db,clientId,employeeId,rewardId,note='',requestedDate=''){
   const cid=Number(clientId),eid=Number(employeeId),rid=Number(rewardId); await ensurePhase5Defaults(db,cid);
   const reward=await db.prepare(`SELECT * FROM reward_catalog WHERE id=?1 AND client_id=?2 AND status='active'`).bind(rid,cid).first(); if(!reward)throw httpError('ไม่พบของรางวัลหรือปิดใช้งานแล้ว',404); if(reward.stock_qty!=null&&Number(reward.stock_qty)<=0)throw httpError('ของรางวัลหมดแล้ว',409);
   const wallet=await ensurePointWallet(db,cid,eid); const cost=Math.max(0,Number(reward.points_cost||0)); if(Number(wallet.balance||0)<cost)throw httpError(`แต้มไม่พอ ต้องใช้ ${cost.toLocaleString('th-TH')} แต้ม`,409);
-  const insert=await db.prepare(`INSERT INTO reward_redemptions (client_id,employee_id,reward_id,points_cost,cash_value,status,employee_note) VALUES (?1,?2,?3,?4,?5,'pending',?6)`).bind(cid,eid,rid,cost,Number(reward.cash_value||0),note||null).run(); const redemptionId=Number(insert.meta.last_row_id);
+  const date=normalizeOptionalDate(requestedDate); if(Number(reward.requires_date||0)&&!date)throw httpError(`กรุณาเลือก${reward.fulfillment_label||'วันที่ต้องการใช้สิทธิ์'}`,400);
+  const initialStatus=String(reward.approval_mode||'hr')==='auto'?'approved':'pending';
+  const insert=await db.prepare(`INSERT INTO reward_redemptions (client_id,employee_id,reward_id,points_cost,cash_value,status,employee_note,requested_date,decided_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,CASE WHEN ?6='approved' THEN CURRENT_TIMESTAMP ELSE NULL END)`).bind(cid,eid,rid,cost,Number(reward.cash_value||0),initialStatus,note||null,date).run(); const redemptionId=Number(insert.meta.last_row_id);
   try{await addPointTransaction(db,{clientId:cid,employeeId:eid,transactionType:'spend',points:-cost,referenceType:'reward_redemption',referenceId:redemptionId,idempotencyKey:`redemption:${redemptionId}:spend`,note:`แลก ${reward.title}`});}
   catch(error){await db.prepare('DELETE FROM reward_redemptions WHERE id=?1').bind(redemptionId).run();throw error;}
+  if(initialStatus==='approved'){
+    if(reward.stock_qty!=null)await db.prepare(`UPDATE reward_catalog SET stock_qty=MAX(0,stock_qty-1),updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(rid).run();
+    if(Number(reward.cash_value||0)>0)await addPointTransaction(db,{clientId:cid,employeeId:eid,transactionType:'earn',points:0,cashValue:Number(reward.cash_value||0),referenceType:'reward_cash',referenceId:redemptionId,idempotencyKey:`redemption:${redemptionId}:cash`,note:`Cash reward · ${reward.title}`});
+  }
   return {id:redemptionId,reward,wallet:await ensurePointWallet(db,cid,eid)};
 }
 
@@ -5429,15 +5584,15 @@ async function getPublicLearningPortal(env,token){
   await ensurePhase5Defaults(env.DB,Number(access.client_id));
   const [wallet,rewards,redemptions,leaderboard]=await Promise.all([
     ensurePointWallet(env.DB,Number(access.client_id),Number(access.employee_id)),
-    env.DB.prepare(`SELECT id,title,description,reward_type,points_cost,cash_value,stock_qty FROM reward_catalog WHERE client_id=?1 AND status='active' AND (stock_qty IS NULL OR stock_qty>0) ORDER BY points_cost,id`).bind(Number(access.client_id)).all(),
-    env.DB.prepare(`SELECT rr.id,rr.reward_id,rr.points_cost,rr.cash_value,rr.status,rr.requested_at,rr.decided_at,rr.delivered_at,rc.title AS reward_title FROM reward_redemptions rr JOIN reward_catalog rc ON rc.id=rr.reward_id WHERE rr.client_id=?1 AND rr.employee_id=?2 ORDER BY rr.requested_at DESC LIMIT 30`).bind(Number(access.client_id),Number(access.employee_id)).all(),
+    env.DB.prepare(`SELECT id,title,description,reward_type,points_cost,cash_value,stock_qty,requires_date,fulfillment_label,approval_mode FROM reward_catalog WHERE client_id=?1 AND status='active' AND (stock_qty IS NULL OR stock_qty>0) ORDER BY points_cost,id`).bind(Number(access.client_id)).all(),
+    env.DB.prepare(`SELECT rr.id,rr.reward_id,rr.points_cost,rr.cash_value,rr.status,rr.requested_at,rr.requested_date,rr.decided_at,rr.delivered_at,rc.title AS reward_title FROM reward_redemptions rr JOIN reward_catalog rc ON rc.id=rr.reward_id WHERE rr.client_id=?1 AND rr.employee_id=?2 ORDER BY rr.requested_at DESC LIMIT 30`).bind(Number(access.client_id),Number(access.employee_id)).all(),
     env.DB.prepare(`SELECT w.employee_id,w.balance,e.nickname,e.first_name FROM employee_point_wallets w JOIN employees e ON e.id=w.employee_id WHERE w.client_id=?1 AND e.status='active' ORDER BY w.balance DESC LIMIT 10`).bind(Number(access.client_id)).all()
   ]);
   return json({employee:{id:access.employee_id,employee_code:access.employee_code,name:access.nickname||access.first_name,company_name:access.company_name,people_status:access.people_status},courses,goals,engagement:{wallet,rewards:rewards.results||[],redemptions:redemptions.results||[],leaderboard:leaderboard.results||[]},summary:{courses:courses.length,completed:courses.filter(c=>c.status==='completed').length,goals:goals.length,points:Number(wallet?.balance||0)}});
 }
 
 async function redeemPublicReward(request,env,token,rewardId){
-  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ'},401); const body=await safeJson(request); try{const result=await requestRewardRedemption(env.DB,Number(access.client_id),Number(access.employee_id),Number(rewardId),String(body.note||'').trim()); return json({ok:true,id:result.id,wallet:result.wallet},201);}catch(e){return json({error:e.message},e.status||400);}
+  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ'},401); const body=await safeJson(request); try{const result=await requestRewardRedemption(env.DB,Number(access.client_id),Number(access.employee_id),Number(rewardId),String(body.note||'').trim(),String(body.requested_date||'').trim()); return json({ok:true,id:result.id,wallet:result.wallet},201);}catch(e){return json({error:e.message},e.status||400);}
 }
 
 async function getAssignmentForPublicModule(db,access,moduleId){
@@ -5691,6 +5846,29 @@ async function ensureV100P5Ready(db){
       catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}
     }
   }
+  // P7.57 — Engagement Studio. Keep the original point engine, but make every rule configurable.
+  await ensureColumns(db,'point_rules',[
+    ['trigger_key','TEXT'],
+    ['audience_type',"TEXT NOT NULL DEFAULT 'all'"],
+    ['audience_ids_json','TEXT'],
+    ['approval_mode',"TEXT NOT NULL DEFAULT 'auto'"],
+    ['repeat_mode',"TEXT NOT NULL DEFAULT 'event'"],
+    ['max_awards_per_employee','INTEGER'],
+    ['requires_evidence','INTEGER NOT NULL DEFAULT 0'],
+    ['starts_at','TEXT'],
+    ['ends_at','TEXT'],
+    ['template_key','TEXT'],
+    ['config_json','TEXT'],
+    ['archived_at','TEXT']
+  ]);
+  await ensureColumns(db,'reward_catalog',[
+    ['requires_date','INTEGER NOT NULL DEFAULT 0'],
+    ['fulfillment_label','TEXT'],
+    ['approval_mode',"TEXT NOT NULL DEFAULT 'hr'"]
+  ]);
+  await ensureColumns(db,'reward_redemptions',[
+    ['requested_date','TEXT']
+  ]);
   SCHEMA_READY.add('p5');
 }
 
@@ -5738,6 +5916,12 @@ async function ensurePhase5Defaults(db,clientId){
   for(const r of defaults){
     await db.prepare(`INSERT OR IGNORE INTO point_rules (client_id,code,name,description,event_type,points,cash_value,threshold_count,is_active,effective_from) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`).bind(id,...r,dateInBangkok()).run();
   }
+  // P7.57: legacy preset rules become Templates instead of cluttering every company by default.
+  // Only hide untouched + inactive presets; anything a customer edited or used stays visible.
+  await db.prepare(`UPDATE point_rules SET archived_at=COALESCE(archived_at,CURRENT_TIMESTAMP)
+    WHERE client_id=?1 AND code IN ('attendance-10','learning-complete','kpi-complete','birthday','anniversary')
+      AND is_active=0 AND archived_at IS NULL AND created_at=updated_at
+      AND NOT EXISTS (SELECT 1 FROM point_transactions t WHERE t.rule_id=point_rules.id LIMIT 1)`).bind(id).run().catch(()=>{});
   const trialPlan=await db.prepare(`SELECT id,trial_days FROM subscription_plans WHERE code='trial' LIMIT 1`).first();
   const existing=await db.prepare('SELECT id FROM company_subscriptions WHERE client_id=?1').bind(id).first();
   if(!existing){
