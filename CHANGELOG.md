@@ -1,3 +1,23 @@
+## V1.0-P7.57 — Engagement Studio / Flexible Activity Builder
+
+- เปลี่ยนหน้า “แต้ม & ของรางวัล” เป็น “กิจกรรม & รางวัล” แบบ Engagement Studio
+- เพิ่ม Activity Builder: Trigger → Audience → Reward → Limit → Approval → Schedule
+- เพิ่ม Template เริ่มต้น: ตรงเวลา, KPI, Learning, Social และ Custom (Template ไม่เปิดเองจนกดสร้าง)
+- รองรับ Trigger อัตโนมัติ: เช็กอินตรงเวลา, Attendance streak, Learning complete, KPI complete, Birthday, Work anniversary
+- รองรับกิจกรรมแบบ HR/หัวหน้ายืนยัน: Social share, Social engagement, Manual, Custom
+- จำกัดกลุ่มเป้าหมายได้: ทั้งบริษัท / แผนก / รายบุคคล
+- จำกัดความถี่ได้: ต่อเหตุการณ์ / ครั้งเดียว / รายวัน / รายสัปดาห์ / รายเดือน / ไม่จำกัด พร้อม Max per employee
+- กำหนดช่วงวันที่เริ่ม–สิ้นสุด และบังคับหลักฐาน/หมายเหตุได้
+- รางวัลจากกิจกรรมรองรับแต้ม + Cash Incentive และส่ง Cash เข้า Payroll ตาม Engine เดิม
+- เพิ่มคำสั่งแก้ไข / คัดลอก / เปิด-ปิด / ลบกิจกรรม โดยการลบเป็น Archive เพื่อรักษาประวัติแต้ม
+- เพิ่ม “บันทึกสำเร็จ” สำหรับกิจกรรม Manual/Social โดยเลือกพนักงานและแนบลิงก์หลักฐานได้
+- เพิ่ม Reward Builder ให้รางวัลเลือกวันที่ใช้สิทธิ์ได้ เช่น WFH / วันหยุดพิเศษ และเลือก HR approve / auto approve ได้
+- Employee Portal รองรับการระบุวันที่ตอนแลกรางวัลที่ต้องเลือกวัน
+- Leaderboard เปลี่ยนเป็น Optional และเปิด/ปิดได้จาก Engagement Settings
+- ซ่อน Legacy preset ที่ยังไม่เคยแก้/ไม่เคยใช้ เพื่อไม่ให้หน้าเริ่มต้นรก; ใช้ Template Library แทน
+- เพิ่ม D1 self-migration columns อัตโนมัติ ไม่ต้องรัน SQL แยกสำหรับ P7.57
+- `npm run check` ผ่าน
+
 ## V1.0-P7.56 — Smart Auto Organization Hierarchy
 - ผังองค์กรจัดลำดับชั้นให้อัตโนมัติเมื่อยังไม่ได้กำหนดแผนกแม่
 - ยึดลำดับที่ผู้ใช้กำหนดเอง (`parent_department_id`) เป็นอันดับแรกเสมอ

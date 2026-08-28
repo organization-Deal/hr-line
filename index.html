@@ -213,7 +213,7 @@
         <button class="nav-item" data-view="recruitment"><svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM3 21v-2a6 6 0 0 1 6-6h2M16 11l2 2 4-4M15 21h6"/></svg><span>Recruitment</span></button>
         <button class="nav-item" data-view="benefits"><svg viewBox="0 0 24 24"><path d="M12 21s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 11c0 5.65-7 10-7 10Z"/><path d="M9 13h6M12 10v6"/></svg><span>สวัสดิการ</span></button>
         <button class="nav-item" data-view="performance"><svg viewBox="0 0 24 24"><path d="m4 18 5-5 4 3 7-9"/><path d="M15 7h5v5"/></svg><span>Learning & KPI</span></button>
-        <button class="nav-item" data-view="engagement"><svg viewBox="0 0 24 24"><path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 3Z"/></svg><span>แต้ม & ของรางวัล</span></button>
+        <button class="nav-item" data-view="engagement"><svg viewBox="0 0 24 24"><path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 3Z"/></svg><span>กิจกรรม & รางวัล</span></button>
         <button class="nav-item" data-view="analytics"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>People Analytics</span></button>
 
         <p class="nav-label">บริหารจัดการ</p>
@@ -228,7 +228,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.56</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.57</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -635,16 +635,50 @@
         </div>
       </section>
       <section id="view-engagement" class="view">
-        <div class="page-intro"><div><p class="kicker">ENGAGEMENT</p><h1>แต้ม & ของรางวัล</h1><p>เปลี่ยนพฤติกรรมที่บริษัทอยากเห็นให้เป็นแต้ม รางวัล และ Incentive ที่ต่อเข้า Payroll ได้</p></div><div class="page-actions"><button id="runPointRulesBtn" class="secondary-btn" type="button">รันกติกาตอนนี้</button><button id="manualAwardBtn" class="primary-btn" type="button">+ ให้แต้ม</button></div></div>
+        <div class="page-intro engagement-page-intro">
+          <div><p class="kicker">ENGAGEMENT STUDIO</p><h1>กิจกรรม & รางวัล</h1><p>สร้างกติกาของบริษัทเองได้ เลือก Trigger · กลุ่มพนักงาน · เงื่อนไข · รางวัล · ช่วงเวลา แล้วเปิดเฉพาะกิจกรรมที่ต้องการ</p></div>
+          <div class="page-actions"><button id="engagementSettingsBtn" class="secondary-btn" type="button">ตั้งค่า</button><button id="manualAwardBtn" class="secondary-btn" type="button">+ ให้รางวัลทันที</button><button id="createPointRuleBtn" class="primary-btn" type="button">+ สร้างกิจกรรม</button></div>
+        </div>
         <div id="engagementSummary" class="engagement-summary"></div>
-        <div class="engagement-grid">
-          <article class="panel"><div class="panel-head"><div><p class="kicker">POINT RULES</p><h3>กติกาการได้แต้ม</h3><p class="panel-subtitle">ปิดไว้เป็นค่าเริ่มต้น HR เลือกเปิดเฉพาะกติกาที่บริษัทต้องการ</p></div><button id="createPointRuleBtn" class="text-btn" type="button">+ กติกา</button></div><div id="pointRulesList" class="phase5-list"></div></article>
-          <article class="panel"><div class="panel-head"><div><p class="kicker">LEADERBOARD</p><h3>คนที่มีแต้มสูงสุด</h3></div><span class="badge badge-soft">Live</span></div><div id="leaderboardList" class="leaderboard-list"></div></article>
-          <article class="panel engagement-reward-panel"><div class="panel-head"><div><p class="kicker">REWARD CATALOG</p><h3>ของรางวัล</h3></div><button id="createRewardBtn" class="text-btn" type="button">+ ของรางวัล</button></div><div id="rewardCatalogList" class="reward-catalog-list"></div></article>
-          <article class="panel"><div class="panel-head"><div><p class="kicker">REDEMPTION QUEUE</p><h3>คำขอแลกรางวัล</h3></div><span id="redemptionQueueBadge" class="badge badge-warning">0 รอจัดการ</span></div><div id="redemptionList" class="phase5-list"></div></article>
+
+        <article class="engagement-studio-hero">
+          <div class="engagement-studio-copy"><span class="engagement-studio-mark">✦</span><div><strong>สร้างระบบ Engagement แบบที่บริษัทต้องการ</strong><p>ไม่ต้องเปิดทุกเกมพร้อมกัน — เลือก Template แล้วแก้เงื่อนไข หรือสร้างเองตั้งแต่ศูนย์ได้</p></div></div>
+          <div class="engagement-template-strip" id="engagementTemplateStrip">
+            <button type="button" data-engagement-template="attendance"><span>◷</span><b>ตรงเวลา</b><small>Auto</small></button>
+            <button type="button" data-engagement-template="kpi"><span>↗</span><b>KPI</b><small>Auto</small></button>
+            <button type="button" data-engagement-template="learning"><span>✓</span><b>Learning</b><small>Auto</small></button>
+            <button type="button" data-engagement-template="social"><span>↗</span><b>Social</b><small>Review</small></button>
+            <button type="button" data-engagement-template="custom"><span>＋</span><b>สร้างเอง</b><small>Custom</small></button>
+          </div>
+        </article>
+
+        <div class="engagement-studio-grid">
+          <article class="panel engagement-activity-panel">
+            <div class="panel-head"><div><p class="kicker">ACTIVITIES</p><h3>กิจกรรมที่บริษัทสร้าง</h3><p class="panel-subtitle">แต่ละกิจกรรมเปิด/ปิด แก้ไข คัดลอก และลบออกจากระบบได้อิสระ</p></div><div class="panel-actions"><button id="runPointRulesBtn" class="text-btn" type="button">ประมวลผลออโต้</button></div></div>
+            <div id="pointRulesList" class="engagement-activity-list"></div>
+          </article>
+
+          <article class="panel engagement-reward-panel-v2">
+            <div class="panel-head"><div><p class="kicker">REWARD STORE</p><h3>ของรางวัล & สิทธิพิเศษ</h3><p class="panel-subtitle">เงินโบนัส วันหยุด ของขวัญ หรือสิทธิ์ที่ต้องเลือกวันใช้ได้</p></div><button id="createRewardBtn" class="text-btn" type="button">+ เพิ่มรางวัล</button></div>
+            <div id="rewardCatalogList" class="reward-catalog-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head"><div><p class="kicker">REDEMPTION QUEUE</p><h3>คำขอแลกรางวัล</h3></div><span id="redemptionQueueBadge" class="badge badge-warning">0 รอจัดการ</span></div>
+            <div id="redemptionList" class="phase5-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head"><div><p class="kicker">ACTIVITY HISTORY</p><h3>แต้มล่าสุด</h3></div><span class="badge badge-soft">Audit</span></div>
+            <div id="engagementHistoryList" class="phase5-list"></div>
+          </article>
+
+          <article id="engagementLeaderboardPanel" class="panel engagement-leaderboard-panel">
+            <div class="panel-head"><div><p class="kicker">OPTIONAL</p><h3>Leaderboard</h3><p class="panel-subtitle">เปิดเมื่อบริษัทอยากใช้การแข่งขัน ไม่บังคับทุก Workspace</p></div><span class="badge badge-soft">เลือกเปิดได้</span></div>
+            <div id="leaderboardList" class="leaderboard-list"></div>
+          </article>
         </div>
       </section>
-
       <section id="view-analytics" class="view">
         <div class="page-intro"><div><p class="kicker">PEOPLE INTELLIGENCE</p><h1>People Analytics</h1><p>เห็นสุขภาพทีมในภาพเดียว ทั้ง Headcount, Turnover, การมาสาย, การลา, Recruitment และช่วงเวลาสำคัญของคน</p></div><span id="analyticsUpdatedBadge" class="badge badge-soft">ข้อมูลล่าสุด</span></div>
         <div id="analyticsSummary" class="analytics-summary"></div>

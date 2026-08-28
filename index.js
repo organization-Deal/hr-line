@@ -560,6 +560,7 @@ CREATE TABLE IF NOT EXISTS payroll_settings (
   late_deduction_per_minute REAL NOT NULL DEFAULT 0,
   social_security_enabled INTEGER NOT NULL DEFAULT 1,
   tax_enabled INTEGER NOT NULL DEFAULT 1,
+  auto_payslip_on_lock INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
@@ -1442,7 +1443,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.39', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.54', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1727,7 +1728,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.34', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.54', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -2119,6 +2120,44 @@ async function handleApi(request, env, url, auth, ctx) {
     await env.DB.prepare('DELETE FROM positions WHERE id=?1 AND client_id=?2').bind(id,clientId).run(); return json({ok:true});
   }
 
+  const departmentAssignMatch=path.match(/^\/api\/departments\/(\d+)\/assign$/);
+  if(departmentAssignMatch && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดคนเข้าแผนก'},403);
+    const departmentId=Number(departmentAssignMatch[1]);
+    const department=await env.DB.prepare('SELECT id,name FROM departments WHERE id=?1 AND client_id=?2').bind(departmentId,clientId).first();
+    if(!department)return json({error:'ไม่พบแผนก'},404);
+    const body=await safeJson(request);
+    const employeeIds=[...new Set((Array.isArray(body.employee_ids)?body.employee_ids:[]).map(Number).filter(Number.isFinite))];
+    for(const employeeId of employeeIds){
+      const employee=await getEmployeeForClient(env.DB,employeeId,clientId);
+      if(!employee)return json({error:'มีพนักงานที่ไม่อยู่ในบริษัทนี้'},400);
+    }
+    const current=(await env.DB.prepare('SELECT id FROM employees WHERE client_id=?1 AND department_id=?2 AND status=\'active\'').bind(clientId,departmentId).all()).results||[];
+    const selected=new Set(employeeIds);
+    let positionResetCount=0;
+    for(const row of current){
+      if(selected.has(Number(row.id)))continue;
+      const before=await env.DB.prepare('SELECT position_id FROM employees WHERE id=?1 AND client_id=?2').bind(Number(row.id),clientId).first();
+      await env.DB.prepare(`UPDATE employees SET department_id=NULL,position_id=CASE WHEN position_id IN (SELECT id FROM positions WHERE client_id=?1 AND department_id=?2) THEN NULL ELSE position_id END,updated_at=CURRENT_TIMESTAMP WHERE id=?3 AND client_id=?1`).bind(clientId,departmentId,Number(row.id)).run();
+      if(before?.position_id){
+        const tied=await env.DB.prepare('SELECT id FROM positions WHERE id=?1 AND client_id=?2 AND department_id=?3').bind(Number(before.position_id),clientId,departmentId).first();
+        if(tied)positionResetCount++;
+      }
+    }
+    for(const employeeId of employeeIds){
+      const before=await env.DB.prepare('SELECT department_id,position_id FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId,clientId).first();
+      let keepPosition=true;
+      if(before?.position_id){
+        const position=await env.DB.prepare('SELECT id,department_id FROM positions WHERE id=?1 AND client_id=?2').bind(Number(before.position_id),clientId).first();
+        keepPosition=Boolean(position && (!position.department_id || Number(position.department_id)===departmentId));
+      }
+      await env.DB.prepare('UPDATE employees SET department_id=?1,position_id=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3 AND client_id=?4').bind(departmentId,keepPosition?(before?.position_id||null):null,employeeId,clientId).run();
+      if(before?.position_id && !keepPosition)positionResetCount++;
+    }
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'department.assign','department',String(departmentId),{employee_ids:employeeIds,position_reset_count:positionResetCount});
+    return json({ok:true,department_id:departmentId,assigned_count:employeeIds.length,position_reset_count:positionResetCount});
+  }
+
   const positionAssignMatch=path.match(/^\/api\/positions\/(\d+)\/assign$/);
   if(positionAssignMatch && method==='POST'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดคนเข้าตำแหน่ง'},403);
@@ -2202,21 +2241,87 @@ async function handleApi(request, env, url, auth, ctx) {
     await assertSeatCapacity(env.DB,clientId,1); const result=await env.DB.prepare(`INSERT INTO employees(client_id,employee_code,first_name,last_name,nickname,email,phone,start_date,probation_end_date,department_id,position_id,employment_type,status,people_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'active','probation')`).bind(clientId,code,candidate.first_name,candidate.last_name,candidate.nickname,candidate.email,candidate.phone,start,body.probation_end_date||null,body.department_id||null,body.position_id||null,body.employment_type||'full_time').run(); await env.DB.prepare(`UPDATE candidates SET stage='hired',updated_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(candidate.id)).run(); await autoAssignLearningForEmployee(env.DB,clientId,Number(result.meta.last_row_id),Number(auth.user.id)); return json({ok:true,employee_id:result.meta.last_row_id},201);
   }
 
+
+  if (path === '/api/team-work-log' && method === 'GET') {
+    const url = new URL(request.url);
+    const modeRaw = String(url.searchParams.get('mode') || 'today').trim();
+    const mode = ['today','day','week','month','range'].includes(modeRaw) ? modeRaw : 'today';
+    const today = dateInBangkok();
+    const datePattern=/^\d{4}-\d{2}-\d{2}$/;
+    const key = d => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+    let anchor = String(url.searchParams.get('date') || today).trim();
+    if (!datePattern.test(anchor)) anchor = today;
+    if (mode === 'today') anchor = today;
+    let start = anchor, end = anchor;
+    const [ay,am,ad] = anchor.split('-').map(Number);
+    if (mode === 'week') {
+      const dt = new Date(Date.UTC(ay,am-1,ad));
+      const jsDay = dt.getUTCDay();
+      const back = (jsDay + 6) % 7;
+      const monday = new Date(dt); monday.setUTCDate(dt.getUTCDate()-back);
+      const sunday = new Date(monday); sunday.setUTCDate(monday.getUTCDate()+6);
+      start = key(monday); end = key(sunday);
+    } else if (mode === 'month') {
+      let month = String(url.searchParams.get('month') || today.slice(0,7)).trim();
+      if (!/^\d{4}-\d{2}$/.test(month)) month=today.slice(0,7);
+      const [my,mm]=month.split('-').map(Number);
+      if(mm<1||mm>12)return json({error:'เดือนไม่ถูกต้อง'},400);
+      start=`${my}-${String(mm).padStart(2,'0')}-01`;
+      const last=new Date(Date.UTC(my,mm,0)); end=key(last); anchor=start;
+    } else if (mode === 'range') {
+      start=String(url.searchParams.get('start')||'').trim(); end=String(url.searchParams.get('end')||'').trim();
+      if(!datePattern.test(start)||!datePattern.test(end))return json({error:'กรุณาระบุช่วงวันที่ให้ครบ'},400);
+      if(start>end)return json({error:'วันที่เริ่มต้องไม่มากกว่าวันสิ้นสุด'},400);
+      const startDt=new Date(`${start}T00:00:00Z`), endDtCheck=new Date(`${end}T00:00:00Z`);
+      const days=Math.floor((endDtCheck-startDt)/86400000)+1;
+      if(days>366)return json({error:'เลือกช่วงวันที่ได้สูงสุด 366 วัน'},400);
+      anchor=start;
+    }
+    const employeeRes = await env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,e.position_id,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.id`).bind(clientId).all();
+    const attendanceRes = await env.DB.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 ORDER BY work_date,employee_id`).bind(clientId,start,end).all();
+    const leaveRes = await env.DB.prepare(`SELECT lr.*,lp.name AS leave_name FROM leave_requests lr LEFT JOIN leave_policies lp ON lp.id=lr.policy_id WHERE lr.client_id=?1 AND lr.start_date<=?3 AND lr.end_date>=?2 AND lr.status IN ('approved','pending','awaiting_evidence') ORDER BY lr.id DESC`).bind(clientId,start,end).all();
+    const attendanceMap = new Map((attendanceRes.results||[]).map(r=>[`${Number(r.employee_id)}|${r.work_date}`,r]));
+    const leaves = leaveRes.results||[];
+    const dates=[]; const cursor=new Date(`${start}T00:00:00Z`), endDt=new Date(`${end}T00:00:00Z`);
+    const dateKey=d=>`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+    while(cursor<=endDt){dates.push(dateKey(cursor));cursor.setUTCDate(cursor.getUTCDate()+1);}
+    const dayNames=['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
+    const rows=[];
+    for (const date of dates) {
+      const dateObj=new Date(`${date}T00:00:00Z`);
+      for (const e of (employeeRes.results||[])) {
+        const a=attendanceMap.get(`${Number(e.id)}|${date}`)||{};
+        const lr=leaves.find(x=>Number(x.employee_id)===Number(e.id)&&date>=x.start_date&&date<=x.end_date)||null;
+        const isFuture=date>today;
+        rows.push({...e,work_date:date,day_label:dayNames[dateObj.getUTCDay()],check_in_at:a.check_in_at||null,check_out_at:a.check_out_at||null,attendance_status:a.status||null,late_minutes:Number(a.late_minutes||0),leave_name:lr?.leave_name||lr?.leave_type||null,leave_status:lr?.status||null,approved_leave:lr?.status==='approved',is_future:isFuture});
+      }
+    }
+    const effectiveRows=rows.filter(r=>!r.is_future);
+    const summary={checked_in:effectiveRows.filter(r=>r.check_in_at).length,late:effectiveRows.filter(r=>r.check_in_at&&Number(r.late_minutes)>0).length,leave:effectiveRows.filter(r=>r.approved_leave&&!r.check_in_at).length,missing:effectiveRows.filter(r=>!r.check_in_at&&!r.approved_leave).length};
+    const thDate=d=>new Intl.DateTimeFormat('th-TH',{day:'numeric',month:'short',year:'numeric',timeZone:'Asia/Bangkok'}).format(new Date(`${d}T12:00:00+07:00`));
+    return json({mode,date:anchor,start_date:start,end_date:end,range_label:start===end?thDate(start):`${thDate(start)} – ${thDate(end)}`,summary,rows});
+  }
+
   if (path === '/api/dashboard' && method === 'GET') {
     return json(await getDashboard(env.DB, clientId, { includeHrCases: canManagePeopleAdmin(auth.role) }));
   }
 
   if (path === '/api/employees' && method === 'GET') {
+    await ensureV100P3Ready(env.DB);
     const result = await env.DB.prepare(`
       SELECT e.*, d.name AS department_name, p.name AS position_name,
+             (SELECT COUNT(*) FROM employee_documents ed WHERE ed.client_id=e.client_id AND ed.employee_id=e.id) AS document_count,
+             (SELECT COUNT(*) FROM employee_documents ed WHERE ed.client_id=e.client_id AND ed.employee_id=e.id AND ed.document_type='employment_contract') AS contract_document_count,
              mgr.nickname AS manager_nickname, mgr.first_name AS manager_first_name, mgr.last_name AS manager_last_name,
              ap.nickname AS leave_approver_nickname, ap.first_name AS leave_approver_first_name, ap.last_name AS leave_approver_last_name,
+             pp.base_salary, pp.bank_name, pp.bank_account_name, pp.bank_account_no, pp.social_security_enabled, pp.tax_enabled,
              GROUP_CONCAT(DISTINCT wl.name) AS work_location_names, GROUP_CONCAT(DISTINCT wl.id) AS work_location_ids
       FROM employees e
       LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN positions p ON p.id = e.position_id
       LEFT JOIN employees mgr ON mgr.id=e.manager_employee_id
       LEFT JOIN employees ap ON ap.id=e.leave_approver_employee_id
+      LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id AND pp.client_id=e.client_id
       LEFT JOIN employee_work_locations ewl ON ewl.employee_id=e.id
       LEFT JOIN work_locations wl ON wl.id=ewl.location_id AND wl.is_active=1
       WHERE e.client_id = ?1
@@ -2241,19 +2346,30 @@ async function handleApi(request, env, url, auth, ctx) {
       INSERT INTO employees (
         client_id, employee_code, first_name, last_name, nickname, email, phone,
         birth_date, start_date, probation_end_date, contract_end_date,
+        contract_type, contract_number, contract_start_date, contract_signed_date,
         department_id, position_id, employment_type, status, people_status
-      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,'active',?15)
+      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,'active',?19)
     `).bind(
       clientId, employeeCode, body.first_name, body.last_name, body.nickname || null,
       body.email || null, body.phone || null, body.birth_date || null, body.start_date,
       body.probation_end_date || null, body.contract_end_date || null,
+      body.contract_type || null, body.contract_number || null, body.contract_start_date || body.start_date || null, body.contract_signed_date || null,
       departmentId, positionId, body.employment_type || 'full_time',
       body.people_status || (body.probation_end_date ? 'probation' : 'employee')
     ).run();
 
-    await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.create', 'employee', String(result.meta.last_row_id), { ...body, employee_code: employeeCode });
-    await autoAssignLearningForEmployee(env.DB, clientId, Number(result.meta.last_row_id), Number(auth.user.id));
-    return json({ ok: true, id: result.meta.last_row_id }, 201);
+    const newEmployeeId = Number(result.meta.last_row_id);
+    if (body.national_id) await env.DB.prepare('UPDATE employees SET national_id=?1 WHERE id=?2 AND client_id=?3').bind(String(body.national_id).trim() || null,newEmployeeId,clientId).run();
+    if (['bank_name','bank_account_name','bank_account_no','base_salary'].some(key => body[key] != null && body[key] !== '')) {
+      await ensureV100P3Ready(env.DB);
+      await env.DB.prepare(`INSERT INTO employee_payroll_profiles (client_id,employee_id,base_salary,social_security_enabled,tax_enabled,personal_allowance,extra_annual_deductions,bank_name,bank_account_name,bank_account_no,effective_from)
+        VALUES (?1,?2,?3,1,1,60000,0,?4,?5,?6,?7)
+        ON CONFLICT(employee_id) DO UPDATE SET base_salary=excluded.base_salary,bank_name=excluded.bank_name,bank_account_name=excluded.bank_account_name,bank_account_no=excluded.bank_account_no,updated_at=CURRENT_TIMESTAMP`)
+        .bind(clientId,newEmployeeId,Math.max(0,Number(body.base_salary||0)),body.bank_name||null,body.bank_account_name||null,body.bank_account_no||null,body.contract_start_date||body.start_date).run();
+    }
+    await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.create', 'employee', String(newEmployeeId), { ...body, employee_code: employeeCode });
+    await autoAssignLearningForEmployee(env.DB, clientId, newEmployeeId, Number(auth.user.id));
+    return json({ ok: true, id: newEmployeeId }, 201);
   }
 
   const employeeManageMatch = path.match(/^\/api\/employees\/(\d+)$/);
@@ -2285,12 +2401,24 @@ async function handleApi(request, env, url, auth, ctx) {
     await env.DB.prepare(`UPDATE employees SET
       employee_code=?1, nickname=?2, first_name=?3, last_name=?4, email=?5, phone=?6,
       birth_date=?7, start_date=?8, probation_end_date=?9, contract_end_date=?10,
-      department_id=?11, position_id=?12, updated_at=CURRENT_TIMESTAMP
-      WHERE id=?13 AND client_id=?14`).bind(
+      department_id=?11, position_id=?12, national_id=?13,
+      contract_type=?14, contract_number=?15, contract_start_date=?16, contract_signed_date=?17,
+      updated_at=CURRENT_TIMESTAMP
+      WHERE id=?18 AND client_id=?19`).bind(
         employeeCode, body.nickname || null, firstName, lastName, body.email || null, body.phone || null,
         body.birth_date || null, startDate, body.probation_end_date || null, body.contract_end_date || null,
-        departmentId, positionId, employeeId, clientId
+        departmentId, positionId, body.national_id || null,
+        body.contract_type || null, body.contract_number || null, body.contract_start_date || startDate || null, body.contract_signed_date || null,
+        employeeId, clientId
       ).run();
+    if (['bank_name','bank_account_name','bank_account_no','base_salary'].some(key => Object.prototype.hasOwnProperty.call(body,key))) {
+      const currentPayroll = await env.DB.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1 AND client_id=?2').bind(employeeId,clientId).first();
+      const baseSalary = body.base_salary === '' || body.base_salary == null ? Number(currentPayroll?.base_salary || 0) : Math.max(0, Number(body.base_salary || 0));
+      await env.DB.prepare(`INSERT INTO employee_payroll_profiles (client_id,employee_id,base_salary,social_security_enabled,tax_enabled,personal_allowance,extra_annual_deductions,monthly_tax_override,bank_name,bank_account_name,bank_account_no,payroll_note,effective_from)
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+        ON CONFLICT(employee_id) DO UPDATE SET base_salary=excluded.base_salary,bank_name=excluded.bank_name,bank_account_name=excluded.bank_account_name,bank_account_no=excluded.bank_account_no,updated_at=CURRENT_TIMESTAMP`)
+        .bind(clientId,employeeId,baseSalary,Number(currentPayroll?.social_security_enabled ?? 1),Number(currentPayroll?.tax_enabled ?? 1),Number(currentPayroll?.personal_allowance ?? 60000),Number(currentPayroll?.extra_annual_deductions ?? 0),currentPayroll?.monthly_tax_override ?? null,body.bank_name ?? currentPayroll?.bank_name ?? null,body.bank_account_name ?? currentPayroll?.bank_account_name ?? null,body.bank_account_no ?? currentPayroll?.bank_account_no ?? null,currentPayroll?.payroll_note ?? null,currentPayroll?.effective_from ?? startDate).run();
+    }
     await audit(env.DB, clientId, 'user', String(auth.user.id), 'employee.update', 'employee', String(employeeId), { before: existing, after: body });
     return json({ ok: true, id: employeeId });
   }
@@ -2309,6 +2437,61 @@ async function handleApi(request, env, url, auth, ctx) {
     ]);
     await env.DB.prepare('DELETE FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId, clientId).run();
     return json({ ok: true, deleted_id: employeeId });
+  }
+
+
+  const employeeDocumentsMatch = path.match(/^\/api\/employees\/(\d+)\/documents$/);
+  if (employeeDocumentsMatch && method === 'GET') {
+    if (!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role)) return json({ error: 'ไม่มีสิทธิ์ดูเอกสารพนักงาน' }, 403);
+    await ensureV100P3Ready(env.DB);
+    const employeeId = Number(employeeDocumentsMatch[1]);
+    const employee = await env.DB.prepare('SELECT id,employee_code,first_name,last_name,nickname FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId,clientId).first();
+    if (!employee) return json({ error: 'ไม่พบพนักงาน' }, 404);
+    const rows = await env.DB.prepare(`SELECT id,document_type,title,file_name,storage_provider,drive_url,content_type,document_date,expires_at,visibility,note,created_at FROM employee_documents WHERE client_id=?1 AND employee_id=?2 ORDER BY created_at DESC`).bind(clientId,employeeId).all();
+    return json({ employee, data: rows.results || [] });
+  }
+
+  if (employeeDocumentsMatch && method === 'POST') {
+    if (!canManagePeopleAdmin(auth.role)) return json({ error: 'ไม่มีสิทธิ์เพิ่มเอกสารพนักงาน' }, 403);
+    await ensureV100P3Ready(env.DB);
+    const employeeId = Number(employeeDocumentsMatch[1]);
+    const employee = await env.DB.prepare('SELECT id,employee_code,first_name,last_name,nickname FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId,clientId).first();
+    if (!employee) return json({ error: 'ไม่พบพนักงาน' }, 404);
+    const form = await request.formData();
+    const file = form.get('file');
+    if (!file || typeof file.arrayBuffer !== 'function' || !file.name) return json({ error: 'กรุณาเลือกไฟล์' }, 400);
+    if (Number(file.size || 0) > 10 * 1024 * 1024) return json({ error: 'ไฟล์ต้องไม่เกิน 10 MB' }, 413);
+    const allowedTypes = new Set(['employment_contract','id_card_copy','bank_book_copy','social_security','tax_document','education_certificate','other']);
+    const documentType = allowedTypes.has(String(form.get('document_type') || '')) ? String(form.get('document_type')) : 'other';
+    const labels = {employment_contract:'สัญญาจ้างงาน',id_card_copy:'สำเนาบัตรประชาชน',bank_book_copy:'หน้าสมุดบัญชี',social_security:'เอกสารประกันสังคม',tax_document:'เอกสารภาษี',education_certificate:'วุฒิการศึกษา',other:'เอกสารพนักงาน'};
+    const title = String(form.get('title') || '').trim() || labels[documentType] || 'เอกสารพนักงาน';
+    const documentDate = String(form.get('document_date') || '').trim() || null;
+    const expiresAt = String(form.get('expires_at') || '').trim() || null;
+    const note = String(form.get('note') || '').trim() || null;
+    const visibility = ['employee','hr_only','manager'].includes(String(form.get('visibility'))) ? String(form.get('visibility')) : 'hr_only';
+    const workspace = await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
+    if (!workspace?.drive_folder_id) return json({ error: 'กรุณาเชื่อม Google Drive ก่อนอัปโหลดเอกสารพนักงาน' }, 409);
+    const accessToken = await getWorkspaceGoogleAccessToken(env,workspace);
+    const rootFolder = await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Employee Documents');
+    const empFolder = await ensureDriveChildFolder(accessToken,rootFolder,`${employee.employee_code} - ${employee.nickname || employee.first_name}`);
+    const privateFolder = await ensureDriveChildFolder(accessToken,empFolder,'HR & Contracts');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const uploaded = await uploadGoogleDriveFile(accessToken,{folderId:privateFolder,fileName:file.name,contentType:file.type || 'application/octet-stream',bytes});
+    const result = await env.DB.prepare(`INSERT INTO employee_documents (client_id,employee_id,document_type,title,file_name,storage_provider,drive_file_id,drive_url,content_type,document_date,expires_at,visibility,note,created_by_user_id) VALUES (?1,?2,?3,?4,?5,'google_drive',?6,?7,?8,?9,?10,?11,?12,?13)`).bind(clientId,employeeId,documentType,title,file.name,uploaded.id,uploaded.webViewLink || null,file.type || 'application/octet-stream',documentDate,expiresAt,visibility,note,Number(auth.user.id)).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.upload','employee',String(employeeId),{document_type:documentType,file_name:file.name});
+    return json({ ok:true, id:Number(result.meta.last_row_id), drive_url:uploaded.webViewLink || null },201);
+  }
+
+  const employeeDocumentDeleteMatch = path.match(/^\/api\/employee-documents\/(\d+)$/);
+  if (employeeDocumentDeleteMatch && method === 'DELETE') {
+    if (!canManagePeopleAdmin(auth.role)) return json({ error: 'ไม่มีสิทธิ์ลบเอกสารพนักงาน' }, 403);
+    await ensureV100P3Ready(env.DB);
+    const id = Number(employeeDocumentDeleteMatch[1]);
+    const row = await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if (!row) return json({ error:'ไม่พบเอกสาร' },404);
+    await env.DB.prepare('DELETE FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.delete','employee_document',String(id),{employee_id:row.employee_id,file_name:row.file_name});
+    return json({ok:true});
   }
 
   const employeeLinkMatch = path.match(/^\/api\/employees\/(\d+)\/line-link-code$/);
@@ -2757,7 +2940,33 @@ async function handleApi(request, env, url, auth, ctx) {
     const count=await env.DB.prepare('SELECT COUNT(*) AS n FROM payroll_items WHERE period_id=?1').bind(id).first(); if(!Number(count?.n||0))return json({error:'ยังไม่มีรายการ Payroll ให้ Lock'},409);
     await env.DB.prepare(`UPDATE payroll_periods SET status='locked',locked_by_user_id=?1,locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(Number(auth.user.id),id,clientId).run();
     await env.DB.prepare(`UPDATE payroll_items SET status='locked',updated_at=CURRENT_TIMESTAMP WHERE period_id=?1`).bind(id).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.lock','payroll_period',String(id),null); return json({ok:true});
+    const settings=await env.DB.prepare(`SELECT * FROM payroll_settings WHERE client_id=?1`).bind(clientId).first();
+    let payslipQueued=false,payslipWarning=null;
+    if(Number(settings?.auto_payslip_on_lock ?? 1)===1){
+      const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
+      if(workspace?.drive_folder_id){
+        const task=publishPayrollPeriod(env,clientId,id,{notify:false}).catch(error=>console.error(JSON.stringify({level:'error',event:'payroll_auto_payslip_failed',period_id:id,message:String(error?.message||error)})));
+        if(ctx?.waitUntil)ctx.waitUntil(task); else await task;
+        payslipQueued=true;
+      }else payslipWarning='Lock สำเร็จ แต่ยังไม่ได้สร้างสลิปอัตโนมัติ เพราะยังไม่ได้เชื่อม Google Drive';
+    }
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.lock','payroll_period',String(id),{auto_payslip:payslipQueued});
+    return json({ok:true,payslip_queued:payslipQueued,warning:payslipWarning});
+  }
+
+
+  const payrollGeneratePayslipMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/generate-payslips$/);
+  if(payrollGeneratePayslipMatch && method==='POST'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์สร้าง Payslip'},403);
+    const id=Number(payrollGeneratePayslipMatch[1]);
+    const period=await env.DB.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404);
+    if(!['locked','published'].includes(period.status))return json({error:'ต้อง Lock Payroll ก่อนสร้าง Payslip'},409);
+    const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
+    if(!workspace?.drive_folder_id)return json({error:'กรุณาเชื่อม Google Drive ก่อนสร้าง Payslip'},409);
+    const task=publishPayrollPeriod(env,clientId,id,{notify:false}).catch(error=>console.error(JSON.stringify({level:'error',event:'payroll_generate_payslip_failed',period_id:id,message:String(error?.message||error)})));
+    if(ctx?.waitUntil)ctx.waitUntil(task); else await task;
+    return json({ok:true,queued:true,message:'กำลังสร้าง Payslip อัตโนมัติลง Google Drive'});
   }
 
   const payrollPublishMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/publish$/);
@@ -3062,6 +3271,76 @@ async function handleApi(request, env, url, auth, ctx) {
     try{await deleteWorkspaceRichMenu(env,integration);return json({ok:true});}catch(e){return json({error:`ลบ Rich Menu ไม่สำเร็จ: ${e.message}`},400);}
   }
 
+
+  if (path === '/api/leave-report' && method === 'GET') {
+    const url = new URL(request.url);
+    const monthRaw = String(url.searchParams.get('month') || '').trim();
+    const nowBkk = new Date(Date.now() + 7 * 60 * 60 * 1000);
+    const fallbackMonth = `${nowBkk.getUTCFullYear()}-${String(nowBkk.getUTCMonth()+1).padStart(2,'0')}`;
+    const month = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : fallbackMonth;
+    const [yy,mm] = month.split('-').map(Number);
+    if (mm < 1 || mm > 12) return json({error:'รูปแบบเดือนไม่ถูกต้อง'},400);
+    const startDate = `${yy}-${String(mm).padStart(2,'0')}-01`;
+    const nextY = mm === 12 ? yy + 1 : yy;
+    const nextM = mm === 12 ? 1 : mm + 1;
+    const nextMonth = `${nextY}-${String(nextM).padStart(2,'0')}-01`;
+    const endObj = new Date(Date.UTC(nextY,nextM-1,1)); endObj.setUTCDate(endObj.getUTCDate()-1);
+    const endDate = `${endObj.getUTCFullYear()}-${String(endObj.getUTCMonth()+1).padStart(2,'0')}-${String(endObj.getUTCDate()).padStart(2,'0')}`;
+
+    const result = await env.DB.prepare(`
+      SELECT l.*,e.first_name,e.last_name,e.nickname,e.employee_code,
+             d.name AS department_name,p.name AS position_name,
+             lp.name AS leave_type_name,
+             ap.nickname AS approver_nickname,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name
+      FROM leave_requests l
+      JOIN employees e ON e.id=l.employee_id
+      LEFT JOIN departments d ON d.id=e.department_id
+      LEFT JOIN positions p ON p.id=e.position_id
+      LEFT JOIN leave_policies lp ON lp.id=l.policy_id
+      LEFT JOIN employees ap ON ap.id=l.approver_employee_id
+      WHERE l.client_id=?1
+        AND l.start_date < ?3
+        AND l.end_date >= ?2
+      ORDER BY l.start_date DESC,l.id DESC
+    `).bind(clientId,startDate,nextMonth).all();
+    const rows = result.results || [];
+    const approved = rows.filter(r => r.status === 'approved');
+    const employeesWithLeave = new Set(approved.map(r => Number(r.employee_id))).size;
+    const approvedDays = approved.reduce((sum,r)=>sum+Number(r.duration_days||0),0);
+    const pendingRequests = rows.filter(r=>r.status==='pending'||r.status==='awaiting_evidence').length;
+
+    const typeMap = new Map();
+    for (const r of approved) {
+      const key = r.leave_type_name || r.leave_type || 'ไม่ระบุ';
+      const item = typeMap.get(key) || {name:key,days:0,requests:0};
+      item.days += Number(r.duration_days||0); item.requests += 1; typeMap.set(key,item);
+    }
+    const personMap = new Map();
+    for (const r of approved) {
+      const key = Number(r.employee_id);
+      const item = personMap.get(key) || {employee_id:key,first_name:r.first_name,last_name:r.last_name,nickname:r.nickname,employee_code:r.employee_code,department_name:r.department_name,days:0,requests:0};
+      item.days += Number(r.duration_days||0); item.requests += 1; personMap.set(key,item);
+    }
+    const monthLabel = new Intl.DateTimeFormat('th-TH',{month:'long',year:'numeric',timeZone:'Asia/Bangkok'}).format(new Date(`${startDate}T12:00:00+07:00`));
+    return json({
+      month,
+      start_date:startDate,
+      end_date:endDate,
+      range_label:monthLabel,
+      summary:{
+        employees_with_leave:employeesWithLeave,
+        requests:rows.length,
+        approved_requests:approved.length,
+        approved_days:Math.round(approvedDays*100)/100,
+        pending_requests:pendingRequests,
+        rejected_requests:rows.filter(r=>r.status==='rejected').length
+      },
+      by_type:[...typeMap.values()].sort((a,b)=>b.days-a.days),
+      top_people:[...personMap.values()].sort((a,b)=>b.days-a.days).slice(0,8),
+      rows
+    });
+  }
+
   if (path === '/api/leaves' && method === 'GET') {
     const result = await env.DB.prepare(`
       SELECT l.*, e.first_name,e.last_name,e.nickname,e.employee_code,
@@ -3143,24 +3422,88 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/engagement/rules' && method === 'POST') {
-    if (!canManageEngagement(auth.role)) return json({error:'ไม่มีสิทธิ์สร้างกติกาแต้ม'},403);
-    await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const name=String(body.name||'').trim();
-    if(name.length<2)return json({error:'กรุณาใส่ชื่อกติกา'},400); const eventType=['attendance_streak','learning_complete','kpi_complete','birthday','work_anniversary','manual','custom'].includes(String(body.event_type))?String(body.event_type):'manual';
-    const code=(String(body.code||name).toLowerCase().replace(/[^a-z0-9ก-๙]+/g,'-').replace(/^-|-$/g,'').slice(0,50)||`rule-${Date.now()}`);
-    try{const r=await env.DB.prepare(`INSERT INTO point_rules (client_id,code,name,description,event_type,points,cash_value,threshold_count,window_days,is_active,effective_from,created_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`)
-      .bind(clientId,code,name,String(body.description||'').trim()||null,eventType,Math.max(0,num(body.points,0)),Math.max(0,num(body.cash_value,0)),Math.max(1,Math.floor(num(body.threshold_count,1))),body.window_days?Math.max(1,Math.floor(num(body.window_days,30))):null,body.is_active?1:0,body.effective_from||dateInBangkok(),Number(auth.user.id)).run(); return json({ok:true,id:Number(r.meta.last_row_id)},201);}catch(e){if(/UNIQUE/i.test(String(e?.message||e)))return json({error:'รหัสกติกาซ้ำ'},409);throw e;}
+    if (!canManageEngagement(auth.role)) return json({error:'ไม่มีสิทธิ์สร้างกิจกรรม'},403);
+    await ensurePhase5Defaults(env.DB,clientId);
+    const body=await safeJson(request), name=String(body.name||'').trim();
+    if(name.length<2)return json({error:'กรุณาใส่ชื่อกิจกรรม'},400);
+    const triggerKey=normalizeEngagementTrigger(body.trigger_key||body.event_type);
+    const eventType=legacyEventTypeForTrigger(triggerKey);
+    const audience=normalizeEngagementAudience(body.audience_type,body.audience_ids);
+    const repeatMode=normalizeEngagementRepeat(body.repeat_mode,triggerKey);
+    const approvalMode=normalizeEngagementApproval(body.approval_mode,triggerKey);
+    const code=(String(body.code||name).toLowerCase().replace(/[^a-z0-9ก-๙]+/g,'-').replace(/^-|-$/g,'').slice(0,50)||`activity-${Date.now()}`);
+    const points=Math.max(0,num(body.points,0)), cash=Math.max(0,num(body.cash_value,0));
+    if(points<=0&&cash<=0)return json({error:'กิจกรรมต้องมีรางวัลอย่างน้อย 1 อย่าง'},400);
+    try{
+      const r=await env.DB.prepare(`INSERT INTO point_rules (
+        client_id,code,name,description,event_type,trigger_key,points,cash_value,threshold_count,window_days,is_active,effective_from,
+        audience_type,audience_ids_json,approval_mode,repeat_mode,max_awards_per_employee,requires_evidence,starts_at,ends_at,template_key,config_json,created_by_user_id
+      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)`)
+        .bind(clientId,code,name,String(body.description||'').trim()||null,eventType,triggerKey,points,cash,
+          Math.max(1,Math.floor(num(body.threshold_count,1))),body.window_days?Math.max(1,Math.floor(num(body.window_days,30))):null,body.is_active?1:0,
+          body.effective_from||body.starts_at||dateInBangkok(),audience.type,JSON.stringify(audience.ids),approvalMode,repeatMode,
+          body.max_awards_per_employee===''||body.max_awards_per_employee==null?null:Math.max(1,Math.floor(num(body.max_awards_per_employee,1))),
+          body.requires_evidence?1:0,normalizeOptionalDate(body.starts_at),normalizeOptionalDate(body.ends_at),String(body.template_key||'').trim()||null,
+          JSON.stringify(body.config&&typeof body.config==='object'?body.config:{}),Number(auth.user.id)).run();
+      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.activity.create','point_rule',String(r.meta.last_row_id),{name,trigger_key:triggerKey,audience_type:audience.type});
+      return json({ok:true,id:Number(r.meta.last_row_id)},201);
+    }catch(e){if(/UNIQUE/i.test(String(e?.message||e)))return json({error:'ชื่อหรือรหัสกิจกรรมซ้ำ กรุณาเปลี่ยนชื่อ'},409);throw e;}
   }
 
   const engagementRuleMatch=path.match(/^\/api\/engagement\/rules\/(\d+)$/);
   if(engagementRuleMatch && method==='PATCH'){
-    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์แก้กติกาแต้ม'},403); await ensurePhase5Defaults(env.DB,clientId); const id=Number(engagementRuleMatch[1]); const row=await env.DB.prepare('SELECT * FROM point_rules WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!row)return json({error:'ไม่พบกติกา'},404); const body=await safeJson(request);
-    await env.DB.prepare(`UPDATE point_rules SET name=?1,description=?2,event_type=?3,points=?4,cash_value=?5,threshold_count=?6,window_days=?7,is_active=?8,effective_from=?9,updated_at=CURRENT_TIMESTAMP WHERE id=?10 AND client_id=?11`)
-      .bind(String(body.name??row.name).trim(),String(body.description??row.description??'').trim()||null,['attendance_streak','learning_complete','kpi_complete','birthday','work_anniversary','manual','custom'].includes(String(body.event_type))?String(body.event_type):row.event_type,Math.max(0,num(body.points,row.points)),Math.max(0,num(body.cash_value,row.cash_value)),Math.max(1,Math.floor(num(body.threshold_count,row.threshold_count||1))),body.window_days===null?null:(body.window_days===undefined?row.window_days:Math.max(1,Math.floor(num(body.window_days,row.window_days||30)))),body.is_active===undefined?Number(row.is_active):(body.is_active?1:0),body.effective_from||row.effective_from||dateInBangkok(),id,clientId).run(); return json({ok:true});
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์แก้กิจกรรม'},403);
+    await ensurePhase5Defaults(env.DB,clientId);
+    const id=Number(engagementRuleMatch[1]), row=await env.DB.prepare('SELECT * FROM point_rules WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if(!row)return json({error:'ไม่พบกิจกรรม'},404);
+    const body=await safeJson(request), triggerKey=normalizeEngagementTrigger(body.trigger_key??row.trigger_key??row.event_type), eventType=legacyEventTypeForTrigger(triggerKey);
+    const existingAudienceIds=safeJsonParse(row.audience_ids_json,[]), audience=normalizeEngagementAudience(body.audience_type??row.audience_type,body.audience_ids??existingAudienceIds);
+    const repeatMode=normalizeEngagementRepeat(body.repeat_mode??row.repeat_mode,triggerKey), approvalMode=normalizeEngagementApproval(body.approval_mode??row.approval_mode,triggerKey);
+    await env.DB.prepare(`UPDATE point_rules SET
+      name=?1,description=?2,event_type=?3,trigger_key=?4,points=?5,cash_value=?6,threshold_count=?7,window_days=?8,is_active=?9,effective_from=?10,
+      audience_type=?11,audience_ids_json=?12,approval_mode=?13,repeat_mode=?14,max_awards_per_employee=?15,requires_evidence=?16,starts_at=?17,ends_at=?18,
+      template_key=?19,config_json=?20,updated_at=CURRENT_TIMESTAMP WHERE id=?21 AND client_id=?22`)
+      .bind(String(body.name??row.name).trim(),String(body.description??row.description??'').trim()||null,eventType,triggerKey,
+        Math.max(0,num(body.points,row.points)),Math.max(0,num(body.cash_value,row.cash_value)),Math.max(1,Math.floor(num(body.threshold_count,row.threshold_count||1))),
+        body.window_days===null?null:(body.window_days===undefined?row.window_days:Math.max(1,Math.floor(num(body.window_days,row.window_days||30)))),
+        body.is_active===undefined?Number(row.is_active):(body.is_active?1:0),body.effective_from||body.starts_at||row.effective_from||dateInBangkok(),
+        audience.type,JSON.stringify(audience.ids),approvalMode,repeatMode,
+        body.max_awards_per_employee===undefined?row.max_awards_per_employee:(body.max_awards_per_employee===''||body.max_awards_per_employee==null?null:Math.max(1,Math.floor(num(body.max_awards_per_employee,1)))),
+        body.requires_evidence===undefined?Number(row.requires_evidence||0):(body.requires_evidence?1:0),
+        body.starts_at===undefined?row.starts_at:normalizeOptionalDate(body.starts_at),body.ends_at===undefined?row.ends_at:normalizeOptionalDate(body.ends_at),
+        body.template_key===undefined?row.template_key:(String(body.template_key||'').trim()||null),
+        body.config===undefined?(row.config_json||'{}'):JSON.stringify(body.config&&typeof body.config==='object'?body.config:{}),id,clientId).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.activity.update','point_rule',String(id),{trigger_key:triggerKey,is_active:body.is_active});
+    return json({ok:true});
+  }
+
+  if(engagementRuleMatch && method==='DELETE'){
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ลบกิจกรรม'},403);
+    await ensurePhase5Defaults(env.DB,clientId); const id=Number(engagementRuleMatch[1]);
+    const row=await env.DB.prepare('SELECT id,name FROM point_rules WHERE id=?1 AND client_id=?2 AND archived_at IS NULL').bind(id,clientId).first();
+    if(!row)return json({error:'ไม่พบกิจกรรม'},404);
+    await env.DB.prepare(`UPDATE point_rules SET is_active=0,archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.activity.archive','point_rule',String(id),{name:row.name});
+    return json({ok:true});
+  }
+
+  const engagementCompleteMatch=path.match(/^\/api\/engagement\/rules\/(\d+)\/complete$/);
+  if(engagementCompleteMatch && method==='POST'){
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์บันทึกกิจกรรม'},403);
+    await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request), id=Number(engagementCompleteMatch[1]), employeeId=Number(body.employee_id);
+    const rule=await env.DB.prepare('SELECT * FROM point_rules WHERE id=?1 AND client_id=?2 AND archived_at IS NULL').bind(id,clientId).first();
+    if(!rule)return json({error:'ไม่พบกิจกรรม'},404); if(!Number(rule.is_active))return json({error:'กิจกรรมนี้ยังปิดอยู่'},409);
+    const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+    try{
+      const result=await completeEngagementRule(env.DB,{clientId,employeeId,rule,note:String(body.note||'').trim(),evidenceUrl:String(body.evidence_url||'').trim(),createdByUserId:Number(auth.user.id)});
+      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.activity.complete','employee',String(employeeId),{rule_id:id,points:Number(rule.points||0),cash_value:Number(rule.cash_value||0)});
+      return json({ok:true,...result},201);
+    }catch(e){return json({error:e.message},e.status||400);}
   }
 
   if(path==='/api/engagement/award' && method==='POST'){
-    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ให้แต้ม'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const employeeId=Number(body.employee_id); const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404); const points=num(body.points,0); if(!points)return json({error:'กรุณาระบุแต้ม'},400);
-    const result=await addPointTransaction(env.DB,{clientId,employeeId,transactionType:points>=0?'earn':'adjust',points,cashValue:Math.max(0,num(body.cash_value,0)),referenceType:'manual',referenceId:null,idempotencyKey:null,note:String(body.note||'HR ให้แต้ม').trim(),createdByUserId:Number(auth.user.id)}); await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.points.manual','employee',String(employeeId),{points,cash_value:Number(body.cash_value||0)}); return json({ok:true,...result},201);
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ให้รางวัล'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const employeeId=Number(body.employee_id); const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404); const points=num(body.points,0),cash=Math.max(0,num(body.cash_value,0)); if(!points&&!cash)return json({error:'กรุณาระบุแต้ม หรือเงินรางวัล'},400);
+    const result=await addPointTransaction(env.DB,{clientId,employeeId,transactionType:points>=0?'earn':'adjust',points,cashValue:cash,referenceType:'manual',referenceId:null,idempotencyKey:null,note:String(body.note||'HR ให้รางวัล').trim(),createdByUserId:Number(auth.user.id)}); await safeAudit(env.DB,clientId,'user',String(auth.user.id),'engagement.points.manual','employee',String(employeeId),{points,cash_value:cash}); return json({ok:true,...result},201);
   }
 
   if(path==='/api/engagement/run-rules' && method==='POST'){
@@ -3168,12 +3511,14 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if(path==='/api/engagement/rewards' && method==='POST'){
-    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์เพิ่มของรางวัล'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const title=String(body.title||'').trim(); if(title.length<2)return json({error:'กรุณาใส่ชื่อของรางวัล'},400); const type=['gift','cash','leave','perk','custom'].includes(String(body.reward_type))?String(body.reward_type):'gift'; const r=await env.DB.prepare(`INSERT INTO reward_catalog (client_id,title,description,reward_type,points_cost,cash_value,stock_qty,status,created_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,'active',?8)`).bind(clientId,title,String(body.description||'').trim()||null,type,Math.max(0,num(body.points_cost,0)),Math.max(0,num(body.cash_value,0)),body.stock_qty===''||body.stock_qty==null?null:Math.max(0,Math.floor(num(body.stock_qty,0))),Number(auth.user.id)).run(); return json({ok:true,id:Number(r.meta.last_row_id)},201);
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์เพิ่มของรางวัล'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const title=String(body.title||'').trim(); if(title.length<2)return json({error:'กรุณาใส่ชื่อของรางวัล'},400); const type=['gift','cash','leave','perk','custom'].includes(String(body.reward_type))?String(body.reward_type):'gift';
+    const r=await env.DB.prepare(`INSERT INTO reward_catalog (client_id,title,description,reward_type,points_cost,cash_value,stock_qty,status,requires_date,fulfillment_label,approval_mode,created_by_user_id) VALUES (?1,?2,?3,?4,?5,?6,?7,'active',?8,?9,?10,?11)`).bind(clientId,title,String(body.description||'').trim()||null,type,Math.max(0,num(body.points_cost,0)),Math.max(0,num(body.cash_value,0)),body.stock_qty===''||body.stock_qty==null?null:Math.max(0,Math.floor(num(body.stock_qty,0))),body.requires_date?1:0,String(body.fulfillment_label||'').trim()||null,body.approval_mode==='auto'?'auto':'hr',Number(auth.user.id)).run(); return json({ok:true,id:Number(r.meta.last_row_id)},201);
   }
 
   const rewardMatch=path.match(/^\/api\/engagement\/rewards\/(\d+)$/);
   if(rewardMatch && method==='PATCH'){
-    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์แก้ของรางวัล'},403); const id=Number(rewardMatch[1]); const row=await env.DB.prepare('SELECT * FROM reward_catalog WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!row)return json({error:'ไม่พบของรางวัล'},404); const body=await safeJson(request); await env.DB.prepare(`UPDATE reward_catalog SET title=?1,description=?2,reward_type=?3,points_cost=?4,cash_value=?5,stock_qty=?6,status=?7,updated_at=CURRENT_TIMESTAMP WHERE id=?8 AND client_id=?9`).bind(String(body.title??row.title).trim(),String(body.description??row.description??'').trim()||null,['gift','cash','leave','perk','custom'].includes(String(body.reward_type))?String(body.reward_type):row.reward_type,Math.max(0,num(body.points_cost,row.points_cost)),Math.max(0,num(body.cash_value,row.cash_value)),body.stock_qty===undefined?row.stock_qty:(body.stock_qty===''||body.stock_qty==null?null:Math.max(0,Math.floor(num(body.stock_qty,0)))),['active','inactive','archived'].includes(String(body.status))?String(body.status):row.status,id,clientId).run(); return json({ok:true});
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์แก้ของรางวัล'},403); const id=Number(rewardMatch[1]); const row=await env.DB.prepare('SELECT * FROM reward_catalog WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!row)return json({error:'ไม่พบของรางวัล'},404); const body=await safeJson(request);
+    await env.DB.prepare(`UPDATE reward_catalog SET title=?1,description=?2,reward_type=?3,points_cost=?4,cash_value=?5,stock_qty=?6,status=?7,requires_date=?8,fulfillment_label=?9,approval_mode=?10,updated_at=CURRENT_TIMESTAMP WHERE id=?11 AND client_id=?12`).bind(String(body.title??row.title).trim(),String(body.description??row.description??'').trim()||null,['gift','cash','leave','perk','custom'].includes(String(body.reward_type))?String(body.reward_type):row.reward_type,Math.max(0,num(body.points_cost,row.points_cost)),Math.max(0,num(body.cash_value,row.cash_value)),body.stock_qty===undefined?row.stock_qty:(body.stock_qty===''||body.stock_qty==null?null:Math.max(0,Math.floor(num(body.stock_qty,0)))),['active','inactive','archived'].includes(String(body.status))?String(body.status):row.status,body.requires_date===undefined?Number(row.requires_date||0):(body.requires_date?1:0),body.fulfillment_label===undefined?row.fulfillment_label:(String(body.fulfillment_label||'').trim()||null),body.approval_mode===undefined?(row.approval_mode||'hr'):(body.approval_mode==='auto'?'auto':'hr'),id,clientId).run(); return json({ok:true});
   }
 
   const redemptionDecisionMatch=path.match(/^\/api\/engagement\/redemptions\/(\d+)\/(approve|reject|deliver)$/);
@@ -3676,6 +4021,9 @@ async function checkIn(db, employeeId, lat, lng, source) {
   await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_in', 'attendance', `${employeeId}:${workDate}`, {
     lat, lng, late_minutes: lateMinutes, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
   });
+  if(schedule.is_workday && lateMinutes===0){
+    try{await awardEventRules(db,Number(employee.client_id),Number(employeeId),'attendance_on_time',workDate,`เช็กอินตรงเวลา · ${workDate}`);}catch(error){console.warn('attendance engagement award failed',error);}
+  }
   return {
     check_in_at: nowIso, work_date: workDate, status, late_minutes: lateMinutes,
     distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
@@ -4347,7 +4695,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.39',
+    version:'1.0-P7.54',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -4488,8 +4836,8 @@ async function getPayrollPeriodDetail(db,clientId,periodId){
   const period=await db.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(Number(periodId),Number(clientId)).first();
   if(!period)return {period:null,items:[],adjustments:[]};
   const [items,adjustments,documents]=await db.batch([
-    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,d.name AS department_name,pp.bank_name,pp.bank_account_no
-      FROM payroll_items pi JOIN employees e ON e.id=pi.employee_id LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id
+    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,d.name AS department_name,pos.name AS position_name,pp.bank_name,pp.bank_account_no
+      FROM payroll_items pi JOIN employees e ON e.id=pi.employee_id LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions pos ON pos.id=e.position_id LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id
       WHERE pi.period_id=?1 AND pi.client_id=?2 ORDER BY e.first_name,e.last_name`).bind(Number(periodId),Number(clientId)),
     db.prepare(`SELECT a.*,e.employee_code,e.first_name,e.last_name,e.nickname FROM payroll_adjustments a JOIN employees e ON e.id=a.employee_id WHERE a.period_id=?1 AND a.client_id=?2 ORDER BY a.employee_id,a.id`).bind(Number(periodId),Number(clientId)),
     db.prepare(`SELECT * FROM payroll_documents WHERE period_id=?1 AND client_id=?2`).bind(Number(periodId),Number(clientId)),
@@ -4576,13 +4924,14 @@ async function recalculatePayrollPeriod(env,clientId,periodId){
       if(date<=cutoff && !att?.check_in_at){ const leave=leaveByEmployeeDate.get(`${employee.id}:${date}`); if(!leave || String(leave.policy_code||'').toLowerCase().includes('unpaid')) absentDays+=leave&&leave.start_date===leave.end_date&&['am','pm','half'].includes(String(leave.day_part||''))?.5:1; }
     }
     let attendanceDeduction=0; if(Number(settings?.absence_deduction_enabled))attendanceDeduction+=roundMoney((salary/divisor)*absentDays); if(Number(settings?.late_deduction_enabled))attendanceDeduction+=roundMoney(lateMinutes*Number(settings?.late_deduction_per_minute||0));
-    let overtime=0,commission=0,incentive=0,allowance=0,bonus=0,otherEarnings=0,otherDeductions=0,taxableAdjustments=0,ssoAdjustments=0;
-    for(const a of adjustmentsByEmployee.get(Number(employee.id))||[]){const amt=Number(a.amount||0); if(a.adjustment_type==='deduction'){otherDeductions+=amt;continue;} if(Number(a.taxable))taxableAdjustments+=amt;if(Number(a.sso_contributable))ssoAdjustments+=amt; switch(String(a.category)){case'overtime':overtime+=amt;break;case'commission':commission+=amt;break;case'incentive':incentive+=amt;break;case'allowance':allowance+=amt;break;case'bonus':bonus+=amt;break;default:otherEarnings+=amt;}}
+    let overtime=0,commission=0,incentive=0,allowance=0,bonus=0,otherEarnings=0,otherDeductions=0,taxableAdjustments=0,ssoAdjustments=0,taxManualAdjust=0;
+    for(const a of adjustmentsByEmployee.get(Number(employee.id))||[]){const amt=Number(a.amount||0); const category=String(a.category||'other'); if(category==='tax_add'){taxManualAdjust+=amt;continue;} if(category==='tax_reduce'){taxManualAdjust-=amt;continue;} if(a.adjustment_type==='deduction'){otherDeductions+=amt;continue;} if(Number(a.taxable))taxableAdjustments+=amt;if(Number(a.sso_contributable))ssoAdjustments+=amt; switch(category){case'overtime':overtime+=amt;break;case'commission':commission+=amt;break;case'kpi':otherEarnings+=amt;break;case'incentive':incentive+=amt;break;case'allowance':allowance+=amt;break;case'bonus':bonus+=amt;break;default:otherEarnings+=amt;}}
     const gross=roundMoney(prorated+overtime+commission+incentive+allowance+bonus+otherEarnings); const taxableMonthly=Math.max(0,roundMoney(prorated+taxableAdjustments-attendanceDeduction));
     let sso=0; if(Number(settings?.social_security_enabled)&&Number(profile.social_security_enabled??1)){const contributable=Math.max(Number(rules.sso.wage_floor||0),Math.min(Number(rules.sso.wage_ceiling||17500),Math.max(0,prorated+ssoAdjustments))); if(prorated>0)sso=roundMoney(contributable*Number(rules.sso.employee_rate||.05));}
     let withholding=0; if(Number(settings?.tax_enabled)&&Number(profile.tax_enabled??1)){
       if(profile.monthly_tax_override!=null)withholding=Math.max(0,roundMoney(profile.monthly_tax_override)); else {const prior=ytd.get(Number(employee.id))||{}; const projectedIncome=Number(prior.ytd_taxable||0)+taxableMonthly*monthsRemaining; const projectedSso=Number(prior.ytd_sso||0)+sso*monthsRemaining; const expense=Math.min(projectedIncome*Number(rules.tax.expense_rate||.5),Number(rules.tax.expense_cap||100000)); const personal=Math.max(0,Number(profile.personal_allowance??rules.tax.personal_allowance??60000)); const extra=Math.max(0,Number(profile.extra_annual_deductions||0)); const netTaxable=Math.max(0,projectedIncome-expense-personal-extra-projectedSso); const annualTax=payrollTaxFromBrackets(netTaxable,rules.tax.brackets); withholding=roundMoney(Math.max(0,annualTax-Number(prior.ytd_tax||0))/monthsRemaining);}
     }
+    withholding=Math.max(0,roundMoney(withholding+taxManualAdjust));
     const deductions=roundMoney(attendanceDeduction+sso+withholding+otherDeductions); const netPay=roundMoney(Math.max(0,gross-deductions)); const breakdown={scheduled_days:scheduledDays,active_calendar_days:activeCalendarDays,tax_rule:rules.tax_version,sso_rule:rules.sso_version,taxable_monthly:taxableMonthly};
     statements.push(db.prepare(`INSERT INTO payroll_items (client_id,period_id,employee_id,base_salary,prorated_salary,absent_days,late_minutes,attendance_deduction,overtime,commission,incentive,allowance,bonus,other_earnings,gross_income,social_security,withholding_tax,other_deductions,total_deductions,net_pay,breakdown_json,calculation_note,status) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,'preview')`).bind(Number(clientId),Number(periodId),Number(employee.id),salary,prorated,absentDays,lateMinutes,attendanceDeduction,overtime,commission,incentive,allowance,bonus,otherEarnings,gross,sso,withholding,otherDeductions,deductions,netPay,JSON.stringify(breakdown),'ภาษีเป็นประมาณการรายเดือนแบบ annualized; HR/Payroll ต้องตรวจสอบก่อน Lock'));
     totals.gross+=gross;totals.deductions+=deductions;totals.net+=netPay;totals.count++;
@@ -4625,7 +4974,7 @@ function buildPayslipReadyFlex(employee,period,netPay,shareUrl){
   return lineBubble({eyebrow:'PAYROLL',title:'สลิปเงินเดือนพร้อมแล้ว',subtitle:`รอบ ${period.period_key}`,status:'พร้อมดู',statusTone:'success',body:[lineInfoCard([lineInfoRow('พนักงาน',displayName(employee)),lineInfoRow('รับสุทธิ',`${Number(netPay||0).toLocaleString('th-TH',{minimumFractionDigits:2})} บาท`,LINE_CI.success)],'success'),lineText('เอกสารเป็นข้อมูลส่วนตัว กรุณาอย่าส่งต่อลิงก์นี้','xxs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดสลิปเงินเดือน',{type:'uri',label:'เปิดสลิปเงินเดือน',uri:shareUrl})]});
 }
 
-async function publishPayrollPeriod(env,clientId,periodId){
+async function publishPayrollPeriod(env,clientId,periodId,{notify=true}={}){
   await ensureV100P3Ready(env.DB); const db=env.DB; const detail=await getPayrollPeriodDetail(db,clientId,periodId); if(!detail.period)throw new Error('Payroll period not found'); const client=await getClient(db,clientId); const workspace=await db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(); if(!workspace)throw new Error('Google not connected');
   const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const fontBytes=await fetchNaknaPdfFont(env); const payrollRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Payroll'); const periodFolder=await ensureDriveChildFolder(accessToken,payrollRoot,detail.period.period_key); const lineCtx=await getEffectiveLineContextForClient(env,clientId); const canEmail=String(workspace.scopes||'').includes('gmail.send');
   for(const item of detail.items){
@@ -4634,8 +4983,11 @@ async function publishPayrollPeriod(env,clientId,periodId){
       if(existing){await db.prepare(`UPDATE payroll_documents SET payroll_item_id=?1,file_name=?2,drive_file_id=?3,drive_url=?4,sha256=?5,share_token_hash=?6,share_token_value=?7,created_at=CURRENT_TIMESTAMP WHERE id=?8`).bind(Number(item.id),fileName,uploaded.id,uploaded.webViewLink||null,sha,tokenHash,token,Number(existing.id)).run();}
       else await db.prepare(`INSERT INTO payroll_documents (client_id,period_id,payroll_item_id,employee_id,file_name,drive_file_id,drive_url,sha256,share_token_hash,share_token_value) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`).bind(Number(clientId),Number(periodId),Number(item.id),Number(employee.id),fileName,uploaded.id,uploaded.webViewLink||null,sha,tokenHash,token).run();
       const shareUrl=`${env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev'}/payslip/${token}`;
-      let emailSent=false,lineSent=false; if(employee.email&&canEmail){try{await sendGmailAttachment(accessToken,{to:employee.email,subject:`สลิปเงินเดือน ${detail.period.period_key} · ${client.name}`,html:`<div style="font-family:Arial,sans-serif"><h2>สลิปเงินเดือน ${detail.period.period_key}</h2><p>สวัสดี ${employee.nickname||employee.first_name}</p><p>สลิปเงินเดือนของคุณพร้อมแล้ว เอกสาร PDF แนบมากับอีเมลนี้</p><p>เปิดเอกสารออนไลน์: <a href="${shareUrl}">ดูสลิปเงินเดือน</a></p><p>— Nakna HR</p></div>`,fileName,contentType:'application/pdf',bytes:pdfBytes});emailSent=true;}catch(error){console.error(JSON.stringify({level:'warn',event:'payslip_email_failed',employee_id:employee.id,message:String(error?.message||error)}));}}
-      if(employee.line_user_id&&lineCtx?.accessToken){try{await pushLineMessages(lineCtx.accessToken,employee.line_user_id,[buildPayslipReadyFlex(employee,detail.period,item.net_pay,shareUrl)]);lineSent=true;}catch{}}
+      let emailSent=false,lineSent=false;
+      if(notify){
+        if(employee.email&&canEmail){try{await sendGmailAttachment(accessToken,{to:employee.email,subject:`สลิปเงินเดือน ${detail.period.period_key} · ${client.name}`,html:`<div style="font-family:Arial,sans-serif"><h2>สลิปเงินเดือน ${detail.period.period_key}</h2><p>สวัสดี ${employee.nickname||employee.first_name}</p><p>สลิปเงินเดือนของคุณพร้อมแล้ว เอกสาร PDF แนบมากับอีเมลนี้</p><p>เปิดเอกสารออนไลน์: <a href="${shareUrl}">ดูสลิปเงินเดือน</a></p><p>— Nakna HR</p></div>`,fileName,contentType:'application/pdf',bytes:pdfBytes});emailSent=true;}catch(error){console.error(JSON.stringify({level:'warn',event:'payslip_email_failed',employee_id:employee.id,message:String(error?.message||error)}));}}
+        if(employee.line_user_id&&lineCtx?.accessToken){try{await pushLineMessages(lineCtx.accessToken,employee.line_user_id,[buildPayslipReadyFlex(employee,detail.period,item.net_pay,shareUrl)]);lineSent=true;}catch{}}
+      }
       await db.prepare(`UPDATE payroll_documents SET email_sent_at=CASE WHEN ?1=1 THEN CURRENT_TIMESTAMP ELSE email_sent_at END,line_notified_at=CASE WHEN ?2=1 THEN CURRENT_TIMESTAMP ELSE line_notified_at END WHERE period_id=?3 AND employee_id=?4`).bind(emailSent?1:0,lineSent?1:0,Number(periodId),Number(employee.id)).run();
     }catch(error){console.error(JSON.stringify({level:'error',event:'payslip_generate_failed',period_id:periodId,employee_id:item.employee_id,message:String(error?.message||error)}));}
   }
@@ -4652,6 +5004,73 @@ async function generateEmployeeCertificate(env,clientId,employeeId,type,userId,n
 
 function wrapTextSimple(text,maxChars){const words=String(text||'').split(/\s+/);const lines=[];let line='';for(const word of words){if((line+' '+word).trim().length>maxChars&&line){lines.push(line);line=word;}else line=(line+' '+word).trim();}if(line)lines.push(line);return lines;}
 
+
+
+function normalizeEngagementTrigger(value){
+  const v=String(value||'manual').trim();
+  const allowed=['attendance_on_time','attendance_streak','learning_complete','kpi_complete','birthday','work_anniversary','social_share','social_engagement','manual','custom'];
+  return allowed.includes(v)?v:'custom';
+}
+function legacyEventTypeForTrigger(trigger){
+  return ['attendance_streak','learning_complete','kpi_complete','birthday','work_anniversary','manual'].includes(String(trigger))?String(trigger):'custom';
+}
+function normalizeEngagementRepeat(value,trigger='manual'){
+  const v=String(value||'').trim(); const allowed=['event','once','daily','weekly','monthly','unlimited'];
+  if(allowed.includes(v))return v;
+  return ['birthday','work_anniversary'].includes(String(trigger))?'event':['attendance_on_time','learning_complete','kpi_complete','attendance_streak'].includes(String(trigger))?'event':'once';
+}
+function normalizeEngagementApproval(value,trigger='manual'){
+  const v=String(value||'').trim();
+  if(['auto','hr'].includes(v))return v;
+  return ['social_share','social_engagement','manual','custom'].includes(String(trigger))?'hr':'auto';
+}
+function normalizeEngagementAudience(type,ids){
+  const t=['all','department','employees'].includes(String(type))?String(type):'all';
+  const raw=Array.isArray(ids)?ids:(ids==null?[]:[ids]);
+  const clean=[...new Set(raw.map(Number).filter(Number.isFinite).filter(x=>x>0))];
+  return {type:t,ids:t==='all'?[]:clean};
+}
+function normalizeOptionalDate(v){const x=String(v||'').trim();return /^\d{4}-\d{2}-\d{2}$/.test(x)?x:null;}
+function engagementTriggerKey(rule){return normalizeEngagementTrigger(rule?.trigger_key||rule?.event_type);}
+function engagementRuleScheduleAllows(rule,dateKey=dateInBangkok()){
+  const d=String(dateKey||dateInBangkok()).slice(0,10); if(rule?.archived_at)return false;
+  if(rule?.starts_at&&d<String(rule.starts_at).slice(0,10))return false;
+  if(rule?.ends_at&&d>String(rule.ends_at).slice(0,10))return false;
+  return true;
+}
+async function employeeMatchesEngagementAudience(db,rule,clientId,employeeId){
+  const type=String(rule?.audience_type||'all'); if(type==='all')return true;
+  const ids=(safeJsonParse(rule?.audience_ids_json,[])||[]).map(Number);
+  if(type==='employees')return ids.includes(Number(employeeId));
+  if(type==='department'){
+    const row=await db.prepare('SELECT department_id FROM employees WHERE id=?1 AND client_id=?2').bind(Number(employeeId),Number(clientId)).first();
+    return ids.includes(Number(row?.department_id||0));
+  }
+  return true;
+}
+function engagementPeriodKey(repeatMode,dateKey=dateInBangkok()){
+  const d=String(dateKey||dateInBangkok()).slice(0,10); if(repeatMode==='daily')return d; if(repeatMode==='monthly')return d.slice(0,7);
+  if(repeatMode==='weekly'){
+    const dt=new Date(`${d}T12:00:00+07:00`), day=(dt.getUTCDay()+6)%7; dt.setUTCDate(dt.getUTCDate()-day);
+    return dt.toISOString().slice(0,10);
+  }
+  if(repeatMode==='once')return 'once'; return null;
+}
+async function completeEngagementRule(db,{clientId,employeeId,rule,note='',evidenceUrl='',createdByUserId=null}){
+  const cid=Number(clientId),eid=Number(employeeId),today=dateInBangkok();
+  const setting=await db.prepare('SELECT points_enabled FROM engagement_settings WHERE client_id=?1').bind(cid).first(); if(Number(setting?.points_enabled??1)!==1)throw httpError('ระบบแต้มและรางวัลถูกปิดอยู่',409);
+  if(!engagementRuleScheduleAllows(rule,today))throw httpError('กิจกรรมนี้อยู่นอกช่วงเวลาที่กำหนด',409);
+  if(!await employeeMatchesEngagementAudience(db,rule,cid,eid))throw httpError('พนักงานคนนี้ไม่ได้อยู่ในกลุ่มของกิจกรรม',409);
+  if(Number(rule.requires_evidence||0)&&!String(evidenceUrl||'').trim()&&!String(note||'').trim())throw httpError('กิจกรรมนี้ต้องมีหลักฐานหรือหมายเหตุ',400);
+  const max=rule.max_awards_per_employee==null?null:Math.max(1,Number(rule.max_awards_per_employee));
+  if(max){const n=Number((await db.prepare('SELECT COUNT(*) AS n FROM point_transactions WHERE client_id=?1 AND employee_id=?2 AND rule_id=?3').bind(cid,eid,Number(rule.id)).first())?.n||0);if(n>=max)throw httpError(`กิจกรรมนี้รับรางวัลได้สูงสุด ${max} ครั้งต่อคน`,409);}
+  const repeat=normalizeEngagementRepeat(rule.repeat_mode,engagementTriggerKey(rule)),period=engagementPeriodKey(repeat,today);
+  const key=repeat==='event'||repeat==='unlimited'?`rule:${rule.id}:manual:${eid}:${Date.now()}:${Math.random().toString(36).slice(2,8)}`:`rule:${rule.id}:manual:${eid}:${period}`;
+  const detail=[note,evidenceUrl?`หลักฐาน: ${evidenceUrl}`:''].filter(Boolean).join(' · ')||rule.name;
+  const result=await addPointTransaction(db,{clientId:cid,employeeId:eid,ruleId:Number(rule.id),transactionType:'earn',points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'engagement_activity',referenceId:period||today,idempotencyKey:key,note:detail,createdByUserId});
+  if(result.duplicate)throw httpError('พนักงานได้รับรางวัลจากกิจกรรมนี้ในรอบที่กำหนดแล้ว',409);
+  return result;
+}
 
 function canViewEngagement(role){ return ['owner','co_owner','hr_admin','hr','manager','viewer'].includes(String(role||'')); }
 function canManageEngagement(role){ return ['owner','co_owner','hr_admin','hr'].includes(String(role||'')); }
@@ -4689,37 +5108,50 @@ async function addPointTransaction(db,{clientId,employeeId,ruleId=null,transacti
 
 async function awardEventRules(db,clientId,employeeId,eventType,referenceId,note){
   await ensurePhase5Defaults(db,clientId);
-  const rules=(await db.prepare(`SELECT * FROM point_rules WHERE client_id=?1 AND is_active=1 AND event_type=?2 ORDER BY id`).bind(Number(clientId),String(eventType)).all()).results||[];
+  const setting=await db.prepare('SELECT points_enabled FROM engagement_settings WHERE client_id=?1').bind(Number(clientId)).first(); if(Number(setting?.points_enabled??1)!==1)return 0;
+  const cid=Number(clientId),eid=Number(employeeId),trigger=normalizeEngagementTrigger(eventType),today=dateInBangkok();
+  const rules=(await db.prepare(`SELECT * FROM point_rules WHERE client_id=?1 AND is_active=1 AND archived_at IS NULL AND COALESCE(NULLIF(trigger_key,''),event_type)=?2 ORDER BY id`).bind(cid,trigger).all()).results||[];
   let awarded=0;
   for(const rule of rules){
-    const key=`rule:${rule.id}:${eventType}:${employeeId}:${referenceId}`;
-    const r=await addPointTransaction(db,{clientId,employeeId,ruleId:rule.id,transactionType:'earn',points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:eventType,referenceId,idempotencyKey:key,note:note||rule.name});
+    if(!engagementRuleScheduleAllows(rule,today))continue;
+    if(!await employeeMatchesEngagementAudience(db,rule,cid,eid))continue;
+    const repeat=normalizeEngagementRepeat(rule.repeat_mode,trigger), period=engagementPeriodKey(repeat,today);
+    let suffix=String(referenceId??today);
+    if(repeat==='once'||repeat==='daily'||repeat==='weekly'||repeat==='monthly')suffix=period;
+    const max=rule.max_awards_per_employee==null?null:Math.max(1,Number(rule.max_awards_per_employee));
+    if(max){const n=Number((await db.prepare('SELECT COUNT(*) AS n FROM point_transactions WHERE client_id=?1 AND employee_id=?2 AND rule_id=?3').bind(cid,eid,Number(rule.id)).first())?.n||0);if(n>=max)continue;}
+    const key=`rule:${rule.id}:${trigger}:${eid}:${suffix}`;
+    const r=await addPointTransaction(db,{clientId:cid,employeeId:eid,ruleId:rule.id,transactionType:'earn',points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:trigger,referenceId:suffix,idempotencyKey:key,note:note||rule.name});
     if(!r.duplicate)awarded++;
   }
   return awarded;
 }
 
 async function runEngagementAutomationForClient(db,clientId){
-  await ensurePhase5Defaults(db,clientId); const cid=Number(clientId),today=dateInBangkok(),year=today.slice(0,4);
-  const rules=(await db.prepare(`SELECT * FROM point_rules WHERE client_id=?1 AND is_active=1 ORDER BY id`).bind(cid).all()).results||[];
-  const employees=(await db.prepare(`SELECT id,birth_date,start_date,first_name,last_name,nickname FROM employees WHERE client_id=?1 AND status='active' AND COALESCE(people_status,'employee') IN ('probation','employee','leave_of_absence')`).bind(cid).all()).results||[];
+  await ensurePhase5Defaults(db,clientId); const setting=await db.prepare('SELECT points_enabled FROM engagement_settings WHERE client_id=?1').bind(Number(clientId)).first(); if(Number(setting?.points_enabled??1)!==1)return {awarded:0}; const cid=Number(clientId),today=dateInBangkok(),year=today.slice(0,4);
+  const rules=(await db.prepare(`SELECT * FROM point_rules WHERE client_id=?1 AND is_active=1 AND archived_at IS NULL ORDER BY id`).bind(cid).all()).results||[];
+  const employees=(await db.prepare(`SELECT id,department_id,birth_date,start_date,first_name,last_name,nickname FROM employees WHERE client_id=?1 AND status='active' AND COALESCE(people_status,'employee') IN ('probation','employee','leave_of_absence')`).bind(cid).all()).results||[];
   let awarded=0;
   for(const rule of rules){
-    if(rule.event_type==='attendance_streak'){
-      const threshold=Math.max(1,Number(rule.threshold_count||1)); const effective=rule.effective_from||'2000-01-01';
+    if(!engagementRuleScheduleAllows(rule,today))continue;
+    const trigger=engagementTriggerKey(rule);
+    if(trigger==='attendance_streak'){
+      const threshold=Math.max(1,Number(rule.threshold_count||1)); const effective=rule.starts_at||rule.effective_from||'2000-01-01';
       for(const emp of employees){
+        if(!await employeeMatchesEngagementAudience(db,rule,cid,emp.id))continue;
         const countRow=await db.prepare(`SELECT COUNT(*) AS n FROM attendance WHERE client_id=?1 AND employee_id=?2 AND work_date>=?3 AND work_date<=?4 AND check_in_at IS NOT NULL AND COALESCE(late_minutes,0)=0 AND COALESCE(status,'present') NOT IN ('leave','absent')`).bind(cid,Number(emp.id),effective,today).first();
         const blocks=Math.floor(Number(countRow?.n||0)/threshold);
         for(let b=1;b<=blocks;b++){
+          const max=rule.max_awards_per_employee==null?null:Math.max(1,Number(rule.max_awards_per_employee)); if(max&&b>max)break;
           const r=await addPointTransaction(db,{clientId:cid,employeeId:emp.id,ruleId:rule.id,points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'attendance_streak',referenceId:`block-${b}`,idempotencyKey:`rule:${rule.id}:attendance:${emp.id}:block:${b}`,note:`${rule.name} · ครั้งที่ ${b*threshold}`}); if(!r.duplicate)awarded++;
         }
       }
     }
-    if(rule.event_type==='birthday'){
-      for(const emp of employees){if(!emp.birth_date||String(emp.birth_date).slice(5)!==today.slice(5))continue;const r=await addPointTransaction(db,{clientId:cid,employeeId:emp.id,ruleId:rule.id,points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'birthday',referenceId:year,idempotencyKey:`rule:${rule.id}:birthday:${emp.id}:${year}`,note:`${rule.name} ${emp.nickname||emp.first_name}`});if(!r.duplicate)awarded++;}
+    if(trigger==='birthday'){
+      for(const emp of employees){if(!await employeeMatchesEngagementAudience(db,rule,cid,emp.id))continue;if(!emp.birth_date||String(emp.birth_date).slice(5)!==today.slice(5))continue;const r=await addPointTransaction(db,{clientId:cid,employeeId:emp.id,ruleId:rule.id,points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'birthday',referenceId:year,idempotencyKey:`rule:${rule.id}:birthday:${emp.id}:${year}`,note:`${rule.name} ${emp.nickname||emp.first_name}`});if(!r.duplicate)awarded++;}
     }
-    if(rule.event_type==='work_anniversary'){
-      for(const emp of employees){if(!emp.start_date||String(emp.start_date).slice(5)!==today.slice(5)||String(emp.start_date).slice(0,4)>=year)continue;const years=Number(year)-Number(String(emp.start_date).slice(0,4));const r=await addPointTransaction(db,{clientId:cid,employeeId:emp.id,ruleId:rule.id,points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'work_anniversary',referenceId:year,idempotencyKey:`rule:${rule.id}:anniversary:${emp.id}:${year}`,note:`${rule.name} · ${years} ปี`});if(!r.duplicate)awarded++;}
+    if(trigger==='work_anniversary'){
+      for(const emp of employees){if(!await employeeMatchesEngagementAudience(db,rule,cid,emp.id))continue;if(!emp.start_date||String(emp.start_date).slice(5)!==today.slice(5)||String(emp.start_date).slice(0,4)>=year)continue;const years=Number(year)-Number(String(emp.start_date).slice(0,4));const r=await addPointTransaction(db,{clientId:cid,employeeId:emp.id,ruleId:rule.id,points:Number(rule.points||0),cashValue:Number(rule.cash_value||0),referenceType:'work_anniversary',referenceId:year,idempotencyKey:`rule:${rule.id}:anniversary:${emp.id}:${year}`,note:`${rule.name} · ${years} ปี`});if(!r.duplicate)awarded++;}
     }
   }
   return {awarded};
@@ -4729,7 +5161,7 @@ async function getEngagementOverview(db,clientId){
   const cid=Number(clientId); await ensurePhase5Defaults(db,cid); await runEngagementAutomationForClient(db,cid);
   const [settings,rules,rewards,redemptions,leaderboard,tx,pendingCash]=await Promise.all([
     db.prepare('SELECT * FROM engagement_settings WHERE client_id=?1').bind(cid).first(),
-    db.prepare('SELECT * FROM point_rules WHERE client_id=?1 ORDER BY is_active DESC,id').bind(cid).all(),
+    db.prepare('SELECT * FROM point_rules WHERE client_id=?1 AND archived_at IS NULL ORDER BY is_active DESC,id DESC').bind(cid).all(),
     db.prepare('SELECT * FROM reward_catalog WHERE client_id=?1 ORDER BY status,id DESC').bind(cid).all(),
     db.prepare(`SELECT rr.*,rc.title AS reward_title,rc.reward_type,e.employee_code,e.first_name,e.last_name,e.nickname FROM reward_redemptions rr JOIN reward_catalog rc ON rc.id=rr.reward_id JOIN employees e ON e.id=rr.employee_id WHERE rr.client_id=?1 ORDER BY rr.requested_at DESC LIMIT 100`).bind(cid).all(),
     db.prepare(`SELECT w.*,e.employee_code,e.first_name,e.last_name,e.nickname,d.name AS department_name FROM employee_point_wallets w JOIN employees e ON e.id=w.employee_id LEFT JOIN departments d ON d.id=e.department_id WHERE w.client_id=?1 AND e.status='active' ORDER BY w.balance DESC,w.lifetime_earned DESC LIMIT 30`).bind(cid).all(),
@@ -4737,16 +5169,22 @@ async function getEngagementOverview(db,clientId){
     db.prepare(`SELECT COALESCE(SUM(cash_value),0) AS amount,COUNT(*) AS n FROM point_transactions WHERE client_id=?1 AND cash_value>0 AND payroll_adjustment_id IS NULL`).bind(cid).first(),
   ]);
   const leaderboardRows=leaderboard.results||[]; const wallets=await db.prepare('SELECT COALESCE(SUM(balance),0) AS outstanding,COALESCE(SUM(lifetime_earned),0) AS earned FROM employee_point_wallets WHERE client_id=?1').bind(cid).first();
-  return {settings,rules:rules.results||[],rewards:rewards.results||[],redemptions:redemptions.results||[],leaderboard:leaderboardRows,recent_transactions:tx.results||[],summary:{points_outstanding:Number(wallets?.outstanding||0),lifetime_earned:Number(wallets?.earned||0),active_rewards:(rewards.results||[]).filter(x=>x.status==='active').length,pending_redemptions:(redemptions.results||[]).filter(x=>x.status==='pending').length,pending_cash_payroll:Number(pendingCash?.amount||0),pending_cash_count:Number(pendingCash?.n||0)}};
+  return {settings,rules:rules.results||[],rewards:rewards.results||[],redemptions:redemptions.results||[],leaderboard:leaderboardRows,recent_transactions:tx.results||[],summary:{points_outstanding:Number(wallets?.outstanding||0),lifetime_earned:Number(wallets?.earned||0),active_activities:(rules.results||[]).filter(x=>Number(x.is_active)&&engagementRuleScheduleAllows(x)).length,total_activities:(rules.results||[]).length,active_rewards:(rewards.results||[]).filter(x=>x.status==='active').length,pending_redemptions:(redemptions.results||[]).filter(x=>x.status==='pending').length,pending_cash_payroll:Number(pendingCash?.amount||0),pending_cash_count:Number(pendingCash?.n||0)}};
 }
 
-async function requestRewardRedemption(db,clientId,employeeId,rewardId,note=''){
+async function requestRewardRedemption(db,clientId,employeeId,rewardId,note='',requestedDate=''){
   const cid=Number(clientId),eid=Number(employeeId),rid=Number(rewardId); await ensurePhase5Defaults(db,cid);
   const reward=await db.prepare(`SELECT * FROM reward_catalog WHERE id=?1 AND client_id=?2 AND status='active'`).bind(rid,cid).first(); if(!reward)throw httpError('ไม่พบของรางวัลหรือปิดใช้งานแล้ว',404); if(reward.stock_qty!=null&&Number(reward.stock_qty)<=0)throw httpError('ของรางวัลหมดแล้ว',409);
   const wallet=await ensurePointWallet(db,cid,eid); const cost=Math.max(0,Number(reward.points_cost||0)); if(Number(wallet.balance||0)<cost)throw httpError(`แต้มไม่พอ ต้องใช้ ${cost.toLocaleString('th-TH')} แต้ม`,409);
-  const insert=await db.prepare(`INSERT INTO reward_redemptions (client_id,employee_id,reward_id,points_cost,cash_value,status,employee_note) VALUES (?1,?2,?3,?4,?5,'pending',?6)`).bind(cid,eid,rid,cost,Number(reward.cash_value||0),note||null).run(); const redemptionId=Number(insert.meta.last_row_id);
+  const date=normalizeOptionalDate(requestedDate); if(Number(reward.requires_date||0)&&!date)throw httpError(`กรุณาเลือก${reward.fulfillment_label||'วันที่ต้องการใช้สิทธิ์'}`,400);
+  const initialStatus=String(reward.approval_mode||'hr')==='auto'?'approved':'pending';
+  const insert=await db.prepare(`INSERT INTO reward_redemptions (client_id,employee_id,reward_id,points_cost,cash_value,status,employee_note,requested_date,decided_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,CASE WHEN ?6='approved' THEN CURRENT_TIMESTAMP ELSE NULL END)`).bind(cid,eid,rid,cost,Number(reward.cash_value||0),initialStatus,note||null,date).run(); const redemptionId=Number(insert.meta.last_row_id);
   try{await addPointTransaction(db,{clientId:cid,employeeId:eid,transactionType:'spend',points:-cost,referenceType:'reward_redemption',referenceId:redemptionId,idempotencyKey:`redemption:${redemptionId}:spend`,note:`แลก ${reward.title}`});}
   catch(error){await db.prepare('DELETE FROM reward_redemptions WHERE id=?1').bind(redemptionId).run();throw error;}
+  if(initialStatus==='approved'){
+    if(reward.stock_qty!=null)await db.prepare(`UPDATE reward_catalog SET stock_qty=MAX(0,stock_qty-1),updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(rid).run();
+    if(Number(reward.cash_value||0)>0)await addPointTransaction(db,{clientId:cid,employeeId:eid,transactionType:'earn',points:0,cashValue:Number(reward.cash_value||0),referenceType:'reward_cash',referenceId:redemptionId,idempotencyKey:`redemption:${redemptionId}:cash`,note:`Cash reward · ${reward.title}`});
+  }
   return {id:redemptionId,reward,wallet:await ensurePointWallet(db,cid,eid)};
 }
 
@@ -5146,15 +5584,15 @@ async function getPublicLearningPortal(env,token){
   await ensurePhase5Defaults(env.DB,Number(access.client_id));
   const [wallet,rewards,redemptions,leaderboard]=await Promise.all([
     ensurePointWallet(env.DB,Number(access.client_id),Number(access.employee_id)),
-    env.DB.prepare(`SELECT id,title,description,reward_type,points_cost,cash_value,stock_qty FROM reward_catalog WHERE client_id=?1 AND status='active' AND (stock_qty IS NULL OR stock_qty>0) ORDER BY points_cost,id`).bind(Number(access.client_id)).all(),
-    env.DB.prepare(`SELECT rr.id,rr.reward_id,rr.points_cost,rr.cash_value,rr.status,rr.requested_at,rr.decided_at,rr.delivered_at,rc.title AS reward_title FROM reward_redemptions rr JOIN reward_catalog rc ON rc.id=rr.reward_id WHERE rr.client_id=?1 AND rr.employee_id=?2 ORDER BY rr.requested_at DESC LIMIT 30`).bind(Number(access.client_id),Number(access.employee_id)).all(),
+    env.DB.prepare(`SELECT id,title,description,reward_type,points_cost,cash_value,stock_qty,requires_date,fulfillment_label,approval_mode FROM reward_catalog WHERE client_id=?1 AND status='active' AND (stock_qty IS NULL OR stock_qty>0) ORDER BY points_cost,id`).bind(Number(access.client_id)).all(),
+    env.DB.prepare(`SELECT rr.id,rr.reward_id,rr.points_cost,rr.cash_value,rr.status,rr.requested_at,rr.requested_date,rr.decided_at,rr.delivered_at,rc.title AS reward_title FROM reward_redemptions rr JOIN reward_catalog rc ON rc.id=rr.reward_id WHERE rr.client_id=?1 AND rr.employee_id=?2 ORDER BY rr.requested_at DESC LIMIT 30`).bind(Number(access.client_id),Number(access.employee_id)).all(),
     env.DB.prepare(`SELECT w.employee_id,w.balance,e.nickname,e.first_name FROM employee_point_wallets w JOIN employees e ON e.id=w.employee_id WHERE w.client_id=?1 AND e.status='active' ORDER BY w.balance DESC LIMIT 10`).bind(Number(access.client_id)).all()
   ]);
   return json({employee:{id:access.employee_id,employee_code:access.employee_code,name:access.nickname||access.first_name,company_name:access.company_name,people_status:access.people_status},courses,goals,engagement:{wallet,rewards:rewards.results||[],redemptions:redemptions.results||[],leaderboard:leaderboard.results||[]},summary:{courses:courses.length,completed:courses.filter(c=>c.status==='completed').length,goals:goals.length,points:Number(wallet?.balance||0)}});
 }
 
 async function redeemPublicReward(request,env,token,rewardId){
-  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ'},401); const body=await safeJson(request); try{const result=await requestRewardRedemption(env.DB,Number(access.client_id),Number(access.employee_id),Number(rewardId),String(body.note||'').trim()); return json({ok:true,id:result.id,wallet:result.wallet},201);}catch(e){return json({error:e.message},e.status||400);}
+  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ'},401); const body=await safeJson(request); try{const result=await requestRewardRedemption(env.DB,Number(access.client_id),Number(access.employee_id),Number(rewardId),String(body.note||'').trim(),String(body.requested_date||'').trim()); return json({ok:true,id:result.id,wallet:result.wallet},201);}catch(e){return json({error:e.message},e.status||400);}
 }
 
 async function getAssignmentForPublicModule(db,access,moduleId){
@@ -5382,6 +5820,7 @@ async function ensureV100P3Ready(db){
     const statements=V100P3_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
     for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}}
   }
+  await db.prepare(`ALTER TABLE payroll_settings ADD COLUMN auto_payslip_on_lock INTEGER NOT NULL DEFAULT 1`).run().catch(()=>{});
   SCHEMA_READY.add('p3');
 }
 
@@ -5407,6 +5846,29 @@ async function ensureV100P5Ready(db){
       catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}
     }
   }
+  // P7.57 — Engagement Studio. Keep the original point engine, but make every rule configurable.
+  await ensureColumns(db,'point_rules',[
+    ['trigger_key','TEXT'],
+    ['audience_type',"TEXT NOT NULL DEFAULT 'all'"],
+    ['audience_ids_json','TEXT'],
+    ['approval_mode',"TEXT NOT NULL DEFAULT 'auto'"],
+    ['repeat_mode',"TEXT NOT NULL DEFAULT 'event'"],
+    ['max_awards_per_employee','INTEGER'],
+    ['requires_evidence','INTEGER NOT NULL DEFAULT 0'],
+    ['starts_at','TEXT'],
+    ['ends_at','TEXT'],
+    ['template_key','TEXT'],
+    ['config_json','TEXT'],
+    ['archived_at','TEXT']
+  ]);
+  await ensureColumns(db,'reward_catalog',[
+    ['requires_date','INTEGER NOT NULL DEFAULT 0'],
+    ['fulfillment_label','TEXT'],
+    ['approval_mode',"TEXT NOT NULL DEFAULT 'hr'"]
+  ]);
+  await ensureColumns(db,'reward_redemptions',[
+    ['requested_date','TEXT']
+  ]);
   SCHEMA_READY.add('p5');
 }
 
@@ -5454,6 +5916,12 @@ async function ensurePhase5Defaults(db,clientId){
   for(const r of defaults){
     await db.prepare(`INSERT OR IGNORE INTO point_rules (client_id,code,name,description,event_type,points,cash_value,threshold_count,is_active,effective_from) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`).bind(id,...r,dateInBangkok()).run();
   }
+  // P7.57: legacy preset rules become Templates instead of cluttering every company by default.
+  // Only hide untouched + inactive presets; anything a customer edited or used stays visible.
+  await db.prepare(`UPDATE point_rules SET archived_at=COALESCE(archived_at,CURRENT_TIMESTAMP)
+    WHERE client_id=?1 AND code IN ('attendance-10','learning-complete','kpi-complete','birthday','anniversary')
+      AND is_active=0 AND archived_at IS NULL AND created_at=updated_at
+      AND NOT EXISTS (SELECT 1 FROM point_transactions t WHERE t.rule_id=point_rules.id LIMIT 1)`).bind(id).run().catch(()=>{});
   const trialPlan=await db.prepare(`SELECT id,trial_days FROM subscription_plans WHERE code='trial' LIMIT 1`).first();
   const existing=await db.prepare('SELECT id FROM company_subscriptions WHERE client_id=?1').bind(id).first();
   if(!existing){
@@ -6426,7 +6894,8 @@ async function ensureCoreSchema(db) {
   await ensureColumns(db,'employee_invites',[['token_value','TEXT']]);
   await ensureColumns(db,'employees',[
     ['line_display_name','TEXT'],['line_picture_url','TEXT'],['line_linked_at','TEXT'],['onboarding_source','TEXT'],
-    ['emergency_contact_name','TEXT'],['emergency_contact_phone','TEXT']
+    ['emergency_contact_name','TEXT'],['emergency_contact_phone','TEXT'],['national_id','TEXT'],
+    ['contract_type','TEXT'],['contract_number','TEXT'],['contract_start_date','TEXT'],['contract_signed_date','TEXT']
   ]);
   await ensureColumns(db,'attendance',[
     ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
