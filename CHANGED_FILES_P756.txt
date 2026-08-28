@@ -1,0 +1,21 @@
+V1.0-P7.56 — Smart Auto Organization Hierarchy
+
+Changed:
+- app.js
+- index.html
+- styles.css
+- public/app.js
+- public/index.html
+- public/styles.css
+- package.json
+- CHANGELOG.md
+
+Behavior:
+- Existing manual parent_department_id always wins.
+- Otherwise hierarchy is inferred from department-head reporting line, executive level, and department category.
+- CEO is placed at the top; C-level roles are placed under CEO.
+- Marketing/Content/VISIONHUB route to CMO when present.
+- HR/Operations/Partner Experience route to COO when present.
+- Accounting/Finance route to CFO when present, otherwise CEO.
+- Sales/DEALMAKER route to CSO when present, otherwise COO/CEO.
+- Both List and Chart views use the same inferred hierarchy.

@@ -1,3 +1,14 @@
+## V1.0-P7.56 — Smart Auto Organization Hierarchy
+- ผังองค์กรจัดลำดับชั้นให้อัตโนมัติเมื่อยังไม่ได้กำหนดแผนกแม่
+- ยึดลำดับที่ผู้ใช้กำหนดเอง (`parent_department_id`) เป็นอันดับแรกเสมอ
+- ถ้าหัวหน้าแผนกมีหัวหน้าโดยตรงในอีกแผนก ระบบใช้สายบังคับบัญชานั้นเป็นโครงสร้างอัตโนมัติ
+- รู้จักระดับ CEO / C-level และจัด CEO ไว้บนสุด จากนั้นแยก COO / CMO / CFO / CTO / CSO ตามสายงาน
+- จัดกลุ่มสายงานอัตโนมัติ เช่น Marketing/Content/VISIONHUB → CMO, HR/Operations/Partner Experience → COO, Accounting/Finance → CFO หรือ CEO เมื่อไม่มี CFO
+- ป้องกันวงจร parent ซ้อนกันผิดพลาด และเรียง sibling ตามระดับ/สายงาน/ลำดับเดิม/ชื่อ
+- หน้า List และหน้า Chart ใช้ hierarchy ชุดเดียวกัน เพื่อไม่ให้ข้อมูลสองมุมมองไม่ตรงกัน
+- Modal แผนกเปลี่ยนตัวเลือก parent ว่างเป็น “อัตโนมัติ (แนะนำ)” พร้อมคำอธิบาย
+- เพิ่มสถานะ AUTO / ตามหัวหน้า / กำหนดเอง บนการ์ดผังองค์กร
+
 ## V1.0-P7.55 — Visual Organization Chart
 
 - Added `รายการ / โครงสร้าง` view switch on the Organization page.

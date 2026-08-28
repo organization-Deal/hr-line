@@ -2454,6 +2454,138 @@ function renderOrganizationAvatar(employee,size='normal'){
   return `<span class="org-person-avatar ${size==='small'?'small':''}" title="${escapeHtml(name)}">${photo?`<img src="${escapeHtml(photo)}" alt="" loading="lazy"/>`:`<b>${initial(employee||{})}</b>`}</span>`;
 }
 
+function normalizeOrganizationText(value=''){
+  return String(value||'').toLowerCase().replace(/[._/\\-]+/g,' ').replace(/\s+/g,' ').trim();
+}
+
+function organizationDepartmentProfile(department){
+  const text=normalizeOrganizationText(`${department?.name||''} ${department?.code||''}`);
+  const has=(...terms)=>terms.some(term=>text.includes(term));
+  let rank=3;
+  if(has('chief executive',' ceo','ceo ','กรรมการผู้จัดการ','managing director','founder','owner','ประธานเจ้าหน้าที่บริหาร')) rank=0;
+  else if(has('chief ',' officer',' cmo','cmo ',' coo','coo ',' cfo','cfo ',' cto','cto ',' cso','cso ','vice president',' vp','vp ','ประธานเจ้าหน้าที่','รองประธาน')) rank=1;
+  else if(has('director','head of','general manager','manager office')) rank=2;
+
+  let category='general';
+  if(has('marketing','brand','content','creative','media','visionhub','public relation','communication','การตลาด','คอนเทนต์','สื่อ','แบรนด์')) category='marketing';
+  else if(has('finance','account','accounting','payroll','บัญชี','การเงิน','ภาษี')) category='finance';
+  else if(has('technology',' tech','tech ',' it','developer','development','engineering','product','software','digital','เทคโนโลยี','ไอที','โปรดักต์')) category='technology';
+  else if(has('sales','dealmaker','business development','commercial','revenue','ขาย','ฝ่ายขาย','ดีลเมกเกอร์')) category='sales';
+  else if(has('operation','operations','operating','human resource','human resources',' hr','hr ','people','partner experience','customer','service','support','location','procurement','purchase','legal','admin','office','ปฏิบัติการ','บุคคล','ทรัพยากรบุคคล','ลูกค้า','จัดซื้อ','กฎหมาย','ธุรการ')) category='operations';
+  if(rank===0) category='executive';
+  return {text,rank,category};
+}
+
+function buildSmartOrganizationHierarchy(departments=[],employees=[]){
+  const source=Array.isArray(departments)?departments:[];
+  const departmentById=new Map(source.map(item=>[Number(item.id),item]));
+  const employeeById=new Map((employees||[]).map(item=>[Number(item.id),item]));
+  const profiles=new Map(source.map(item=>[Number(item.id),organizationDepartmentProfile(item)]));
+  const validParent=(childId,parentId)=>Boolean(parentId&&parentId!==childId&&departmentById.has(parentId));
+
+  const scoreLead=(department,category)=>{
+    const profile=profiles.get(Number(department.id))||{rank:9,category:'general'};
+    let score=0;
+    if(profile.rank===1) score+=20;
+    if(profile.category===category) score+=55;
+    const text=profile.text||'';
+    if(category==='operations' && (text.includes('chief operating')||/(^| )coo( |$)/.test(text))) score+=80;
+    if(category==='marketing' && (text.includes('chief marketing')||/(^| )cmo( |$)/.test(text))) score+=80;
+    if(category==='finance' && (text.includes('chief financial')||/(^| )cfo( |$)/.test(text))) score+=80;
+    if(category==='technology' && (text.includes('chief technology')||/(^| )cto( |$)/.test(text))) score+=80;
+    if(category==='sales' && (text.includes('chief sales')||/(^| )cso( |$)/.test(text))) score+=80;
+    score-=Number(department.sort_order||0)/1000;
+    return score;
+  };
+
+  const executiveCandidates=source.filter(item=>(profiles.get(Number(item.id))||{}).rank===0);
+  const executive=executiveCandidates.sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||String(a.name||'').localeCompare(String(b.name||''),'th'))[0]||null;
+  const executiveId=Number(executive?.id||0);
+
+  const leadFor={};
+  for(const category of ['operations','marketing','finance','technology','sales']){
+    const candidates=source.filter(item=>Number(item.id)!==executiveId && (profiles.get(Number(item.id))||{}).rank<=1);
+    const ranked=candidates.map(item=>({item,score:scoreLead(item,category)})).sort((a,b)=>b.score-a.score);
+    if(ranked[0]&&ranked[0].score>=60) leadFor[category]=Number(ranked[0].item.id);
+  }
+
+  const inferredParent=new Map();
+  const autoReason=new Map();
+  source.forEach(department=>{
+    const id=Number(department.id);
+    const explicit=Number(department.parent_department_id||0);
+    if(validParent(id,explicit)){
+      inferredParent.set(id,explicit);
+      autoReason.set(id,'manual');
+      return;
+    }
+
+    // Strongest automatic signal: the department head reports to somebody in another department.
+    const manager=employeeById.get(Number(department.manager_employee_id||0));
+    const managerBoss=manager?employeeById.get(Number(manager.manager_employee_id||0)):null;
+    const bossDepartmentId=Number(managerBoss?.department_id||0);
+    if(validParent(id,bossDepartmentId)){
+      inferredParent.set(id,bossDepartmentId);
+      autoReason.set(id,'manager');
+      return;
+    }
+
+    const profile=profiles.get(id)||{rank:3,category:'general'};
+    if(id===executiveId || profile.rank===0){
+      inferredParent.set(id,0);
+      autoReason.set(id,'executive');
+      return;
+    }
+    if(profile.rank===1){
+      inferredParent.set(id,validParent(id,executiveId)?executiveId:0);
+      autoReason.set(id,'level');
+      return;
+    }
+
+    let parentId=0;
+    if(profile.category==='marketing') parentId=leadFor.marketing||executiveId;
+    else if(profile.category==='operations') parentId=leadFor.operations||executiveId;
+    else if(profile.category==='technology') parentId=leadFor.technology||leadFor.operations||executiveId;
+    else if(profile.category==='sales') parentId=leadFor.sales||leadFor.operations||executiveId;
+    else if(profile.category==='finance') parentId=leadFor.finance||executiveId;
+    else parentId=leadFor.operations||executiveId;
+    inferredParent.set(id,validParent(id,parentId)?parentId:0);
+    autoReason.set(id,parentId?'keyword':'root');
+  });
+
+  // Guard against accidental cycles coming from manual or manager relationships.
+  const safeParent=new Map();
+  const createsCycle=(id,parentId)=>{
+    const seen=new Set([id]);
+    let cursor=parentId;
+    while(cursor){
+      if(seen.has(cursor))return true;
+      seen.add(cursor);
+      cursor=Number(inferredParent.get(cursor)||0);
+    }
+    return false;
+  };
+  source.forEach(item=>{
+    const id=Number(item.id); const parentId=Number(inferredParent.get(id)||0);
+    safeParent.set(id,createsCycle(id,parentId)?0:parentId);
+  });
+
+  const categoryOrder={executive:0,operations:10,marketing:20,finance:30,sales:40,technology:50,general:60};
+  const sortItems=(items=[])=>items.sort((a,b)=>{
+    const ap=profiles.get(Number(a.id))||{rank:9,category:'general'};
+    const bp=profiles.get(Number(b.id))||{rank:9,category:'general'};
+    return ap.rank-bp.rank || (categoryOrder[ap.category]??99)-(categoryOrder[bp.category]??99) || Number(a.sort_order||0)-Number(b.sort_order||0) || String(a.name||'').localeCompare(String(b.name||''),'th');
+  });
+  const byParent=new Map();
+  source.forEach(item=>{
+    const parentId=Number(safeParent.get(Number(item.id))||0);
+    if(!byParent.has(parentId))byParent.set(parentId,[]);
+    byParent.get(parentId).push(item);
+  });
+  byParent.forEach(sortItems);
+  return {byParent,parentById:safeParent,reasonById:autoReason,profiles,executiveId};
+}
+
 function renderOrganizationVisual(){
   const canvas=$('#organizationVisualCanvas');
   if(!canvas)return;
@@ -2469,15 +2601,8 @@ function renderOrganizationVisual(){
     return;
   }
 
-  const byParent=new Map();
-  const departmentIds=new Set(departments.map(item=>Number(item.id)));
-  departments.forEach(department=>{
-    const parentId=Number(department.parent_department_id||0);
-    const safeParent=parentId&&departmentIds.has(parentId)?parentId:0;
-    if(!byParent.has(safeParent))byParent.set(safeParent,[]);
-    byParent.get(safeParent).push(department);
-  });
-  byParent.forEach(items=>items.sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||String(a.name||'').localeCompare(String(b.name||''),'th')));
+  const smartHierarchy=buildSmartOrganizationHierarchy(departments,activeEmployees);
+  const byParent=smartHierarchy.byParent;
 
   const membersByDepartment=new Map();
   activeEmployees.forEach(employee=>{
@@ -2498,9 +2623,11 @@ function renderOrganizationVisual(){
     const members=membersByDepartment.get(Number(department.id))||[];
     const manager=members.find(employee=>Number(employee.id)===Number(department.manager_employee_id))||activeEmployees.find(employee=>Number(employee.id)===Number(department.manager_employee_id));
     const positionCount=positions.filter(position=>Number(position.department_id)===Number(department.id)).length;
+    const hierarchyReason=smartHierarchy.reasonById.get(Number(department.id));
+    const hierarchyLabel=hierarchyReason==='manual'?'กำหนดเอง':hierarchyReason==='manager'?'ตามหัวหน้า':'AUTO';
     return `<article class="org-visual-card" data-department-id="${Number(department.id)}">
       <div class="org-visual-card-head">
-        <div><span>DEPARTMENT</span><strong>${escapeHtml(department.name)}</strong></div>
+        <div><span>DEPARTMENT · ${hierarchyLabel}</span><strong>${escapeHtml(department.name)}</strong></div>
         <em>${members.length} คน</em>
       </div>
       <div class="org-visual-card-meta">
@@ -2538,7 +2665,7 @@ function renderOrganizationVisual(){
       ${roots.length?`<ul>${roots.map(renderBranch).join('')}</ul>`:''}
     </li></ul>
   </div>`;
-  if($('#orgVisualStats')) $('#orgVisualStats').textContent=`${departments.length} แผนก · ${activeEmployees.length} คน`;
+  if($('#orgVisualStats')) $('#orgVisualStats').textContent=`${departments.length} แผนก · ${activeEmployees.length} คน · Auto hierarchy`;
   setOrganizationZoom(state.organizationZoom||1);
 }
 
@@ -2546,9 +2673,11 @@ function renderPeopleCore(){
   const core=state.peopleCore||{}; const departments=core.departments||[]; const schedules=core.schedules||[]; const holidays=core.holidays||[];
   const org=$('#organizationChart');
   if(org){
-    const roots=departments.filter(d=>!d.parent_department_id||!departments.some(x=>Number(x.id)===Number(d.parent_department_id)));
-    const renderNode=(d,depth=0)=>{const positionCount=(core.positions||[]).filter(p=>Number(p.department_id)===Number(d.id)).length;return `<div class="org-node" style="--depth:${depth}"><div class="org-line"></div><div class="org-card org-card-modern"><div class="org-card-copy"><strong>${escapeHtml(d.name)}</strong><small>${Number(d.employee_count||0)} คน · ${positionCount} ตำแหน่ง</small><em>${d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า'}</em></div><div class="org-card-actions"><button class="text-btn org-people-btn" type="button" onclick="window.openDepartmentAssignment(${Number(d.id)})">+ พนักงาน</button><button class="text-btn" type="button" onclick="window.openPositionForDepartment(${Number(d.id)})">+ ตำแหน่ง</button><button class="text-btn" type="button" onclick="window.editDepartment(${Number(d.id)})">แก้ไข</button></div></div>${departments.filter(x=>Number(x.parent_department_id)===Number(d.id)).map(x=>renderNode(x,depth+1)).join('')}</div>`;};
-    org.innerHTML=roots.length?roots.map(d=>renderNode(d)).join(''):emptyState('ยังไม่มีโครงสร้างแผนก','เพิ่มแผนกแรก แล้วค่อยกำหนดหัวหน้าและแผนกย่อย');
+    const activeEmployees=(state.employees||[]).filter(employee=>employee.status==='active');
+    const smartHierarchy=buildSmartOrganizationHierarchy(departments,activeEmployees);
+    const roots=smartHierarchy.byParent.get(0)||[];
+    const renderNode=(d,depth=0)=>{const positionCount=(core.positions||[]).filter(p=>Number(p.department_id)===Number(d.id)).length;const reason=smartHierarchy.reasonById.get(Number(d.id));const hierarchyNote=reason==='manual'?'ลำดับกำหนดเอง':reason==='manager'?'เรียงตามหัวหน้า':'ระบบจัดลำดับอัตโนมัติ';return `<div class="org-node" style="--depth:${depth}"><div class="org-line"></div><div class="org-card org-card-modern"><div class="org-card-copy"><strong>${escapeHtml(d.name)}</strong><small>${Number(d.employee_count||0)} คน · ${positionCount} ตำแหน่ง</small><em>${escapeHtml(hierarchyNote)} · ${d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า'}</em></div><div class="org-card-actions"><button class="text-btn org-people-btn" type="button" onclick="window.openDepartmentAssignment(${Number(d.id)})">+ พนักงาน</button><button class="text-btn" type="button" onclick="window.openPositionForDepartment(${Number(d.id)})">+ ตำแหน่ง</button><button class="text-btn" type="button" onclick="window.editDepartment(${Number(d.id)})">แก้ไข</button></div></div>${(smartHierarchy.byParent.get(Number(d.id))||[]).map(x=>renderNode(x,depth+1)).join('')}</div>`;};
+    org.innerHTML=roots.length?roots.map(d=>renderNode(d)).join(''):emptyState('ยังไม่มีโครงสร้างแผนก','เพิ่มแผนกแรก แล้วระบบจะจัดลำดับให้อัตโนมัติ');
   }
   renderOrganizationVisual();
   setOrganizationView(state.organizationView||'chart');
@@ -2576,7 +2705,7 @@ function renderPeopleCore(){
 window.editDepartment=id=>openDepartmentModal((state.peopleCore.departments||[]).find(d=>Number(d.id)===Number(id)));
 function openDepartmentModal(department=null){
   $('#departmentId').value=department?.id||''; $('#departmentName').value=department?.name||''; $('#departmentCode').value=department?.code||'';
-  $('#departmentParent').innerHTML=`<option value="">ไม่มี / เป็นแผนกหลัก</option>${(state.peopleCore.departments||[]).filter(d=>Number(d.id)!==Number(department?.id)).map(d=>`<option value="${d.id}" ${Number(department?.parent_department_id)===Number(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}`;
+  $('#departmentParent').innerHTML=`<option value="">อัตโนมัติ (แนะนำ)</option>${(state.peopleCore.departments||[]).filter(d=>Number(d.id)!==Number(department?.id)).map(d=>`<option value="${d.id}" ${Number(department?.parent_department_id)===Number(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}`;
   $('#departmentManager').innerHTML=`<option value="">ยังไม่กำหนด</option>${state.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}" ${Number(department?.manager_employee_id)===Number(e.id)?'selected':''}>${escapeHtml(e.nickname||e.first_name)}${e.department_name?` · ${escapeHtml(e.department_name)}`:''}</option>`).join('')}`;
   $('#departmentModalTitle').textContent=department?'แก้ไขแผนก':'เพิ่มแผนก'; $('#departmentModal').showModal();
 }

@@ -2239,6 +2239,11 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
   }
 }
 
+
+/* P7.56 — Smart organization hierarchy */
+.label-hint{margin-left:6px;color:#178b8b;font-size:8.5px;font-weight:650}
+.org-visual-card-head span{white-space:nowrap}
+
 /* P7.55 — Visual organization chart */
 .standalone-organization{min-width:0}
 .organization-view-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:2px 0 14px}
