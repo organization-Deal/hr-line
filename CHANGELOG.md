@@ -1,3 +1,13 @@
+## V1.0-P7.55 — Visual Organization Chart
+
+- Added `รายการ / โครงสร้าง` view switch on the Organization page.
+- Added a visual department tree with connector lines driven by `parent_department_id`.
+- Department cards now show employee count, position count, department head, and employee avatars/initials.
+- Added direct `จัดพนักงาน` and `แก้ไข` actions inside each chart node.
+- Added zoom and center controls with horizontal scrolling for large organization structures.
+- Departments without a parent are automatically connected under the company root, so the chart is still useful before hierarchy is fully configured.
+- Added responsive behavior for smaller screens.
+
 # Changelog
 
 ## V1.0-P7.54 — Department Member Assignment
