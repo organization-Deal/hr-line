@@ -1296,6 +1296,7 @@ html.js body:not(.nakna-ready) dialog { display: none !important; }
 .position-card-modern{padding:15px 16px;border-radius:16px;box-shadow:0 6px 24px rgba(22,57,60,.035)}
 .position-card-main{display:flex;align-items:center;gap:11px;min-width:0}.position-symbol{width:38px;height:38px;flex:0 0 auto;display:grid;place-items:center;border-radius:12px;background:#eaf6f3;color:#147f80;font-weight:700;font-size:13px}.position-card-main strong{font-size:13px}.position-card-main em{display:block;margin-top:5px;font-style:normal;color:#6f7f81;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}.position-card-actions{display:flex;align-items:center;gap:8px}.position-assign-btn{font-weight:700}
 .position-assign-modal{width:min(680px,calc(100vw - 28px));max-height:min(82vh,760px)}
+.department-assign-note{display:flex;gap:9px;align-items:flex-start;padding:10px 12px;margin:12px 0 2px;border:1px solid #dceceb;border-radius:12px;background:#f7fbfa}.department-assign-note strong{flex:0 0 auto;color:#166f70;font-size:10px}.department-assign-note span{color:#66787a;font-size:9px;line-height:1.45}.org-people-btn{font-weight:700;color:#117d7e}.department-person-row:has(input:checked){box-shadow:inset 3px 0 0 #178b8b}
 .position-assign-toolbar{display:flex;gap:10px;align-items:center;margin:14px 0}.compact-search{flex:1;margin:0}.position-assign-people{display:grid;gap:7px;max-height:430px;overflow:auto;padding-right:2px}.position-person-row{display:grid;grid-template-columns:20px 36px minmax(0,1fr);gap:10px;align-items:center;padding:11px 12px;border:1px solid var(--border);border-radius:13px;background:#fff;cursor:pointer}.position-person-row:has(input:checked){border-color:#8accc6;background:#f2faf8}.position-person-row input{width:17px;height:17px;accent-color:#178b8b}.person-mini-avatar{width:36px;height:36px;display:grid;place-items:center;border-radius:11px;background:#eaf6f3;color:#147f80;font-weight:700}.position-person-copy{min-width:0}.position-person-copy strong{display:block;color:#163f47;font-size:11.5px}.position-person-copy small{display:block;margin-top:2px;color:#7d898b;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:720px){
   .settings-detail-tabs{display:none!important}
@@ -2038,7 +2039,7 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
 }
 
 
-/* P7.53 · Mobile Employee Master — readable card layout */
+/* P7.54 · Mobile Employee Master — readable card layout */
 @media (max-width: 700px) {
   .employee-master-table-card{
     overflow:visible!important;
