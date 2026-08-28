@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.54" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.55" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -228,7 +228,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.54</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.55</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -396,7 +396,31 @@
           <div><p class="kicker">ORGANIZATION</p><h2>โครงสร้างองค์กร</h2><p>สร้างแผนก แผนกย่อย ตำแหน่ง และกำหนดหัวหน้า เพื่อให้งานอนุมัติและตารางงานรู้ว่าใครขึ้นกับใคร</p></div>
           <div class="section-action-group"><button id="addPositionBtn" class="secondary-btn" type="button">+ ตำแหน่ง</button><button id="addDepartmentBtn" class="primary-btn" type="button">+ แผนก</button></div>
           </div>
-          <div id="organizationChart" class="organization-chart"></div>
+          <div class="organization-view-toolbar">
+            <div class="organization-view-switch" role="group" aria-label="เลือกรูปแบบการแสดงโครงสร้าง">
+              <button type="button" data-org-view="list" aria-pressed="false">รายการ</button>
+              <button type="button" data-org-view="chart" class="active" aria-pressed="true">โครงสร้าง</button>
+            </div>
+            <div id="organizationChartControls" class="organization-chart-controls">
+              <span id="orgVisualStats">0 แผนก · 0 คน</span>
+              <button id="orgCenterBtn" class="icon-btn" type="button" title="จัดผังให้อยู่กึ่งกลาง" aria-label="จัดผังให้อยู่กึ่งกลาง">⌖</button>
+              <button id="orgZoomOutBtn" class="icon-btn" type="button" title="ย่อ" aria-label="ย่อ">−</button>
+              <button id="orgZoomResetBtn" class="org-zoom-reset" type="button" title="ขนาดปัจจุบัน">100%</button>
+              <button id="orgZoomInBtn" class="icon-btn" type="button" title="ขยาย" aria-label="ขยาย">+</button>
+            </div>
+          </div>
+          <div id="organizationListPanel" class="organization-list-panel hidden">
+            <div id="organizationChart" class="organization-chart"></div>
+          </div>
+          <div id="organizationVisualPanel" class="organization-visual-panel">
+            <div class="organization-visual-head">
+              <div><strong>ผังองค์กร</strong><small>เส้นเชื่อมอิงจาก “แผนกแม่ / แผนกย่อย” ที่ตั้งไว้ กดการ์ดเพื่อจัดพนักงานหรือแก้ไขแผนกได้ทันที</small></div>
+              <span>เลื่อนซ้าย–ขวาได้</span>
+            </div>
+            <div id="organizationVisualViewport" class="organization-visual-viewport">
+              <div id="organizationVisualCanvas" class="organization-visual-canvas"></div>
+            </div>
+          </div>
           <div class="organization-position-block">
           <div class="organization-position-head"><div><p class="kicker">POSITIONS</p><h3>ตำแหน่งในบริษัท</h3><p>สร้างตำแหน่งไว้ก่อน แล้วเลือกได้ทันทีตอนเพิ่มพนักงาน</p></div><button id="addPositionInlineBtn" class="secondary-btn" type="button">+ เพิ่มตำแหน่ง</button></div>
           <div id="positionList" class="position-list"></div>
@@ -1223,7 +1247,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.54" type="module"></script>
+  <script src="/app.js?v=1.0-p7.55" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

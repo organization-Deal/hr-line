@@ -46,6 +46,8 @@ const state = {
   currentView: 'dashboard',
   activeSettingsCategory: null,
   settingsNavExpanded: false,
+  organizationView: 'chart',
+  organizationZoom: 1,
 };
 
 const $ = selector => document.querySelector(selector);
@@ -514,6 +516,11 @@ function bindEvents() {
   $('#addWorkLocationBtn').onclick = openWorkLocationModal;
   $('#addDepartmentBtn').onclick = openDepartmentModal;
   $('#addPositionBtn').onclick = openPositionModal;
+  $$('[data-org-view]').forEach(button => button.onclick = () => setOrganizationView(button.dataset.orgView));
+  if ($('#orgZoomOutBtn')) $('#orgZoomOutBtn').onclick = () => setOrganizationZoom(state.organizationZoom - 0.1);
+  if ($('#orgZoomResetBtn')) $('#orgZoomResetBtn').onclick = () => setOrganizationZoom(1, { center: true });
+  if ($('#orgZoomInBtn')) $('#orgZoomInBtn').onclick = () => setOrganizationZoom(state.organizationZoom + 0.1);
+  if ($('#orgCenterBtn')) $('#orgCenterBtn').onclick = centerOrganizationChart;
   $('#positionAssignSaveBtn').onclick = savePositionAssignment;
   $('#positionAssignSearch').addEventListener('input', renderPositionAssignPeople);
   if ($('#addPositionInlineBtn')) $('#addPositionInlineBtn').onclick = openPositionModal;
@@ -2406,6 +2413,135 @@ async function savePositionAssignment(){
   }catch(e){toast(e.message,true);}finally{button.disabled=false;}
 }
 
+function setOrganizationView(view='chart'){
+  const next=view==='list'?'list':'chart';
+  state.organizationView=next;
+  $('#organizationListPanel')?.classList.toggle('hidden',next!=='list');
+  $('#organizationVisualPanel')?.classList.toggle('hidden',next!=='chart');
+  $('#organizationChartControls')?.classList.toggle('hidden',next!=='chart');
+  $$('[data-org-view]').forEach(button=>{
+    const active=button.dataset.orgView===next;
+    button.classList.toggle('active',active);
+    button.setAttribute('aria-pressed',String(active));
+  });
+  if(next==='chart') requestAnimationFrame(()=>centerOrganizationChart());
+}
+
+function setOrganizationZoom(value,{center=false}={}){
+  const zoom=Math.min(1.35,Math.max(.55,Math.round(Number(value||1)*10)/10));
+  state.organizationZoom=zoom;
+  const canvas=$('#organizationVisualCanvas');
+  if(canvas) canvas.style.setProperty('--org-zoom',String(zoom));
+  if($('#orgZoomResetBtn')) $('#orgZoomResetBtn').textContent=`${Math.round(zoom*100)}%`;
+  if(center) requestAnimationFrame(()=>centerOrganizationChart());
+}
+
+function centerOrganizationChart(){
+  const viewport=$('#organizationVisualViewport');
+  const canvas=$('#organizationVisualCanvas');
+  if(!viewport||!canvas)return;
+  const maxLeft=Math.max(0,canvas.scrollWidth-viewport.clientWidth);
+  viewport.scrollTo({left:maxLeft/2,top:0,behavior:'smooth'});
+}
+
+function organizationEmployeeName(employee){
+  return `${employee.nickname||employee.first_name||''} ${employee.last_name||''}`.trim()||employee.employee_code||'พนักงาน';
+}
+
+function renderOrganizationAvatar(employee,size='normal'){
+  const photo=String(employee?.line_picture_url||employee?.avatar_url||'').trim();
+  const name=organizationEmployeeName(employee);
+  return `<span class="org-person-avatar ${size==='small'?'small':''}" title="${escapeHtml(name)}">${photo?`<img src="${escapeHtml(photo)}" alt="" loading="lazy"/>`:`<b>${initial(employee||{})}</b>`}</span>`;
+}
+
+function renderOrganizationVisual(){
+  const canvas=$('#organizationVisualCanvas');
+  if(!canvas)return;
+  const core=state.peopleCore||{};
+  const departments=core.departments||[];
+  const activeEmployees=(state.employees||[]).filter(employee=>employee.status==='active');
+  const positions=core.positions||[];
+  const companyName=state.companyProfile?.name||activeCompany()?.name||state.dashboard?.client?.name||'บริษัทของคุณ';
+
+  if(!departments.length){
+    canvas.innerHTML=emptyState('ยังไม่มีโครงสร้างแผนก','เพิ่มแผนกและจัดพนักงานก่อน แล้วระบบจะวาดผังองค์กรให้อัตโนมัติ');
+    if($('#orgVisualStats')) $('#orgVisualStats').textContent='0 แผนก · 0 คน';
+    return;
+  }
+
+  const byParent=new Map();
+  const departmentIds=new Set(departments.map(item=>Number(item.id)));
+  departments.forEach(department=>{
+    const parentId=Number(department.parent_department_id||0);
+    const safeParent=parentId&&departmentIds.has(parentId)?parentId:0;
+    if(!byParent.has(safeParent))byParent.set(safeParent,[]);
+    byParent.get(safeParent).push(department);
+  });
+  byParent.forEach(items=>items.sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||String(a.name||'').localeCompare(String(b.name||''),'th')));
+
+  const membersByDepartment=new Map();
+  activeEmployees.forEach(employee=>{
+    const departmentId=Number(employee.department_id||0);
+    if(!membersByDepartment.has(departmentId))membersByDepartment.set(departmentId,[]);
+    membersByDepartment.get(departmentId).push(employee);
+  });
+  membersByDepartment.forEach(items=>items.sort((a,b)=>String(a.nickname||a.first_name||'').localeCompare(String(b.nickname||b.first_name||''),'th')));
+
+  const renderPeople=(members,max=5)=>{
+    if(!members.length)return `<span class="org-person-empty">ยังไม่มีพนักงาน</span>`;
+    const visible=members.slice(0,max);
+    const more=members.length-visible.length;
+    return `${visible.map(employee=>renderOrganizationAvatar(employee)).join('')}${more>0?`<span class="org-person-more">+${more}</span>`:''}`;
+  };
+
+  const renderDepartmentCard=department=>{
+    const members=membersByDepartment.get(Number(department.id))||[];
+    const manager=members.find(employee=>Number(employee.id)===Number(department.manager_employee_id))||activeEmployees.find(employee=>Number(employee.id)===Number(department.manager_employee_id));
+    const positionCount=positions.filter(position=>Number(position.department_id)===Number(department.id)).length;
+    return `<article class="org-visual-card" data-department-id="${Number(department.id)}">
+      <div class="org-visual-card-head">
+        <div><span>DEPARTMENT</span><strong>${escapeHtml(department.name)}</strong></div>
+        <em>${members.length} คน</em>
+      </div>
+      <div class="org-visual-card-meta">
+        <span>${positionCount} ตำแหน่ง</span>
+        <span>${manager?`หัวหน้า · ${escapeHtml(organizationEmployeeName(manager))}`:'ยังไม่กำหนดหัวหน้า'}</span>
+      </div>
+      <div class="org-visual-people">${renderPeople(members)}</div>
+      <div class="org-visual-card-actions">
+        <button type="button" onclick="window.openDepartmentAssignment(${Number(department.id)})">จัดพนักงาน</button>
+        <button type="button" onclick="window.editDepartment(${Number(department.id)})">แก้ไข</button>
+      </div>
+    </article>`;
+  };
+
+  const visited=new Set();
+  const renderBranch=department=>{
+    const id=Number(department.id);
+    if(visited.has(id))return '';
+    visited.add(id);
+    const children=(byParent.get(id)||[]).filter(child=>Number(child.id)!==id);
+    return `<li><div class="org-visual-node">${renderDepartmentCard(department)}</div>${children.length?`<ul>${children.map(renderBranch).join('')}</ul>`:''}</li>`;
+  };
+
+  const roots=byParent.get(0)||[];
+  const companyPreview=activeEmployees.slice(0,6);
+  canvas.innerHTML=`<div class="org-tree">
+    <ul class="org-tree-root"><li>
+      <div class="org-visual-node">
+        <article class="org-visual-card company-node">
+          <div class="org-visual-card-head"><div><span>ORGANIZATION</span><strong>${escapeHtml(companyName)}</strong></div><em>${activeEmployees.length} คน</em></div>
+          <div class="org-visual-card-meta"><span>${departments.length} แผนก</span><span>${positions.length} ตำแหน่ง</span></div>
+          <div class="org-visual-people">${renderPeople(companyPreview,6)}</div>
+        </article>
+      </div>
+      ${roots.length?`<ul>${roots.map(renderBranch).join('')}</ul>`:''}
+    </li></ul>
+  </div>`;
+  if($('#orgVisualStats')) $('#orgVisualStats').textContent=`${departments.length} แผนก · ${activeEmployees.length} คน`;
+  setOrganizationZoom(state.organizationZoom||1);
+}
+
 function renderPeopleCore(){
   const core=state.peopleCore||{}; const departments=core.departments||[]; const schedules=core.schedules||[]; const holidays=core.holidays||[];
   const org=$('#organizationChart');
@@ -2414,6 +2550,8 @@ function renderPeopleCore(){
     const renderNode=(d,depth=0)=>{const positionCount=(core.positions||[]).filter(p=>Number(p.department_id)===Number(d.id)).length;return `<div class="org-node" style="--depth:${depth}"><div class="org-line"></div><div class="org-card org-card-modern"><div class="org-card-copy"><strong>${escapeHtml(d.name)}</strong><small>${Number(d.employee_count||0)} คน · ${positionCount} ตำแหน่ง</small><em>${d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า'}</em></div><div class="org-card-actions"><button class="text-btn org-people-btn" type="button" onclick="window.openDepartmentAssignment(${Number(d.id)})">+ พนักงาน</button><button class="text-btn" type="button" onclick="window.openPositionForDepartment(${Number(d.id)})">+ ตำแหน่ง</button><button class="text-btn" type="button" onclick="window.editDepartment(${Number(d.id)})">แก้ไข</button></div></div>${departments.filter(x=>Number(x.parent_department_id)===Number(d.id)).map(x=>renderNode(x,depth+1)).join('')}</div>`;};
     org.innerHTML=roots.length?roots.map(d=>renderNode(d)).join(''):emptyState('ยังไม่มีโครงสร้างแผนก','เพิ่มแผนกแรก แล้วค่อยกำหนดหัวหน้าและแผนกย่อย');
   }
+  renderOrganizationVisual();
+  setOrganizationView(state.organizationView||'chart');
   const positionRoot=$('#positionList');
   if(positionRoot){
     const positions=core.positions||[];
