@@ -1,0 +1,19 @@
+V1.0-P7.58 — Visible Manual Organization Arrange
+
+Deploy-critical files:
+- public/index.html
+- public/app.js
+- public/styles.css
+- CHANGELOG.md
+
+Root mirror files are included in the full package for compatibility:
+- index.html
+- app.js
+- styles.css
+
+How to use:
+1. Open โครงสร้างทีม → โครงสร้าง.
+2. Click the large “จัดลำดับเอง” button in the chart header.
+3. Drag a department card, use ← / →, or click “ย้ายตำแหน่ง”.
+4. “ย้ายตำแหน่ง” lets you choose the parent department and exact sibling order.
+5. Click “เสร็จสิ้นการจัด” when finished.
