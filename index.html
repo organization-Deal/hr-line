@@ -394,7 +394,7 @@
         <div id="organizationSection" class="people-core-section standalone-organization">
           <div class="page-intro compact">
           <div><p class="kicker">ORGANIZATION</p><h2>โครงสร้างองค์กร</h2><p>สร้างแผนก แผนกย่อย ตำแหน่ง และกำหนดหัวหน้า เพื่อให้งานอนุมัติและตารางงานรู้ว่าใครขึ้นกับใคร</p></div>
-          <div class="section-action-group"><button id="addPositionBtn" class="secondary-btn" type="button">+ ตำแหน่ง</button><button id="addDepartmentBtn" class="primary-btn" type="button">+ แผนก</button></div>
+          <div class="section-action-group"><button id="organizationManageBtn" class="secondary-btn org-manage-btn" type="button">จัดโครงสร้าง</button><button id="addPositionBtn" class="secondary-btn" type="button">+ ตำแหน่ง</button><button id="addDepartmentBtn" class="primary-btn" type="button">+ แผนก</button></div>
           </div>
           <div id="organizationChart" class="organization-chart"></div>
           <div class="organization-position-block">
@@ -1045,6 +1045,22 @@
       </div>
       <div class="modal-actions"><button class="secondary-btn" type="button" data-close-dialog="departmentLinkModal">ยกเลิก</button><button id="departmentLinkSaveBtn" class="primary-btn" type="button">บันทึกการโยงเส้น</button></div>
     </form>
+  </dialog>
+
+  <dialog id="organizationBuilderModal" class="organization-builder-modal">
+    <div class="organization-builder-shell">
+      <div class="modal-head organization-builder-head">
+        <div><p class="kicker">ORGANIZATION BUILDER</p><h3>จัดโครงสร้างองค์กร</h3><p>ลากแผนกไปวางบนแผนกแม่เพื่อโยงเส้น หรือเลือก “ขึ้นตรงกับ” จาก Dropdown ได้ทันที</p></div>
+        <button class="icon-btn" type="button" data-close-dialog="organizationBuilderModal" aria-label="ปิด">×</button>
+      </div>
+      <div class="organization-builder-help">
+        <span><b>1</b> ลากแผนก</span><span><b>2</b> วางบนแผนกแม่</span><span><b>3</b> ระบบบันทึกและวาดเส้นให้ทันที</span>
+      </div>
+      <div id="organizationRootDropZone" class="organization-root-dropzone">ลากมาวางตรงนี้ = ย้ายเป็นระดับบนสุด</div>
+      <div class="organization-builder-toolbar"><div><strong id="organizationBuilderCount">0 แผนก</strong><small>แก้ลำดับและสายบังคับบัญชาได้จากหน้านี้</small></div><button id="organizationBuilderRefreshBtn" class="secondary-btn" type="button">รีเฟรช</button></div>
+      <div id="organizationBuilderList" class="organization-builder-list"></div>
+      <div class="modal-actions organization-builder-actions"><button class="primary-btn" type="button" data-close-dialog="organizationBuilderModal">เสร็จแล้ว</button></div>
+    </div>
   </dialog>
 
   <dialog id="positionModal">
