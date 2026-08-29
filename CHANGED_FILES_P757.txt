@@ -1,13 +1,22 @@
-V1.0-P7.57 changed files
+V1.0-P7.57 — Manual Organization Drag & Drop
 
+Deploy-critical files:
+- public/index.html
+- public/app.js
+- public/styles.css
+- src/index.js
+- package.json
+- CHANGELOG.md
+
+Root mirror files are included in the full package for compatibility:
 - index.html
 - app.js
 - styles.css
 - index.js
-- public/index.html
-- public/app.js
-- public/styles.css
-- public/learn.js
-- src/index.js
-- CHANGELOG.md
-- CHANGED_FILES_P757.txt
+
+Main behavior:
+- Click “จัดผังเอง” to enable manual arrangement.
+- Drag left/right edge of another card to reorder sibling departments.
+- Drop in the center of another department to make it a child department.
+- Drop on the company card to move it to top-level.
+- Changes persist to D1 with cycle validation.
