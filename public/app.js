@@ -48,6 +48,8 @@ const state = {
   settingsNavExpanded: false,
   organizationView: 'chart',
   organizationZoom: 1,
+  organizationArrangeMode: false,
+  organizationMoveSaving: false,
 };
 
 const $ = selector => document.querySelector(selector);
@@ -178,7 +180,7 @@ const viewMeta = {
   payroll: ['Payroll', 'PAYROLL'],
   documents: ['เอกสาร', 'DOCUMENTS'],
   performance: ['Learning & KPI', 'GROWTH OS'],
-  engagement: ['กิจกรรม & รางวัล', 'ENGAGEMENT STUDIO'],
+  engagement: ['แต้ม & ของรางวัล', 'ENGAGEMENT'],
   analytics: ['People Analytics', 'PEOPLE INTELLIGENCE'],
   'saas-admin': ['Nakna Admin', 'SAAS CONTROL'],
   settings: ['ตั้งค่า', 'SYSTEM'],
@@ -476,10 +478,8 @@ function bindEvents() {
   $('#documentGenerateSaveBtn').onclick = generateEmployeeDocument;
   $('#runPointRulesBtn').onclick = runPointRules;
   $('#manualAwardBtn').onclick = openManualAward;
-  $('#createPointRuleBtn').onclick = () => openEngagementActivityBuilder();
+  $('#createPointRuleBtn').onclick = openPointRule;
   $('#createRewardBtn').onclick = openReward;
-  $('#engagementSettingsBtn').onclick = openEngagementSettings;
-  $$('[data-engagement-template]').forEach(button=>button.onclick=()=>openEngagementActivityBuilder(null,button.dataset.engagementTemplate));
   $('#subscriptionPlanBtn').onclick = openSubscriptionPlan;
   $('#generateInvoiceBtn').onclick = generateSubscriptionInvoice;
 
@@ -523,6 +523,10 @@ function bindEvents() {
   if ($('#orgZoomResetBtn')) $('#orgZoomResetBtn').onclick = () => setOrganizationZoom(1, { center: true });
   if ($('#orgZoomInBtn')) $('#orgZoomInBtn').onclick = () => setOrganizationZoom(state.organizationZoom + 0.1);
   if ($('#orgCenterBtn')) $('#orgCenterBtn').onclick = centerOrganizationChart;
+  if ($('#orgArrangeBtn')) $('#orgArrangeBtn').onclick = () => setOrganizationArrangeMode(!state.organizationArrangeMode);
+  if ($('#orgArrangePrimaryBtn')) $('#orgArrangePrimaryBtn').onclick = () => setOrganizationArrangeMode(!state.organizationArrangeMode);
+  if ($('#organizationMoveParent')) $('#organizationMoveParent').onchange = refreshOrganizationMoveOrder;
+  if ($('#organizationMoveSaveBtn')) $('#organizationMoveSaveBtn').onclick = saveOrganizationMove;
   $('#positionAssignSaveBtn').onclick = savePositionAssignment;
   $('#positionAssignSearch').addEventListener('input', renderPositionAssignPeople);
   if ($('#addPositionInlineBtn')) $('#addPositionInlineBtn').onclick = openPositionModal;
@@ -2446,6 +2450,276 @@ function centerOrganizationChart(){
   viewport.scrollTo({left:maxLeft/2,top:0,behavior:'smooth'});
 }
 
+function setOrganizationArrangeMode(enabled){
+  state.organizationArrangeMode=Boolean(enabled);
+  const syncButton=(button,primary=false)=>{
+    if(!button)return;
+    button.classList.toggle('active',state.organizationArrangeMode);
+    button.setAttribute('aria-pressed',String(state.organizationArrangeMode));
+    button.innerHTML=state.organizationArrangeMode
+      ? `<span aria-hidden="true">✓</span><b>${primary?'เสร็จสิ้นการจัด':'เสร็จสิ้น'}</b>`
+      : `<span aria-hidden="true">↕</span><b>จัดลำดับเอง</b>`;
+  };
+  syncButton($('#orgArrangeBtn'));
+  syncButton($('#orgArrangePrimaryBtn'),true);
+  const panel=$('#organizationVisualPanel');
+  panel?.classList.toggle('arrange-mode',state.organizationArrangeMode);
+  const hint=$('#orgVisualHint');
+  if(hint) hint.textContent=state.organizationArrangeMode?'โหมดจัดเองเปิดอยู่ · ลากการ์ด หรือกด “ย้ายตำแหน่ง”':'เลื่อนซ้าย–ขวาได้';
+  renderOrganizationVisual();
+}
+
+function organizationWouldCycle(sourceId,parentId,hierarchy){
+  const source=Number(sourceId||0);
+  let cursor=Number(parentId||0);
+  const seen=new Set();
+  while(cursor){
+    if(cursor===source)return true;
+    if(seen.has(cursor))return true;
+    seen.add(cursor);
+    cursor=Number(hierarchy?.parentById?.get(cursor)||0);
+  }
+  return false;
+}
+
+function organizationSiblingIds(hierarchy,parentId){
+  return (hierarchy?.byParent?.get(Number(parentId||0))||[]).map(item=>Number(item.id));
+}
+
+async function persistOrganizationMoves(moves,message='บันทึกลำดับโครงสร้างแล้ว'){
+  if(state.organizationMoveSaving||!moves?.length)return;
+  state.organizationMoveSaving=true;
+  const stats=$('#orgVisualStats');
+  const previous=stats?.textContent||'';
+  if(stats)stats.textContent='กำลังบันทึกผัง…';
+  try{
+    await api('/api/departments/reorder',{method:'PATCH',body:JSON.stringify({moves})});
+    const byId=new Map((state.peopleCore?.departments||[]).map(item=>[Number(item.id),item]));
+    moves.forEach(move=>{
+      const row=byId.get(Number(move.id));
+      if(!row)return;
+      if(Object.prototype.hasOwnProperty.call(move,'parent_department_id')) row.parent_department_id=move.parent_department_id==null?null:Number(move.parent_department_id);
+      if(Object.prototype.hasOwnProperty.call(move,'sort_order')) row.sort_order=Number(move.sort_order||0);
+      if(Object.prototype.hasOwnProperty.call(move,'hierarchy_mode')) row.hierarchy_mode=move.hierarchy_mode;
+    });
+    renderPeopleCore();
+    toast(message);
+  }catch(error){
+    if(stats)stats.textContent=previous;
+    toast(error.message||'บันทึกผังไม่สำเร็จ',true);
+  }finally{
+    state.organizationMoveSaving=false;
+  }
+}
+
+async function moveOrganizationDepartment(sourceId,targetId,mode,hierarchy){
+  const source=Number(sourceId||0);
+  const target=Number(targetId||0);
+  if(!source||state.organizationMoveSaving)return;
+  const oldParent=Number(hierarchy.parentById.get(source)||0);
+  let newParent=0;
+  if(mode==='inside')newParent=target;
+  else if(mode==='before'||mode==='after')newParent=Number(hierarchy.parentById.get(target)||0);
+  if(source===target||organizationWouldCycle(source,newParent,hierarchy)){
+    toast('ย้ายตรงนี้ไม่ได้ เพราะจะทำให้โครงสร้างวนกลับหาตัวเอง',true);
+    return;
+  }
+
+  const oldSiblings=organizationSiblingIds(hierarchy,oldParent).filter(id=>id!==source);
+  const destinationBase=(oldParent===newParent?oldSiblings:organizationSiblingIds(hierarchy,newParent).filter(id=>id!==source));
+  let insertAt=destinationBase.length;
+  if(mode==='before'||mode==='after'){
+    const targetIndex=destinationBase.indexOf(target);
+    if(targetIndex>=0)insertAt=targetIndex+(mode==='after'?1:0);
+  }
+  const destination=[...destinationBase];
+  destination.splice(Math.max(0,Math.min(insertAt,destination.length)),0,source);
+
+  const updates=new Map();
+  const setSort=(ids)=>ids.forEach((id,index)=>{
+    const current=updates.get(id)||{id};
+    current.sort_order=(index+1)*100;
+    updates.set(id,current);
+  });
+  if(oldParent!==newParent)setSort(oldSiblings);
+  setSort(destination);
+  const sourceMove=updates.get(source)||{id:source,sort_order:(destination.indexOf(source)+1)*100};
+  sourceMove.parent_department_id=newParent||null;
+  sourceMove.hierarchy_mode='manual';
+  updates.set(source,sourceMove);
+
+  const label=mode==='inside'?'ย้ายเป็นทีมย่อยแล้ว':mode==='root'?'ย้ายขึ้นระดับบริษัทแล้ว':'เปลี่ยนลำดับแล้ว';
+  await persistOrganizationMoves([...updates.values()],label);
+}
+
+function bindOrganizationArrangement(hierarchy){
+  const canvas=$('#organizationVisualCanvas');
+  if(!canvas||!state.organizationArrangeMode)return;
+  let draggedId=0;
+  const clearDropState=()=>{
+    canvas.querySelectorAll('.drop-before,.drop-after,.drop-inside,.drop-root,.drop-invalid,.is-dragging').forEach(node=>node.classList.remove('drop-before','drop-after','drop-inside','drop-root','drop-invalid','is-dragging'));
+    canvas.classList.remove('dragging-organization');
+  };
+  const desiredParent=(targetId,mode)=>mode==='inside'?Number(targetId):Number(hierarchy.parentById.get(Number(targetId))||0);
+
+  canvas.querySelectorAll('.org-visual-card[data-department-id]').forEach(card=>{
+    card.addEventListener('dragstart',event=>{
+      if(!state.organizationArrangeMode||state.organizationMoveSaving||event.target.closest('button')){event.preventDefault();return;}
+      draggedId=Number(card.dataset.departmentId||0);
+      card.classList.add('is-dragging');
+      canvas.classList.add('dragging-organization');
+      event.dataTransfer.effectAllowed='move';
+      event.dataTransfer.setData('text/plain',String(draggedId));
+    });
+    card.addEventListener('dragend',()=>{draggedId=0;clearDropState();});
+    card.addEventListener('dragover',event=>{
+      const source=draggedId||Number(event.dataTransfer?.getData('text/plain')||0);
+      const target=Number(card.dataset.departmentId||0);
+      if(!source||source===target)return;
+      const rect=card.getBoundingClientRect();
+      const ratio=rect.width?((event.clientX-rect.left)/rect.width):.5;
+      const mode=ratio<.28?'before':ratio>.72?'after':'inside';
+      const parent=desiredParent(target,mode);
+      event.preventDefault();
+      canvas.querySelectorAll('.drop-before,.drop-after,.drop-inside,.drop-invalid').forEach(node=>node.classList.remove('drop-before','drop-after','drop-inside','drop-invalid'));
+      if(organizationWouldCycle(source,parent,hierarchy)){
+        card.classList.add('drop-invalid');
+        event.dataTransfer.dropEffect='none';
+        return;
+      }
+      card.classList.add(`drop-${mode}`);
+      card.dataset.dropMode=mode;
+      event.dataTransfer.dropEffect='move';
+    });
+    card.addEventListener('dragleave',event=>{
+      if(card.contains(event.relatedTarget))return;
+      card.classList.remove('drop-before','drop-after','drop-inside','drop-invalid');
+    });
+    card.addEventListener('drop',event=>{
+      event.preventDefault();
+      const source=draggedId||Number(event.dataTransfer?.getData('text/plain')||0);
+      const target=Number(card.dataset.departmentId||0);
+      const mode=card.dataset.dropMode||'inside';
+      clearDropState();
+      if(source&&target&&source!==target)moveOrganizationDepartment(source,target,mode,hierarchy);
+    });
+  });
+
+  const company=canvas.querySelector('.company-node[data-org-root-drop]');
+  if(company){
+    company.addEventListener('dragover',event=>{
+      if(!draggedId)return;
+      event.preventDefault();
+      canvas.querySelectorAll('.drop-before,.drop-after,.drop-inside,.drop-invalid').forEach(node=>node.classList.remove('drop-before','drop-after','drop-inside','drop-invalid'));
+      company.classList.add('drop-root');
+      event.dataTransfer.dropEffect='move';
+    });
+    company.addEventListener('dragleave',()=>company.classList.remove('drop-root'));
+    company.addEventListener('drop',event=>{
+      event.preventDefault();
+      const source=draggedId||Number(event.dataTransfer?.getData('text/plain')||0);
+      clearDropState();
+      if(source)moveOrganizationDepartment(source,0,'root',hierarchy);
+    });
+  }
+}
+
+function currentOrganizationHierarchy(){
+  const departments=state.peopleCore?.departments||[];
+  const activeEmployees=(state.employees||[]).filter(employee=>employee.status==='active');
+  return buildSmartOrganizationHierarchy(departments,activeEmployees);
+}
+
+function refreshOrganizationMoveOrder(){
+  const source=Number($('#organizationMoveDepartmentId')?.value||0);
+  const parent=Number($('#organizationMoveParent')?.value||0);
+  const orderSelect=$('#organizationMoveOrder');
+  if(!source||!orderSelect)return;
+  const hierarchy=currentOrganizationHierarchy();
+  const siblings=organizationSiblingIds(hierarchy,parent).filter(id=>id!==source);
+  const oldParent=Number(hierarchy.parentById.get(source)||0);
+  const oldSiblings=organizationSiblingIds(hierarchy,oldParent);
+  const oldIndex=oldSiblings.indexOf(source);
+  const maxPosition=siblings.length+1;
+  const selected=parent===oldParent&&oldIndex>=0?Math.min(maxPosition,oldIndex+1):maxPosition;
+  orderSelect.innerHTML=Array.from({length:maxPosition},(_,index)=>`<option value="${index+1}" ${index+1===selected?'selected':''}>ลำดับ ${index+1}${index===0?' · ซ้ายสุด':''}</option>`).join('');
+}
+
+window.openOrganizationMoveModal=function(departmentId){
+  const source=Number(departmentId||0);
+  const department=(state.peopleCore?.departments||[]).find(item=>Number(item.id)===source);
+  if(!source||!department)return;
+  const hierarchy=currentOrganizationHierarchy();
+  const currentParent=Number(hierarchy.parentById.get(source)||0);
+  const parentSelect=$('#organizationMoveParent');
+  $('#organizationMoveDepartmentId').value=String(source);
+  $('#organizationMoveTitle').textContent=`ย้าย ${department.name||'แผนก'}`;
+  const parentDepartment=(state.peopleCore?.departments||[]).find(item=>Number(item.id)===currentParent);
+  $('#organizationMoveSummary').innerHTML=`<strong>${escapeHtml(department.name||'แผนก')}</strong><span>ปัจจุบันอยู่ใต้ ${escapeHtml(parentDepartment?.name||'บริษัท')} · เลือกตำแหน่งใหม่แล้วกดบันทึก</span>`;
+  const options=[`<option value="0">บริษัท · ระดับบนสุด</option>`];
+  (state.peopleCore?.departments||[]).forEach(item=>{
+    const id=Number(item.id||0);
+    if(!id||id===source||organizationWouldCycle(source,id,hierarchy))return;
+    options.push(`<option value="${id}">${escapeHtml(item.name||'แผนก')}</option>`);
+  });
+  parentSelect.innerHTML=options.join('');
+  parentSelect.value=String(currentParent);
+  if(parentSelect.value!==String(currentParent))parentSelect.value='0';
+  refreshOrganizationMoveOrder();
+  $('#organizationMoveModal')?.showModal();
+};
+
+async function saveOrganizationMove(){
+  const source=Number($('#organizationMoveDepartmentId')?.value||0);
+  const newParent=Number($('#organizationMoveParent')?.value||0);
+  const requestedPosition=Math.max(1,Number($('#organizationMoveOrder')?.value||1));
+  if(!source||state.organizationMoveSaving)return;
+  const hierarchy=currentOrganizationHierarchy();
+  if(organizationWouldCycle(source,newParent,hierarchy)){
+    toast('ย้ายตรงนี้ไม่ได้ เพราะจะทำให้โครงสร้างวนกลับหาตัวเอง',true);
+    return;
+  }
+  const oldParent=Number(hierarchy.parentById.get(source)||0);
+  const oldSiblings=organizationSiblingIds(hierarchy,oldParent).filter(id=>id!==source);
+  const destination=organizationSiblingIds(hierarchy,newParent).filter(id=>id!==source);
+  const insertAt=Math.max(0,Math.min(requestedPosition-1,destination.length));
+  destination.splice(insertAt,0,source);
+  const updates=new Map();
+  const setSort=ids=>ids.forEach((id,index)=>{
+    const row=updates.get(id)||{id};
+    row.sort_order=(index+1)*100;
+    updates.set(id,row);
+  });
+  if(oldParent!==newParent)setSort(oldSiblings);
+  setSort(destination);
+  const sourceMove=updates.get(source)||{id:source,sort_order:(insertAt+1)*100};
+  sourceMove.parent_department_id=newParent||null;
+  sourceMove.hierarchy_mode='manual';
+  updates.set(source,sourceMove);
+  await persistOrganizationMoves([...updates.values()],'ย้ายตำแหน่งในผังแล้ว');
+  try{$('#organizationMoveModal')?.close();}catch{}
+}
+
+window.shiftOrganizationDepartment=async function(departmentId,direction){
+  const source=Number(departmentId||0);
+  const delta=Number(direction||0);
+  if(!source||!delta||state.organizationMoveSaving)return;
+  const hierarchy=currentOrganizationHierarchy();
+  const parent=Number(hierarchy.parentById.get(source)||0);
+  const siblings=organizationSiblingIds(hierarchy,parent);
+  const from=siblings.indexOf(source);
+  const to=Math.max(0,Math.min(siblings.length-1,from+delta));
+  if(from<0||to===from){toast(delta<0?'อยู่ซ้ายสุดแล้ว':'อยู่ขวาสุดแล้ว');return;}
+  const reordered=[...siblings];
+  reordered.splice(from,1);
+  reordered.splice(to,0,source);
+  const moves=reordered.map((id,index)=>({id,sort_order:(index+1)*100}));
+  const sourceMove=moves.find(move=>Number(move.id)===source);
+  sourceMove.parent_department_id=parent||null;
+  sourceMove.hierarchy_mode='manual';
+  await persistOrganizationMoves(moves,delta<0?'เลื่อนไปทางซ้ายแล้ว':'เลื่อนไปทางขวาแล้ว');
+};
+
 function organizationEmployeeName(employee){
   return `${employee.nickname||employee.first_name||''} ${employee.last_name||''}`.trim()||employee.employee_code||'พนักงาน';
 }
@@ -2516,6 +2790,13 @@ function buildSmartOrganizationHierarchy(departments=[],employees=[]){
   source.forEach(department=>{
     const id=Number(department.id);
     const explicit=Number(department.parent_department_id||0);
+    const hierarchyMode=String(department.hierarchy_mode||'auto').toLowerCase();
+    if(hierarchyMode==='manual'){
+      inferredParent.set(id,validParent(id,explicit)?explicit:0);
+      autoReason.set(id,'manual');
+      return;
+    }
+    // Backward compatibility: older saved parent relationships did not have hierarchy_mode yet.
     if(validParent(id,explicit)){
       inferredParent.set(id,explicit);
       autoReason.set(id,'manual');
@@ -2576,7 +2857,13 @@ function buildSmartOrganizationHierarchy(departments=[],employees=[]){
   const sortItems=(items=[])=>items.sort((a,b)=>{
     const ap=profiles.get(Number(a.id))||{rank:9,category:'general'};
     const bp=profiles.get(Number(b.id))||{rank:9,category:'general'};
-    return ap.rank-bp.rank || (categoryOrder[ap.category]??99)-(categoryOrder[bp.category]??99) || Number(a.sort_order||0)-Number(b.sort_order||0) || String(a.name||'').localeCompare(String(b.name||''),'th');
+    const ao=Number(a.sort_order||0),bo=Number(b.sort_order||0);
+    if(ao>0||bo>0){
+      const orderedA=ao>0?ao:Number.MAX_SAFE_INTEGER;
+      const orderedB=bo>0?bo:Number.MAX_SAFE_INTEGER;
+      if(orderedA!==orderedB)return orderedA-orderedB;
+    }
+    return ap.rank-bp.rank || (categoryOrder[ap.category]??99)-(categoryOrder[bp.category]??99) || String(a.name||'').localeCompare(String(b.name||''),'th');
   });
   const byParent=new Map();
   source.forEach(item=>{
@@ -2627,20 +2914,26 @@ function renderOrganizationVisual(){
     const positionCount=positions.filter(position=>Number(position.department_id)===Number(department.id)).length;
     const hierarchyReason=smartHierarchy.reasonById.get(Number(department.id));
     const hierarchyLabel=hierarchyReason==='manual'?'กำหนดเอง':hierarchyReason==='manager'?'ตามหัวหน้า':'AUTO';
-    return `<article class="org-visual-card" data-department-id="${Number(department.id)}">
+    const arranging=Boolean(state.organizationArrangeMode);
+    return `<article class="org-visual-card ${arranging?'is-arrange-card':''}" data-department-id="${Number(department.id)}" draggable="${arranging?'true':'false'}">
       <div class="org-visual-card-head">
         <div><span>DEPARTMENT · ${hierarchyLabel}</span><strong>${escapeHtml(department.name)}</strong></div>
-        <em>${members.length} คน</em>
+        <div class="org-card-head-tools">${arranging?'<i class="org-drag-handle" aria-label="ลากเพื่อย้ายตำแหน่ง"></i>':''}<em>${members.length} คน</em></div>
       </div>
+      ${arranging?'<div class="org-arrange-instruction"><strong>ลากการ์ดนี้ไปวางตำแหน่งใหม่ได้เลย</strong><small>วางกลางการ์ด = อยู่ใต้แผนกนั้น · วางซ้าย/ขวา = เรียงลำดับ</small></div>':''}
       <div class="org-visual-card-meta">
         <span>${positionCount} ตำแหน่ง</span>
         <span>${manager?`หัวหน้า · ${escapeHtml(organizationEmployeeName(manager))}`:'ยังไม่กำหนดหัวหน้า'}</span>
       </div>
       <div class="org-visual-people">${renderPeople(members)}</div>
-      <div class="org-visual-card-actions">
+      ${arranging?`<div class="org-arrange-card-controls">
+        <button type="button" title="เลื่อนไปซ้าย" onclick="window.shiftOrganizationDepartment(${Number(department.id)},-1)">←</button>
+        <button class="org-move-position-btn" type="button" onclick="window.openOrganizationMoveModal(${Number(department.id)})">ย้ายตำแหน่ง</button>
+        <button type="button" title="เลื่อนไปขวา" onclick="window.shiftOrganizationDepartment(${Number(department.id)},1)">→</button>
+      </div>`:`<div class="org-visual-card-actions">
         <button type="button" onclick="window.openDepartmentAssignment(${Number(department.id)})">จัดพนักงาน</button>
         <button type="button" onclick="window.editDepartment(${Number(department.id)})">แก้ไข</button>
-      </div>
+      </div>`}
     </article>`;
   };
 
@@ -2658,7 +2951,7 @@ function renderOrganizationVisual(){
   canvas.innerHTML=`<div class="org-tree">
     <ul class="org-tree-root"><li>
       <div class="org-visual-node">
-        <article class="org-visual-card company-node">
+        <article class="org-visual-card company-node" data-org-root-drop="1">
           <div class="org-visual-card-head"><div><span>ORGANIZATION</span><strong>${escapeHtml(companyName)}</strong></div><em>${activeEmployees.length} คน</em></div>
           <div class="org-visual-card-meta"><span>${departments.length} แผนก</span><span>${positions.length} ตำแหน่ง</span></div>
           <div class="org-visual-people">${renderPeople(companyPreview,6)}</div>
@@ -2667,8 +2960,10 @@ function renderOrganizationVisual(){
       ${roots.length?`<ul>${roots.map(renderBranch).join('')}</ul>`:''}
     </li></ul>
   </div>`;
-  if($('#orgVisualStats')) $('#orgVisualStats').textContent=`${departments.length} แผนก · ${activeEmployees.length} คน · Auto hierarchy`;
+  if($('#orgVisualStats')) $('#orgVisualStats').textContent=`${departments.length} แผนก · ${activeEmployees.length} คน · ${state.organizationArrangeMode?'กำลังจัดเอง':'Auto hierarchy'}`;
   setOrganizationZoom(state.organizationZoom||1);
+  $('#organizationVisualPanel')?.classList.toggle('arrange-mode',Boolean(state.organizationArrangeMode));
+  if(state.organizationArrangeMode)bindOrganizationArrangement(smartHierarchy);
 }
 
 function renderPeopleCore(){
@@ -2707,14 +3002,18 @@ function renderPeopleCore(){
 window.editDepartment=id=>openDepartmentModal((state.peopleCore.departments||[]).find(d=>Number(d.id)===Number(id)));
 function openDepartmentModal(department=null){
   $('#departmentId').value=department?.id||''; $('#departmentName').value=department?.name||''; $('#departmentCode').value=department?.code||'';
-  $('#departmentParent').innerHTML=`<option value="">อัตโนมัติ (แนะนำ)</option>${(state.peopleCore.departments||[]).filter(d=>Number(d.id)!==Number(department?.id)).map(d=>`<option value="${d.id}" ${Number(department?.parent_department_id)===Number(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}`;
+  const hasSavedParent=Boolean(department?.parent_department_id);
+  const manualRoot=Boolean(department&&String(department.hierarchy_mode||'auto')==='manual'&&!hasSavedParent);
+  const autoSelected=!department||(!manualRoot&&!hasSavedParent&&String(department.hierarchy_mode||'auto')!=='manual');
+  $('#departmentParent').innerHTML=`<option value="" ${autoSelected?'selected':''}>อัตโนมัติ (แนะนำ)</option><option value="__root__" ${manualRoot?'selected':''}>บริษัท (ระดับบนสุด)</option>${(state.peopleCore.departments||[]).filter(d=>Number(d.id)!==Number(department?.id)).map(d=>`<option value="${d.id}" ${Number(department?.parent_department_id)===Number(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}`;
   $('#departmentManager').innerHTML=`<option value="">ยังไม่กำหนด</option>${state.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}" ${Number(department?.manager_employee_id)===Number(e.id)?'selected':''}>${escapeHtml(e.nickname||e.first_name)}${e.department_name?` · ${escapeHtml(e.department_name)}`:''}</option>`).join('')}`;
   $('#departmentModalTitle').textContent=department?'แก้ไขแผนก':'เพิ่มแผนก'; $('#departmentModal').showModal();
 }
 async function saveDepartment(){
   const id=$('#departmentId').value;
   const isCreating=!id;
-  const body={name:$('#departmentName').value.trim(),code:$('#departmentCode').value.trim(),parent_department_id:$('#departmentParent').value||null,manager_employee_id:$('#departmentManager').value||null};
+  const parentValue=$('#departmentParent').value;
+  const body={name:$('#departmentName').value.trim(),code:$('#departmentCode').value.trim(),parent_department_id:parentValue&&parentValue!=='__root__'?parentValue:null,hierarchy_mode:parentValue===''?'auto':'manual',manager_employee_id:$('#departmentManager').value||null};
   if(body.name.length<2)return toast('กรุณาใส่ชื่อแผนก',true);
   const b=$('#departmentSaveBtn');b.disabled=true;
   try{
@@ -3878,121 +4177,26 @@ async function refreshPhase5(){
   renderEngagement();renderAnalytics();renderSubscription();renderSaasAdmin();
 }
 
-function engagementRuleTrigger(r){return String(r?.trigger_key||r?.event_type||'manual');}
-function engagementAudienceIds(r){try{const v=JSON.parse(r?.audience_ids_json||'[]');return Array.isArray(v)?v.map(Number).filter(Boolean):[]}catch{return []}}
-function eventRuleLabel(v){return ({attendance_on_time:'เช็กอินตรงเวลา',attendance_streak:'มาตรงเวลาครบจำนวน',learning_complete:'เรียนจบหลักสูตร',kpi_complete:'KPI สำเร็จ',birthday:'วันเกิด',work_anniversary:'ครบรอบงาน',social_share:'แชร์โพสต์ / Social Action',social_engagement:'Social Engagement ถึงเป้า',manual:'HR / หัวหน้าบันทึก',custom:'กำหนดเอง'})[v]||v;}
-function engagementTriggerIcon(v){return ({attendance_on_time:'◷',attendance_streak:'◷',learning_complete:'✓',kpi_complete:'↗',birthday:'✦',work_anniversary:'★',social_share:'↗',social_engagement:'◎',manual:'＋',custom:'✦'})[v]||'✦';}
-function engagementAudienceLabel(r){const type=String(r?.audience_type||'all'),ids=engagementAudienceIds(r);if(type==='all')return 'พนักงานทุกคน';if(type==='department'){const names=(state.peopleCore?.departments||[]).filter(d=>ids.includes(Number(d.id))).map(d=>d.name);return names.length?names.join(', '):'เฉพาะแผนก';}if(type==='employees'){const names=(state.employees||[]).filter(e=>ids.includes(Number(e.id))).map(e=>e.nickname||e.first_name);return names.length?names.join(', '):'รายบุคคล';}return 'พนักงานทุกคน';}
-function engagementRewardLabel(r){const bits=[];if(Number(r?.points||0)>0)bits.push(`+${Number(r.points).toLocaleString('th-TH')} แต้ม`);if(Number(r?.cash_value||0)>0)bits.push(`${money(r.cash_value)} เข้า Payroll`);return bits.join(' + ')||'ยังไม่กำหนดรางวัล';}
-function engagementRepeatLabel(v){return ({event:'ต่อเหตุการณ์',once:'ครั้งเดียว',daily:'วันละครั้ง',weekly:'สัปดาห์ละครั้ง',monthly:'เดือนละครั้ง',unlimited:'ไม่จำกัด'})[v]||'ต่อเหตุการณ์';}
-function engagementScheduleLabel(r){if(r?.starts_at&&r?.ends_at)return `${formatDate(r.starts_at)} – ${formatDate(r.ends_at)}`;if(r?.starts_at)return `เริ่ม ${formatDate(r.starts_at)}`;if(r?.ends_at)return `ถึง ${formatDate(r.ends_at)}`;return 'ไม่กำหนดวันสิ้นสุด';}
+function renderEngagement(){
+  const d=state.engagement||{},sum=d.summary||{},canManage=canManageEngagementUi();
+  const root=$('#engagementSummary');if(!root)return;
+  root.innerHTML=[['แต้มคงเหลือในระบบ',Number(sum.points_outstanding||0).toLocaleString('th-TH'),'POINTS'],['แต้มที่เคยให้ทั้งหมด',Number(sum.lifetime_earned||0).toLocaleString('th-TH'),'EARNED'],['ของรางวัลใช้งาน',Number(sum.active_rewards||0).toLocaleString('th-TH'),'REWARDS'],['รออนุมัติแลก',Number(sum.pending_redemptions||0).toLocaleString('th-TH'),'QUEUE'],['รอเข้า Payroll',money(sum.pending_cash_payroll||0),'INCENTIVE']].map(([l,v,k])=>`<article><span>${k}</span><strong>${v}</strong><p>${l}</p></article>`).join('');
+  $('#manualAwardBtn').classList.toggle('hidden',!canManage);$('#createPointRuleBtn').classList.toggle('hidden',!canManage);$('#createRewardBtn').classList.toggle('hidden',!canManage);$('#runPointRulesBtn').classList.toggle('hidden',!canManage);
+  const rules=d.rules||[];$('#pointRulesList').innerHTML=rules.length?rules.map(r=>`<div class="phase5-row"><div class="rule-state ${Number(r.is_active)?'on':''}"></div><div class="phase5-copy"><strong>${escapeHtml(r.name)}</strong><p>${escapeHtml(eventRuleLabel(r.event_type))} · +${Number(r.points||0).toLocaleString('th-TH')} แต้ม${Number(r.cash_value||0)>0?` · ${money(r.cash_value)} เข้า Payroll`:''}${r.event_type==='attendance_streak'?` · ทุก ${Number(r.threshold_count||1)} ครั้ง`:''}</p></div><span class="badge ${Number(r.is_active)?'badge-success':'badge-neutral'}">${Number(r.is_active)?'เปิด':'ปิด'}</span>${canManage?`<button class="text-btn" onclick="window.togglePointRule(${r.id},${Number(r.is_active)?0:1})">${Number(r.is_active)?'ปิด':'เปิด'}</button>`:''}</div>`).join(''):emptyState('ยังไม่มีกติกา','สร้างกติกาเพื่อให้แต้มจากพฤติกรรมที่บริษัทต้องการ');
+  const board=d.leaderboard||[];$('#leaderboardList').innerHTML=board.length?board.slice(0,10).map((w,i)=>`<div class="leaderboard-row"><span class="rank ${i<3?'top':''}">${i+1}</span><span class="mini-avatar">${initial(w)}</span><div><strong>${escapeHtml(w.nickname||w.first_name)}</strong><small>${escapeHtml(w.department_name||'ไม่ระบุแผนก')}</small></div><b>${Number(w.balance||0).toLocaleString('th-TH')} <small>pts</small></b></div>`).join(''):emptyState('ยังไม่มีคะแนน','เมื่อเริ่มให้แต้ม Leaderboard จะขึ้นที่นี่');
+  const rewards=d.rewards||[];$('#rewardCatalogList').innerHTML=rewards.length?rewards.map(r=>`<article class="reward-card ${r.status!=='active'?'inactive':''}"><div class="reward-emoji">${rewardEmoji(r.reward_type)}</div><div><strong>${escapeHtml(r.title)}</strong><p>${escapeHtml(r.description||'')}</p><small>${Number(r.points_cost||0).toLocaleString('th-TH')} แต้ม${Number(r.cash_value||0)>0?` · มูลค่า ${money(r.cash_value)}`:''}${r.stock_qty!=null?` · เหลือ ${r.stock_qty}`:' · ไม่จำกัดจำนวน'}</small></div><span class="badge ${r.status==='active'?'badge-success':'badge-neutral'}">${r.status==='active'?'พร้อมแลก':'ปิด'}</span></article>`).join(''):emptyState('ยังไม่มีของรางวัล','เพิ่มของขวัญ เงินรางวัล หรือสิทธิพิเศษให้ทีม');
+  const reds=d.redemptions||[],pending=reds.filter(x=>x.status==='pending').length;$('#redemptionQueueBadge').textContent=`${pending} รอจัดการ`;$('#redemptionList').innerHTML=reds.length?reds.slice(0,30).map(r=>`<div class="phase5-row"><div class="reward-emoji small">${rewardEmoji(r.reward_type)}</div><div class="phase5-copy"><strong>${escapeHtml(r.nickname||r.first_name)} · ${escapeHtml(r.reward_title)}</strong><p>${Number(r.points_cost||0).toLocaleString('th-TH')} แต้ม · ${formatDateTime(r.requested_at)}</p></div><span class="badge ${r.status==='pending'?'badge-warning':r.status==='approved'?'badge-success':r.status==='delivered'?'badge-soft':'badge-neutral'}">${redemptionLabel(r.status)}</span>${canManage?redemptionActions(r):''}</div>`).join(''):emptyState('ยังไม่มีคำขอแลก','คำขอจาก Employee Portal จะมาอยู่ตรงนี้');
+}
+function eventRuleLabel(v){return ({attendance_streak:'มาตรงเวลาเป็นชุด',learning_complete:'เรียนจบหลักสูตร',kpi_complete:'KPI สำเร็จ',birthday:'วันเกิด',work_anniversary:'ครบรอบงาน',manual:'HR ให้เอง',custom:'กำหนดเอง'})[v]||v;}
 function rewardEmoji(v){return ({gift:'🎁',cash:'💸',leave:'🌴',perk:'✨',custom:'⭐'})[v]||'🎁';}
 function redemptionLabel(v){return ({pending:'รออนุมัติ',approved:'อนุมัติแล้ว',rejected:'ปฏิเสธ',delivered:'ส่งมอบแล้ว',cancelled:'ยกเลิก'})[v]||v;}
 function redemptionActions(r){if(r.status==='pending')return `<div class="row-actions"><button class="text-btn success-text" onclick="window.rewardDecision(${r.id},'approve')">อนุมัติ</button><button class="text-btn danger-text" onclick="window.rewardDecision(${r.id},'reject')">ปฏิเสธ</button></div>`;if(r.status==='approved')return `<button class="text-btn" onclick="window.rewardDecision(${r.id},'deliver')">ส่งมอบแล้ว</button>`;return '';}
-function engagementRuleIsReview(r){return ['social_share','social_engagement','manual','custom'].includes(engagementRuleTrigger(r))||String(r.approval_mode||'')==='hr';}
-
-function renderEngagement(){
-  const d=state.engagement||{},sum=d.summary||{},canManage=canManageEngagementUi(),settings=d.settings||{};
-  const root=$('#engagementSummary');if(!root)return;
-  root.innerHTML=[
-    ['กิจกรรมที่เปิด',Number(sum.active_activities||0).toLocaleString('th-TH'),'ACTIVE'],
-    ['แต้มคงเหลือ',Number(sum.points_outstanding||0).toLocaleString('th-TH'),'POINTS'],
-    ['รางวัลพร้อมแลก',Number(sum.active_rewards||0).toLocaleString('th-TH'),'REWARDS'],
-    ['รออนุมัติ',Number(sum.pending_redemptions||0).toLocaleString('th-TH'),'QUEUE'],
-    ['รอเข้า Payroll',money(sum.pending_cash_payroll||0),'PAYROLL']
-  ].map(([l,v,k])=>`<article><span>${k}</span><strong>${v}</strong><p>${l}</p></article>`).join('');
-  ['manualAwardBtn','createPointRuleBtn','createRewardBtn','runPointRulesBtn','engagementSettingsBtn'].forEach(id=>$('#'+id)?.classList.toggle('hidden',!canManage));
-
-  const rules=d.rules||[];
-  $('#pointRulesList').innerHTML=rules.length?rules.map(r=>{
-    const trigger=engagementRuleTrigger(r),active=Number(r.is_active)===1,review=engagementRuleIsReview(r),threshold=trigger==='attendance_streak'?` · ครบ ${Number(r.threshold_count||1)} ครั้ง`:'';
-    return `<article class="engagement-activity-card ${active?'is-active':'is-paused'}">
-      <div class="engagement-activity-icon">${engagementTriggerIcon(trigger)}</div>
-      <div class="engagement-activity-main">
-        <div class="engagement-activity-title"><strong>${escapeHtml(r.name)}</strong><span class="badge ${active?'badge-success':'badge-neutral'}">${active?'เปิดใช้งาน':'ปิดอยู่'}</span></div>
-        <p>${escapeHtml(r.description||eventRuleLabel(trigger))}</p>
-        <div class="engagement-rule-flow"><span><b>เมื่อ</b> ${escapeHtml(eventRuleLabel(trigger))}${threshold}</span><i>→</i><span><b>ให้</b> ${escapeHtml(engagementRewardLabel(r))}</span></div>
-        <div class="engagement-rule-meta"><span>${review?'ต้องยืนยัน':'อัตโนมัติ'}</span><span>${escapeHtml(engagementAudienceLabel(r))}</span><span>${escapeHtml(engagementRepeatLabel(r.repeat_mode))}</span><span>${escapeHtml(engagementScheduleLabel(r))}</span>${Number(r.requires_evidence)?'<span>มีหลักฐาน</span>':''}</div>
-      </div>
-      ${canManage?`<div class="engagement-activity-actions">${review&&active?`<button class="secondary-btn compact-btn" onclick="window.completeEngagementActivity(${r.id})">บันทึกสำเร็จ</button>`:''}<button class="text-btn" onclick="window.editEngagementActivity(${r.id})">แก้ไข</button><button class="text-btn" onclick="window.duplicateEngagementActivity(${r.id})">คัดลอก</button><button class="text-btn" onclick="window.togglePointRule(${r.id},${active?0:1})">${active?'ปิด':'เปิด'}</button><button class="text-btn danger-text" onclick="window.deleteEngagementActivity(${r.id})">ลบ</button></div>`:''}
-    </article>`;
-  }).join(''):emptyState('ยังไม่มีกิจกรรม','เลือก Template ด้านบน หรือกด “สร้างกิจกรรม” เพื่อกำหนดกติกาของบริษัทเอง');
-
-  const rewards=d.rewards||[];
-  $('#rewardCatalogList').innerHTML=rewards.length?rewards.map(r=>`<article class="reward-card ${r.status!=='active'?'inactive':''}"><div class="reward-emoji">${rewardEmoji(r.reward_type)}</div><div><strong>${escapeHtml(r.title)}</strong><p>${escapeHtml(r.description||'')}</p><small>${Number(r.points_cost||0).toLocaleString('th-TH')} แต้ม${Number(r.cash_value||0)>0?` · มูลค่า ${money(r.cash_value)}`:''}${r.stock_qty!=null?` · เหลือ ${r.stock_qty}`:' · ไม่จำกัด'}${Number(r.requires_date)?` · เลือก${escapeHtml(r.fulfillment_label||'วันใช้สิทธิ์')}`:''}</small></div><div class="reward-card-actions"><span class="badge ${r.status==='active'?'badge-success':'badge-neutral'}">${r.status==='active'?'พร้อมแลก':'ปิด'}</span>${canManage?`<button class="text-btn" onclick="window.editEngagementReward(${r.id})">แก้ไข</button><button class="text-btn" onclick="window.toggleEngagementReward(${r.id},'${r.status==='active'?'inactive':'active'}')">${r.status==='active'?'ปิด':'เปิด'}</button>`:''}</div></article>`).join(''):emptyState('ยังไม่มีของรางวัล','เพิ่มโบนัส เงิน ของขวัญ วันหยุด หรือสิทธิพิเศษที่พนักงานใช้แต้มแลกได้');
-
-  const reds=d.redemptions||[],pending=reds.filter(x=>x.status==='pending').length;
-  $('#redemptionQueueBadge').textContent=`${pending} รอจัดการ`;
-  $('#redemptionList').innerHTML=reds.length?reds.slice(0,30).map(r=>`<div class="phase5-row"><div class="reward-emoji small">${rewardEmoji(r.reward_type)}</div><div class="phase5-copy"><strong>${escapeHtml(r.nickname||r.first_name)} · ${escapeHtml(r.reward_title)}</strong><p>${Number(r.points_cost||0).toLocaleString('th-TH')} แต้ม · ${formatDateTime(r.requested_at)}${r.requested_date?` · ใช้ ${formatDate(r.requested_date)}`:''}</p></div><span class="badge ${r.status==='pending'?'badge-warning':r.status==='approved'?'badge-success':r.status==='delivered'?'badge-soft':'badge-neutral'}">${redemptionLabel(r.status)}</span>${canManage?redemptionActions(r):''}</div>`).join(''):emptyState('ยังไม่มีคำขอแลก','คำขอจาก Employee Portal จะมาอยู่ตรงนี้');
-
-  const tx=d.recent_transactions||[];
-  $('#engagementHistoryList').innerHTML=tx.length?tx.slice(0,20).map(t=>`<div class="phase5-row"><div class="engagement-history-points ${Number(t.points||0)>=0?'plus':'minus'}">${Number(t.points||0)>=0?'+':''}${Number(t.points||0).toLocaleString('th-TH')}</div><div class="phase5-copy"><strong>${escapeHtml(t.nickname||t.first_name)} · ${escapeHtml(t.rule_name||t.note||'ปรับแต้ม')}</strong><p>${escapeHtml(t.note||'')} · ${formatDateTime(t.created_at)}</p></div>${Number(t.cash_value||0)>0?`<span class="badge badge-soft">${money(t.cash_value)}</span>`:''}</div>`).join(''):emptyState('ยังไม่มีประวัติ','เมื่อมีการให้แต้ม ระบบจะเก็บ Audit ไว้ตรงนี้');
-
-  const board=d.leaderboard||[],leaderPanel=$('#engagementLeaderboardPanel');
-  leaderPanel?.classList.toggle('hidden',Number(settings.leaderboard_enabled||0)!==1);
-  $('#leaderboardList').innerHTML=board.length?board.slice(0,10).map((w,i)=>`<div class="leaderboard-row"><span class="rank ${i<3?'top':''}">${i+1}</span><span class="mini-avatar">${initial(w)}</span><div><strong>${escapeHtml(w.nickname||w.first_name)}</strong><small>${escapeHtml(w.department_name||'ไม่ระบุแผนก')}</small></div><b>${Number(w.balance||0).toLocaleString('th-TH')} <small>pts</small></b></div>`).join(''):emptyState('ยังไม่มีคะแนน','เมื่อเริ่มให้แต้ม Leaderboard จะขึ้นที่นี่');
-}
-
-window.togglePointRule=async(id,on)=>{try{await api(`/api/engagement/rules/${id}`,{method:'PATCH',body:JSON.stringify({is_active:Boolean(on)})});await refreshPhase5();toast(on?'เปิดกิจกรรมแล้ว':'พักกิจกรรมแล้ว')}catch(e){toast(e.message,true)}};
-window.editEngagementActivity=id=>{const r=(state.engagement.rules||[]).find(x=>Number(x.id)===Number(id));if(r)openEngagementActivityBuilder(r)};
-window.duplicateEngagementActivity=id=>{const r=(state.engagement.rules||[]).find(x=>Number(x.id)===Number(id));if(r)openEngagementActivityBuilder({...r,id:null,name:`${r.name} (คัดลอก)`,is_active:0},r.template_key||'custom')};
-window.deleteEngagementActivity=async id=>{const r=(state.engagement.rules||[]).find(x=>Number(x.id)===Number(id));if(!r||!confirm(`ลบกิจกรรม “${r.name}” ?\nประวัติแต้มเดิมจะยังถูกเก็บไว้`))return;try{await api(`/api/engagement/rules/${id}`,{method:'DELETE'});await refreshPhase5();toast('ลบกิจกรรมแล้ว')}catch(e){toast(e.message,true)}};
-window.completeEngagementActivity=id=>openEngagementCompletion(id);
+window.togglePointRule=async(id,on)=>{try{const r=(state.engagement.rules||[]).find(x=>Number(x.id)===Number(id));await api(`/api/engagement/rules/${id}`,{method:'PATCH',body:JSON.stringify({is_active:Boolean(on),name:r?.name,event_type:r?.event_type})});await refreshPhase5();toast(on?'เปิดกติกาแล้ว':'ปิดกติกาแล้ว')}catch(e){toast(e.message,true)}};
 window.rewardDecision=async(id,action)=>{const note=action==='reject'?prompt('เหตุผลที่ปฏิเสธ','')||'':action==='approve'?prompt('หมายเหตุถึงพนักงาน (ถ้ามี)','')||'':'';try{await api(`/api/engagement/redemptions/${id}/${action}`,{method:'POST',body:JSON.stringify({note})});await refreshPhase5();toast(action==='approve'?'อนุมัติรางวัลแล้ว':action==='reject'?'ปฏิเสธและคืนแต้มแล้ว':'บันทึกว่าส่งมอบแล้ว')}catch(e){toast(e.message,true)}};
-window.editEngagementReward=id=>{const r=(state.engagement.rewards||[]).find(x=>Number(x.id)===Number(id));if(r)openReward(r)};
-window.toggleEngagementReward=async(id,status)=>{try{await api(`/api/engagement/rewards/${id}`,{method:'PATCH',body:JSON.stringify({status})});await refreshPhase5();toast(status==='active'?'เปิดรางวัลแล้ว':'ปิดรางวัลแล้ว')}catch(e){toast(e.message,true)}};
-
-async function runPointRules(){try{const r=await api('/api/engagement/run-rules',{method:'POST',body:'{}'});await refreshPhase5();toast(`ประมวลผลแล้ว · เพิ่ม ${Number(r.awarded||0)} รายการ`)}catch(e){toast(e.message,true)}}
-function openManualAward(){openPhase5Form({eyebrow:'QUICK REWARD',title:'ให้รางวัลทันที',subtitle:'ใช้สำหรับชมเชยหรือปรับแต้มแบบครั้งเดียว เงินรางวัลจะรอเข้า Payroll อัตโนมัติ',html:`<div class="field full"><label>พนักงาน</label><select id="p5AwardEmployee">${phase5EmployeeOptions()}</select></div><div class="field"><label>แต้ม</label><input id="p5AwardPoints" type="number" value="100"/></div><div class="field"><label>โบนัส / Incentive (บาท)</label><input id="p5AwardCash" type="number" min="0" value="0"/></div><div class="field full"><label>เหตุผล</label><input id="p5AwardNote" value="ชื่นชมผลงาน"/></div>`,onSave:async()=>{await api('/api/engagement/award',{method:'POST',body:JSON.stringify({employee_id:Number($('#p5AwardEmployee').value),points:Number($('#p5AwardPoints').value),cash_value:Number($('#p5AwardCash').value||0),note:$('#p5AwardNote').value.trim()})});await refreshPhase5();}})}
-
-const ENGAGEMENT_TEMPLATES={
-  attendance:{name:'มาตรงเวลารับแต้ม',description:'เช็กอินตรงเวลาในวันทำงานแล้วรับแต้มอัตโนมัติ',trigger_key:'attendance_on_time',points:5,cash_value:0,threshold_count:1,repeat_mode:'daily',approval_mode:'auto',requires_evidence:0,template_key:'attendance'},
-  kpi:{name:'KPI สำเร็จ',description:'เมื่อ KPI ถึง 100% ให้รางวัลอัตโนมัติ',trigger_key:'kpi_complete',points:100,cash_value:0,threshold_count:1,repeat_mode:'event',approval_mode:'auto',requires_evidence:0,template_key:'kpi'},
-  learning:{name:'เรียนจบหลักสูตร',description:'เรียนหลักสูตรที่ได้รับมอบหมายจบแล้วรับแต้ม',trigger_key:'learning_complete',points:50,cash_value:0,threshold_count:1,repeat_mode:'event',approval_mode:'auto',requires_evidence:0,template_key:'learning'},
-  social:{name:'DEAL Social Boost',description:'ทำ Social Action ตามแคมเปญ แล้วให้หัวหน้าหรือ HR ยืนยัน',trigger_key:'social_share',points:10,cash_value:0,threshold_count:1,repeat_mode:'daily',approval_mode:'hr',requires_evidence:1,template_key:'social'},
-  custom:{name:'',description:'',trigger_key:'manual',points:50,cash_value:0,threshold_count:1,repeat_mode:'once',approval_mode:'hr',requires_evidence:0,template_key:'custom'}
-};
-function engagementDepartmentOptions(ids=[]){return (state.peopleCore?.departments||[]).map(d=>`<option value="${d.id}" ${ids.includes(Number(d.id))?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
-function engagementEmployeeOptions(ids=[]){return (state.employees||[]).filter(e=>e.status==='active').map(e=>`<option value="${e.id}" ${ids.includes(Number(e.id))?'selected':''}>${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.department_name||'-')}</option>`).join('')}
-function openEngagementActivityBuilder(rule=null,templateKey='custom'){
-  const seed=rule||ENGAGEMENT_TEMPLATES[templateKey]||ENGAGEMENT_TEMPLATES.custom,editing=Boolean(rule?.id),trigger=engagementRuleTrigger(seed),audienceType=seed.audience_type||'all',ids=engagementAudienceIds(seed);
-  openPhase5Form({eyebrow:'ENGAGEMENT BUILDER',title:editing?'แก้ไขกิจกรรม':'สร้างกิจกรรม',subtitle:'WHEN เหตุการณ์เกิดขึ้น · FOR ใคร · THEN ให้รางวัล · LIMIT ความถี่ · APPROVE วิธีตรวจสอบ',saveText:editing?'บันทึกการแก้ไข':'สร้างกิจกรรม',html:`
-    <div class="field full engagement-builder-section"><span class="builder-step">1</span><div><b>กิจกรรม</b><small>ชื่อที่ HR และพนักงานเข้าใจตรงกัน</small></div></div>
-    <div class="field full"><label>ชื่อกิจกรรม</label><input id="p5ActivityName" value="${escapeHtml(seed.name||'')}" placeholder="เช่น แชร์โพสต์ DEAL! รับแต้ม"/></div>
-    <div class="field full"><label>คำอธิบาย</label><input id="p5ActivityDescription" value="${escapeHtml(seed.description||'')}" placeholder="อธิบายสิ่งที่ต้องทำแบบสั้น ๆ"/></div>
-    <div class="field full engagement-builder-section"><span class="builder-step">2</span><div><b>WHEN — เกิดอะไรขึ้น</b><small>เลือก Trigger ที่ระบบรู้จัก หรือใช้แบบ HR ยืนยันเอง</small></div></div>
-    <div class="field full"><label>Trigger</label><select id="p5ActivityTrigger"><option value="attendance_on_time" ${trigger==='attendance_on_time'?'selected':''}>เช็กอินตรงเวลา — Auto</option><option value="attendance_streak" ${trigger==='attendance_streak'?'selected':''}>มาตรงเวลาครบจำนวน — Auto</option><option value="learning_complete" ${trigger==='learning_complete'?'selected':''}>เรียนจบหลักสูตร — Auto</option><option value="kpi_complete" ${trigger==='kpi_complete'?'selected':''}>KPI สำเร็จ — Auto</option><option value="birthday" ${trigger==='birthday'?'selected':''}>วันเกิด — Auto</option><option value="work_anniversary" ${trigger==='work_anniversary'?'selected':''}>ครบรอบงาน — Auto</option><option value="social_share" ${trigger==='social_share'?'selected':''}>แชร์โพสต์ / Social Action — Review</option><option value="social_engagement" ${trigger==='social_engagement'?'selected':''}>Social Engagement ถึงเป้า — Review</option><option value="manual" ${trigger==='manual'?'selected':''}>HR / หัวหน้าบันทึกสำเร็จ</option><option value="custom" ${trigger==='custom'?'selected':''}>Custom — Review</option></select></div>
-    <div id="p5ActivityThresholdField" class="field"><label>ครบกี่ครั้ง</label><input id="p5ActivityThreshold" type="number" min="1" value="${Number(seed.threshold_count||1)}"/></div>
-    <div class="field"><label>วิธีอนุมัติ</label><select id="p5ActivityApproval"><option value="auto" ${String(seed.approval_mode||'auto')==='auto'?'selected':''}>อัตโนมัติ</option><option value="hr" ${String(seed.approval_mode||'')==='hr'?'selected':''}>HR / หัวหน้ายืนยัน</option></select></div>
-    <div class="field full engagement-builder-section"><span class="builder-step">3</span><div><b>FOR — ใครเล่นกิจกรรมนี้</b><small>ใช้กิจกรรมเดียวกันกับทั้งบริษัท แผนก หรือรายบุคคลได้</small></div></div>
-    <div class="field"><label>กลุ่มพนักงาน</label><select id="p5ActivityAudience"><option value="all" ${audienceType==='all'?'selected':''}>ทุกคน</option><option value="department" ${audienceType==='department'?'selected':''}>เฉพาะแผนก</option><option value="employees" ${audienceType==='employees'?'selected':''}>เลือกรายบุคคล</option></select></div>
-    <div id="p5ActivityDepartmentField" class="field full"><label>แผนก</label><select id="p5ActivityDepartments" multiple size="4">${engagementDepartmentOptions(ids)}</select><small class="field-hint">เลือกได้มากกว่า 1 แผนก</small></div>
-    <div id="p5ActivityEmployeesField" class="field full"><label>พนักงาน</label><select id="p5ActivityEmployees" multiple size="5">${engagementEmployeeOptions(ids)}</select><small class="field-hint">เลือกได้มากกว่า 1 คน</small></div>
-    <div class="field full engagement-builder-section"><span class="builder-step">4</span><div><b>THEN — ให้รางวัลอะไร</b><small>ใช้แต้ม เงิน หรือให้ทั้งสองอย่างพร้อมกันได้</small></div></div>
-    <div class="field"><label>แต้ม</label><input id="p5ActivityPoints" type="number" min="0" value="${Number(seed.points||0)}"/></div>
-    <div class="field"><label>โบนัส / Incentive (บาท)</label><input id="p5ActivityCash" type="number" min="0" value="${Number(seed.cash_value||0)}"/></div>
-    <div class="field full engagement-builder-section"><span class="builder-step">5</span><div><b>LIMIT — เล่นได้บ่อยแค่ไหน</b><small>กันการปั๊มแต้มและกำหนดช่วงแคมเปญได้</small></div></div>
-    <div class="field"><label>ความถี่รับรางวัล</label><select id="p5ActivityRepeat"><option value="event" ${String(seed.repeat_mode||'event')==='event'?'selected':''}>ต่อเหตุการณ์</option><option value="once" ${seed.repeat_mode==='once'?'selected':''}>ครั้งเดียวต่อคน</option><option value="daily" ${seed.repeat_mode==='daily'?'selected':''}>วันละครั้ง</option><option value="weekly" ${seed.repeat_mode==='weekly'?'selected':''}>สัปดาห์ละครั้ง</option><option value="monthly" ${seed.repeat_mode==='monthly'?'selected':''}>เดือนละครั้ง</option><option value="unlimited" ${seed.repeat_mode==='unlimited'?'selected':''}>ไม่จำกัด</option></select></div>
-    <div class="field"><label>สูงสุดต่อคน (ครั้ง)</label><input id="p5ActivityMax" type="number" min="1" value="${seed.max_awards_per_employee??''}" placeholder="ว่าง = ตามความถี่"/></div>
-    <div class="field"><label>เริ่มวันที่</label><input id="p5ActivityStart" type="date" value="${seed.starts_at||''}"/></div>
-    <div class="field"><label>สิ้นสุดวันที่</label><input id="p5ActivityEnd" type="date" value="${seed.ends_at||''}"/></div>
-    <div class="field full"><label class="toggle-line"><input id="p5ActivityEvidence" type="checkbox" ${Number(seed.requires_evidence||0)?'checked':''}/> ต้องมีหลักฐาน / หมายเหตุก่อนยืนยัน</label></div>
-    <div class="field full"><label class="toggle-line"><input id="p5ActivityActive" type="checkbox" ${Number(seed.is_active||0)?'checked':''}/> เปิดใช้งานทันที</label></div>`,onSave:async()=>{
-      const audience=$('#p5ActivityAudience').value,audienceIds=audience==='department'?[...$('#p5ActivityDepartments').selectedOptions].map(o=>Number(o.value)):audience==='employees'?[...$('#p5ActivityEmployees').selectedOptions].map(o=>Number(o.value)):[];
-      const body={name:$('#p5ActivityName').value.trim(),description:$('#p5ActivityDescription').value.trim(),trigger_key:$('#p5ActivityTrigger').value,threshold_count:Number($('#p5ActivityThreshold').value||1),approval_mode:$('#p5ActivityApproval').value,audience_type:audience,audience_ids:audienceIds,points:Number($('#p5ActivityPoints').value||0),cash_value:Number($('#p5ActivityCash').value||0),repeat_mode:$('#p5ActivityRepeat').value,max_awards_per_employee:$('#p5ActivityMax').value,starts_at:$('#p5ActivityStart').value||null,ends_at:$('#p5ActivityEnd').value||null,requires_evidence:$('#p5ActivityEvidence').checked,is_active:$('#p5ActivityActive').checked,template_key:seed.template_key||templateKey};
-      if(!body.name)return Promise.reject(new Error('กรุณาใส่ชื่อกิจกรรม'));if(body.points<=0&&body.cash_value<=0)return Promise.reject(new Error('กรุณากำหนดแต้ม หรือเงินรางวัลอย่างน้อย 1 อย่าง'));if(audience!=='all'&&!audienceIds.length)return Promise.reject(new Error('กรุณาเลือกกลุ่มพนักงาน'));
-      await api(editing?`/api/engagement/rules/${rule.id}`:'/api/engagement/rules',{method:editing?'PATCH':'POST',body:JSON.stringify(body)});await refreshPhase5();
-    }});
-  const sync=()=>{const t=$('#p5ActivityTrigger').value,a=$('#p5ActivityAudience').value,manual=['social_share','social_engagement','manual','custom'].includes(t);$('#p5ActivityThresholdField').classList.toggle('hidden',t!=='attendance_streak');$('#p5ActivityDepartmentField').classList.toggle('hidden',a!=='department');$('#p5ActivityEmployeesField').classList.toggle('hidden',a!=='employees');if(!manual){$('#p5ActivityApproval').value='auto';$('#p5ActivityApproval').disabled=true;$('#p5ActivityEvidence').checked=false;$('#p5ActivityEvidence').disabled=true}else{$('#p5ActivityApproval').disabled=false;$('#p5ActivityEvidence').disabled=false;if($('#p5ActivityApproval').value==='auto')$('#p5ActivityApproval').value='hr';}};
-  $('#p5ActivityTrigger').onchange=sync;$('#p5ActivityAudience').onchange=sync;sync();
-}
-
-function eligibleEmployeesForEngagementRule(rule){const type=String(rule.audience_type||'all'),ids=engagementAudienceIds(rule);return (state.employees||[]).filter(e=>e.status==='active'&&(type==='all'||(type==='department'&&ids.includes(Number(e.department_id)))||(type==='employees'&&ids.includes(Number(e.id)))))}
-function openEngagementCompletion(id){const rule=(state.engagement.rules||[]).find(x=>Number(x.id)===Number(id));if(!rule)return;const employees=eligibleEmployeesForEngagementRule(rule);if(!employees.length)return toast('ไม่พบพนักงานในกลุ่มกิจกรรมนี้',true);openPhase5Form({eyebrow:'CONFIRM ACTIVITY',title:`บันทึกสำเร็จ · ${rule.name}`,subtitle:`ระบบจะให้ ${engagementRewardLabel(rule)} ตามกติกาที่ตั้งไว้`,saveText:'ยืนยันและให้รางวัล',html:`<div class="field full"><label>พนักงาน</label><select id="p5CompleteEmployee">${employees.map(e=>`<option value="${e.id}">${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.department_name||'-')}</option>`).join('')}</select></div><div class="field full"><label>หมายเหตุ${Number(rule.requires_evidence)?' / หลักฐาน':''}</label><textarea id="p5CompleteNote" rows="3" placeholder="เช่น แชร์โพสต์ Campaign 28 Aug แล้ว"></textarea></div><div class="field full"><label>ลิงก์หลักฐาน (ถ้ามี)</label><input id="p5CompleteEvidence" type="url" placeholder="https://..."/></div>`,onSave:async()=>{await api(`/api/engagement/rules/${id}/complete`,{method:'POST',body:JSON.stringify({employee_id:Number($('#p5CompleteEmployee').value),note:$('#p5CompleteNote').value.trim(),evidence_url:$('#p5CompleteEvidence').value.trim()})});await refreshPhase5();}})}
-
-function openEngagementSettings(){const s=state.engagement?.settings||{};openPhase5Form({eyebrow:'ENGAGEMENT SETTINGS',title:'ตั้งค่ากิจกรรม & รางวัล',subtitle:'ฟีเจอร์อย่าง Leaderboard เป็น Optional ปิดได้ถ้าไม่เหมาะกับ Culture ของบริษัท',html:`<div class="field full"><label class="toggle-line"><input id="p5SettingPoints" type="checkbox" ${Number(s.points_enabled??1)?'checked':''}/> เปิดระบบแต้มและรางวัล</label></div><div class="field full"><label class="toggle-line"><input id="p5SettingBoard" type="checkbox" ${Number(s.leaderboard_enabled??1)?'checked':''}/> แสดง Leaderboard</label></div><div class="field full"><label class="toggle-line"><input id="p5SettingBirthday" type="checkbox" ${Number(s.birthday_moment_enabled??1)?'checked':''}/> อนุญาตกิจกรรมวันเกิด</label></div><div class="field full"><label class="toggle-line"><input id="p5SettingAnniversary" type="checkbox" ${Number(s.anniversary_moment_enabled??1)?'checked':''}/> อนุญาตกิจกรรมครบรอบงาน</label></div>`,onSave:async()=>{await api('/api/engagement/settings',{method:'PATCH',body:JSON.stringify({points_enabled:$('#p5SettingPoints').checked,leaderboard_enabled:$('#p5SettingBoard').checked,birthday_moment_enabled:$('#p5SettingBirthday').checked,anniversary_moment_enabled:$('#p5SettingAnniversary').checked})});await refreshPhase5();}})}
-
-function openReward(reward=null){const r=reward||{},editing=Boolean(r.id);openPhase5Form({eyebrow:'REWARD BUILDER',title:editing?'แก้ไขรางวัล':'เพิ่มของรางวัล',subtitle:'สร้างรางวัลได้ทั้งเงิน ของขวัญ วันหยุด และสิทธิพิเศษ พร้อมให้พนักงานเลือกวันใช้สิทธิ์ได้',html:`<div class="field full"><label>ชื่อของรางวัล</label><input id="p5RewardTitle" value="${escapeHtml(r.title||'')}" placeholder="เช่น โบนัส 500 บาท / WFH 1 วัน"/></div><div class="field"><label>ประเภท</label><select id="p5RewardType"><option value="gift" ${r.reward_type==='gift'?'selected':''}>ของขวัญ</option><option value="cash" ${r.reward_type==='cash'?'selected':''}>เงินรางวัล</option><option value="leave" ${r.reward_type==='leave'?'selected':''}>วันลา / วันหยุดพิเศษ</option><option value="perk" ${r.reward_type==='perk'?'selected':''}>สิทธิพิเศษ</option><option value="custom" ${r.reward_type==='custom'?'selected':''}>อื่น ๆ</option></select></div><div class="field"><label>แต้มที่ใช้</label><input id="p5RewardPoints" type="number" min="0" value="${Number(r.points_cost??500)}"/></div><div class="field"><label>มูลค่าเงิน (ถ้ามี)</label><input id="p5RewardCash" type="number" min="0" value="${Number(r.cash_value||0)}"/></div><div class="field"><label>จำนวนในคลัง</label><input id="p5RewardStock" type="number" min="0" value="${r.stock_qty??''}" placeholder="ว่าง = ไม่จำกัด"/></div><div class="field"><label>การอนุมัติ</label><select id="p5RewardApproval"><option value="hr" ${String(r.approval_mode||'hr')==='hr'?'selected':''}>HR อนุมัติ</option><option value="auto" ${r.approval_mode==='auto'?'selected':''}>อนุมัติอัตโนมัติ</option></select></div><div class="field full"><label>รายละเอียด</label><input id="p5RewardDescription" value="${escapeHtml(r.description||'')}" placeholder="เงื่อนไขหรือรายละเอียดของรางวัล"/></div><div class="field full"><label class="toggle-line"><input id="p5RewardDate" type="checkbox" ${Number(r.requires_date||0)?'checked':''}/> ให้พนักงานเลือกวันที่ต้องการใช้สิทธิ์</label></div><div id="p5RewardDateLabelField" class="field full"><label>ชื่อช่องวันที่</label><input id="p5RewardDateLabel" value="${escapeHtml(r.fulfillment_label||'วันที่ต้องการใช้สิทธิ์')}" placeholder="เช่น วันที่ WFH / วันที่ลา"/></div>`,onSave:async()=>{const body={title:$('#p5RewardTitle').value.trim(),description:$('#p5RewardDescription').value.trim(),reward_type:$('#p5RewardType').value,points_cost:Number($('#p5RewardPoints').value||0),cash_value:Number($('#p5RewardCash').value||0),stock_qty:$('#p5RewardStock').value,requires_date:$('#p5RewardDate').checked,fulfillment_label:$('#p5RewardDateLabel').value.trim(),approval_mode:$('#p5RewardApproval').value};if(!body.title)return Promise.reject(new Error('กรุณาใส่ชื่อรางวัล'));await api(editing?`/api/engagement/rewards/${r.id}`:'/api/engagement/rewards',{method:editing?'PATCH':'POST',body:JSON.stringify(body)});await refreshPhase5();}});const sync=()=>$('#p5RewardDateLabelField').classList.toggle('hidden',!$('#p5RewardDate').checked);$('#p5RewardDate').onchange=sync;sync();}
+async function runPointRules(){try{const r=await api('/api/engagement/run-rules',{method:'POST',body:'{}'});await refreshPhase5();toast(`รันกติกาแล้ว · เพิ่ม ${Number(r.awarded||0)} รายการ`)}catch(e){toast(e.message,true)}}
+function openManualAward(){openPhase5Form({eyebrow:'MANUAL POINTS',title:'ให้แต้มพนักงาน',subtitle:'แต้มติดลบใช้สำหรับปรับยอดได้ Cash Incentive จะถูกส่งเข้า Payroll รอบที่เกี่ยวข้อง',html:`<div class="field full"><label>พนักงาน</label><select id="p5AwardEmployee">${phase5EmployeeOptions()}</select></div><div class="field"><label>แต้ม</label><input id="p5AwardPoints" type="number" value="100"/></div><div class="field"><label>Cash Incentive (บาท)</label><input id="p5AwardCash" type="number" min="0" value="0"/></div><div class="field full"><label>เหตุผล</label><input id="p5AwardNote" value="HR ให้แต้ม"/></div>`,onSave:async()=>{await api('/api/engagement/award',{method:'POST',body:JSON.stringify({employee_id:Number($('#p5AwardEmployee').value),points:Number($('#p5AwardPoints').value),cash_value:Number($('#p5AwardCash').value||0),note:$('#p5AwardNote').value.trim()})});await refreshPhase5();}})}
+function openPointRule(){openPhase5Form({eyebrow:'POINT RULE',title:'สร้างกติกาแต้ม',subtitle:'กติกาจะยังไม่ทำงานจนกว่าจะเปิดสวิตช์',html:`<div class="field full"><label>ชื่อกติกา</label><input id="p5RuleName" placeholder="เช่น มาตรงเวลา 10 ครั้ง"/></div><div class="field"><label>เหตุการณ์</label><select id="p5RuleEvent"><option value="attendance_streak">มาตรงเวลาครบจำนวน</option><option value="learning_complete">เรียนจบหลักสูตร</option><option value="kpi_complete">KPI สำเร็จ</option><option value="birthday">วันเกิด</option><option value="work_anniversary">ครบรอบงาน</option><option value="manual">Manual</option></select></div><div class="field"><label>จำนวนครั้ง</label><input id="p5RuleThreshold" type="number" min="1" value="10"/></div><div class="field"><label>แต้ม</label><input id="p5RulePoints" type="number" min="0" value="100"/></div><div class="field"><label>Cash Incentive (บาท)</label><input id="p5RuleCash" type="number" min="0" value="0"/></div><div class="field full"><label class="toggle-line"><input id="p5RuleActive" type="checkbox"/> เปิดใช้งานทันที</label></div>`,onSave:async()=>{await api('/api/engagement/rules',{method:'POST',body:JSON.stringify({name:$('#p5RuleName').value.trim(),event_type:$('#p5RuleEvent').value,threshold_count:Number($('#p5RuleThreshold').value||1),points:Number($('#p5RulePoints').value||0),cash_value:Number($('#p5RuleCash').value||0),is_active:$('#p5RuleActive').checked})});await refreshPhase5();}})}
+function openReward(){openPhase5Form({eyebrow:'REWARD',title:'เพิ่มของรางวัล',subtitle:'พนักงานจะเห็นรายการนี้ใน Employee Portal และใช้แต้มแลกได้',html:`<div class="field full"><label>ชื่อของรางวัล</label><input id="p5RewardTitle" placeholder="เช่น Voucher 500 บาท"/></div><div class="field"><label>ประเภท</label><select id="p5RewardType"><option value="gift">ของขวัญ</option><option value="cash">เงินรางวัล</option><option value="leave">วันลา / วันหยุดพิเศษ</option><option value="perk">สิทธิพิเศษ</option><option value="custom">อื่นๆ</option></select></div><div class="field"><label>แต้มที่ใช้</label><input id="p5RewardPoints" type="number" min="0" value="500"/></div><div class="field"><label>มูลค่าเงิน (ถ้ามี)</label><input id="p5RewardCash" type="number" min="0" value="0"/></div><div class="field"><label>จำนวนในคลัง</label><input id="p5RewardStock" type="number" min="0" placeholder="เว้นว่าง = ไม่จำกัด"/></div><div class="field full"><label>รายละเอียด</label><input id="p5RewardDescription" placeholder="เงื่อนไขหรือรายละเอียดของรางวัล"/></div>`,onSave:async()=>{await api('/api/engagement/rewards',{method:'POST',body:JSON.stringify({title:$('#p5RewardTitle').value.trim(),description:$('#p5RewardDescription').value.trim(),reward_type:$('#p5RewardType').value,points_cost:Number($('#p5RewardPoints').value||0),cash_value:Number($('#p5RewardCash').value||0),stock_qty:$('#p5RewardStock').value})});await refreshPhase5();}})}
 
 function renderAnalytics(){const d=state.analytics||{},s=d.summary||{};if(!$('#analyticsSummary'))return;$('#analyticsSummary').innerHTML=[['Active Headcount',s.active_headcount||0,'คน'],['Probation',s.probation||0,'คน'],['รับเข้า 30 วัน',s.hires_30||0,'คน'],['ออก 90 วัน',s.exits_90||0,'คน'],['Turnover 90 วัน',`${Number(s.turnover_90_pct||0).toFixed(1)}%`,'อัตรา'],['มาสาย 30 วัน',s.late_records_30||0,'ครั้ง']].map(([l,v,u])=>`<article><span>${escapeHtml(l)}</span><strong>${v}</strong><small>${u}</small></article>`).join('');
   const trend=d.headcount_trend||[],max=Math.max(1,...trend.map(x=>Number(x.headcount||0)));$('#headcountTrend').innerHTML=trend.length?trend.map(x=>`<div class="trend-column"><div class="trend-bars"><i class="head" style="height:${Math.max(8,Number(x.headcount||0)/max*100)}%" title="Headcount ${x.headcount}"></i><i class="hire" style="height:${Math.max(2,Number(x.hires||0)/max*100)}%" title="Hire ${x.hires}"></i><i class="exit" style="height:${Math.max(2,Number(x.exits||0)/max*100)}%" title="Exit ${x.exits}"></i></div><strong>${escapeHtml(x.month.slice(5))}/${escapeHtml(x.month.slice(2,4))}</strong><small>${x.headcount} คน</small></div>`).join(''):emptyState('ยังไม่มีข้อมูล Trend','ข้อมูลจะสะสมตามเดือน');
