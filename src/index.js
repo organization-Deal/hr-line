@@ -2080,65 +2080,27 @@ async function handleApi(request, env, url, auth, ctx) {
     if (!canManagePeopleAdmin(auth.role)) return json({error:'ไม่มีสิทธิ์จัดการแผนก'},403);
     await ensureV100P1Ready(env.DB);
     const body=await safeJson(request); const name=String(body.name||'').trim(); if(name.length<2)return json({error:'กรุณาใส่ชื่อแผนก'},400);
-    const code=slugCode(body.code||name)||`dept_${Date.now()}`; const parentId=body.parent_department_id?Number(body.parent_department_id):null; const managerId=body.manager_employee_id?Number(body.manager_employee_id):null; const hierarchyMode=String(body.hierarchy_mode||'auto')==='manual'?'manual':'auto';
+    const code=slugCode(body.code||name)||`dept_${Date.now()}`; const parentId=body.parent_department_id?Number(body.parent_department_id):null; const managerId=body.manager_employee_id?Number(body.manager_employee_id):null;
     if(parentId){const row=await env.DB.prepare('SELECT id FROM departments WHERE id=?1 AND client_id=?2').bind(parentId,clientId).first();if(!row)return json({error:'แผนกแม่ไม่อยู่ในบริษัทนี้'},400);}
     if(managerId){const row=await getEmployeeForClient(env.DB,managerId,clientId);if(!row)return json({error:'หัวหน้าแผนกไม่อยู่ในบริษัทนี้'},400);}
-    const result=await env.DB.prepare(`INSERT INTO departments(client_id,name,code,manager_employee_id,parent_department_id,sort_order,hierarchy_mode) VALUES(?1,?2,?3,?4,?5,?6,?7)`).bind(clientId,name,code,managerId,parentId,Number(body.sort_order||0),hierarchyMode).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'department.create','department',String(result.meta.last_row_id),{name,manager_id:managerId,parent_id:parentId,hierarchy_mode:hierarchyMode});
+    const result=await env.DB.prepare(`INSERT INTO departments(client_id,name,code,manager_employee_id,parent_department_id,sort_order) VALUES(?1,?2,?3,?4,?5,?6)`).bind(clientId,name,code,managerId,parentId,Number(body.sort_order||0)).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'department.create','department',String(result.meta.last_row_id),{name,manager_id:managerId,parent_id:parentId});
     return json({ok:true,id:result.meta.last_row_id},201);
-  }
-
-  if(path==='/api/departments/reorder' && method==='PATCH'){
-    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดลำดับแผนก'},403);
-    await ensureV100P1Ready(env.DB);
-    const body=await safeJson(request);
-    const moves=Array.isArray(body.moves)?body.moves:[];
-    if(!moves.length||moves.length>200)return json({error:'ไม่พบรายการย้ายแผนก หรือมีรายการมากเกินไป'},400);
-    const all=await env.DB.prepare('SELECT id,parent_department_id,sort_order,hierarchy_mode FROM departments WHERE client_id=?1').bind(clientId).all();
-    const rows=new Map((all.results||[]).map(row=>[Number(row.id),row]));
-    const ids=new Set();
-    for(const move of moves){
-      const id=Number(move?.id||0);
-      if(!id||ids.has(id)||!rows.has(id))return json({error:'ข้อมูลแผนกที่ต้องการย้ายไม่ถูกต้อง'},400);
-      ids.add(id);
-      if(Object.prototype.hasOwnProperty.call(move,'parent_department_id')){
-        const parentId=move.parent_department_id==null||move.parent_department_id===''?0:Number(move.parent_department_id);
-        if(parentId===id)return json({error:'แผนกไม่สามารถอยู่ใต้ตัวเองได้'},400);
-        if(parentId&&!rows.has(parentId))return json({error:'แผนกแม่ไม่อยู่ในบริษัทนี้'},400);
-      }
-    }
-    const proposedParent=new Map([...rows.entries()].map(([id,row])=>[id,Number(row.parent_department_id||0)]));
-    moves.forEach(move=>{if(Object.prototype.hasOwnProperty.call(move,'parent_department_id'))proposedParent.set(Number(move.id),move.parent_department_id==null||move.parent_department_id===''?0:Number(move.parent_department_id));});
-    for(const id of proposedParent.keys()){
-      const seen=new Set([id]);
-      let cursor=Number(proposedParent.get(id)||0);
-      while(cursor){
-        if(seen.has(cursor))return json({error:'ย้ายไม่ได้ เพราะจะทำให้โครงสร้างองค์กรวนกลับหาตัวเอง'},400);
-        seen.add(cursor);
-        cursor=Number(proposedParent.get(cursor)||0);
-      }
-    }
-    const statements=moves.map(move=>{
-      const id=Number(move.id); const current=rows.get(id);
-      const parentId=Object.prototype.hasOwnProperty.call(move,'parent_department_id')?(move.parent_department_id==null||move.parent_department_id===''?null:Number(move.parent_department_id)):(current.parent_department_id==null?null:Number(current.parent_department_id));
-      const sortOrder=Object.prototype.hasOwnProperty.call(move,'sort_order')?Math.max(0,Math.min(1000000,Number(move.sort_order)||0)):Number(current.sort_order||0);
-      const hierarchyMode=Object.prototype.hasOwnProperty.call(move,'hierarchy_mode')?(String(move.hierarchy_mode)==='manual'?'manual':'auto'):String(current.hierarchy_mode||'auto');
-      return env.DB.prepare('UPDATE departments SET parent_department_id=?1,sort_order=?2,hierarchy_mode=?3 WHERE id=?4 AND client_id=?5').bind(parentId,sortOrder,hierarchyMode,id,clientId);
-    });
-    await env.DB.batch(statements);
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'department.reorder','department','batch',{moves:moves.map(move=>({id:Number(move.id),parent_department_id:Object.prototype.hasOwnProperty.call(move,'parent_department_id')?move.parent_department_id:undefined,sort_order:move.sort_order,hierarchy_mode:move.hierarchy_mode}))});
-    return json({ok:true,updated:moves.length});
   }
 
   const departmentCoreMatch=path.match(/^\/api\/departments\/(\d+)$/);
   if(departmentCoreMatch && method==='PATCH'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดการแผนก'},403);
     await ensureV100P1Ready(env.DB); const id=Number(departmentCoreMatch[1]); const existing=await env.DB.prepare('SELECT * FROM departments WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!existing)return json({error:'ไม่พบแผนก'},404);
-    const body=await safeJson(request); const name=String(body.name??existing.name).trim(); const managerId=body.manager_employee_id===null||body.manager_employee_id===''?null:(body.manager_employee_id===undefined?existing.manager_employee_id:Number(body.manager_employee_id)); const parentId=body.parent_department_id===null||body.parent_department_id===''?null:(body.parent_department_id===undefined?existing.parent_department_id:Number(body.parent_department_id)); const hierarchyMode=body.hierarchy_mode===undefined?String(existing.hierarchy_mode||'auto'):(String(body.hierarchy_mode)==='manual'?'manual':'auto');
+    const body=await safeJson(request); const name=String(body.name??existing.name).trim(); const managerId=body.manager_employee_id===null||body.manager_employee_id===''?null:(body.manager_employee_id===undefined?existing.manager_employee_id:Number(body.manager_employee_id)); const parentId=body.parent_department_id===null||body.parent_department_id===''?null:(body.parent_department_id===undefined?existing.parent_department_id:Number(body.parent_department_id));
     if(parentId===id)return json({error:'แผนกไม่สามารถเป็นแผนกแม่ของตัวเองได้'},400);
-    if(parentId){const row=await env.DB.prepare('SELECT id FROM departments WHERE id=?1 AND client_id=?2').bind(parentId,clientId).first();if(!row)return json({error:'แผนกแม่ไม่อยู่ในบริษัทนี้'},400);}
+    if(parentId){
+      const parent=await env.DB.prepare('SELECT id FROM departments WHERE id=?1 AND client_id=?2').bind(parentId,clientId).first();
+      if(!parent)return json({error:'แผนกแม่ไม่อยู่ในบริษัทนี้'},400);
+      if(await departmentParentCreatesCycle(env.DB,clientId,id,parentId))return json({error:'ลำดับแผนกไม่ถูกต้อง เพราะจะทำให้เกิดการวนลูปของโครงสร้าง'},400);
+    }
     if(managerId){const row=await getEmployeeForClient(env.DB,managerId,clientId);if(!row)return json({error:'หัวหน้าแผนกไม่อยู่ในบริษัทนี้'},400);}
-    await env.DB.prepare(`UPDATE departments SET name=?1,manager_employee_id=?2,parent_department_id=?3,sort_order=?4,hierarchy_mode=?5 WHERE id=?6 AND client_id=?7`).bind(name,managerId,parentId,Number(body.sort_order??existing.sort_order??0),hierarchyMode,id,clientId).run();
+    await env.DB.prepare(`UPDATE departments SET name=?1,manager_employee_id=?2,parent_department_id=?3,sort_order=?4 WHERE id=?5 AND client_id=?6`).bind(name,managerId,parentId,Math.max(0,Number(body.sort_order??existing.sort_order??0)||0),id,clientId).run();
     return json({ok:true});
   }
 
@@ -5608,6 +5570,18 @@ async function clearLineSession(db,lineUserId){await db.prepare('DELETE FROM lin
 function num(value,fallback=0){const n=Number(value);return Number.isFinite(n)?n:fallback;}
 function nullableNum(value){if(value===null||value===undefined||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}
 function slugCode(value){return String(value||'').trim().toLowerCase().replace(/[^a-z0-9ก-๙]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40);}
+async function departmentParentCreatesCycle(db,clientId,departmentId,parentId){
+  let cursor=Number(parentId||0);
+  const seen=new Set([Number(departmentId)]);
+  while(cursor){
+    if(seen.has(cursor)) return true;
+    seen.add(cursor);
+    const row=await db.prepare('SELECT parent_department_id FROM departments WHERE id=?1 AND client_id=?2').bind(cursor,clientId).first();
+    if(!row) return false;
+    cursor=row.parent_department_id?Number(row.parent_department_id):0;
+  }
+  return false;
+}
 function formatThaiDateOnly(date){try{return new Date(`${date}T12:00:00+07:00`).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Bangkok'});}catch{return date;}}
 
 async function ensureV050Ready(db){
@@ -5674,7 +5648,7 @@ async function ensureV100P1Ready(db){
     const statements=V100P1_SCHEMA_SQL.split(';').map(x=>x.trim()).filter(Boolean);
     for(const statement of statements){try{await db.prepare(statement).run();}catch(error){if(/CREATE INDEX/i.test(statement))continue;throw error;}}
   }
-  await ensureColumns(db,'departments',[['parent_department_id','INTEGER'],['sort_order','INTEGER NOT NULL DEFAULT 0'],['hierarchy_mode',"TEXT NOT NULL DEFAULT 'auto'"]]);
+  await ensureColumns(db,'departments',[['parent_department_id','INTEGER'],['sort_order','INTEGER NOT NULL DEFAULT 0']]);
   await ensureColumns(db,'employees',[['people_status',"TEXT NOT NULL DEFAULT 'employee'"],['confirmed_at','TEXT'],['end_date','TEXT'],['end_reason','TEXT']]);
   await ensureColumns(db,'clients',[['allow_checkout_outside_geofence','INTEGER NOT NULL DEFAULT 0']]);
   await ensureColumns(db,'attendance',[['checkout_outside_geofence','INTEGER NOT NULL DEFAULT 0'],['scheduled_start','TEXT'],['scheduled_end','TEXT'],['schedule_source','TEXT']]);
@@ -7377,7 +7351,7 @@ function googleSheetHeaders() {
     'Leave Policy':['policy_id','code','name','default_entitlement_days','notice_days','evidence_required_after_days','is_active'],
     'Approvers':['employee_id','permission_key','granted_at'],
     'Work Locations':['location_id','name','address','latitude','longitude','radius_m','is_active'],
-    'Departments':['department_id','name','code','manager_employee_id','parent_department_id','sort_order','hierarchy_mode'],
+    'Departments':['department_id','name','code','manager_employee_id','parent_department_id','sort_order'],
     'Positions':['position_id','department_id','name'],
     'Invitations':['invite_id','token_preview','department_id','position_id','start_date','max_uses','used_count','expires_at','status'],
     'Documents':['document_id','employee_id','document_type','file_name','drive_file_id','drive_url','created_at'],
@@ -7548,7 +7522,7 @@ async function syncWorkspaceSnapshotToSheet(env, clientId, integration, accessTo
     'Attendance': (attendance.results||[]).map(a=>[a.id,a.employee_id,a.work_date,a.scheduled_start,a.scheduled_end,a.schedule_source,a.check_in_at,a.check_out_at,a.status,a.late_minutes,a.location_name,a.checkin_lat,a.checkin_lng,a.checkout_outside_geofence,a.source]),
     'Leave Requests': (leaves.results||[]).map(l=>[l.id,l.employee_id,l.leave_type,l.start_date,l.end_date,l.duration_days,l.reason,l.status,l.approver_employee_id,l.evidence_count,l.created_at]),
     'Work Locations': (locations.results||[]).map(w=>[w.id,w.name,w.address,w.latitude,w.longitude,w.radius_m,w.is_active]),
-    'Departments': (departments.results||[]).map(d=>[d.id,d.name,d.code,d.manager_employee_id,d.parent_department_id,d.sort_order,d.hierarchy_mode||'auto']),
+    'Departments': (departments.results||[]).map(d=>[d.id,d.name,d.code,d.manager_employee_id,d.parent_department_id,d.sort_order]),
     'Positions': (positions.results||[]).map(p=>[p.id,p.department_id,p.name]),
     'Invitations': (invites.results||[]).map(i=>[i.id,String(i.token_hint||''),i.department_id,i.position_id,i.start_date,i.max_uses,i.used_count,i.expires_at,i.status]),
     'Approvers': (permissions.results||[]).map(r=>[r.employee_id,r.permission_key,r.created_at]),
