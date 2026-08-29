@@ -46,10 +46,7 @@ const state = {
   currentView: 'dashboard',
   activeSettingsCategory: null,
   settingsNavExpanded: false,
-  organizationView: 'chart',
-  organizationZoom: 1,
-  organizationArrangeMode: false,
-  organizationMoveSaving: false,
+  organizationViewMode: (() => { try { const saved = localStorage.getItem('nakna.organizationViewMode'); return saved === 'list' ? 'list' : 'chart'; } catch { return 'chart'; } })(),
 };
 
 const $ = selector => document.querySelector(selector);
@@ -518,12 +515,6 @@ function bindEvents() {
   $('#addWorkLocationBtn').onclick = openWorkLocationModal;
   $('#addDepartmentBtn').onclick = openDepartmentModal;
   $('#addPositionBtn').onclick = openPositionModal;
-  $$('[data-org-view]').forEach(button => button.onclick = () => setOrganizationView(button.dataset.orgView));
-  if ($('#orgZoomOutBtn')) $('#orgZoomOutBtn').onclick = () => setOrganizationZoom(state.organizationZoom - 0.1);
-  if ($('#orgZoomResetBtn')) $('#orgZoomResetBtn').onclick = () => setOrganizationZoom(1, { center: true });
-  if ($('#orgZoomInBtn')) $('#orgZoomInBtn').onclick = () => setOrganizationZoom(state.organizationZoom + 0.1);
-  if ($('#orgCenterBtn')) $('#orgCenterBtn').onclick = centerOrganizationChart;
-  if ($('#orgArrangeBtn')) $('#orgArrangeBtn').onclick = () => setOrganizationArrangeMode(!state.organizationArrangeMode);
   $('#positionAssignSaveBtn').onclick = savePositionAssignment;
   $('#positionAssignSearch').addEventListener('input', renderPositionAssignPeople);
   if ($('#addPositionInlineBtn')) $('#addPositionInlineBtn').onclick = openPositionModal;
@@ -532,6 +523,7 @@ function bindEvents() {
   $('#departmentSaveBtn').onclick = saveDepartment;
   $('#departmentAssignSaveBtn').onclick = saveDepartmentAssignment;
   $('#departmentAssignSearch').addEventListener('input', renderDepartmentAssignPeople);
+  if ($('#departmentLinkSaveBtn')) $('#departmentLinkSaveBtn').onclick = saveDepartmentLink;
   $('#positionSaveBtn').onclick = savePosition;
   if ($('#positionCreateDepartmentBtn')) $('#positionCreateDepartmentBtn').onclick = () => { $('#positionModal')?.close(); state.resumePositionAfterDepartment = true; openDepartmentModal(); };
   $('#scheduleSaveBtn').onclick = saveSchedule;
@@ -2383,6 +2375,66 @@ async function saveDepartmentAssignment(){
   }catch(e){toast(e.message,true);}finally{button.disabled=false;}
 }
 
+window.setOrganizationViewMode = mode => {
+  state.organizationViewMode = mode === 'list' ? 'list' : 'chart';
+  try { localStorage.setItem('nakna.organizationViewMode', state.organizationViewMode); } catch {}
+  renderPeopleCore();
+};
+window.openDepartmentLink = id => {
+  const department=(state.peopleCore?.departments||[]).find(d=>Number(d.id)===Number(id));
+  if(!department)return;
+  $('#departmentLinkId').value=department.id;
+  $('#departmentLinkTitle').textContent=`โยงเส้นลำดับ · ${department.name}`;
+  $('#departmentLinkDepartmentName').textContent=department.name;
+  $('#departmentLinkParent').innerHTML=`<option value="">ไม่มี / วางเป็นระดับบนสุด</option>${(state.peopleCore?.departments||[]).filter(d=>Number(d.id)!==Number(department.id)).map(d=>`<option value="${d.id}" ${Number(department.parent_department_id)===Number(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}`;
+  $('#departmentLinkOrder').value=String(Number(department.sort_order||0));
+  const parent=(state.peopleCore?.departments||[]).find(d=>Number(d.id)===Number(department.parent_department_id));
+  $('#departmentLinkHint').textContent=parent?`ปัจจุบันขึ้นตรงกับ ${parent.name}`:'ปัจจุบันวางเป็นแผนกหลักระดับบนสุด';
+  $('#departmentLinkModal').showModal();
+};
+async function saveDepartmentLink(){
+  const id=Number($('#departmentLinkId').value||0);
+  const parentRaw=$('#departmentLinkParent').value;
+  const sortOrder=Math.max(0, Number($('#departmentLinkOrder').value||0));
+  const button=$('#departmentLinkSaveBtn');
+  button.disabled=true;
+  try{
+    await api(`/api/departments/${id}`,{method:'PATCH',body:JSON.stringify({parent_department_id:parentRaw||null,sort_order:sortOrder})});
+    $('#departmentLinkModal').close();
+    await loadAll({silent:true});
+    toast('บันทึกการโยงเส้นและลำดับแล้ว');
+  }catch(e){toast(e.message,true);}finally{button.disabled=false;}
+}
+function sortDepartmentsForView(items){
+  return [...(items||[])].sort((a,b)=>{
+    const ao=Number.isFinite(Number(a?.sort_order))?Number(a.sort_order):0;
+    const bo=Number.isFinite(Number(b?.sort_order))?Number(b.sort_order):0;
+    if(ao!==bo)return ao-bo;
+    return String(a?.name||'').localeCompare(String(b?.name||''),'th');
+  });
+}
+window.moveDepartment = async (id,direction) => {
+  const departments=state.peopleCore?.departments||[];
+  const current=departments.find(d=>Number(d.id)===Number(id));
+  if(!current)return;
+  const parentId=current.parent_department_id?Number(current.parent_department_id):0;
+  const siblings=sortDepartmentsForView(departments.filter(d=>(d.parent_department_id?Number(d.parent_department_id):0)===parentId));
+  const index=siblings.findIndex(d=>Number(d.id)===Number(id));
+  const delta=direction==='up'?-1:1;
+  const target=siblings[index+delta];
+  if(!target)return toast(direction==='up'?'แผนกนี้อยู่บนสุดแล้ว':'แผนกนี้อยู่ล่างสุดแล้ว',true);
+  const currentOrder=Number.isFinite(Number(current.sort_order))?Number(current.sort_order):index;
+  const targetOrder=Number.isFinite(Number(target.sort_order))?Number(target.sort_order):index+delta;
+  try{
+    await Promise.all([
+      api(`/api/departments/${current.id}`,{method:'PATCH',body:JSON.stringify({sort_order:targetOrder})}),
+      api(`/api/departments/${target.id}`,{method:'PATCH',body:JSON.stringify({sort_order:currentOrder})}),
+    ]);
+    await loadAll({silent:true});
+    toast(`ย้ายลำดับ ${current.name} แล้ว`);
+  }catch(e){toast(e.message,true);}
+};
+
 window.openPositionAssignment = id => {
   const position=(state.peopleCore?.positions||[]).find(p=>Number(p.id)===Number(id)); if(!position)return;
   $('#positionAssignId').value=position.id;
@@ -2416,460 +2468,21 @@ async function savePositionAssignment(){
   }catch(e){toast(e.message,true);}finally{button.disabled=false;}
 }
 
-function setOrganizationView(view='chart'){
-  const next=view==='list'?'list':'chart';
-  state.organizationView=next;
-  $('#organizationListPanel')?.classList.toggle('hidden',next!=='list');
-  $('#organizationVisualPanel')?.classList.toggle('hidden',next!=='chart');
-  $('#organizationChartControls')?.classList.toggle('hidden',next!=='chart');
-  $$('[data-org-view]').forEach(button=>{
-    const active=button.dataset.orgView===next;
-    button.classList.toggle('active',active);
-    button.setAttribute('aria-pressed',String(active));
-  });
-  if(next==='chart') requestAnimationFrame(()=>centerOrganizationChart());
-}
-
-function setOrganizationZoom(value,{center=false}={}){
-  const zoom=Math.min(1.35,Math.max(.55,Math.round(Number(value||1)*10)/10));
-  state.organizationZoom=zoom;
-  const canvas=$('#organizationVisualCanvas');
-  if(canvas) canvas.style.setProperty('--org-zoom',String(zoom));
-  if($('#orgZoomResetBtn')) $('#orgZoomResetBtn').textContent=`${Math.round(zoom*100)}%`;
-  if(center) requestAnimationFrame(()=>centerOrganizationChart());
-}
-
-function centerOrganizationChart(){
-  const viewport=$('#organizationVisualViewport');
-  const canvas=$('#organizationVisualCanvas');
-  if(!viewport||!canvas)return;
-  const maxLeft=Math.max(0,canvas.scrollWidth-viewport.clientWidth);
-  viewport.scrollTo({left:maxLeft/2,top:0,behavior:'smooth'});
-}
-
-function setOrganizationArrangeMode(enabled){
-  state.organizationArrangeMode=Boolean(enabled);
-  const button=$('#orgArrangeBtn');
-  if(button){
-    button.classList.toggle('active',state.organizationArrangeMode);
-    button.setAttribute('aria-pressed',String(state.organizationArrangeMode));
-    button.textContent=state.organizationArrangeMode?'เสร็จสิ้น':'จัดผังเอง';
-  }
-  const panel=$('#organizationVisualPanel');
-  panel?.classList.toggle('arrange-mode',state.organizationArrangeMode);
-  const hint=$('#orgVisualHint');
-  if(hint) hint.textContent=state.organizationArrangeMode?'ลากซ้าย/ขวา = เรียงลำดับ · วางตรงกลาง = ย้ายเป็นทีมย่อย · วางบนบริษัท = ขึ้นบนสุด':'เลื่อนซ้าย–ขวาได้';
-  renderOrganizationVisual();
-}
-
-function organizationWouldCycle(sourceId,parentId,hierarchy){
-  const source=Number(sourceId||0);
-  let cursor=Number(parentId||0);
-  const seen=new Set();
-  while(cursor){
-    if(cursor===source)return true;
-    if(seen.has(cursor))return true;
-    seen.add(cursor);
-    cursor=Number(hierarchy?.parentById?.get(cursor)||0);
-  }
-  return false;
-}
-
-function organizationSiblingIds(hierarchy,parentId){
-  return (hierarchy?.byParent?.get(Number(parentId||0))||[]).map(item=>Number(item.id));
-}
-
-async function persistOrganizationMoves(moves,message='บันทึกลำดับโครงสร้างแล้ว'){
-  if(state.organizationMoveSaving||!moves?.length)return;
-  state.organizationMoveSaving=true;
-  const stats=$('#orgVisualStats');
-  const previous=stats?.textContent||'';
-  if(stats)stats.textContent='กำลังบันทึกผัง…';
-  try{
-    await api('/api/departments/reorder',{method:'PATCH',body:JSON.stringify({moves})});
-    const byId=new Map((state.peopleCore?.departments||[]).map(item=>[Number(item.id),item]));
-    moves.forEach(move=>{
-      const row=byId.get(Number(move.id));
-      if(!row)return;
-      if(Object.prototype.hasOwnProperty.call(move,'parent_department_id')) row.parent_department_id=move.parent_department_id==null?null:Number(move.parent_department_id);
-      if(Object.prototype.hasOwnProperty.call(move,'sort_order')) row.sort_order=Number(move.sort_order||0);
-      if(Object.prototype.hasOwnProperty.call(move,'hierarchy_mode')) row.hierarchy_mode=move.hierarchy_mode;
-    });
-    renderPeopleCore();
-    toast(message);
-  }catch(error){
-    if(stats)stats.textContent=previous;
-    toast(error.message||'บันทึกผังไม่สำเร็จ',true);
-  }finally{
-    state.organizationMoveSaving=false;
-  }
-}
-
-async function moveOrganizationDepartment(sourceId,targetId,mode,hierarchy){
-  const source=Number(sourceId||0);
-  const target=Number(targetId||0);
-  if(!source||state.organizationMoveSaving)return;
-  const oldParent=Number(hierarchy.parentById.get(source)||0);
-  let newParent=0;
-  if(mode==='inside')newParent=target;
-  else if(mode==='before'||mode==='after')newParent=Number(hierarchy.parentById.get(target)||0);
-  if(source===target||organizationWouldCycle(source,newParent,hierarchy)){
-    toast('ย้ายตรงนี้ไม่ได้ เพราะจะทำให้โครงสร้างวนกลับหาตัวเอง',true);
-    return;
-  }
-
-  const oldSiblings=organizationSiblingIds(hierarchy,oldParent).filter(id=>id!==source);
-  const destinationBase=(oldParent===newParent?oldSiblings:organizationSiblingIds(hierarchy,newParent).filter(id=>id!==source));
-  let insertAt=destinationBase.length;
-  if(mode==='before'||mode==='after'){
-    const targetIndex=destinationBase.indexOf(target);
-    if(targetIndex>=0)insertAt=targetIndex+(mode==='after'?1:0);
-  }
-  const destination=[...destinationBase];
-  destination.splice(Math.max(0,Math.min(insertAt,destination.length)),0,source);
-
-  const updates=new Map();
-  const setSort=(ids)=>ids.forEach((id,index)=>{
-    const current=updates.get(id)||{id};
-    current.sort_order=(index+1)*100;
-    updates.set(id,current);
-  });
-  if(oldParent!==newParent)setSort(oldSiblings);
-  setSort(destination);
-  const sourceMove=updates.get(source)||{id:source,sort_order:(destination.indexOf(source)+1)*100};
-  sourceMove.parent_department_id=newParent||null;
-  sourceMove.hierarchy_mode='manual';
-  updates.set(source,sourceMove);
-
-  const label=mode==='inside'?'ย้ายเป็นทีมย่อยแล้ว':mode==='root'?'ย้ายขึ้นระดับบริษัทแล้ว':'เปลี่ยนลำดับแล้ว';
-  await persistOrganizationMoves([...updates.values()],label);
-}
-
-function bindOrganizationArrangement(hierarchy){
-  const canvas=$('#organizationVisualCanvas');
-  if(!canvas||!state.organizationArrangeMode)return;
-  let draggedId=0;
-  const clearDropState=()=>{
-    canvas.querySelectorAll('.drop-before,.drop-after,.drop-inside,.drop-root,.drop-invalid,.is-dragging').forEach(node=>node.classList.remove('drop-before','drop-after','drop-inside','drop-root','drop-invalid','is-dragging'));
-    canvas.classList.remove('dragging-organization');
-  };
-  const desiredParent=(targetId,mode)=>mode==='inside'?Number(targetId):Number(hierarchy.parentById.get(Number(targetId))||0);
-
-  canvas.querySelectorAll('.org-visual-card[data-department-id]').forEach(card=>{
-    card.addEventListener('dragstart',event=>{
-      if(!state.organizationArrangeMode||state.organizationMoveSaving||event.target.closest('button')){event.preventDefault();return;}
-      draggedId=Number(card.dataset.departmentId||0);
-      card.classList.add('is-dragging');
-      canvas.classList.add('dragging-organization');
-      event.dataTransfer.effectAllowed='move';
-      event.dataTransfer.setData('text/plain',String(draggedId));
-    });
-    card.addEventListener('dragend',()=>{draggedId=0;clearDropState();});
-    card.addEventListener('dragover',event=>{
-      const source=draggedId||Number(event.dataTransfer?.getData('text/plain')||0);
-      const target=Number(card.dataset.departmentId||0);
-      if(!source||source===target)return;
-      const rect=card.getBoundingClientRect();
-      const ratio=rect.width?((event.clientX-rect.left)/rect.width):.5;
-      const mode=ratio<.28?'before':ratio>.72?'after':'inside';
-      const parent=desiredParent(target,mode);
-      event.preventDefault();
-      canvas.querySelectorAll('.drop-before,.drop-after,.drop-inside,.drop-invalid').forEach(node=>node.classList.remove('drop-before','drop-after','drop-inside','drop-invalid'));
-      if(organizationWouldCycle(source,parent,hierarchy)){
-        card.classList.add('drop-invalid');
-        event.dataTransfer.dropEffect='none';
-        return;
-      }
-      card.classList.add(`drop-${mode}`);
-      card.dataset.dropMode=mode;
-      event.dataTransfer.dropEffect='move';
-    });
-    card.addEventListener('dragleave',event=>{
-      if(card.contains(event.relatedTarget))return;
-      card.classList.remove('drop-before','drop-after','drop-inside','drop-invalid');
-    });
-    card.addEventListener('drop',event=>{
-      event.preventDefault();
-      const source=draggedId||Number(event.dataTransfer?.getData('text/plain')||0);
-      const target=Number(card.dataset.departmentId||0);
-      const mode=card.dataset.dropMode||'inside';
-      clearDropState();
-      if(source&&target&&source!==target)moveOrganizationDepartment(source,target,mode,hierarchy);
-    });
-  });
-
-  const company=canvas.querySelector('.company-node[data-org-root-drop]');
-  if(company){
-    company.addEventListener('dragover',event=>{
-      if(!draggedId)return;
-      event.preventDefault();
-      canvas.querySelectorAll('.drop-before,.drop-after,.drop-inside,.drop-invalid').forEach(node=>node.classList.remove('drop-before','drop-after','drop-inside','drop-invalid'));
-      company.classList.add('drop-root');
-      event.dataTransfer.dropEffect='move';
-    });
-    company.addEventListener('dragleave',()=>company.classList.remove('drop-root'));
-    company.addEventListener('drop',event=>{
-      event.preventDefault();
-      const source=draggedId||Number(event.dataTransfer?.getData('text/plain')||0);
-      clearDropState();
-      if(source)moveOrganizationDepartment(source,0,'root',hierarchy);
-    });
-  }
-}
-
-function organizationEmployeeName(employee){
-  return `${employee.nickname||employee.first_name||''} ${employee.last_name||''}`.trim()||employee.employee_code||'พนักงาน';
-}
-
-function renderOrganizationAvatar(employee,size='normal'){
-  const photo=String(employee?.line_picture_url||employee?.avatar_url||'').trim();
-  const name=organizationEmployeeName(employee);
-  return `<span class="org-person-avatar ${size==='small'?'small':''}" title="${escapeHtml(name)}">${photo?`<img src="${escapeHtml(photo)}" alt="" loading="lazy"/>`:`<b>${initial(employee||{})}</b>`}</span>`;
-}
-
-function normalizeOrganizationText(value=''){
-  return String(value||'').toLowerCase().replace(/[._/\\-]+/g,' ').replace(/\s+/g,' ').trim();
-}
-
-function organizationDepartmentProfile(department){
-  const text=normalizeOrganizationText(`${department?.name||''} ${department?.code||''}`);
-  const has=(...terms)=>terms.some(term=>text.includes(term));
-  let rank=3;
-  if(has('chief executive',' ceo','ceo ','กรรมการผู้จัดการ','managing director','founder','owner','ประธานเจ้าหน้าที่บริหาร')) rank=0;
-  else if(has('chief ',' officer',' cmo','cmo ',' coo','coo ',' cfo','cfo ',' cto','cto ',' cso','cso ','vice president',' vp','vp ','ประธานเจ้าหน้าที่','รองประธาน')) rank=1;
-  else if(has('director','head of','general manager','manager office')) rank=2;
-
-  let category='general';
-  if(has('marketing','brand','content','creative','media','visionhub','public relation','communication','การตลาด','คอนเทนต์','สื่อ','แบรนด์')) category='marketing';
-  else if(has('finance','account','accounting','payroll','บัญชี','การเงิน','ภาษี')) category='finance';
-  else if(has('technology',' tech','tech ',' it','developer','development','engineering','product','software','digital','เทคโนโลยี','ไอที','โปรดักต์')) category='technology';
-  else if(has('sales','dealmaker','business development','commercial','revenue','ขาย','ฝ่ายขาย','ดีลเมกเกอร์')) category='sales';
-  else if(has('operation','operations','operating','human resource','human resources',' hr','hr ','people','partner experience','customer','service','support','location','procurement','purchase','legal','admin','office','ปฏิบัติการ','บุคคล','ทรัพยากรบุคคล','ลูกค้า','จัดซื้อ','กฎหมาย','ธุรการ')) category='operations';
-  if(rank===0) category='executive';
-  return {text,rank,category};
-}
-
-function buildSmartOrganizationHierarchy(departments=[],employees=[]){
-  const source=Array.isArray(departments)?departments:[];
-  const departmentById=new Map(source.map(item=>[Number(item.id),item]));
-  const employeeById=new Map((employees||[]).map(item=>[Number(item.id),item]));
-  const profiles=new Map(source.map(item=>[Number(item.id),organizationDepartmentProfile(item)]));
-  const validParent=(childId,parentId)=>Boolean(parentId&&parentId!==childId&&departmentById.has(parentId));
-
-  const scoreLead=(department,category)=>{
-    const profile=profiles.get(Number(department.id))||{rank:9,category:'general'};
-    let score=0;
-    if(profile.rank===1) score+=20;
-    if(profile.category===category) score+=55;
-    const text=profile.text||'';
-    if(category==='operations' && (text.includes('chief operating')||/(^| )coo( |$)/.test(text))) score+=80;
-    if(category==='marketing' && (text.includes('chief marketing')||/(^| )cmo( |$)/.test(text))) score+=80;
-    if(category==='finance' && (text.includes('chief financial')||/(^| )cfo( |$)/.test(text))) score+=80;
-    if(category==='technology' && (text.includes('chief technology')||/(^| )cto( |$)/.test(text))) score+=80;
-    if(category==='sales' && (text.includes('chief sales')||/(^| )cso( |$)/.test(text))) score+=80;
-    score-=Number(department.sort_order||0)/1000;
-    return score;
-  };
-
-  const executiveCandidates=source.filter(item=>(profiles.get(Number(item.id))||{}).rank===0);
-  const executive=executiveCandidates.sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||String(a.name||'').localeCompare(String(b.name||''),'th'))[0]||null;
-  const executiveId=Number(executive?.id||0);
-
-  const leadFor={};
-  for(const category of ['operations','marketing','finance','technology','sales']){
-    const candidates=source.filter(item=>Number(item.id)!==executiveId && (profiles.get(Number(item.id))||{}).rank<=1);
-    const ranked=candidates.map(item=>({item,score:scoreLead(item,category)})).sort((a,b)=>b.score-a.score);
-    if(ranked[0]&&ranked[0].score>=60) leadFor[category]=Number(ranked[0].item.id);
-  }
-
-  const inferredParent=new Map();
-  const autoReason=new Map();
-  source.forEach(department=>{
-    const id=Number(department.id);
-    const explicit=Number(department.parent_department_id||0);
-    const hierarchyMode=String(department.hierarchy_mode||'auto').toLowerCase();
-    if(hierarchyMode==='manual'){
-      inferredParent.set(id,validParent(id,explicit)?explicit:0);
-      autoReason.set(id,'manual');
-      return;
-    }
-    // Backward compatibility: older saved parent relationships did not have hierarchy_mode yet.
-    if(validParent(id,explicit)){
-      inferredParent.set(id,explicit);
-      autoReason.set(id,'manual');
-      return;
-    }
-
-    // Strongest automatic signal: the department head reports to somebody in another department.
-    const manager=employeeById.get(Number(department.manager_employee_id||0));
-    const managerBoss=manager?employeeById.get(Number(manager.manager_employee_id||0)):null;
-    const bossDepartmentId=Number(managerBoss?.department_id||0);
-    if(validParent(id,bossDepartmentId)){
-      inferredParent.set(id,bossDepartmentId);
-      autoReason.set(id,'manager');
-      return;
-    }
-
-    const profile=profiles.get(id)||{rank:3,category:'general'};
-    if(id===executiveId || profile.rank===0){
-      inferredParent.set(id,0);
-      autoReason.set(id,'executive');
-      return;
-    }
-    if(profile.rank===1){
-      inferredParent.set(id,validParent(id,executiveId)?executiveId:0);
-      autoReason.set(id,'level');
-      return;
-    }
-
-    let parentId=0;
-    if(profile.category==='marketing') parentId=leadFor.marketing||executiveId;
-    else if(profile.category==='operations') parentId=leadFor.operations||executiveId;
-    else if(profile.category==='technology') parentId=leadFor.technology||leadFor.operations||executiveId;
-    else if(profile.category==='sales') parentId=leadFor.sales||leadFor.operations||executiveId;
-    else if(profile.category==='finance') parentId=leadFor.finance||executiveId;
-    else parentId=leadFor.operations||executiveId;
-    inferredParent.set(id,validParent(id,parentId)?parentId:0);
-    autoReason.set(id,parentId?'keyword':'root');
-  });
-
-  // Guard against accidental cycles coming from manual or manager relationships.
-  const safeParent=new Map();
-  const createsCycle=(id,parentId)=>{
-    const seen=new Set([id]);
-    let cursor=parentId;
-    while(cursor){
-      if(seen.has(cursor))return true;
-      seen.add(cursor);
-      cursor=Number(inferredParent.get(cursor)||0);
-    }
-    return false;
-  };
-  source.forEach(item=>{
-    const id=Number(item.id); const parentId=Number(inferredParent.get(id)||0);
-    safeParent.set(id,createsCycle(id,parentId)?0:parentId);
-  });
-
-  const categoryOrder={executive:0,operations:10,marketing:20,finance:30,sales:40,technology:50,general:60};
-  const sortItems=(items=[])=>items.sort((a,b)=>{
-    const ap=profiles.get(Number(a.id))||{rank:9,category:'general'};
-    const bp=profiles.get(Number(b.id))||{rank:9,category:'general'};
-    const ao=Number(a.sort_order||0),bo=Number(b.sort_order||0);
-    if(ao>0||bo>0){
-      const orderedA=ao>0?ao:Number.MAX_SAFE_INTEGER;
-      const orderedB=bo>0?bo:Number.MAX_SAFE_INTEGER;
-      if(orderedA!==orderedB)return orderedA-orderedB;
-    }
-    return ap.rank-bp.rank || (categoryOrder[ap.category]??99)-(categoryOrder[bp.category]??99) || String(a.name||'').localeCompare(String(b.name||''),'th');
-  });
-  const byParent=new Map();
-  source.forEach(item=>{
-    const parentId=Number(safeParent.get(Number(item.id))||0);
-    if(!byParent.has(parentId))byParent.set(parentId,[]);
-    byParent.get(parentId).push(item);
-  });
-  byParent.forEach(sortItems);
-  return {byParent,parentById:safeParent,reasonById:autoReason,profiles,executiveId};
-}
-
-function renderOrganizationVisual(){
-  const canvas=$('#organizationVisualCanvas');
-  if(!canvas)return;
-  const core=state.peopleCore||{};
-  const departments=core.departments||[];
-  const activeEmployees=(state.employees||[]).filter(employee=>employee.status==='active');
-  const positions=core.positions||[];
-  const companyName=state.companyProfile?.name||activeCompany()?.name||state.dashboard?.client?.name||'บริษัทของคุณ';
-
-  if(!departments.length){
-    canvas.innerHTML=emptyState('ยังไม่มีโครงสร้างแผนก','เพิ่มแผนกและจัดพนักงานก่อน แล้วระบบจะวาดผังองค์กรให้อัตโนมัติ');
-    if($('#orgVisualStats')) $('#orgVisualStats').textContent='0 แผนก · 0 คน';
-    return;
-  }
-
-  const smartHierarchy=buildSmartOrganizationHierarchy(departments,activeEmployees);
-  const byParent=smartHierarchy.byParent;
-
-  const membersByDepartment=new Map();
-  activeEmployees.forEach(employee=>{
-    const departmentId=Number(employee.department_id||0);
-    if(!membersByDepartment.has(departmentId))membersByDepartment.set(departmentId,[]);
-    membersByDepartment.get(departmentId).push(employee);
-  });
-  membersByDepartment.forEach(items=>items.sort((a,b)=>String(a.nickname||a.first_name||'').localeCompare(String(b.nickname||b.first_name||''),'th')));
-
-  const renderPeople=(members,max=5)=>{
-    if(!members.length)return `<span class="org-person-empty">ยังไม่มีพนักงาน</span>`;
-    const visible=members.slice(0,max);
-    const more=members.length-visible.length;
-    return `${visible.map(employee=>renderOrganizationAvatar(employee)).join('')}${more>0?`<span class="org-person-more">+${more}</span>`:''}`;
-  };
-
-  const renderDepartmentCard=department=>{
-    const members=membersByDepartment.get(Number(department.id))||[];
-    const manager=members.find(employee=>Number(employee.id)===Number(department.manager_employee_id))||activeEmployees.find(employee=>Number(employee.id)===Number(department.manager_employee_id));
-    const positionCount=positions.filter(position=>Number(position.department_id)===Number(department.id)).length;
-    const hierarchyReason=smartHierarchy.reasonById.get(Number(department.id));
-    const hierarchyLabel=hierarchyReason==='manual'?'กำหนดเอง':hierarchyReason==='manager'?'ตามหัวหน้า':'AUTO';
-    const arranging=Boolean(state.organizationArrangeMode);
-    return `<article class="org-visual-card ${arranging?'is-arrange-card':''}" data-department-id="${Number(department.id)}" draggable="${arranging?'true':'false'}">
-      <div class="org-visual-card-head">
-        <div><span>DEPARTMENT · ${hierarchyLabel}</span><strong>${escapeHtml(department.name)}</strong></div>
-        <div class="org-card-head-tools">${arranging?'<i class="org-drag-handle" aria-hidden="true">⠿</i>':''}<em>${members.length} คน</em></div>
-      </div>
-      <div class="org-visual-card-meta">
-        <span>${positionCount} ตำแหน่ง</span>
-        <span>${manager?`หัวหน้า · ${escapeHtml(organizationEmployeeName(manager))}`:'ยังไม่กำหนดหัวหน้า'}</span>
-      </div>
-      <div class="org-visual-people">${renderPeople(members)}</div>
-      <div class="org-visual-card-actions">
-        <button type="button" onclick="window.openDepartmentAssignment(${Number(department.id)})">จัดพนักงาน</button>
-        <button type="button" onclick="window.editDepartment(${Number(department.id)})">แก้ไข</button>
-      </div>
-    </article>`;
-  };
-
-  const visited=new Set();
-  const renderBranch=department=>{
-    const id=Number(department.id);
-    if(visited.has(id))return '';
-    visited.add(id);
-    const children=(byParent.get(id)||[]).filter(child=>Number(child.id)!==id);
-    return `<li><div class="org-visual-node">${renderDepartmentCard(department)}</div>${children.length?`<ul>${children.map(renderBranch).join('')}</ul>`:''}</li>`;
-  };
-
-  const roots=byParent.get(0)||[];
-  const companyPreview=activeEmployees.slice(0,6);
-  canvas.innerHTML=`<div class="org-tree">
-    <ul class="org-tree-root"><li>
-      <div class="org-visual-node">
-        <article class="org-visual-card company-node" data-org-root-drop="1">
-          <div class="org-visual-card-head"><div><span>ORGANIZATION</span><strong>${escapeHtml(companyName)}</strong></div><em>${activeEmployees.length} คน</em></div>
-          <div class="org-visual-card-meta"><span>${departments.length} แผนก</span><span>${positions.length} ตำแหน่ง</span></div>
-          <div class="org-visual-people">${renderPeople(companyPreview,6)}</div>
-        </article>
-      </div>
-      ${roots.length?`<ul>${roots.map(renderBranch).join('')}</ul>`:''}
-    </li></ul>
-  </div>`;
-  if($('#orgVisualStats')) $('#orgVisualStats').textContent=`${departments.length} แผนก · ${activeEmployees.length} คน · ${state.organizationArrangeMode?'Manual arrange':'Auto hierarchy'}`;
-  setOrganizationZoom(state.organizationZoom||1);
-  $('#organizationVisualPanel')?.classList.toggle('arrange-mode',Boolean(state.organizationArrangeMode));
-  if(state.organizationArrangeMode)bindOrganizationArrangement(smartHierarchy);
-}
-
 function renderPeopleCore(){
   const core=state.peopleCore||{}; const departments=core.departments||[]; const schedules=core.schedules||[]; const holidays=core.holidays||[];
   const org=$('#organizationChart');
   if(org){
-    const activeEmployees=(state.employees||[]).filter(employee=>employee.status==='active');
-    const smartHierarchy=buildSmartOrganizationHierarchy(departments,activeEmployees);
-    const roots=smartHierarchy.byParent.get(0)||[];
-    const renderNode=(d,depth=0)=>{const positionCount=(core.positions||[]).filter(p=>Number(p.department_id)===Number(d.id)).length;const reason=smartHierarchy.reasonById.get(Number(d.id));const hierarchyNote=reason==='manual'?'ลำดับกำหนดเอง':reason==='manager'?'เรียงตามหัวหน้า':'ระบบจัดลำดับอัตโนมัติ';return `<div class="org-node" style="--depth:${depth}"><div class="org-line"></div><div class="org-card org-card-modern"><div class="org-card-copy"><strong>${escapeHtml(d.name)}</strong><small>${Number(d.employee_count||0)} คน · ${positionCount} ตำแหน่ง</small><em>${escapeHtml(hierarchyNote)} · ${d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า'}</em></div><div class="org-card-actions"><button class="text-btn org-people-btn" type="button" onclick="window.openDepartmentAssignment(${Number(d.id)})">+ พนักงาน</button><button class="text-btn" type="button" onclick="window.openPositionForDepartment(${Number(d.id)})">+ ตำแหน่ง</button><button class="text-btn" type="button" onclick="window.editDepartment(${Number(d.id)})">แก้ไข</button></div></div>${(smartHierarchy.byParent.get(Number(d.id))||[]).map(x=>renderNode(x,depth+1)).join('')}</div>`;};
-    org.innerHTML=roots.length?roots.map(d=>renderNode(d)).join(''):emptyState('ยังไม่มีโครงสร้างแผนก','เพิ่มแผนกแรก แล้วระบบจะจัดลำดับให้อัตโนมัติ');
+    const deptIds=new Set(departments.map(d=>Number(d.id)));
+    const roots=sortDepartmentsForView(departments.filter(d=>{const parentId=d.parent_department_id?Number(d.parent_department_id):0;return !parentId||!deptIds.has(parentId);}));
+    const childrenOf=id=>sortDepartmentsForView(departments.filter(x=>Number(x.parent_department_id)===Number(id)));
+    const employeesForDepartment=id=>state.employees.filter(e=>e.status==='active'&&Number(e.department_id)===Number(id));
+    const avatarStrip=id=>{const emps=employeesForDepartment(id);return emps.length?`<div class="org-person-strip">${emps.slice(0,4).map(e=>`<span class="org-person-chip" title="${escapeHtml((e.nickname||e.first_name||'')+' '+(e.last_name||''))}">${escapeHtml(initial(e))}</span>`).join('')}${emps.length>4?`<span class="org-person-chip more">+${emps.length-4}</span>`:''}</div>`:`<div class="org-person-strip empty"><span class="org-empty-note">ยังไม่มีพนักงาน</span></div>`;};
+    const actionButtons=d=>`<button class="text-btn org-people-btn" type="button" onclick="window.openDepartmentAssignment(${Number(d.id)})">+ พนักงาน</button><button class="text-btn" type="button" onclick="window.openPositionForDepartment(${Number(d.id)})">+ ตำแหน่ง</button><button class="text-btn" type="button" onclick="window.openDepartmentLink(${Number(d.id)})">โยงเส้น</button><button class="text-btn" type="button" onclick="window.moveDepartment(${Number(d.id)},'up')">↑</button><button class="text-btn" type="button" onclick="window.moveDepartment(${Number(d.id)},'down')">↓</button><button class="text-btn" type="button" onclick="window.editDepartment(${Number(d.id)})">แก้ไข</button>`;
+    const renderListNode=(d,depth=0)=>{const positionCount=(core.positions||[]).filter(p=>Number(p.department_id)===Number(d.id)).length;return `<div class="org-node" style="--depth:${depth}"><div class="org-line"></div><div class="org-card org-card-modern"><div class="org-card-copy"><strong>${escapeHtml(d.name)}</strong><small>${Number(d.employee_count||0)} คน · ${positionCount} ตำแหน่ง</small><em>${d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า'}</em></div><div class="org-card-actions">${actionButtons(d)}</div></div>${childrenOf(d.id).map(x=>renderListNode(x,depth+1)).join('')}</div>`;};
+    const renderChartNode=d=>{const children=childrenOf(d.id);const positionCount=(core.positions||[]).filter(p=>Number(p.department_id)===Number(d.id)).length;const managerText=d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า';return `<li><div class="org-visual-card"><div class="org-visual-head"><strong>${escapeHtml(d.name)}</strong><span class="badge badge-soft">${Number(d.employee_count||0)} คน</span></div><div class="org-visual-meta"><span>${positionCount} ตำแหน่ง</span><span>${managerText}</span></div>${avatarStrip(d.id)}<div class="org-visual-actions">${actionButtons(d)}</div></div>${children.length?`<ul>${children.map(renderChartNode).join('')}</ul>`:''}</li>`;};
+    const activeEmployees=state.employees.filter(e=>e.status==='active').length;
+    org.innerHTML=roots.length?`<div class="org-view-shell"><div class="org-view-toolbar"><div class="org-view-switch" role="tablist" aria-label="รูปแบบแสดงผลโครงสร้าง"><button class="org-view-btn ${state.organizationViewMode==='list'?'active':''}" type="button" onclick="window.setOrganizationViewMode('list')">รายการ</button><button class="org-view-btn ${state.organizationViewMode!=='list'?'active':''}" type="button" onclick="window.setOrganizationViewMode('chart')">โครงสร้าง</button></div><div class="org-view-summary"><strong>${departments.length} แผนก</strong><span>${activeEmployees} พนักงานทั้งหมด</span></div></div><div class="org-view-note">กด “โยงเส้น” เพื่อกำหนดว่าแผนกนี้ขึ้นตรงกับใคร และใช้ปุ่ม ↑ ↓ เพื่อสลับลำดับในระดับเดียวกัน</div>${state.organizationViewMode==='list'?`<div class="organization-list-stack">${roots.map(d=>renderListNode(d)).join('')}</div>`:`<div class="org-chart-stage"><ul class="org-tree-root">${roots.map(renderChartNode).join('')}</ul></div>`}</div>`:emptyState('ยังไม่มีโครงสร้างแผนก','เพิ่มแผนกแรก แล้วค่อยกำหนดหัวหน้าและแผนกย่อย');
   }
-  renderOrganizationVisual();
-  setOrganizationView(state.organizationView||'chart');
   const positionRoot=$('#positionList');
   if(positionRoot){
     const positions=core.positions||[];
@@ -2894,18 +2507,15 @@ function renderPeopleCore(){
 window.editDepartment=id=>openDepartmentModal((state.peopleCore.departments||[]).find(d=>Number(d.id)===Number(id)));
 function openDepartmentModal(department=null){
   $('#departmentId').value=department?.id||''; $('#departmentName').value=department?.name||''; $('#departmentCode').value=department?.code||'';
-  const hasSavedParent=Boolean(department?.parent_department_id);
-  const manualRoot=Boolean(department&&String(department.hierarchy_mode||'auto')==='manual'&&!hasSavedParent);
-  const autoSelected=!department||(!manualRoot&&!hasSavedParent&&String(department.hierarchy_mode||'auto')!=='manual');
-  $('#departmentParent').innerHTML=`<option value="" ${autoSelected?'selected':''}>อัตโนมัติ (แนะนำ)</option><option value="__root__" ${manualRoot?'selected':''}>บริษัท (ระดับบนสุด)</option>${(state.peopleCore.departments||[]).filter(d=>Number(d.id)!==Number(department?.id)).map(d=>`<option value="${d.id}" ${Number(department?.parent_department_id)===Number(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}`;
+  $('#departmentParent').innerHTML=`<option value="">ไม่มี / เป็นแผนกหลัก</option>${(state.peopleCore.departments||[]).filter(d=>Number(d.id)!==Number(department?.id)).map(d=>`<option value="${d.id}" ${Number(department?.parent_department_id)===Number(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}`;
   $('#departmentManager').innerHTML=`<option value="">ยังไม่กำหนด</option>${state.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}" ${Number(department?.manager_employee_id)===Number(e.id)?'selected':''}>${escapeHtml(e.nickname||e.first_name)}${e.department_name?` · ${escapeHtml(e.department_name)}`:''}</option>`).join('')}`;
+  if ($('#departmentSortOrder')) $('#departmentSortOrder').value=String(Number(department?.sort_order||0));
   $('#departmentModalTitle').textContent=department?'แก้ไขแผนก':'เพิ่มแผนก'; $('#departmentModal').showModal();
 }
 async function saveDepartment(){
   const id=$('#departmentId').value;
   const isCreating=!id;
-  const parentValue=$('#departmentParent').value;
-  const body={name:$('#departmentName').value.trim(),code:$('#departmentCode').value.trim(),parent_department_id:parentValue&&parentValue!=='__root__'?parentValue:null,hierarchy_mode:parentValue===''?'auto':'manual',manager_employee_id:$('#departmentManager').value||null};
+  const body={name:$('#departmentName').value.trim(),code:$('#departmentCode').value.trim(),parent_department_id:$('#departmentParent').value||null,manager_employee_id:$('#departmentManager').value||null,sort_order:Math.max(0,Number($('#departmentSortOrder')?.value||0))};
   if(body.name.length<2)return toast('กรุณาใส่ชื่อแผนก',true);
   const b=$('#departmentSaveBtn');b.disabled=true;
   try{
