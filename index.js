@@ -6,6 +6,10 @@ const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 const SCHEMA_READY = new Set();
 const AUTH_CACHE = new Map();
 const AUTH_CACHE_TTL_MS = 15 * 1000;
+const LINE_MENU_TOKEN_CACHE = new Map();
+const LINE_MENU_ACCESS_CACHE = new Map();
+const LINE_MENU_TOKEN_TTL_MS = 10 * 60 * 1000;
+const LINE_MENU_ACCESS_TTL_MS = 60 * 1000;
 
 const INIT_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1443,7 +1447,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.64', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.65', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1733,7 +1737,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.64', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.65', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -3720,6 +3724,21 @@ async function processLineEvent(event, env, lineCtx) {
 
   if (event.type === 'message' && event.message?.type === 'text') {
     const text = String(event.message.text || '').trim();
+    const quickLower=text.toLowerCase();
+
+    // Hot path for the most-used command. Avoid business-onboarding schema checks,
+    // sessions, and unrelated account setup work before rendering the menu.
+    if(['เมนู','menu','help','ช่วยเหลือ'].includes(quickLower)){
+      const perfStart=Date.now();
+      const emp=await employee();
+      if(!emp) return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ยังไม่ได้เชื่อมบัญชี','ถ้าคุณเป็นเจ้าของบริษัทหรือ HR ให้พิมพ์ “เชื่อมธุรกิจ”\nถ้าคุณเป็นพนักงาน ให้เปิดลิงก์เชิญเข้าทีมที่ HR ส่งให้','warning')]);
+      const afterEmployee=Date.now();
+      const menu=await buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp);
+      const afterMenu=Date.now();
+      const result=await replyLineMessages(accessToken,event.replyToken,[menu]);
+      console.log(JSON.stringify({level:'info',event:'line_menu_perf',employee_ms:afterEmployee-perfStart,menu_ms:afterMenu-afterEmployee,total_before_reply_ms:afterMenu-perfStart}));
+      return result;
+    }
 
     // LINE-first SaaS onboarding lives on Nakna's global Official Account.
     // It is intentionally handled before employee linking so a brand-new owner
@@ -3877,6 +3896,12 @@ async function processLineEvent(event, env, lineCtx) {
 
   if(event.type==='postback'){
     const data=new URLSearchParams(event.postback?.data||''); const action=data.get('action');
+
+    if(action==='owner_dashboard'){
+      const ownerAccess=await getLineOwnerDashboardAccess(env,lineCtx,lineUserId).catch(()=>null);
+      if(ownerAccess) return replyLineMessages(accessToken,event.replyToken,[buildOwnerDashboardFlex(ownerAccess)]);
+      return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ไม่มีสิทธิ์ HR Dashboard','บัญชี LINE นี้ยังไม่มีสิทธิ์ Owner / HR ใน Workspace','warning')]);
+    }
 
     // Direct HR/Owner approval cards are account-level actions and must work even
     // when that administrator is not registered as an employee in this Workspace.
@@ -4508,10 +4533,62 @@ async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId,preferredClien
   };
 }
 
+function lineMenuCacheGet(cache,key,ttl){
+  const row=cache.get(key);
+  if(!row) return null;
+  if(Date.now()-Number(row.at||0)>ttl){ cache.delete(key); return null; }
+  return row.value||null;
+}
+function lineMenuCacheSet(cache,key,value){
+  cache.set(key,{at:Date.now(),value});
+  // Keep per-isolate memory bounded.
+  if(cache.size>300){
+    const first=cache.keys().next().value;
+    if(first) cache.delete(first);
+  }
+  return value;
+}
+async function getEmployeePortalTokenForMenu(db,clientId,employeeId){
+  const key=`${Number(clientId)}:${Number(employeeId)}`;
+  const cached=lineMenuCacheGet(LINE_MENU_TOKEN_CACHE,key,LINE_MENU_TOKEN_TTL_MS);
+  if(cached) return cached;
+  const token=await issueEmployeePortalToken(db,Number(clientId),Number(employeeId));
+  return lineMenuCacheSet(LINE_MENU_TOKEN_CACHE,key,token);
+}
+async function getLineMenuManagementAccessFast(env,lineCtx,lineUserId,preferredClientId=null){
+  const providerScope=String(lineCtx?.providerScope||'default');
+  const preferred=Number(preferredClientId||0);
+  const key=`${providerScope}:${String(lineUserId)}:${preferred}`;
+  const cached=lineMenuCacheGet(LINE_MENU_ACCESS_CACHE,key,LINE_MENU_ACCESS_TTL_MS);
+  if(cached!==null) return cached;
+  // Fast path: one read-only query, no schema migration checks and no login-token writes.
+  // The expensive one-time Dashboard login URL is generated only after the user taps it.
+  const row=await env.DB.prepare(`SELECT u.id AS user_id,c.id,c.name,c.code,m.role
+    FROM users u
+    JOIN company_members m ON m.user_id=u.id AND m.status='active'
+    JOIN clients c ON c.id=m.client_id
+    WHERE u.line_user_id=?1 AND COALESCE(u.line_provider_scope,'default')=?2
+      AND u.status='active' AND m.role IN ('owner','co_owner','hr_admin','hr','payroll_admin','manager','approver')
+    ORDER BY CASE WHEN c.id=?3 THEN 0 ELSE 1 END,m.id DESC LIMIT 1`)
+    .bind(String(lineUserId),providerScope,preferred).first().catch(()=>null);
+  if(!row){
+    LINE_MENU_ACCESS_CACHE.set(key,{at:Date.now(),value:null});
+    return null;
+  }
+  const value={
+    user:{id:Number(row.user_id)},
+    primary:{id:Number(row.id),name:row.name,code:row.code,role:row.role},
+    role:String(row.role||'').toLowerCase(),
+    roleLabel:lineManagementRoleLabel(row.role),
+    dashboardUrl:null,
+  };
+  return lineMenuCacheSet(LINE_MENU_ACCESS_CACHE,key,value);
+}
+
 async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const [ownerAccess,portalToken]=await Promise.all([
-    getLineOwnerDashboardAccess(env,lineCtx,lineUserId,Number(emp.client_id)).catch(()=>null),
-    issueEmployeePortalToken(env.DB,Number(emp.client_id),Number(emp.id)).catch(()=>null),
+    getLineMenuManagementAccessFast(env,lineCtx,lineUserId,Number(emp.client_id)).catch(()=>null),
+    getEmployeePortalTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id)).catch(()=>null),
   ]);
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
@@ -4658,7 +4735,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.64',
+    version:'1.0-P7.65',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -4681,11 +4758,13 @@ async function getPublicDiagnostics(env){
 }
 
 async function handleLineBusinessOnboardingText({text,event,env,lineCtx,lineUserId,accessToken,sessionKey}){
-  await ensureV100P7Ready(env.DB);
   const lower=String(text||'').trim().toLowerCase();
   const providerScope=String(lineCtx.providerScope||'default');
 
   if(isBusinessConnectCommand(text)||isCreateBusinessCommand(text)){
+    // Only business setup needs the heavy P7 schema readiness path. Normal
+    // employee commands (especially "เมนู") must not pay this cost.
+    await ensureV100P7Ready(env.DB);
     // P7: LINE is only the identity + entry point. Business creation and Google
     // provisioning happen on the web so customers can see every step/status.
     await clearLineSession(env.DB,sessionKey).catch(()=>{});
@@ -6387,13 +6466,13 @@ function buildWelcomeFlex(name,company){
 }
 function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null){
   const name=emp.nickname||emp.first_name;
-  const hasManagement=Boolean(ownerAccess?.dashboardUrl&&ownerAccess?.primary);
+  const hasManagement=Boolean(ownerAccess?.primary);
   const managementCompany=ownerAccess?.primary?.name||emp.company_name||'';
   const roleLabel=ownerAccess?.roleLabel||lineManagementRoleLabel(ownerAccess?.role);
   const footer=hasManagement?[
     lineText('สำหรับผู้บริหาร / HR','xs',LINE_CI.primaryDark,'bold'),
     lineText(`${roleLabel} · ${managementCompany||'ธุรกิจของคุณ'}`,'xxs',LINE_CI.muted,'regular'),
-    linePrimaryButton('เปิด HR Dashboard',{type:'uri',label:'เปิด HR Dashboard',uri:ownerAccess.dashboardUrl})
+    linePrimaryButton('เปิด HR Dashboard',{type:'postback',label:'เปิด HR Dashboard',data:'action=owner_dashboard'})
   ]:[];
   return {type:'flex',altText:hasManagement?`เมนูพนักงาน + ${roleLabel} · นากนะ`:'เมนูพนักงาน · นากนะ',contents:lineBubble({
     eyebrow:hasManagement?`นากนะ · EMPLOYEE + ${String(roleLabel).toUpperCase()}`:'นากนะ · EMPLOYEE',title:`สวัสดี ${name} 👋`,subtitle:emp.company_name||'',
