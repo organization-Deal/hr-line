@@ -514,11 +514,9 @@ function bindEvents() {
   $('#inviteEmployeeBtnInline').onclick = openInviteModal;
   $('#addWorkLocationBtn').onclick = openWorkLocationModal;
   $('#addDepartmentBtn').onclick = openDepartmentModal;
-  if ($('#organizationManageBtn')) $('#organizationManageBtn').onclick = () => window.openOrganizationBuilder?.();
   $('#addPositionBtn').onclick = openPositionModal;
   $('#positionAssignSaveBtn').onclick = savePositionAssignment;
   $('#positionAssignSearch').addEventListener('input', renderPositionAssignPeople);
-  if ($('#addPositionInlineBtn')) $('#addPositionInlineBtn').onclick = openPositionModal;
   $('#addScheduleBtn').onclick = openScheduleModal;
   $('#addHolidayBtn').onclick = openHolidayModal;
   $('#departmentSaveBtn').onclick = saveDepartment;
@@ -2538,21 +2536,21 @@ function renderPeopleCore(){
   const core=state.peopleCore||{}; const departments=core.departments||[]; const schedules=core.schedules||[]; const holidays=core.holidays||[];
   const org=$('#organizationChart');
   if(org){
-    const deptIds=new Set(departments.map(d=>Number(d.id)));
-    const roots=sortDepartmentsForView(departments.filter(d=>{const parentId=d.parent_department_id?Number(d.parent_department_id):0;return !parentId||!deptIds.has(parentId);}));
-    const childrenOf=id=>sortDepartmentsForView(departments.filter(x=>Number(x.parent_department_id)===Number(id)));
-    const employeesForDepartment=id=>state.employees.filter(e=>e.status==='active'&&Number(e.department_id)===Number(id));
-    const avatarStrip=id=>{const emps=employeesForDepartment(id);return emps.length?`<div class="org-person-strip">${emps.slice(0,4).map(e=>`<span class="org-person-chip" title="${escapeHtml((e.nickname||e.first_name||'')+' '+(e.last_name||''))}">${escapeHtml(initial(e))}</span>`).join('')}${emps.length>4?`<span class="org-person-chip more">+${emps.length-4}</span>`:''}</div>`:`<div class="org-person-strip empty"><span class="org-empty-note">ยังไม่มีพนักงาน</span></div>`;};
-    const actionButtons=d=>`<button class="org-card-primary-action" type="button" onclick="window.openDepartmentAssignment(${Number(d.id)})">พนักงาน</button><button class="org-card-secondary-action" type="button" onclick="window.editDepartment(${Number(d.id)})">ตั้งค่า</button>`;
-    const renderListNode=(d,depth=0)=>{const positionCount=(core.positions||[]).filter(p=>Number(p.department_id)===Number(d.id)).length;return `<div class="org-node" style="--depth:${depth}"><div class="org-line"></div><div class="org-card org-card-modern"><div class="org-card-copy"><strong>${escapeHtml(d.name)}</strong><small>${Number(d.employee_count||0)} คน · ${positionCount} ตำแหน่ง</small><em>${d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า'}</em></div><div class="org-card-actions">${actionButtons(d)}</div></div>${childrenOf(d.id).map(x=>renderListNode(x,depth+1)).join('')}</div>`;};
-    const renderChartNode=d=>{const children=childrenOf(d.id);const positionCount=(core.positions||[]).filter(p=>Number(p.department_id)===Number(d.id)).length;const managerText=d.manager_employee_id?`หัวหน้า ${escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว')}`:'ยังไม่กำหนดหัวหน้า';return `<li><div class="org-visual-card"><div class="org-visual-head"><strong>${escapeHtml(d.name)}</strong><span class="badge badge-soft">${Number(d.employee_count||0)} คน</span></div><div class="org-visual-meta"><span>${positionCount} ตำแหน่ง</span><span>${managerText}</span></div>${avatarStrip(d.id)}<div class="org-visual-actions">${actionButtons(d)}</div></div>${children.length?`<ul>${children.map(renderChartNode).join('')}</ul>`:''}</li>`;};
-    const activeEmployees=state.employees.filter(e=>e.status==='active').length;
-    org.innerHTML=roots.length?`<div class="org-view-shell"><div class="org-view-toolbar"><div class="org-view-switch" role="tablist" aria-label="รูปแบบแสดงผลโครงสร้าง"><button class="org-view-btn ${state.organizationViewMode==='list'?'active':''}" type="button" onclick="window.setOrganizationViewMode('list')">รายการ</button><button class="org-view-btn ${state.organizationViewMode!=='list'?'active':''}" type="button" onclick="window.setOrganizationViewMode('chart')">โครงสร้าง</button></div><div class="org-view-summary"><button class="secondary-btn org-builder-open-btn" type="button" onclick="window.openOrganizationBuilder()">จัดโครงสร้าง / ลากวาง</button><strong>${departments.length} แผนก</strong><span>${activeEmployees} พนักงานทั้งหมด</span></div></div><div class="org-view-note org-view-note-easy"><strong>ทำให้ง่ายขึ้น:</strong> กด “จัดโครงสร้าง / ลากวาง” แล้วลากแผนกไปวางบนแผนกแม่ ระบบจะโยงเส้นและบันทึกให้อัตโนมัติ</div>${state.organizationViewMode==='list'?`<div class="organization-list-stack">${roots.map(d=>renderListNode(d)).join('')}</div>`:`<div class="org-chart-stage"><ul class="org-tree-root">${roots.map(renderChartNode).join('')}</ul></div>`}</div>`:emptyState('ยังไม่มีโครงสร้างแผนก','เพิ่มแผนกแรก แล้วค่อยกำหนดหัวหน้าและแผนกย่อย');
-  }
-  const positionRoot=$('#positionList');
-  if(positionRoot){
+    const activeEmployees=state.employees.filter(e=>e.status==='active');
     const positions=core.positions||[];
-    positionRoot.innerHTML=positions.length?positions.map(p=>{const assigned=state.employees.filter(e=>Number(e.position_id)===Number(p.id));const preview=assigned.slice(0,3).map(e=>escapeHtml(e.nickname||e.first_name)).join(', ');return `<article class="position-row position-card-modern"><div class="position-card-main"><div class="position-symbol">${escapeHtml(String(p.name||'?').slice(0,1).toUpperCase())}</div><div><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.department_name||'ตำแหน่งกลาง · ใช้ได้ทุกแผนก')}</small>${assigned.length?`<em>${preview}${assigned.length>3?` +${assigned.length-3}`:''}</em>`:'<em>ยังไม่มีคนในตำแหน่งนี้</em>'}</div></div><div class="position-card-actions"><span class="badge badge-soft">${assigned.length} คน</span><button class="text-btn position-assign-btn" type="button" onclick="window.openPositionAssignment(${Number(p.id)})">จัดคน</button></div></article>`}).join(''):emptyState('ยังไม่มีตำแหน่ง','เริ่มจากสร้างตำแหน่ง แล้วกด “จัดคน” เพื่อระบุว่าใครอยู่ตำแหน่งไหน');
+    const sortedDepartments=[...departments].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th'));
+    const employeesForDepartment=id=>activeEmployees.filter(e=>Number(e.department_id)===Number(id)).sort((a,b)=>String(a.nickname||a.first_name||'').localeCompare(String(b.nickname||b.first_name||''),'th'));
+    const departmentPositions=id=>positions.filter(p=>Number(p.department_id)===Number(id));
+    const personRow=e=>`<div class="dept-person-row"><div class="dept-person-main"><span class="dept-person-avatar">${escapeHtml(initial(e))}</span><div class="dept-person-copy"><strong>${escapeHtml(e.nickname||e.first_name||'ไม่ระบุชื่อ')} ${escapeHtml(e.last_name||'')}</strong><small>${escapeHtml(e.employee_code||'ไม่มีรหัสพนักงาน')}</small></div></div><div class="dept-person-position"><span>ตำแหน่ง</span><strong>${escapeHtml(e.position_name||'ยังไม่ระบุตำแหน่ง')}</strong></div><button class="secondary-btn dept-person-edit" type="button" onclick="window.openPeopleProfile(${Number(e.id)})">แก้ไข</button></div>`;
+    const departmentCard=d=>{
+      const people=employeesForDepartment(d.id);
+      const deptPositions=departmentPositions(d.id);
+      const manager=d.manager_employee_id?escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว'):'ยังไม่กำหนด';
+      return `<article class="department-directory-card"><div class="department-directory-head"><div><div class="department-title-line"><h3>${escapeHtml(d.name)}</h3><span class="badge badge-soft">${people.length} คน</span></div><p>หัวหน้า: ${manager} · ${deptPositions.length} ตำแหน่ง</p></div><div class="department-directory-actions"><button class="secondary-btn" type="button" onclick="window.openDepartmentAssignment(${Number(d.id)})">จัดพนักงาน</button><button class="text-btn" type="button" onclick="window.openPositionForDepartment(${Number(d.id)})">+ ตำแหน่ง</button><button class="text-btn" type="button" onclick="window.editDepartment(${Number(d.id)})">ตั้งค่าแผนก</button></div></div><div class="department-people-list">${people.length?people.map(personRow).join(''):`<div class="department-empty"><strong>ยังไม่มีพนักงานในแผนกนี้</strong><span>กด “จัดพนักงาน” เพื่อเลือกคนเข้ามา</span></div>`}</div></article>`;
+    };
+    const unassigned=activeEmployees.filter(e=>!e.department_id);
+    const unassignedCard=unassigned.length?`<article class="department-directory-card unassigned"><div class="department-directory-head"><div><div class="department-title-line"><h3>ยังไม่ระบุแผนก</h3><span class="badge badge-warning">${unassigned.length} คน</span></div><p>พนักงานกลุ่มนี้ยังไม่ได้ถูกจัดเข้าแผนก</p></div></div><div class="department-people-list">${unassigned.map(personRow).join('')}</div></article>`:'';
+    org.innerHTML=sortedDepartments.length||unassigned.length?`<div class="org-directory-summary"><div><strong>${sortedDepartments.length}</strong><span>แผนก</span></div><div><strong>${activeEmployees.length}</strong><span>พนักงาน</span></div><div><strong>${positions.length}</strong><span>ตำแหน่ง</span></div></div><div class="department-directory-list">${sortedDepartments.map(departmentCard).join('')}${unassignedCard}</div>`:emptyState('ยังไม่มีข้อมูลทีม','เริ่มจากเพิ่มแผนก แล้วจัดพนักงานและตำแหน่งในแต่ละแผนก');
   }
   const scheduleRoot=$('#workScheduleList');
   if(scheduleRoot){

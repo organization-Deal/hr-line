@@ -392,16 +392,11 @@
 
       <section id="view-organization" class="view">
         <div id="organizationSection" class="people-core-section standalone-organization">
-          <div class="page-intro compact">
-          <div><p class="kicker">ORGANIZATION</p><h2>โครงสร้างองค์กร</h2><p>สร้างแผนก แผนกย่อย ตำแหน่ง และกำหนดหัวหน้า เพื่อให้งานอนุมัติและตารางงานรู้ว่าใครขึ้นกับใคร</p></div>
-          <div class="section-action-group"><button id="organizationManageBtn" class="secondary-btn org-manage-btn" type="button">จัดโครงสร้าง</button><button id="addPositionBtn" class="secondary-btn" type="button">+ ตำแหน่ง</button><button id="addDepartmentBtn" class="primary-btn" type="button">+ แผนก</button></div>
+          <div class="page-intro compact org-simple-intro">
+            <div><p class="kicker">TEAM DIRECTORY</p><h2>ทีมและตำแหน่ง</h2><p>ดูให้ชัดว่าใครอยู่แผนกไหน ทำตำแหน่งอะไร และจัดคนได้จากหน้าเดียว</p></div>
+            <div class="section-action-group"><button id="addPositionBtn" class="secondary-btn" type="button">+ ตำแหน่ง</button><button id="addDepartmentBtn" class="primary-btn" type="button">+ แผนก</button></div>
           </div>
-          <div id="organizationChart" class="organization-chart"></div>
-          <div class="organization-position-block">
-          <div class="organization-position-head"><div><p class="kicker">POSITIONS</p><h3>ตำแหน่งในบริษัท</h3><p>สร้างตำแหน่งไว้ก่อน แล้วเลือกได้ทันทีตอนเพิ่มพนักงาน</p></div><button id="addPositionInlineBtn" class="secondary-btn" type="button">+ เพิ่มตำแหน่ง</button></div>
-          <div id="positionList" class="position-list"></div>
-          </div>
-
+          <div id="organizationChart" class="organization-chart org-directory"></div>
         </div>
       </section>
 
