@@ -1,44 +1,9 @@
-## V1.0-P7.58 — Visible Manual Organization Arrange
 
-- แก้ปัญหาปุ่มจัดผังมองไม่เห็น/ไม่ชัด โดยเพิ่มปุ่ม “จัดลำดับเอง” ขนาดใหญ่ทั้งบน Toolbar และหัวผัง
-- เมื่อเปิดโหมดจัดเอง ทุกการ์ดแผนกจะแสดงแถบ “ลากย้าย” และคำอธิบายจุดวางอย่างชัดเจน
-- เพิ่มปุ่มลูกศร ← / → เพื่อเลื่อนลำดับซ้าย–ขวาโดยไม่ต้องลาก
-- เพิ่มปุ่ม “ย้ายตำแหน่ง” ที่การ์ดทุกใบ เปิดหน้าต่างเลือกแผนกแม่และลำดับได้โดยตรง
-- รองรับการย้ายเป็นระดับบนสุดใต้บริษัท และกันการสร้างโครงสร้างวนลูป
-- การย้ายด้วยปุ่มหรือ Drag & Drop ใช้ API reorder เดิมและบันทึกลง D1 เหมือนกัน
-- ปรับ Responsive เพื่อไม่ซ่อนปุ่มจัดลำดับบนหน้าจอแคบ
-
-## V1.0-P7.57 — Manual Organization Drag & Drop
-
-- เพิ่มปุ่ม “จัดผังเอง” ในหน้าโครงสร้างองค์กร
-- ลากการ์ดซ้าย/ขวาเพื่อเรียงลำดับพี่น้องในระดับเดียวกัน
-- ลากวางกลางการ์ดแผนกเพื่อย้ายให้เป็นแผนกย่อย
-- ลากกลับไปวางบนการ์ดบริษัทเพื่อย้ายขึ้นระดับบนสุด
-- บันทึก parent + sort order ลง D1 และป้องกันโครงสร้างวนลูป
-- เพิ่ม hierarchy_mode เพื่อแยก Auto กับ Manual รวมถึง Manual Root
-- หน้าแก้ไขแผนกมีตัวเลือก “บริษัท (ระดับบนสุด)” และ “อัตโนมัติ” แยกกัน
-
-## V1.0-P7.56 — Smart Auto Organization Hierarchy
-- ผังองค์กรจัดลำดับชั้นให้อัตโนมัติเมื่อยังไม่ได้กำหนดแผนกแม่
-- ยึดลำดับที่ผู้ใช้กำหนดเอง (`parent_department_id`) เป็นอันดับแรกเสมอ
-- ถ้าหัวหน้าแผนกมีหัวหน้าโดยตรงในอีกแผนก ระบบใช้สายบังคับบัญชานั้นเป็นโครงสร้างอัตโนมัติ
-- รู้จักระดับ CEO / C-level และจัด CEO ไว้บนสุด จากนั้นแยก COO / CMO / CFO / CTO / CSO ตามสายงาน
-- จัดกลุ่มสายงานอัตโนมัติ เช่น Marketing/Content/VISIONHUB → CMO, HR/Operations/Partner Experience → COO, Accounting/Finance → CFO หรือ CEO เมื่อไม่มี CFO
-- ป้องกันวงจร parent ซ้อนกันผิดพลาด และเรียง sibling ตามระดับ/สายงาน/ลำดับเดิม/ชื่อ
-- หน้า List และหน้า Chart ใช้ hierarchy ชุดเดียวกัน เพื่อไม่ให้ข้อมูลสองมุมมองไม่ตรงกัน
-- Modal แผนกเปลี่ยนตัวเลือก parent ว่างเป็น “อัตโนมัติ (แนะนำ)” พร้อมคำอธิบาย
-- เพิ่มสถานะ AUTO / ตามหัวหน้า / กำหนดเอง บนการ์ดผังองค์กร
-
-## V1.0-P7.55 — Visual Organization Chart
-
-- Added `รายการ / โครงสร้าง` view switch on the Organization page.
-- Added a visual department tree with connector lines driven by `parent_department_id`.
-- Department cards now show employee count, position count, department head, and employee avatars/initials.
-- Added direct `จัดพนักงาน` and `แก้ไข` actions inside each chart node.
-- Added zoom and center controls with horizontal scrolling for large organization structures.
-- Departments without a parent are automatically connected under the company root, so the chart is still useful before hierarchy is fully configured.
-- Added responsive behavior for smaller screens.
-
+## V1.0-P7.60
+- แสดง Loading กลางหน้าจอสำหรับคำสั่งบันทึก/แก้ไข พร้อมสถานะสำเร็จ/ผิดพลาด
+- ปุ่มบันทึก People Profile แสดง spinner และสถานะกำลังบันทึก
+- ลดเวลาค้างของสถานะสำเร็จเพื่อให้ UI รู้สึกเร็วขึ้น
+- ล้าง focus/text selection หลังบันทึก People Profile เพื่อป้องกัน caret กระพริบบนข้อความ
 # Changelog
 
 ## V1.0-P7.54 — Department Member Assignment

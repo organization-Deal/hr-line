@@ -1312,46 +1312,65 @@ html.js body:not(.nakna-ready) dialog { display: none !important; }
 }
 
 
-/* P7.13 — global save / mutation feedback */
+/* P7.60 — centered save / mutation feedback */
 .action-status{
   position:fixed;
-  z-index:6200;
-  right:22px;
-  bottom:22px;
-  min-width:250px;
-  max-width:min(380px,calc(100vw - 32px));
+  z-index:7200;
+  inset:0;
   display:grid;
-  grid-template-columns:38px minmax(0,1fr);
-  gap:12px;
-  align-items:center;
-  padding:13px 15px;
-  border:1px solid rgba(17,92,94,.13);
-  border-radius:17px;
-  background:rgba(255,255,255,.96);
-  box-shadow:0 18px 48px rgba(20,55,58,.16);
-  backdrop-filter:blur(16px);
-  transform:translateY(0);
+  place-items:center;
+  padding:22px;
+  background:rgba(22,45,48,.18);
+  backdrop-filter:blur(2px);
+  -webkit-backdrop-filter:blur(2px);
   opacity:1;
-  transition:opacity .18s ease,transform .18s ease;
+  transition:opacity .16s ease;
+  user-select:none;
+  caret-color:transparent;
 }
 .action-status.hidden{display:none!important}
+.action-status-card{
+  width:min(330px,calc(100vw - 40px));
+  display:grid;
+  grid-template-columns:46px minmax(0,1fr);
+  gap:13px;
+  align-items:center;
+  padding:17px 18px;
+  border:1px solid rgba(17,92,94,.13);
+  border-radius:20px;
+  background:rgba(255,255,255,.98);
+  box-shadow:0 24px 70px rgba(20,55,58,.22);
+  animation:nakna-action-pop .16s ease-out both;
+  user-select:none;
+  caret-color:transparent;
+}
 .action-status-icon{
-  width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
+  width:46px;height:46px;border-radius:14px;display:grid;place-items:center;
   background:#eaf6f3;color:#128181;font-weight:800;
 }
-.action-status-copy{display:grid;gap:2px;min-width:0}
-.action-status-copy strong{font-size:12.5px;line-height:1.3;color:#123c4a}
-.action-status-copy small{font-size:10.5px;line-height:1.4;color:#7b898b}
-.action-status-spinner{width:18px;height:18px;border:2px solid #cfe4df;border-top-color:#178b8b;border-radius:50%;animation:nakna-action-spin .72s linear infinite}
+.action-status-copy{display:grid;gap:3px;min-width:0;user-select:none;caret-color:transparent}
+.action-status-copy strong{font-size:14px;line-height:1.3;color:#123c4a;user-select:none;caret-color:transparent}
+.action-status-copy small{font-size:11px;line-height:1.45;color:#7b898b;user-select:none;caret-color:transparent}
+.action-status-spinner{width:21px;height:21px;border:2.5px solid #cfe4df;border-top-color:#178b8b;border-radius:50%;animation:nakna-action-spin .68s linear infinite}
+.action-status.success{background:rgba(22,45,48,.10)}
+.action-status.error{background:rgba(69,35,30,.15)}
 .action-status.success .action-status-icon{background:#e8f7ef;color:#168457}
 .action-status.error .action-status-icon{background:#fff0ed;color:#c95a4b}
 .action-status.success .action-status-spinner,.action-status.error .action-status-spinner{display:none}
-.action-status.success .action-status-icon::before{content:'✓';font-size:18px}
-.action-status.error .action-status-icon::before{content:'!';font-size:17px}
+.action-status.success .action-status-icon::before{content:'✓';font-size:20px}
+.action-status.error .action-status-icon::before{content:'!';font-size:19px}
+body.is-mutating{cursor:progress}
 body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{cursor:wait}
+.button-inline-spinner{width:14px;height:14px;display:inline-block;flex:0 0 auto;border:2px solid rgba(255,255,255,.42);border-top-color:currentColor;border-radius:50%;animation:nakna-action-spin .68s linear infinite}
+.primary-btn[aria-busy="true"]{display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:wait}
+#peopleProfileModal.is-saving{cursor:wait}
+#peopleProfileModal :is(label,small,strong,p,h1,h2,h3,.field-label-note,.inline-create-btn,.primary-btn,.secondary-btn,.close-btn){caret-color:transparent}
+#peopleProfileModal input,#peopleProfileModal textarea{caret-color:auto}
 @keyframes nakna-action-spin{to{transform:rotate(360deg)}}
+@keyframes nakna-action-pop{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
 @media(max-width:720px){
-  .action-status{left:16px;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));max-width:none;min-width:0;padding:13px 14px;border-radius:16px}
+  .action-status{padding:16px}
+  .action-status-card{width:min(320px,calc(100vw - 28px));padding:15px 16px;border-radius:18px}
 }
 
 
