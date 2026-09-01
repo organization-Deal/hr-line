@@ -113,6 +113,48 @@ function clearNaknaStartupCache() {
     }
   } catch {}
 }
+
+let dashboardRefreshTimer = null;
+function refreshDashboardSoon(delay = 250){
+  clearTimeout(dashboardRefreshTimer);
+  dashboardRefreshTimer = setTimeout(() => {
+    viewLoadedAt.delete('dashboard');
+    loadDashboardFast({ silent: true }).then(()=>markViewLoaded('dashboard')).catch(()=>{});
+  }, Math.max(0, delay));
+}
+function attentionItemByKey(key){
+  return (state.dashboard?.attention || []).find(item => String(item.key) === String(key)) || null;
+}
+function removeAttentionItemsLocally(key, itemKeys = []){
+  if(!state.dashboard?.attention?.length) return;
+  const removeSet=new Set((itemKeys||[]).map(String));
+  const next=[];
+  for(const item of state.dashboard.attention){
+    if(String(item.key)!==String(key)){ next.push(item); continue; }
+    const keys=Array.isArray(item.item_keys)?item.item_keys.map(String):[];
+    const remaining=removeSet.size?keys.filter(k=>!removeSet.has(k)):[];
+    if(remaining.length){ next.push({...item,item_keys:remaining,count:remaining.length}); }
+  }
+  state.dashboard={...state.dashboard,attention:next};
+  try{ renderDashboard(); writeDashboardCache(); }catch{}
+}
+function markAttentionRead(key, itemKeys = [], { optimistic = true } = {}){
+  const clean=[...new Set((itemKeys||[]).map(String).filter(Boolean))];
+  if(!key || !clean.length) return Promise.resolve(false);
+  if(optimistic) removeAttentionItemsLocally(key, clean);
+  return api('/api/dashboard/attention/read',{method:'POST',body:JSON.stringify({key,item_keys:clean})})
+    .then(()=>true)
+    .catch(error=>{ console.warn('[Nakna] attention read sync failed', key, error?.message||error); refreshDashboardSoon(800); return false; });
+}
+function acknowledgeAttentionCategory(key){
+  const item=attentionItemByKey(key);
+  if(!item?.item_keys?.length) return;
+  markAttentionRead(key,item.item_keys,{optimistic:true});
+}
+function acknowledgeAttentionForView(viewName){
+  const map={attendance:['missing'],leave:['leave_pending'],recruitment:['candidate'],'hr-inbox':['hr_private'],requests:['request']};
+  for(const key of (map[viewName]||[])) acknowledgeAttentionCategory(key);
+}
 function hydrateDashboardCache() {
   const cached = readDashboardCache();
   if (!cached) return false;
@@ -208,6 +250,7 @@ function renderViewData(name){
     if(name==='attendance'){ renderAttendance(); return; }
     if(name==='leave'){ renderLeaves(); renderLeavePolicies(); return; }
     if(name==='requests'){ renderRequests(); renderEmployeeService(); return; }
+    if(name==='hr-inbox'){ renderHrInbox(); return; }
     if(name==='broadcast'){ renderBroadcastPage(); return; }
     if(name==='payroll'){ renderPayroll(); return; }
     if(name==='documents'){ renderDocuments(); return; }
@@ -250,6 +293,8 @@ async function loadViewData(name,{force=false}={}){
         const [leaves,policies,employees,peopleCore]=await Promise.all([load('/api/leaves',{data:state.leaves}),load('/api/leave-policies',{data:state.leavePolicies}),load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore)]); state.leaves=leaves?.data||state.leaves; state.leavePolicies=policies?.data||state.leavePolicies; state.employees=employees?.data||state.employees; state.peopleCore=peopleCore||state.peopleCore;
       }else if(name==='requests'){
         const [requests,service]=await Promise.all([load('/api/requests',{data:state.requests}),load('/api/employee-service',state.employeeService)]); state.requests=requests?.data||state.requests; state.employeeService=service||state.employeeService;
+      }else if(name==='hr-inbox'){
+        if(isHr){ const cases=await load('/api/hr-cases',{data:state.hrCases}); state.hrCases=cases?.data||state.hrCases; }
       }else if(name==='broadcast'){
         if(canReadBroadcasts){ const broadcasts=await load('/api/broadcasts',{data:state.broadcasts}); state.broadcasts=broadcasts?.data||state.broadcasts; }
       }else if(name==='payroll'){
@@ -1743,7 +1788,10 @@ function renderDashboard() {
 
   $$('[data-attention]').forEach(row => {
     row.onclick = () => {
-      const target = attentionTarget(row.dataset.attention);
+      const key=row.dataset.attention;
+      const item=attentionItemByKey(key);
+      if(item?.item_keys?.length) markAttentionRead(key,item.item_keys,{optimistic:true});
+      const target = attentionTarget(key);
       if (target) showView(target);
     };
   });
@@ -2005,7 +2053,9 @@ window.moveCandidate = async (id, stage) => {
   if(stage==='hired') return window.hireCandidate(id);
   try {
     await api(`/api/candidates/${id}/stage`, { method: 'PATCH', body: JSON.stringify({ stage }) });
-    await loadAll({ silent: true });
+    const candidate=state.candidates.find(x=>Number(x.id)===Number(id));
+    if(candidate){candidate.stage=stage;candidate.last_activity_at=new Date().toISOString();candidate.updated_at=candidate.last_activity_at;}
+    renderCandidates(); markViewLoaded('recruitment'); refreshDashboardSoon(80);
     toast(`อัปเดตสถานะเป็น “${stageLabels[stage]}” แล้ว`);
   } catch (error) {
     toast(error.message, true);
@@ -2301,7 +2351,9 @@ window.leaveAction = async (id, action) => {
   if (action === 'reject' && (!reason || reason.trim().length < 2)) return;
   try {
     await api(`/api/leaves/${id}/${action}`, { method: 'PATCH', body: JSON.stringify({ reason }) });
-    await loadAll({ silent: true });
+    const leave=state.leaves.find(x=>Number(x.id)===Number(id));
+    if(leave){ leave.status=action==='approve'?'approved':'rejected'; if(reason)leave.decision_reason=reason; }
+    renderLeaves(); markViewLoaded('leave'); refreshDashboardSoon(80);
     toast(action === 'approve' ? 'อนุมัติคำขอลาเรียบร้อยแล้ว' : 'บันทึกเหตุผลและไม่อนุมัติแล้ว');
   } catch (error) { toast(error.message, true); }
 };
@@ -2427,7 +2479,8 @@ function renderHrInbox(){
   const open=cases.filter(c=>!['resolved','closed'].includes(String(c.status))).length;
   const urgent=cases.filter(c=>!['resolved','closed'].includes(String(c.status))&&['urgent','high'].includes(String(c.priority))).length;
   const closed=cases.filter(c=>['resolved','closed'].includes(String(c.status))).length;
-  if($('#hrInboxNavCount')){ $('#hrInboxNavCount').textContent=String(open); $('#hrInboxNavCount').classList.toggle('hidden',open===0); }
+  const unreadPrivate=Number(attentionItemByKey('hr_private')?.count||0);
+  if($('#hrInboxNavCount')){ $('#hrInboxNavCount').textContent=String(unreadPrivate); $('#hrInboxNavCount').classList.toggle('hidden',unreadPrivate===0); }
   if($('#hrInboxOpenBadge')) $('#hrInboxOpenBadge').textContent=`${open} เรื่องเปิด`;
   if($('#hrInboxOpenCount')) $('#hrInboxOpenCount').textContent=String(open);
   if($('#hrInboxUrgentCount')) $('#hrInboxUrgentCount').textContent=String(urgent);
@@ -2482,6 +2535,8 @@ async function removeRichMenu(){if(!confirm('ลบ Rich Menu เริ่มต
 window.openHrCase=async id=>{
   try{
     const result=await api(`/api/hr-cases/${id}`); const c=result.data; state.activeHrCaseId=Number(id);
+    const caseKey=`hr_private:${Number(id)}:${String(c.created_at||'')}`;
+    markAttentionRead('hr_private',[caseKey],{optimistic:true});
     $('#hrCaseModalTitle').textContent=`#HR-${String(id).padStart(4,'0')} · ${c.subject}`;
     $('#hrCaseModalSub').textContent=`${c.nickname||c.first_name} · ${c.department_name||'ไม่ระบุแผนก'} · ${formatDateTime(c.created_at)}`;
     $('#hrCaseStatus').value=c.status; $('#hrCasePriority').value=c.priority; $('#hrCaseNote').value=c.hr_note||''; $('#hrCaseReply').value='';
@@ -2491,7 +2546,7 @@ window.openHrCase=async id=>{
 };
 async function saveHrCase(){
   const id=state.activeHrCaseId;if(!id)return;const btn=$('#hrCaseSaveBtn');btn.disabled=true;
-  try{await api(`/api/hr-cases/${id}`,{method:'PATCH',body:JSON.stringify({status:$('#hrCaseStatus').value,priority:$('#hrCasePriority').value,hr_note:$('#hrCaseNote').value.trim(),assigned_to_me:true})});const reply=$('#hrCaseReply').value.trim();if(reply)await api(`/api/hr-cases/${id}/reply`,{method:'POST',body:JSON.stringify({message:reply})});$('#hrCaseModal').close();await loadAll({silent:true});toast(reply?'บันทึกและตอบกลับพนักงานแล้ว':'บันทึกเรื่อง HR แล้ว');}catch(e){toast(e.message,true);}finally{btn.disabled=false;}
+  try{await api(`/api/hr-cases/${id}`,{method:'PATCH',body:JSON.stringify({status:$('#hrCaseStatus').value,priority:$('#hrCasePriority').value,hr_note:$('#hrCaseNote').value.trim(),assigned_to_me:true})});const reply=$('#hrCaseReply').value.trim();if(reply)await api(`/api/hr-cases/${id}/reply`,{method:'POST',body:JSON.stringify({message:reply})});$('#hrCaseModal').close();await loadViewData('hr-inbox',{force:true});refreshDashboardSoon(80);toast(reply?'บันทึกและตอบกลับพนักงานแล้ว':'บันทึกเรื่อง HR แล้ว');}catch(e){toast(e.message,true);}finally{btn.disabled=false;}
 }
 
 async function saveProbationLeaveLock(){
@@ -2532,6 +2587,10 @@ function showView(name) {
   }
   syncSettingsSidebar();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  // Entering a task-specific inbox means the HR user has seen the current
+  // notification set. Hide those attention items immediately and persist the
+  // read state, while unresolved records remain available inside the page.
+  acknowledgeAttentionForView(name);
   // Route-based lazy loading: opening one menu no longer downloads every HR
   // module. This is especially important on mobile / 4G.
   loadViewData(name).catch(error=>console.warn('[Nakna] route load failed',name,error));
