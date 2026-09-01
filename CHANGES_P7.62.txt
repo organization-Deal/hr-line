@@ -1,0 +1,11 @@
+P7.62 Mobile UX + performance
+- Mobile dialogs changed to bottom-sheet layout with sticky header/actions and scrollable form body.
+- Save/mutation feedback is centered consistently on desktop and mobile.
+- Added view-level loading overlay for route data fetches.
+- Replaced full loadAll on navigation with route-based lazy loading.
+- Opening the app no longer blocks first paint on onboarding/status data for existing users.
+- Initial fallback render no longer renders every module or triggers leave report loading.
+- Background preload is limited to People/Organization common data only.
+- Refresh button refreshes current module only instead of all HR modules.
+- Team Directory mobile controls, row layout, selects, buttons, and sticky search toolbar improved.
+- Updated cache-busting/version labels to V1.0-P7.62.
