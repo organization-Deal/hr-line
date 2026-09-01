@@ -2311,7 +2311,20 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/dashboard' && method === 'GET') {
-    return json(await getDashboard(env.DB, clientId, { includeHrCases: canManagePeopleAdmin(auth.role) }));
+    return json(await getDashboard(env.DB, clientId, { includeHrCases: canManagePeopleAdmin(auth.role), userId: Number(auth.user.id) }));
+  }
+
+  if (path === '/api/dashboard/attention/read' && method === 'POST') {
+    await ensureDashboardAttentionReady(env.DB);
+    const body=await safeJson(request);
+    const allowed=new Set(['missing','leave_pending','probation','contract','candidate','hr_private','request']);
+    const key=String(body.key||'');
+    if(!allowed.has(key)) return json({error:'ประเภทแจ้งเตือนไม่ถูกต้อง'},400);
+    const itemKeys=[...new Set((Array.isArray(body.item_keys)?body.item_keys:[]).map(v=>String(v||'').trim()).filter(Boolean))].slice(0,500);
+    if(!itemKeys.length) return json({ok:true,read_count:0});
+    const statements=itemKeys.map(itemKey=>env.DB.prepare(`INSERT INTO dashboard_attention_reads(client_id,user_id,attention_key,item_key,read_at) VALUES(?1,?2,?3,?4,CURRENT_TIMESTAMP) ON CONFLICT(client_id,user_id,attention_key,item_key) DO UPDATE SET read_at=CURRENT_TIMESTAMP`).bind(clientId,Number(auth.user.id),key,itemKey));
+    await env.DB.batch(statements);
+    return json({ok:true,read_count:itemKeys.length});
   }
 
   if (path === '/api/employees' && method === 'GET') {
@@ -3514,7 +3527,7 @@ async function handleApi(request, env, url, auth, ctx) {
   return json({ error: 'API route not found' }, 404);
 }
 
-async function getDashboard(db, clientId, { includeHrCases=false }={}) {
+async function getDashboard(db, clientId, { includeHrCases=false, userId=null }={}) {
   const client = await getClient(db, clientId);
   if (!client) throw new Error('Client not found');
   const today = dateInBangkok();
@@ -3537,7 +3550,13 @@ async function getDashboard(db, clientId, { includeHrCases=false }={}) {
   const leaves = leaveRes.results || [];
   const candidates = candidatesRes.results || [];
   const requests = requestsRes.results || [];
-  const hrCasesOpen = includeHrCases ? Number((await db.prepare(`SELECT COUNT(*) AS n FROM hr_cases WHERE client_id=?1 AND status NOT IN ('resolved','closed')`).bind(clientId).first().catch(()=>({n:0})))?.n||0) : 0;
+  await ensureDashboardAttentionReady(db);
+  const [hrCasesOpenRes,attentionReadRes]=await Promise.all([
+    includeHrCases ? db.prepare(`SELECT id,created_at FROM hr_cases WHERE client_id=?1 AND status NOT IN ('resolved','closed')`).bind(clientId).all().catch(()=>({results:[]})) : Promise.resolve({results:[]}),
+    userId ? db.prepare(`SELECT attention_key,item_key FROM dashboard_attention_reads WHERE client_id=?1 AND user_id=?2`).bind(clientId,Number(userId)).all().catch(()=>({results:[]})) : Promise.resolve({results:[]}),
+  ]);
+  const hrCasesOpen = hrCasesOpenRes.results || [];
+  const attentionReadSet=new Set((attentionReadRes.results||[]).map(r=>`${String(r.attention_key)}|${String(r.item_key)}`));
   const attendanceByEmployee = new Map(attendance.map(a => [Number(a.employee_id), a]));
 
   const onLeaveTodayIds = new Set();
@@ -3565,7 +3584,8 @@ async function getDashboard(db, clientId, { includeHrCases=false }={}) {
   const late = attendance.filter(a => a.status === 'late').length;
   const onLeave = employees.filter(e => onLeaveTodayIds.has(Number(e.id))).length;
   const expectedToday=employees.filter(employeeExpected);
-  const missing = expectedToday.filter(e=>!attendanceByEmployee.get(Number(e.id))?.check_in_at&&!onLeaveTodayIds.has(Number(e.id))).length;
+  const missingEmployees = expectedToday.filter(e=>!attendanceByEmployee.get(Number(e.id))?.check_in_at&&!onLeaveTodayIds.has(Number(e.id)));
+  const missing = missingEmployees.length;
 
   const birthdays = upcomingBirthdays(employees, today, Number(client.birthday_reminder_days || 7));
   const probation = employees.filter(e => e.probation_end_date && daysBetween(today, e.probation_end_date) >= 0 && daysBetween(today, e.probation_end_date) <= 14)
@@ -3573,20 +3593,25 @@ async function getDashboard(db, clientId, { includeHrCases=false }={}) {
   const contracts = employees.filter(e => e.contract_end_date && daysBetween(today, e.contract_end_date) >= 0 && daysBetween(today, e.contract_end_date) <= 30)
     .map(e => ({ id: e.id, name: displayName(e), date: e.contract_end_date, days: daysBetween(today, e.contract_end_date) }));
   const staleCandidates = candidates.filter(c => !['hired','rejected'].includes(c.stage) && hoursBetween(c.last_activity_at, nowIso) >= 72)
-    .map(c => ({ id: c.id, name: `${c.nickname || c.first_name} · ${c.position_name}`, stage: c.stage, hours: Math.floor(hoursBetween(c.last_activity_at, nowIso)) }));
+    .map(c => ({ id: c.id, name: `${c.nickname || c.first_name} · ${c.position_name}`, stage: c.stage, hours: Math.floor(hoursBetween(c.last_activity_at, nowIso)), activity_at: c.last_activity_at || c.created_at }));
 
   const stages = {};
   for (const c of candidates) stages[c.stage] = (stages[c.stage] || 0) + 1;
 
-  const attention = [
-    { key: 'missing', level: 'danger', label: 'ยังไม่ Check-in', count: missing },
-    { key: 'leave_pending', level: 'warning', label: 'ใบลารออนุมัติ', count: leaves.length },
-    { key: 'probation', level: 'purple', label: 'Probation ใกล้ครบ', count: probation.length },
-    { key: 'contract', level: 'warning', label: 'สัญญาใกล้หมด', count: contracts.length },
-    { key: 'candidate', level: 'purple', label: 'Candidate รอ Action > 3 วัน', count: staleCandidates.length },
-    { key: 'hr_private', level: 'danger', label: 'แจ้งเรื่องส่วนตัวถึง HR', count: hrCasesOpen },
-    { key: 'request', level: 'info', label: 'HR Request ค้าง', count: requests.length },
-  ].filter(x => x.count > 0);
+  const unreadKeys=(key,keys)=>keys.filter(itemKey=>!attentionReadSet.has(`${key}|${itemKey}`));
+  const attentionDefs = [
+    { key: 'missing', level: 'danger', label: 'ยังไม่ Check-in', keys: missingEmployees.map(e=>`missing:${today}:${Number(e.id)}`) },
+    { key: 'leave_pending', level: 'warning', label: 'ใบลารออนุมัติ', keys: leaves.map(l=>`leave_pending:${Number(l.id)}:${String(l.created_at||l.start_date||'')}`) },
+    { key: 'probation', level: 'purple', label: 'Probation ใกล้ครบ', keys: probation.map(e=>`probation:${Number(e.id)}:${String(e.date||'')}`) },
+    { key: 'contract', level: 'warning', label: 'สัญญาใกล้หมด', keys: contracts.map(e=>`contract:${Number(e.id)}:${String(e.date||'')}`) },
+    { key: 'candidate', level: 'purple', label: 'Candidate รอ Action > 3 วัน', keys: staleCandidates.map(c=>`candidate:${Number(c.id)}:${String(c.activity_at||'')}`) },
+    { key: 'hr_private', level: 'danger', label: 'แจ้งเรื่องส่วนตัวถึง HR', keys: hrCasesOpen.map(c=>`hr_private:${Number(c.id)}:${String(c.created_at||'')}`) },
+    { key: 'request', level: 'info', label: 'HR Request ค้าง', keys: requests.map(r=>`request:${Number(r.id)}:${String(r.created_at||'')}`) },
+  ];
+  const attention = attentionDefs.map(def=>{
+    const itemKeys=unreadKeys(def.key,def.keys);
+    return {key:def.key,level:def.level,label:def.label,count:itemKeys.length,total_count:def.keys.length,item_keys:itemKeys};
+  }).filter(x=>x.count>0);
 
   return {
     client: { id: client.id, name: client.name, work_start: client.work_start, timezone: client.timezone },
@@ -3600,7 +3625,7 @@ async function getDashboard(db, clientId, { includeHrCases=false }={}) {
     recruitment: stages,
     pending_leaves: leaves.slice(0, 6),
     requests: requests.slice(0, 6),
-    hr_cases_open: hrCasesOpen,
+    hr_cases_open: hrCasesOpen.length,
     recent_attendance: attendance.slice(0, 8),
   };
 }
@@ -5585,6 +5610,20 @@ async function departmentParentCreatesCycle(db,clientId,departmentId,parentId){
   return false;
 }
 function formatThaiDateOnly(date){try{return new Date(`${date}T12:00:00+07:00`).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit',timeZone:'Asia/Bangkok'});}catch{return date;}}
+
+async function ensureDashboardAttentionReady(db){
+  if(SCHEMA_READY.has('dashboard_attention_reads')) return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS dashboard_attention_reads (
+    client_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    attention_key TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (client_id,user_id,attention_key,item_key)
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_dashboard_attention_reads_user ON dashboard_attention_reads(client_id,user_id,attention_key,read_at)`).run().catch(()=>{});
+  SCHEMA_READY.add('dashboard_attention_reads');
+}
 
 async function ensureV050Ready(db){
   if(SCHEMA_READY.has('v050')) return;
