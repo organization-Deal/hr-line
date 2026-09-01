@@ -1621,10 +1621,15 @@ async function handleApi(request, env, url, auth, ctx) {
   const clientId = auth.clientId ? Number(auth.clientId) : null;
 
   if (path === '/api/me' && method === 'GET') {
-    auth = await reconcileAccountIdentity(env, auth).catch(error => {
-      console.warn(JSON.stringify({level:'warn',event:'account_identity_reconcile_failed',message:String(error?.message||error)}));
-      return auth;
-    });
+    // Account reconciliation can touch several D1 tables and is only needed
+    // immediately after an explicit account-link action. Running it on every
+    // page open made /api/me the critical-path bottleneck.
+    if (url.searchParams.get('reconcile') === '1') {
+      auth = await reconcileAccountIdentity(env, auth).catch(error => {
+        console.warn(JSON.stringify({level:'warn',event:'account_identity_reconcile_failed',message:String(error?.message||error)}));
+        return auth;
+      });
+    }
     const memberships = await getMemberships(env.DB, auth.user.id);
     const claimable = memberships.length ? null : await getClaimableLegacyCompany(env.DB);
     const activeMembership=memberships.find(row=>Number(row.id)===Number(auth.clientId))||memberships[0]||null;
@@ -1728,7 +1733,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.54', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.61', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -7793,27 +7798,59 @@ async function reconcileAccountIdentity(env,auth){
 }
 
 async function getMemberships(db, userId) {
-  await db.prepare(`CREATE TABLE IF NOT EXISTS company_assets (client_id INTEGER PRIMARY KEY, logo_data_url TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
-  const result = await db.prepare(`
-    SELECT c.id, c.name, c.code, m.role,
-           (SELECT logo_data_url FROM company_assets ca WHERE ca.client_id=c.id) AS logo_data_url,
-           (SELECT COUNT(*) FROM employees e WHERE e.client_id=c.id AND e.status!='deleted') AS employee_count,
-           (SELECT COUNT(*) FROM departments d WHERE d.client_id=c.id) AS department_count
-    FROM company_members m JOIN clients c ON c.id=m.client_id
-    WHERE m.user_id=?1 AND m.status='active'
-    ORDER BY m.id
-  `).bind(Number(userId)).all();
+  // One D1 round-trip instead of CREATE TABLE + membership query + 2-3 owner
+  // queries for every company. This endpoint sits on the startup critical path.
+  let result;
+  try {
+    result = await db.prepare(`
+      SELECT c.id, c.name, c.code, m.role,
+             (SELECT logo_data_url FROM company_assets ca WHERE ca.client_id=c.id) AS logo_data_url,
+             (SELECT COUNT(*) FROM employees e WHERE e.client_id=c.id AND e.status!='deleted') AS employee_count,
+             (SELECT COUNT(*) FROM departments d WHERE d.client_id=c.id) AS department_count,
+             COALESCE(
+               (SELECT o.owner_user_id
+                  FROM company_onboarding o
+                 WHERE o.client_id=c.id
+                   AND EXISTS (
+                     SELECT 1 FROM company_members om
+                      WHERE om.client_id=c.id AND om.user_id=o.owner_user_id
+                        AND om.role='owner' AND om.status='active'
+                   )
+                 LIMIT 1),
+               (SELECT om.user_id FROM company_members om
+                 WHERE om.client_id=c.id AND om.role='owner' AND om.status='active'
+                 ORDER BY om.id LIMIT 1)
+             ) AS primary_owner_user_id
+      FROM company_members m JOIN clients c ON c.id=m.client_id
+      WHERE m.user_id=?1 AND m.status='active'
+      ORDER BY m.id
+    `).bind(Number(userId)).all();
+  } catch (error) {
+    // Old workspaces created before company_assets/onboarding existed still get
+    // a fast session response instead of forcing runtime schema DDL on every open.
+    result = await db.prepare(`
+      SELECT c.id, c.name, c.code, m.role,
+             NULL AS logo_data_url,
+             (SELECT COUNT(*) FROM employees e WHERE e.client_id=c.id AND e.status!='deleted') AS employee_count,
+             (SELECT COUNT(*) FROM departments d WHERE d.client_id=c.id) AS department_count,
+             (SELECT om.user_id FROM company_members om
+               WHERE om.client_id=c.id AND om.role='owner' AND om.status='active'
+               ORDER BY om.id LIMIT 1) AS primary_owner_user_id
+      FROM company_members m JOIN clients c ON c.id=m.client_id
+      WHERE m.user_id=?1 AND m.status='active'
+      ORDER BY m.id
+    `).bind(Number(userId)).all();
+  }
   const rows=result.results||[];
   const counts=new Map();
   for(const row of rows){const key=String(row.name||'').trim().toLowerCase();counts.set(key,(counts.get(key)||0)+1);}
-  const mapped=[];
-  for(const row of rows){
-    const primaryOwnerUserId=await getPrimaryOwnerUserId(db,Number(row.id));
+  return rows.map(row=>{
+    const primaryOwnerUserId=Number(row.primary_owner_user_id||0)||null;
     const storedRole=String(row.role||'');
-    const effectiveRole=(storedRole==='owner'&&primaryOwnerUserId&&Number(primaryOwnerUserId)!==Number(userId))?'co_owner':storedRole;
-    mapped.push({...row,stored_role:storedRole,role:effectiveRole,is_primary_owner:Boolean(primaryOwnerUserId&&Number(primaryOwnerUserId)===Number(userId)),duplicate_name:(counts.get(String(row.name||'').trim().toLowerCase())||0)>1});
-  }
-  return mapped;
+    const effectiveRole=(storedRole==='owner'&&primaryOwnerUserId&&primaryOwnerUserId!==Number(userId))?'co_owner':storedRole;
+    const {primary_owner_user_id,...publicRow}=row;
+    return {...publicRow,stored_role:storedRole,role:effectiveRole,is_primary_owner:Boolean(primaryOwnerUserId&&primaryOwnerUserId===Number(userId)),duplicate_name:(counts.get(String(row.name||'').trim().toLowerCase())||0)>1};
+  });
 }
 
 async function getClaimableLegacyCompany(db) {
