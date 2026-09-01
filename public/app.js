@@ -278,6 +278,32 @@ let actionStatusCounter = 0;
 let actionStatusHideTimer = null;
 let actionStatusStartedAt = 0;
 
+function clearTransientTextCaret() {
+  requestAnimationFrame(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) active.blur();
+    const selection = window.getSelection?.();
+    if (selection?.rangeCount) selection.removeAllRanges();
+  });
+}
+
+function setButtonBusy(button, busy, label = 'กำลังบันทึก…') {
+  if (!button) return;
+  if (busy) {
+    if (!button.dataset.idleHtml) button.dataset.idleHtml = button.innerHTML;
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.innerHTML = `<span class="button-inline-spinner" aria-hidden="true"></span><span>${label}</span>`;
+  } else {
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    if (button.dataset.idleHtml) {
+      button.innerHTML = button.dataset.idleHtml;
+      delete button.dataset.idleHtml;
+    }
+  }
+}
+
 function requestActionCopy(path = '', method = 'POST') {
   const p = String(path).toLowerCase();
   const m = String(method || 'POST').toUpperCase();
@@ -310,9 +336,10 @@ function finishActionStatus(ok = true, title = null, text = null) {
   $('#actionStatusText').textContent = text || (ok ? 'ข้อมูลล่าสุดถูกอัปเดตเรียบร้อย' : 'ลองใหม่อีกครั้ง หรือตรวจสอบการเชื่อมต่อ');
   document.body?.classList.remove('is-mutating');
   const elapsed = Date.now() - actionStatusStartedAt;
-  const wait = Math.max(650, 950 - elapsed);
+  const minimumLoadingMs = 280;
+  const wait = Math.max(0, minimumLoadingMs - elapsed);
   clearTimeout(actionStatusHideTimer);
-  actionStatusHideTimer = setTimeout(() => root.classList.add('hidden'), ok ? wait + 850 : wait + 1800);
+  actionStatusHideTimer = setTimeout(() => root.classList.add('hidden'), ok ? wait + 450 : wait + 1600);
 }
 
 function beginMutationStatus(path, method, silent = false) {
@@ -1679,17 +1706,29 @@ window.openPeopleProfile = id => {
 };
 
 async function savePeopleProfile(){
-  const id=Number($('#peopleProfileEmployeeId').value); const button=$('#peopleProfileSaveBtn'); button.disabled=true;
+  const id=Number($('#peopleProfileEmployeeId').value);
+  const button=$('#peopleProfileSaveBtn');
+  const modal=$('#peopleProfileModal');
+  setButtonBusy(button,true,'กำลังบันทึก…');
+  modal?.classList.add('is-saving');
+  modal?.setAttribute('aria-busy','true');
   const location_ids=$$('#peopleProfileLocations input:checked').map(i=>Number(i.value));
   const payload={people_status:$('#peopleProfileStatus').value,department_id:$('#peopleProfileDepartment').value||null,position_id:$('#peopleProfilePosition').value||null,manager_employee_id:$('#peopleProfileManager').value||null,probation_end_date:$('#peopleProfileProbationEnd').value||null,confirmed_at:$('#peopleProfileConfirmedAt').value||null,end_date:$('#peopleProfileEndDate').value||null,end_reason:$('#peopleProfileEndReason').value.trim()||null,location_ids};
   try{
     await api(`/api/employees/${id}/people-profile`,{method:'PATCH',body:JSON.stringify(payload)});
     patchEmployeeLocal(id,payload);
-    $('#peopleProfileModal').close();
+    modal?.close();
+    clearTransientTextCaret();
     renderPeopleFast();
     toast('บันทึกข้อมูลพนักงานแล้ว');
     schedulePeopleRefresh(650);
-  }catch(e){toast(e.message,true);}finally{button.disabled=false;}
+  }catch(e){
+    toast(e.message,true);
+  }finally{
+    modal?.classList.remove('is-saving');
+    modal?.removeAttribute('aria-busy');
+    setButtonBusy(button,false);
+  }
 }
 
 function renderInviteCenter() {
