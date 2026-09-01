@@ -62,8 +62,14 @@ function initBootLogo(){const logo=$('#bootLogo');if(!logo)return;const markMiss
 function startBootWatchdog(){clearTimeout(bootWatchdog);setBootStatus('กำลังเตรียมพื้นที่ทำงานของคุณ',false);bootWatchdog=setTimeout(()=>{if(!$('#bootSplash')?.classList.contains('hidden'))setBootStatus('เครือข่ายตอบช้ากว่าปกติ',true);},7000);}
 function stopBootWatchdog(){clearTimeout(bootWatchdog);bootWatchdog=null;}
 
-const DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
+// P7.61 — Stale-while-revalidate startup cache.
+// sessionStorage disappeared when the tab was closed, so every reopen behaved
+// like a cold start. Keep only the dashboard/company shell in localStorage,
+// render it after the session is verified, then refresh in the background.
+const DASHBOARD_CACHE_FRESH_MS = 5 * 60 * 1000;
+const DASHBOARD_CACHE_MAX_STALE_MS = 12 * 60 * 60 * 1000;
 let deferredLoadTimer = null;
+let deferredIdleHandle = null;
 let deferredLoadInFlight = false;
 
 function dashboardCacheKey() {
@@ -74,10 +80,16 @@ function readDashboardCache() {
   const key = dashboardCacheKey();
   if (!key) return null;
   try {
-    const raw = sessionStorage.getItem(key);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const cached = JSON.parse(raw);
-    if (!cached?.dashboard || Date.now() - Number(cached.saved_at || 0) > DASHBOARD_CACHE_TTL_MS) return null;
+    const age = Date.now() - Number(cached?.saved_at || 0);
+    if (!cached?.dashboard || age > DASHBOARD_CACHE_MAX_STALE_MS) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    cached.is_stale = age > DASHBOARD_CACHE_FRESH_MS;
+    cached.age_ms = Math.max(0, age);
     return cached;
   } catch { return null; }
 }
@@ -85,11 +97,20 @@ function writeDashboardCache() {
   const key = dashboardCacheKey();
   if (!key || !state.dashboard) return;
   try {
-    sessionStorage.setItem(key, JSON.stringify({
+    localStorage.setItem(key, JSON.stringify({
+      cache_version: 2,
       saved_at: Date.now(),
       dashboard: state.dashboard,
       companyProfile: state.companyProfile || null,
     }));
+  } catch {}
+}
+function clearNaknaStartupCache() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('nakna.dashboard.')) localStorage.removeItem(key);
+    }
   } catch {}
 }
 function hydrateDashboardCache() {
@@ -131,14 +152,24 @@ async function loadDashboardFast({ silent = true } = {}) {
     console.info(`[Nakna] fast dashboard ${elapsed}ms`);
   }
 }
-function scheduleDeferredLoad(delay = 250) {
+function scheduleDeferredLoad(delay = 900) {
   clearTimeout(deferredLoadTimer);
-  deferredLoadTimer = setTimeout(async () => {
+  if (deferredIdleHandle && 'cancelIdleCallback' in window) {
+    try { cancelIdleCallback(deferredIdleHandle); } catch {}
+  }
+  const run = async () => {
     if (deferredLoadInFlight) return;
     deferredLoadInFlight = true;
     try { await loadAll({ silent: true, background: true }); }
     finally { deferredLoadInFlight = false; }
-  }, delay);
+  };
+  deferredLoadTimer = setTimeout(() => {
+    if ('requestIdleCallback' in window) {
+      deferredIdleHandle = requestIdleCallback(() => run(), { timeout: 2200 });
+    } else {
+      run();
+    }
+  }, Math.max(0, delay));
 }
 
 let peopleRefreshTimer = null;
@@ -417,14 +448,22 @@ async function boot() {
   loadPublicOnboarding();
   const returnState = handleReturnMessage();
   try {
-    const ready = await loadSessionOnly({ forceNewBusiness: returnState.forceNewBusiness });
+    const ready = await loadSessionOnly({ forceNewBusiness: returnState.forceNewBusiness, reconcileIdentity: returnState.reconcileIdentity });
     if (!ready) return;
     const onboardingReady = await maybeRunOnboarding({ forceNewBusiness: returnState.forceNewBusiness });
     if (!onboardingReady) return;
+
+    // Show the application as soon as authentication is verified. Modern apps
+    // do not keep a blocking splash on screen while every dashboard request is
+    // running; they render cached/stale data first and revalidate it behind the
+    // scenes (stale-while-revalidate).
     showAppShell();
     const hadCache = hydrateDashboardCache();
-    await loadDashboardFast({ silent: true });
-    scheduleDeferredLoad(hadCache ? 450 : 180);
+    if (!hadCache) {
+      try { renderFallbackShell(); } catch {}
+    }
+    loadDashboardFast({ silent: true }).catch(() => {});
+    scheduleDeferredLoad(hadCache ? 1200 : 550);
   } catch (error) {
     showAppShell();
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
@@ -671,9 +710,10 @@ function bindEvents() {
   });
 }
 
-async function loadSessionOnly({ forceNewBusiness = false } = {}) {
+async function loadSessionOnly({ forceNewBusiness = false, reconcileIdentity = false } = {}) {
   try {
-    const data = await api('/api/me', { timeoutMs: 12000 });
+    const meUrl = reconcileIdentity ? '/api/me?reconcile=1' : '/api/me';
+    const data = await api(meUrl, { timeoutMs: 9000 });
     state.me = data;
     hideLogin();
     renderIdentity();
@@ -951,6 +991,7 @@ async function claimLegacyCompany() {
 
 async function logout() {
   try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
+  clearNaknaStartupCache();
   state.me = null;
   state.googleWorkspace = null;
   state.companyProfile = null;
@@ -967,7 +1008,10 @@ async function switchCompany(clientId) {
       const onboardingReady = await maybeRunOnboarding();
       if (onboardingReady) {
         showAppShell();
-        if (await ensureWorkspaceReady()) await loadAll({ silent: true });
+        const hadCache=hydrateDashboardCache();
+        if(!hadCache) renderLoadingState();
+        loadDashboardFast({silent:true}).catch(()=>{});
+        scheduleDeferredLoad(hadCache?900:350);
       }
     }
     toast('เปลี่ยนบริษัทเรียบร้อยแล้ว');
@@ -1173,6 +1217,7 @@ function handleReturnMessage() {
   const forceNewBusiness = url.searchParams.get('setup') === 'new';
   const googleConnected = url.searchParams.get('google_workspace') === 'connected';
   const joinedWorkspace = url.searchParams.get('workspace') === 'joined';
+  const reconcileIdentity = url.searchParams.get('account') === 'linked';
   if (googleConnected) toast('เชื่อม Gmail + Drive + Google Sheets เรียบร้อยแล้ว');
   if (url.searchParams.get('auth') === 'success') toast('เข้าสู่ระบบด้วย Google เรียบร้อยแล้ว');
   if (url.searchParams.get('account') === 'linked') toast('เชื่อมบัญชี Google กับ LINE แล้ว · มือถือและคอมใช้บัญชีเดียวกัน');
@@ -1194,7 +1239,7 @@ function handleReturnMessage() {
     const query = url.searchParams.toString();
     history.replaceState({}, '', `${url.pathname}${query ? `?${query}` : ''}${url.hash}`);
   }
-  return { forceNewBusiness, googleConnected, joinedWorkspace };
+  return { forceNewBusiness, googleConnected, joinedWorkspace, reconcileIdentity };
 }
 
 async function ensureWorkspaceReady() {
