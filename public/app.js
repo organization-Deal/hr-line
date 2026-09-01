@@ -140,6 +140,83 @@ function scheduleDeferredLoad(delay = 250) {
     finally { deferredLoadInFlight = false; }
   }, delay);
 }
+
+let peopleRefreshTimer = null;
+let peopleRefreshInFlight = null;
+let peopleRefreshNeedsLookups = false;
+
+function normalizeNullableId(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function patchEmployeeLocal(employeeId, patch = {}) {
+  const employee = state.employees.find(e => Number(e.id) === Number(employeeId));
+  if (!employee) return null;
+  Object.assign(employee, patch);
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'department_id')) {
+    const departmentId = normalizeNullableId(patch.department_id);
+    employee.department_id = departmentId;
+    const department = (state.peopleCore?.departments || []).find(d => Number(d.id) === Number(departmentId));
+    employee.department_name = department?.name || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'position_id')) {
+    const positionId = normalizeNullableId(patch.position_id);
+    employee.position_id = positionId;
+    const position = (state.peopleCore?.positions || []).find(p => Number(p.id) === Number(positionId));
+    employee.position_name = position?.name || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'manager_employee_id')) {
+    employee.manager_employee_id = normalizeNullableId(patch.manager_employee_id);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'people_status')) {
+    const peopleStatus = String(patch.people_status || 'employee');
+    employee.people_status = peopleStatus;
+    employee.status = ['leave_of_absence','resigned','terminated','alumni','inactive'].includes(peopleStatus) ? 'inactive' : 'active';
+  }
+  if (Array.isArray(patch.location_ids)) {
+    const ids = [...new Set(patch.location_ids.map(Number).filter(Number.isFinite))];
+    employee.work_location_ids = ids.join(',');
+    employee.work_location_names = ids.map(id => state.workLocations.find(x => Number(x.id) === Number(id))?.name).filter(Boolean).join(', ');
+  }
+  return employee;
+}
+
+function renderPeopleFast() {
+  try { renderEmployees($('#employeeSearch')?.value || ''); } catch {}
+  try { renderPeopleCore(); } catch {}
+  try { renderSettingsSidebar(); } catch {}
+}
+
+async function refreshPeopleData({ includeLookups = false, render = true } = {}) {
+  const tasks = [api('/api/employees'), api('/api/people-core')];
+  if (includeLookups) tasks.push(api('/api/lookups'));
+  const [employees, peopleCore, lookups] = await Promise.all(tasks);
+  state.employees = employees?.data || state.employees || [];
+  state.peopleCore = peopleCore || state.peopleCore || { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} };
+  if (includeLookups && lookups) state.lookups = lookups;
+  if (render) renderPeopleFast();
+  return true;
+}
+
+function schedulePeopleRefresh(delay = 700, { includeLookups = false } = {}) {
+  peopleRefreshNeedsLookups = peopleRefreshNeedsLookups || includeLookups;
+  clearTimeout(peopleRefreshTimer);
+  peopleRefreshTimer = setTimeout(async () => {
+    if (peopleRefreshInFlight) {
+      schedulePeopleRefresh(350, { includeLookups: peopleRefreshNeedsLookups });
+      return;
+    }
+    const needsLookups = peopleRefreshNeedsLookups;
+    peopleRefreshNeedsLookups = false;
+    peopleRefreshInFlight = refreshPeopleData({ includeLookups: needsLookups, render: true });
+    try { await peopleRefreshInFlight; }
+    catch (error) { console.warn('[Nakna] people refresh failed', error?.message || error); }
+    finally { peopleRefreshInFlight = null; }
+  }, delay);
+}
 function warmWorkspaceInBackground() {
   // Migrations are the source of truth in production. Runtime bootstrap is only
   // a safety net and must never block first paint on mobile.
@@ -1604,7 +1681,15 @@ window.openPeopleProfile = id => {
 async function savePeopleProfile(){
   const id=Number($('#peopleProfileEmployeeId').value); const button=$('#peopleProfileSaveBtn'); button.disabled=true;
   const location_ids=$$('#peopleProfileLocations input:checked').map(i=>Number(i.value));
-  try{await api(`/api/employees/${id}/people-profile`,{method:'PATCH',body:JSON.stringify({people_status:$('#peopleProfileStatus').value,department_id:$('#peopleProfileDepartment').value||null,position_id:$('#peopleProfilePosition').value||null,manager_employee_id:$('#peopleProfileManager').value||null,probation_end_date:$('#peopleProfileProbationEnd').value||null,confirmed_at:$('#peopleProfileConfirmedAt').value||null,end_date:$('#peopleProfileEndDate').value||null,end_reason:$('#peopleProfileEndReason').value.trim()||null,location_ids})});$('#peopleProfileModal').close();await loadAll({silent:true});toast('อัปเดตสถานะพนักงานแล้ว');}catch(e){toast(e.message,true);}finally{button.disabled=false;}
+  const payload={people_status:$('#peopleProfileStatus').value,department_id:$('#peopleProfileDepartment').value||null,position_id:$('#peopleProfilePosition').value||null,manager_employee_id:$('#peopleProfileManager').value||null,probation_end_date:$('#peopleProfileProbationEnd').value||null,confirmed_at:$('#peopleProfileConfirmedAt').value||null,end_date:$('#peopleProfileEndDate').value||null,end_reason:$('#peopleProfileEndReason').value.trim()||null,location_ids};
+  try{
+    await api(`/api/employees/${id}/people-profile`,{method:'PATCH',body:JSON.stringify(payload)});
+    patchEmployeeLocal(id,payload);
+    $('#peopleProfileModal').close();
+    renderPeopleFast();
+    toast('บันทึกข้อมูลพนักงานแล้ว');
+    schedulePeopleRefresh(650);
+  }catch(e){toast(e.message,true);}finally{button.disabled=false;}
 }
 
 function renderInviteCenter() {
@@ -2372,10 +2457,17 @@ async function saveDepartmentAssignment(){
   const button=$('#departmentAssignSaveBtn'); button.disabled=true;
   try{
     const result=await api(`/api/departments/${id}/assign`,{method:'POST',body:JSON.stringify({employee_ids})});
+    const selected=new Set(employee_ids.map(Number));
+    state.employees.forEach(employee=>{
+      if(employee.status!=='active')return;
+      if(Number(employee.department_id)===id&&!selected.has(Number(employee.id))) patchEmployeeLocal(employee.id,{department_id:null});
+      if(selected.has(Number(employee.id))) patchEmployeeLocal(employee.id,{department_id:id});
+    });
     $('#departmentAssignModal').close();
-    await loadAll({silent:true});
+    renderPeopleFast();
     const resetCount=Number(result?.position_reset_count||0);
     toast(resetCount?`จัดพนักงานเข้าแผนกแล้ว ${employee_ids.length} คน · ล้างตำแหน่งเดิม ${resetCount} คน`:`จัดพนักงานเข้าแผนกแล้ว ${employee_ids.length} คน`);
+    schedulePeopleRefresh(650);
   }catch(e){toast(e.message,true);}finally{button.disabled=false;}
 }
 
@@ -2529,9 +2621,15 @@ async function savePositionAssignment(){
   const button=$('#positionAssignSaveBtn'); button.disabled=true;
   try{
     await api(`/api/positions/${id}/assign`,{method:'POST',body:JSON.stringify({employee_ids})});
+    const selected=new Set(employee_ids.map(Number));
+    state.employees.forEach(employee=>{
+      if(Number(employee.position_id)===id&&!selected.has(Number(employee.id))) patchEmployeeLocal(employee.id,{position_id:null});
+      if(selected.has(Number(employee.id))) patchEmployeeLocal(employee.id,{position_id:id});
+    });
     $('#positionAssignModal').close();
-    await loadAll({silent:true});
+    renderPeopleFast();
     toast(`บันทึกคนในตำแหน่งแล้ว ${employee_ids.length} คน`);
+    schedulePeopleRefresh(650);
   }catch(e){toast(e.message,true);}finally{button.disabled=false;}
 }
 
@@ -2541,12 +2639,26 @@ window.clearTeamDirectoryFilters = () => { state.teamDirectorySearch=''; state.t
 window.quickSetEmployeePosition = async (employeeId,positionId) => {
   const employee=state.employees.find(e=>Number(e.id)===Number(employeeId)); if(!employee)return;
   const select=document.querySelector(`[data-quick-position="${Number(employeeId)}"]`); if(select)select.disabled=true;
-  try{await api(`/api/employees/${Number(employeeId)}/team-placement`,{method:'PATCH',body:JSON.stringify({department_id:employee.department_id||null,position_id:positionId||null})});await loadAll({silent:true});toast('อัปเดตตำแหน่งแล้ว');}catch(e){toast(e.message,true);await loadAll({silent:true});}finally{if(select)select.disabled=false;}
+  const previous=employee.position_id||null;
+  try{
+    await api(`/api/employees/${Number(employeeId)}/team-placement`,{method:'PATCH',body:JSON.stringify({department_id:employee.department_id||null,position_id:positionId||null})});
+    patchEmployeeLocal(employeeId,{position_id:positionId||null});
+    renderPeopleFast();
+    toast('อัปเดตตำแหน่งแล้ว');
+    schedulePeopleRefresh(800);
+  }catch(e){patchEmployeeLocal(employeeId,{position_id:previous});renderPeopleFast();toast(e.message,true);}finally{if(select)select.disabled=false;}
 };
 window.quickSetEmployeeDepartment = async (employeeId,departmentId) => {
   const employee=state.employees.find(e=>Number(e.id)===Number(employeeId)); if(!employee)return;
   const select=document.querySelector(`[data-quick-department="${Number(employeeId)}"]`); if(select)select.disabled=true;
-  try{await api(`/api/employees/${Number(employeeId)}/team-placement`,{method:'PATCH',body:JSON.stringify({department_id:departmentId||null,position_id:employee.position_id||null})});await loadAll({silent:true});toast('ย้ายแผนกแล้ว');}catch(e){toast(e.message,true);await loadAll({silent:true});}finally{if(select)select.disabled=false;}
+  const previous=employee.department_id||null;
+  try{
+    await api(`/api/employees/${Number(employeeId)}/team-placement`,{method:'PATCH',body:JSON.stringify({department_id:departmentId||null,position_id:employee.position_id||null})});
+    patchEmployeeLocal(employeeId,{department_id:departmentId||null});
+    renderPeopleFast();
+    toast('ย้ายแผนกแล้ว');
+    schedulePeopleRefresh(800);
+  }catch(e){patchEmployeeLocal(employeeId,{department_id:previous});renderPeopleFast();toast(e.message,true);}finally{if(select)select.disabled=false;}
 };
 
 function renderPeopleCore(){
@@ -2611,9 +2723,15 @@ async function saveDepartment(){
     $('#departmentModal').close();
     const resumePosition=Boolean(state.resumePositionAfterDepartment && isCreating);
     state.resumePositionAfterDepartment=false;
-    await loadAll({silent:true});
-    toast('บันทึกโครงสร้างแผนกแล้ว');
-    if(resumePosition) requestAnimationFrame(()=>openPositionModal(Number(result?.id||0)));
+    const departmentId=Number(id||result?.id||0);
+    const manager=state.employees.find(e=>Number(e.id)===Number(body.manager_employee_id));
+    const patch={id:departmentId,name:body.name,code:body.code||null,parent_department_id:normalizeNullableId(body.parent_department_id),manager_employee_id:normalizeNullableId(body.manager_employee_id),sort_order:Number(body.sort_order||0),manager_nickname:manager?.nickname||null,manager_first_name:manager?.first_name||null,employee_count:Number((state.peopleCore.departments||[]).find(d=>Number(d.id)===departmentId)?.employee_count||0)};
+    const currentIndex=(state.peopleCore.departments||[]).findIndex(d=>Number(d.id)===departmentId);
+    if(currentIndex>=0) state.peopleCore.departments[currentIndex]={...state.peopleCore.departments[currentIndex],...patch}; else state.peopleCore.departments.push(patch);
+    renderPeopleFast();
+    toast('บันทึกแผนกแล้ว');
+    schedulePeopleRefresh(650,{includeLookups:true});
+    if(resumePosition) requestAnimationFrame(()=>openPositionModal());
   }catch(e){toast(e.message,true);}finally{b.disabled=false;}
 }
 function openPositionModal(){
@@ -2624,7 +2742,17 @@ function openPositionModal(){
 async function savePosition(){
   const body={name:$('#positionName').value.trim()}; if(body.name.length<2)return toast('กรุณาใส่ชื่อตำแหน่ง',true);
   const b=$('#positionSaveBtn');b.disabled=true;
-  try{const result=await api('/api/positions',{method:'POST',body:JSON.stringify(body)});$('#positionModal').close();await loadAll({silent:true});toast(result?.reused?'ตำแหน่งนี้มีอยู่แล้ว ใช้รายการเดิมได้เลย':'เพิ่มตำแหน่งกลางแล้ว');const employeeId=Number(state.returnToPeopleProfileAfterPosition||0);state.returnToPeopleProfileAfterPosition=null;if(employeeId)requestAnimationFrame(()=>window.openPeopleProfile(employeeId));}catch(e){toast(e.message,true);}finally{b.disabled=false;}
+  try{
+    const result=await api('/api/positions',{method:'POST',body:JSON.stringify(body)});
+    const positionId=Number(result?.id||0);
+    if(positionId&&!state.peopleCore.positions.some(p=>Number(p.id)===positionId)) state.peopleCore.positions.push({id:positionId,name:body.name,department_id:null,employee_count:0});
+    $('#positionModal').close();
+    renderPeopleFast();
+    toast(result?.reused?'ตำแหน่งนี้มีอยู่แล้ว ใช้รายการเดิมได้เลย':'เพิ่มตำแหน่งกลางแล้ว');
+    schedulePeopleRefresh(650,{includeLookups:true});
+    const employeeId=Number(state.returnToPeopleProfileAfterPosition||0);state.returnToPeopleProfileAfterPosition=null;
+    if(employeeId)requestAnimationFrame(()=>window.openPeopleProfile(employeeId));
+  }catch(e){toast(e.message,true);}finally{b.disabled=false;}
 }
 window.openScheduleFor=(type,id)=>openScheduleModal(type,id);
 window.resetSchedule=async(type,id)=>{if(!confirm('ล้างตาราง Override นี้และกลับไปใช้ค่าระดับบนใช่ไหม?'))return;try{await api(`/api/work-schedules/${type}/${Number(id||0)}`,{method:'DELETE'});await loadAll({silent:true});toast('ล้างตาราง Override แล้ว');}catch(e){toast(e.message,true);}};
