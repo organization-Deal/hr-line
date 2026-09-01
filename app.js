@@ -47,6 +47,8 @@ const state = {
   activeSettingsCategory: null,
   settingsNavExpanded: false,
   organizationViewMode: (() => { try { const saved = localStorage.getItem('nakna.organizationViewMode'); return saved === 'list' ? 'list' : 'chart'; } catch { return 'chart'; } })(),
+  teamDirectorySearch: '',
+  teamDirectoryDepartment: 'all',
 };
 
 const $ = selector => document.querySelector(selector);
@@ -167,7 +169,7 @@ const leaveLabels = {
 const viewMeta = {
   dashboard: ['ภาพรวม', 'HR COMMAND CENTER'],
   employees: ['พนักงาน', 'PEOPLE'],
-  organization: ['โครงสร้างทีม', 'ORGANIZATION'],
+  organization: ['ทีมและตำแหน่ง', 'TEAM DIRECTORY'],
   recruitment: ['Recruitment', 'TALENT'],
   benefits: ['สวัสดิการ', 'BENEFITS'],
   attendance: ['เวลาเข้างาน', 'WORKDAY'],
@@ -526,7 +528,8 @@ function bindEvents() {
   if ($('#organizationRootDropZone')) { $('#organizationRootDropZone').ondragover = e => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }; $('#organizationRootDropZone').ondragleave = e => e.currentTarget.classList.remove('drag-over'); $('#organizationRootDropZone').ondrop = async e => { e.preventDefault(); e.currentTarget.classList.remove('drag-over'); const id=Number(e.dataTransfer.getData('text/plain')||0); if(id) await setDepartmentParentQuick(id,null); }; }
   if ($('#departmentLinkSaveBtn')) $('#departmentLinkSaveBtn').onclick = saveDepartmentLink;
   $('#positionSaveBtn').onclick = savePosition;
-  if ($('#positionCreateDepartmentBtn')) $('#positionCreateDepartmentBtn').onclick = () => { $('#positionModal')?.close(); state.resumePositionAfterDepartment = true; openDepartmentModal(); };
+  if ($('#peopleProfileCreatePositionBtn')) $('#peopleProfileCreatePositionBtn').onclick = () => { $('#peopleProfileModal')?.close(); state.returnToPeopleProfileAfterPosition = Number($('#peopleProfileEmployeeId')?.value||0); openPositionModal(); };
+  $$('[data-position-preset]').forEach(button=>button.onclick=()=>{ if($('#positionName')) $('#positionName').value=button.dataset.positionPreset||''; });
   $('#scheduleSaveBtn').onclick = saveSchedule;
   $('#scheduleScopeType').onchange = refreshScheduleTarget;
   $('#holidaySaveBtn').onclick = saveHoliday;
@@ -1589,8 +1592,8 @@ window.openPeopleProfile = id => {
   const profileDepartment=$('#peopleProfileDepartment'); const profilePosition=$('#peopleProfilePosition');
   const profileDepartments=state.peopleCore.departments||[]; const profilePositions=state.peopleCore.positions||[];
   profileDepartment.innerHTML=`<option value="">ไม่ระบุแผนก</option>${profileDepartments.map(d=>`<option value="${d.id}" ${Number(employee.department_id)===Number(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}`;
-  const renderProfilePositions=()=>{const departmentId=Number(profileDepartment.value||0);const filtered=profilePositions.filter(pos=>!departmentId||!pos.department_id||Number(pos.department_id)===departmentId);profilePosition.innerHTML=`<option value="">ไม่ระบุตำแหน่ง</option>${filtered.map(pos=>`<option value="${pos.id}" ${Number(employee.position_id)===Number(pos.id)?'selected':''}>${escapeHtml(pos.name)}${pos.department_name?` · ${escapeHtml(pos.department_name)}`:''}</option>`).join('')}`;};
-  profileDepartment.onchange=()=>{profilePosition.value='';renderProfilePositions();}; renderProfilePositions();
+  const renderProfilePositions=()=>{const sorted=[...profilePositions].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th'));profilePosition.innerHTML=`<option value="">ไม่ระบุตำแหน่ง</option>${sorted.map(pos=>`<option value="${pos.id}" ${Number(employee.position_id)===Number(pos.id)?'selected':''}>${escapeHtml(pos.name)}</option>`).join('')}`;};
+  profileDepartment.onchange=()=>{}; renderProfilePositions();
   $('#peopleProfileManager').innerHTML=`<option value="">ไม่ระบุ</option>${state.employees.filter(e=>Number(e.id)!==Number(id)&&e.status==='active').map(e=>`<option value="${e.id}" ${Number(employee.manager_employee_id)===Number(e.id)?'selected':''}>${escapeHtml(e.nickname||e.first_name)}${e.department_name?` · ${escapeHtml(e.department_name)}`:''}</option>`).join('')}`;
   $('#peopleProfileProbationEnd').value=employee.probation_end_date||''; $('#peopleProfileConfirmedAt').value=employee.confirmed_at||''; $('#peopleProfileEndDate').value=employee.end_date||''; $('#peopleProfileEndReason').value=employee.end_reason||'';
   const selectedLocations=new Set(String(employee.work_location_ids||'').split(',').filter(Boolean).map(Number));
@@ -2532,25 +2535,46 @@ async function savePositionAssignment(){
   }catch(e){toast(e.message,true);}finally{button.disabled=false;}
 }
 
+window.setTeamDirectorySearch = value => { state.teamDirectorySearch=String(value||''); renderPeopleCore(); requestAnimationFrame(()=>{const input=$('#teamDirectorySearch');if(input){input.focus();try{input.setSelectionRange(input.value.length,input.value.length)}catch{}}}); };
+window.setTeamDirectoryDepartment = value => { state.teamDirectoryDepartment=String(value||'all'); renderPeopleCore(); };
+window.clearTeamDirectoryFilters = () => { state.teamDirectorySearch=''; state.teamDirectoryDepartment='all'; renderPeopleCore(); };
+window.quickSetEmployeePosition = async (employeeId,positionId) => {
+  const employee=state.employees.find(e=>Number(e.id)===Number(employeeId)); if(!employee)return;
+  const select=document.querySelector(`[data-quick-position="${Number(employeeId)}"]`); if(select)select.disabled=true;
+  try{await api(`/api/employees/${Number(employeeId)}/team-placement`,{method:'PATCH',body:JSON.stringify({department_id:employee.department_id||null,position_id:positionId||null})});await loadAll({silent:true});toast('อัปเดตตำแหน่งแล้ว');}catch(e){toast(e.message,true);await loadAll({silent:true});}finally{if(select)select.disabled=false;}
+};
+window.quickSetEmployeeDepartment = async (employeeId,departmentId) => {
+  const employee=state.employees.find(e=>Number(e.id)===Number(employeeId)); if(!employee)return;
+  const select=document.querySelector(`[data-quick-department="${Number(employeeId)}"]`); if(select)select.disabled=true;
+  try{await api(`/api/employees/${Number(employeeId)}/team-placement`,{method:'PATCH',body:JSON.stringify({department_id:departmentId||null,position_id:employee.position_id||null})});await loadAll({silent:true});toast('ย้ายแผนกแล้ว');}catch(e){toast(e.message,true);await loadAll({silent:true});}finally{if(select)select.disabled=false;}
+};
+
 function renderPeopleCore(){
   const core=state.peopleCore||{}; const departments=core.departments||[]; const schedules=core.schedules||[]; const holidays=core.holidays||[];
   const org=$('#organizationChart');
   if(org){
     const activeEmployees=state.employees.filter(e=>e.status==='active');
-    const positions=core.positions||[];
-    const sortedDepartments=[...departments].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th'));
-    const employeesForDepartment=id=>activeEmployees.filter(e=>Number(e.department_id)===Number(id)).sort((a,b)=>String(a.nickname||a.first_name||'').localeCompare(String(b.nickname||b.first_name||''),'th'));
-    const departmentPositions=id=>positions.filter(p=>Number(p.department_id)===Number(id));
-    const personRow=e=>`<div class="dept-person-row"><div class="dept-person-main"><span class="dept-person-avatar">${escapeHtml(initial(e))}</span><div class="dept-person-copy"><strong>${escapeHtml(e.nickname||e.first_name||'ไม่ระบุชื่อ')} ${escapeHtml(e.last_name||'')}</strong><small>${escapeHtml(e.employee_code||'ไม่มีรหัสพนักงาน')}</small></div></div><div class="dept-person-position"><span>ตำแหน่ง</span><strong>${escapeHtml(e.position_name||'ยังไม่ระบุตำแหน่ง')}</strong></div><button class="secondary-btn dept-person-edit" type="button" onclick="window.openPeopleProfile(${Number(e.id)})">แก้ไข</button></div>`;
-    const departmentCard=d=>{
-      const people=employeesForDepartment(d.id);
-      const deptPositions=departmentPositions(d.id);
-      const manager=d.manager_employee_id?escapeHtml(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว'):'ยังไม่กำหนด';
-      return `<article class="department-directory-card"><div class="department-directory-head"><div><div class="department-title-line"><h3>${escapeHtml(d.name)}</h3><span class="badge badge-soft">${people.length} คน</span></div><p>หัวหน้า: ${manager} · ${deptPositions.length} ตำแหน่ง</p></div><div class="department-directory-actions"><button class="secondary-btn" type="button" onclick="window.openDepartmentAssignment(${Number(d.id)})">จัดพนักงาน</button><button class="text-btn" type="button" onclick="window.openPositionForDepartment(${Number(d.id)})">+ ตำแหน่ง</button><button class="text-btn" type="button" onclick="window.editDepartment(${Number(d.id)})">ตั้งค่าแผนก</button></div></div><div class="department-people-list">${people.length?people.map(personRow).join(''):`<div class="department-empty"><strong>ยังไม่มีพนักงานในแผนกนี้</strong><span>กด “จัดพนักงาน” เพื่อเลือกคนเข้ามา</span></div>`}</div></article>`;
-    };
-    const unassigned=activeEmployees.filter(e=>!e.department_id);
-    const unassignedCard=unassigned.length?`<article class="department-directory-card unassigned"><div class="department-directory-head"><div><div class="department-title-line"><h3>ยังไม่ระบุแผนก</h3><span class="badge badge-warning">${unassigned.length} คน</span></div><p>พนักงานกลุ่มนี้ยังไม่ได้ถูกจัดเข้าแผนก</p></div></div><div class="department-people-list">${unassigned.map(personRow).join('')}</div></article>`:'';
-    org.innerHTML=sortedDepartments.length||unassigned.length?`<div class="org-directory-summary"><div><strong>${sortedDepartments.length}</strong><span>แผนก</span></div><div><strong>${activeEmployees.length}</strong><span>พนักงาน</span></div><div><strong>${positions.length}</strong><span>ตำแหน่ง</span></div></div><div class="department-directory-list">${sortedDepartments.map(departmentCard).join('')}${unassignedCard}</div>`:emptyState('ยังไม่มีข้อมูลทีม','เริ่มจากเพิ่มแผนก แล้วจัดพนักงานและตำแหน่งในแต่ละแผนก');
+    const positions=[...(core.positions||[])].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th'));
+    const departments=[...(core.departments||[])].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th'));
+    const query=String(state.teamDirectorySearch||'').trim().toLowerCase();
+    const deptFilter=String(state.teamDirectoryDepartment||'all');
+    const matches=e=>!query||[e.nickname,e.first_name,e.last_name,e.employee_code,e.department_name,e.position_name].some(v=>String(v||'').toLowerCase().includes(query));
+    const positionOptions=e=>`<option value="">ยังไม่ระบุตำแหน่ง</option>${positions.map(p=>`<option value="${p.id}" ${Number(e.position_id)===Number(p.id)?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}`;
+    const departmentOptions=e=>`<option value="">ยังไม่ระบุแผนก</option>${departments.map(d=>`<option value="${d.id}" ${Number(e.department_id)===Number(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}`;
+    const personRow=e=>`<div class="team-directory-row"><div class="team-person-cell"><span class="team-person-avatar">${escapeHtml(initial(e))}</span><div><strong>${escapeHtml(e.nickname||e.first_name||'ไม่ระบุชื่อ')} ${escapeHtml(e.last_name||'')}</strong><small>${escapeHtml(e.employee_code||'ไม่มีรหัสพนักงาน')}</small></div></div><div class="team-position-cell"><span class="mobile-cell-label">ตำแหน่ง</span><select data-quick-position="${Number(e.id)}" onchange="window.quickSetEmployeePosition(${Number(e.id)},this.value)">${positionOptions(e)}</select></div><div class="team-department-cell"><span class="mobile-cell-label">แผนก</span><select data-quick-department="${Number(e.id)}" onchange="window.quickSetEmployeeDepartment(${Number(e.id)},this.value)">${departmentOptions(e)}</select></div><div class="team-status-cell"><span class="people-status ${peopleStatusTone(e.people_status||'employee')}">${escapeHtml(peopleStatusLabel(e.people_status||'employee'))}</span></div><button class="icon-action-btn" type="button" onclick="window.openPeopleProfile(${Number(e.id)})">แก้ไข</button></div>`;
+    const groups=[];
+    for(const d of departments){
+      if(deptFilter!=='all'&&deptFilter!==String(d.id))continue;
+      const people=activeEmployees.filter(e=>Number(e.department_id)===Number(d.id)&&matches(e));
+      if(query&&!people.length)continue;
+      groups.push({id:d.id,name:d.name,manager:d.manager_employee_id?(d.manager_nickname||d.manager_first_name||'กำหนดแล้ว'):'ยังไม่กำหนดหัวหน้า',people});
+    }
+    const unassigned=activeEmployees.filter(e=>!e.department_id&&matches(e));
+    if((deptFilter==='all'||deptFilter==='unassigned')&&unassigned.length)groups.push({id:null,name:'ยังไม่ระบุแผนก',manager:'—',people:unassigned,unassigned:true});
+    const visiblePeople=groups.reduce((n,g)=>n+g.people.length,0);
+    const filterOptions=`<option value="all">ทุกแผนก</option>${departments.map(d=>`<option value="${d.id}" ${deptFilter===String(d.id)?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}<option value="unassigned" ${deptFilter==='unassigned'?'selected':''}>ยังไม่ระบุแผนก</option>`;
+    const groupHtml=g=>`<section class="team-department-group ${g.unassigned?'is-unassigned':''}"><header class="team-department-header"><div><div class="team-department-title"><strong>${escapeHtml(g.name)}</strong><span>${g.people.length} คน</span></div><small>${g.unassigned?'พนักงานที่ยังไม่ได้จัดแผนก':`หัวหน้า: ${escapeHtml(g.manager)}`}</small></div>${g.id?`<div class="team-department-header-actions"><button type="button" onclick="window.openDepartmentAssignment(${Number(g.id)})">เพิ่ม/ย้ายคน</button><button type="button" onclick="window.editDepartment(${Number(g.id)})">ตั้งค่า</button></div>`:''}</header><div class="team-directory-columns"><span>พนักงาน</span><span>ตำแหน่ง</span><span>แผนก</span><span>สถานะ</span><span></span></div><div class="team-directory-rows">${g.people.length?g.people.map(personRow).join(''):`<div class="team-empty-row"><span>ยังไม่มีพนักงานในแผนกนี้</span>${g.id?`<button type="button" onclick="window.openDepartmentAssignment(${Number(g.id)})">+ เพิ่มพนักงาน</button>`:''}</div>`}</div></section>`;
+    org.innerHTML=`<div class="team-directory-toolbar"><div class="team-directory-search"><span>⌕</span><input id="teamDirectorySearch" type="search" value="${escapeHtml(state.teamDirectorySearch||'')}" placeholder="ค้นหาชื่อ รหัส ตำแหน่ง..." oninput="window.setTeamDirectorySearch(this.value)"/></div><select class="team-directory-filter" onchange="window.setTeamDirectoryDepartment(this.value)">${filterOptions}</select><div class="team-directory-count"><strong>${visiblePeople}</strong><span>จาก ${activeEmployees.length} พนักงาน · ${departments.length} แผนก</span></div><button class="secondary-btn team-add-employee" type="button" onclick="window.openEmployeeModal()">+ พนักงาน</button></div>${groups.length?`<div class="team-directory-groups">${groups.map(groupHtml).join('')}</div>`:`<div class="team-no-result"><strong>ไม่พบพนักงาน</strong><span>ลองเปลี่ยนคำค้นหาหรือเลือกแผนกอื่น</span><button type="button" onclick="window.clearTeamDirectoryFilters()">ล้างตัวกรอง</button></div>`}`;
   }
   const scheduleRoot=$('#workScheduleList');
   if(scheduleRoot){
@@ -2592,21 +2616,16 @@ async function saveDepartment(){
     if(resumePosition) requestAnimationFrame(()=>openPositionModal(Number(result?.id||0)));
   }catch(e){toast(e.message,true);}finally{b.disabled=false;}
 }
-function openPositionModal(preselectDepartmentId=0){
-  const departments=state.peopleCore?.departments||[];
-  if(!departments.length){
-    state.resumePositionAfterDepartment=true;
-    toast('ยังไม่มีแผนก — สร้างแผนกแรกก่อน แล้วระบบจะพากลับมาเพิ่มตำแหน่งให้อัตโนมัติ');
-    openDepartmentModal();
-    return;
-  }
+function openPositionModal(){
   $('#positionName').value='';
-  $('#positionDepartment').innerHTML=`${departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}<option value="">ไม่ระบุแผนก</option>`;
-  if(preselectDepartmentId && departments.some(d=>Number(d.id)===Number(preselectDepartmentId))) $('#positionDepartment').value=String(preselectDepartmentId);
-  const help=$('#positionDepartmentHelp'); if(help) help.textContent=`มี ${departments.length} แผนก · เลือกแผนกที่ตำแหน่งนี้สังกัด หรือสร้างแผนกใหม่ได้`; 
   $('#positionModal').showModal();
+  requestAnimationFrame(()=>$('#positionName')?.focus());
 }
-async function savePosition(){const body={name:$('#positionName').value.trim(),department_id:$('#positionDepartment').value||null};if(body.name.length<2)return toast('กรุณาใส่ชื่อตำแหน่ง',true);const b=$('#positionSaveBtn');b.disabled=true;try{await api('/api/positions',{method:'POST',body:JSON.stringify(body)});$('#positionModal').close();await loadAll({silent:true});toast('เพิ่มตำแหน่งแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
+async function savePosition(){
+  const body={name:$('#positionName').value.trim()}; if(body.name.length<2)return toast('กรุณาใส่ชื่อตำแหน่ง',true);
+  const b=$('#positionSaveBtn');b.disabled=true;
+  try{const result=await api('/api/positions',{method:'POST',body:JSON.stringify(body)});$('#positionModal').close();await loadAll({silent:true});toast(result?.reused?'ตำแหน่งนี้มีอยู่แล้ว ใช้รายการเดิมได้เลย':'เพิ่มตำแหน่งกลางแล้ว');const employeeId=Number(state.returnToPeopleProfileAfterPosition||0);state.returnToPeopleProfileAfterPosition=null;if(employeeId)requestAnimationFrame(()=>window.openPeopleProfile(employeeId));}catch(e){toast(e.message,true);}finally{b.disabled=false;}
+}
 window.openScheduleFor=(type,id)=>openScheduleModal(type,id);
 window.resetSchedule=async(type,id)=>{if(!confirm('ล้างตาราง Override นี้และกลับไปใช้ค่าระดับบนใช่ไหม?'))return;try{await api(`/api/work-schedules/${type}/${Number(id||0)}`,{method:'DELETE'});await loadAll({silent:true});toast('ล้างตาราง Override แล้ว');}catch(e){toast(e.message,true);}};
 function openScheduleModal(type='company',id=0){$('#scheduleScopeType').value=type;refreshScheduleTarget();if(id)$('#scheduleScopeId').value=String(id);$('#scheduleStart').value=state.companyProfile?.work_start||'09:00';$('#scheduleEnd').value=state.companyProfile?.work_end||'18:00';$('#scheduleGrace').value=String(state.companyProfile?.late_grace_minutes??10);$('#scheduleIsWorkday').checked=true;$$('#scheduleWeekdays input').forEach((input,i)=>input.checked=i<5);$('#scheduleModal').showModal();}
@@ -2658,8 +2677,9 @@ async function saveWorkLocation() {
   finally { button.disabled = false; }
 }
 
+window.openEmployeeModal = openEmployeeModal;
 function openEmployeeModal() {
-  openModal('EMPLOYEE', 'เพิ่มพนักงานใหม่', 'กรอกข้อมูลพื้นฐาน แล้วเลือกแผนกและตำแหน่งได้ทันที ระบบจะผูกเข้ากับ Organization Chart อัตโนมัติ', [
+  openModal('EMPLOYEE', 'เพิ่มพนักงานใหม่', 'กรอกข้อมูลพื้นฐาน แล้วเลือกแผนกและตำแหน่งกลางของบริษัทได้ทันที', [
     ['employee_code', 'รหัสพนักงาน (ไม่กรอก = สร้างอัตโนมัติ)', 'text'],
     ['nickname', 'ชื่อเล่น', 'text'],
     ['first_name', 'ชื่อ', 'text', true],
@@ -2702,18 +2722,15 @@ function openEmployeeModal() {
   }
   const renderPositionOptions = () => {
     if (!position) return;
-    const departmentId = Number(department?.value || 0);
-    const filtered = positions.filter(x => !departmentId || !x.department_id || Number(x.department_id) === departmentId);
-    position.innerHTML = `<option value="">ยังไม่ระบุตำแหน่ง</option>${filtered.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}${x.department_name?` · ${escapeHtml(x.department_name)}`:''}</option>`).join('')}`;
+    position.innerHTML = `<option value="">ยังไม่ระบุตำแหน่ง</option>${[...positions].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th')).map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('')}`;
   };
-  if (department) department.onchange = renderPositionOptions;
   renderPositionOptions();
   const contractStart = $('#field-contract_start_date');
   if (contractStart && !contractStart.value) contractStart.value = start?.value || localDateKey(new Date());
   if (!departments.length) {
     const hint = document.createElement('div');
     hint.className = 'modal-inline-hint full';
-    hint.innerHTML = `<strong>ยังไม่มีแผนก</strong><span>ไปที่ ตั้งค่า → โครงสร้างองค์กร เพื่อสร้างแผนกและตำแหน่งก่อน หรือเพิ่มพนักงานโดยไม่ระบุก่อนได้</span>`;
+    hint.innerHTML = `<strong>ยังไม่มีแผนก</strong><span>เพิ่มแผนกจากหน้า ทีมและตำแหน่ง หรือเพิ่มพนักงานโดยไม่ระบุก่อนได้</span>`;
     $('#modalFields')?.prepend(hint);
   }
 }
@@ -2760,15 +2777,10 @@ window.openEmployeeEdit = id => {
   if (department) department.innerHTML = `<option value="">ยังไม่ระบุแผนก</option>${departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}`;
   const renderPositionOptions = (selectedPositionId = null) => {
     if (!position) return;
-    const departmentId = Number(department?.value || 0);
-    const filtered = positions.filter(x => !departmentId || !x.department_id || Number(x.department_id) === departmentId);
-    position.innerHTML = `<option value="">ยังไม่ระบุตำแหน่ง</option>${filtered.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}${x.department_name?` · ${escapeHtml(x.department_name)}`:''}</option>`).join('')}`;
+    position.innerHTML = `<option value="">ยังไม่ระบุตำแหน่ง</option>${[...positions].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th')).map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('')}`;
     if (selectedPositionId) position.value = String(selectedPositionId);
   };
-  if (department) {
-    department.value = employee.department_id ? String(employee.department_id) : '';
-    department.onchange = () => renderPositionOptions(null);
-  }
+  if (department) department.value = employee.department_id ? String(employee.department_id) : '';
   renderPositionOptions(employee.position_id);
   const values = {
     employee_code: employee.employee_code,

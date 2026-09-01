@@ -1,19 +1,25 @@
-V1.0-P7.58 — Visible Manual Organization Arrange
+Nakna HR V1.0-P7.58
 
-Deploy-critical files:
-- public/index.html
-- public/app.js
-- public/styles.css
-- CHANGELOG.md
+Changed:
+- index.html / public/index.html
+- app.js / public/app.js
+- styles.css / public/styles.css
+- index.js / src/index.js
+- package.json
 
-Root mirror files are included in the full package for compatibility:
-- index.html
-- app.js
-- styles.css
+Main changes:
+1. Rebuilt Team & Positions page as compact searchable directory.
+2. Search/filter employees from one toolbar.
+3. Employees grouped by department with compact rows.
+4. Inline change Position and Department from directory.
+5. Positions are now company-wide/global, reusable across every department.
+6. Existing department-linked positions are automatically globalized when People Core loads.
+7. Creating an existing position name reuses the existing position instead of making another.
+8. Added common position presets: Executive, Head, Manager, Lead, Senior, Mid-Level, Junior, Staff, Intern.
+9. People Profile no longer filters positions by department.
+10. Moving department no longer clears employee position.
+11. Added quick team-placement API.
 
-How to use:
-1. Open โครงสร้างทีม → โครงสร้าง.
-2. Click the large “จัดลำดับเอง” button in the chart header.
-3. Drag a department card, use ← / →, or click “ย้ายตำแหน่ง”.
-4. “ย้ายตำแหน่ง” lets you choose the parent department and exact sibling order.
-5. Click “เสร็จสิ้นการจัด” when finished.
+Validation:
+- npm run check: PASS
+- npm run audit: baseline project has no scripts/audit.mjs, so audit script cannot run.

@@ -2057,6 +2057,8 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/people-core' && method === 'GET') {
     await ensureV100P1Ready(env.DB);
+    // P7.58: positions are company-wide, not department-specific.
+    await env.DB.prepare('UPDATE positions SET department_id=NULL WHERE client_id=?1 AND department_id IS NOT NULL').bind(clientId).run();
     const [departments, positions, schedules, holidays, client] = await Promise.all([
       env.DB.prepare(`SELECT d.*,m.nickname AS manager_nickname,m.first_name AS manager_first_name,m.last_name AS manager_last_name,
         (SELECT COUNT(*) FROM employees e WHERE e.department_id=d.id AND e.client_id=d.client_id AND e.status='active') AS employee_count
@@ -2106,18 +2108,19 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if(path==='/api/positions' && method==='POST'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดการตำแหน่ง'},403);
-    const body=await safeJson(request); const name=String(body.name||'').trim(); const departmentId=body.department_id?Number(body.department_id):null; if(name.length<2)return json({error:'กรุณาใส่ชื่อตำแหน่ง'},400);
-    if(departmentId){const d=await env.DB.prepare('SELECT id FROM departments WHERE id=?1 AND client_id=?2').bind(departmentId,clientId).first();if(!d)return json({error:'แผนกไม่อยู่ในบริษัทนี้'},400);}
-    const result=await env.DB.prepare('INSERT INTO positions(client_id,department_id,name) VALUES(?1,?2,?3)').bind(clientId,departmentId,name).run(); return json({ok:true,id:result.meta.last_row_id},201);
+    const body=await safeJson(request); const name=String(body.name||'').trim(); if(name.length<2)return json({error:'กรุณาใส่ชื่อตำแหน่ง'},400);
+    const existingRows=(await env.DB.prepare('SELECT id,name FROM positions WHERE client_id=?1 ORDER BY id').bind(clientId).all()).results||[];
+    const same=existingRows.find(row=>String(row.name||'').trim().toLocaleLowerCase()===name.toLocaleLowerCase());
+    if(same){await env.DB.prepare('UPDATE positions SET department_id=NULL WHERE id=?1 AND client_id=?2').bind(Number(same.id),clientId).run();return json({ok:true,id:Number(same.id),reused:true});}
+    const result=await env.DB.prepare('INSERT INTO positions(client_id,department_id,name) VALUES(?1,NULL,?2)').bind(clientId,name).run(); return json({ok:true,id:result.meta.last_row_id,reused:false},201);
   }
 
   const positionCoreMatch=path.match(/^\/api\/positions\/(\d+)$/);
   if(positionCoreMatch && method==='PATCH'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดการตำแหน่ง'},403);
     const id=Number(positionCoreMatch[1]); const existing=await env.DB.prepare('SELECT * FROM positions WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!existing)return json({error:'ไม่พบตำแหน่ง'},404);
-    const body=await safeJson(request); const name=String(body.name??existing.name).trim(); const departmentId=body.department_id===null||body.department_id===''?null:(body.department_id===undefined?existing.department_id:Number(body.department_id)); if(name.length<2)return json({error:'กรุณาใส่ชื่อตำแหน่ง'},400);
-    if(departmentId){const d=await env.DB.prepare('SELECT id FROM departments WHERE id=?1 AND client_id=?2').bind(departmentId,clientId).first();if(!d)return json({error:'แผนกไม่อยู่ในบริษัทนี้'},400);}
-    await env.DB.prepare('UPDATE positions SET name=?1,department_id=?2 WHERE id=?3 AND client_id=?4').bind(name,departmentId,id,clientId).run(); return json({ok:true});
+    const body=await safeJson(request); const name=String(body.name??existing.name).trim(); if(name.length<2)return json({error:'กรุณาใส่ชื่อตำแหน่ง'},400);
+    await env.DB.prepare('UPDATE positions SET name=?1,department_id=NULL WHERE id=?2 AND client_id=?3').bind(name,id,clientId).run(); return json({ok:true});
   }
   if(positionCoreMatch && method==='DELETE'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดการตำแหน่ง'},403);
@@ -2139,28 +2142,15 @@ async function handleApi(request, env, url, auth, ctx) {
     }
     const current=(await env.DB.prepare('SELECT id FROM employees WHERE client_id=?1 AND department_id=?2 AND status=\'active\'').bind(clientId,departmentId).all()).results||[];
     const selected=new Set(employeeIds);
-    let positionResetCount=0;
     for(const row of current){
       if(selected.has(Number(row.id)))continue;
-      const before=await env.DB.prepare('SELECT position_id FROM employees WHERE id=?1 AND client_id=?2').bind(Number(row.id),clientId).first();
-      await env.DB.prepare(`UPDATE employees SET department_id=NULL,position_id=CASE WHEN position_id IN (SELECT id FROM positions WHERE client_id=?1 AND department_id=?2) THEN NULL ELSE position_id END,updated_at=CURRENT_TIMESTAMP WHERE id=?3 AND client_id=?1`).bind(clientId,departmentId,Number(row.id)).run();
-      if(before?.position_id){
-        const tied=await env.DB.prepare('SELECT id FROM positions WHERE id=?1 AND client_id=?2 AND department_id=?3').bind(Number(before.position_id),clientId,departmentId).first();
-        if(tied)positionResetCount++;
-      }
+      await env.DB.prepare('UPDATE employees SET department_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2').bind(Number(row.id),clientId).run();
     }
     for(const employeeId of employeeIds){
-      const before=await env.DB.prepare('SELECT department_id,position_id FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId,clientId).first();
-      let keepPosition=true;
-      if(before?.position_id){
-        const position=await env.DB.prepare('SELECT id,department_id FROM positions WHERE id=?1 AND client_id=?2').bind(Number(before.position_id),clientId).first();
-        keepPosition=Boolean(position && (!position.department_id || Number(position.department_id)===departmentId));
-      }
-      await env.DB.prepare('UPDATE employees SET department_id=?1,position_id=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3 AND client_id=?4').bind(departmentId,keepPosition?(before?.position_id||null):null,employeeId,clientId).run();
-      if(before?.position_id && !keepPosition)positionResetCount++;
+      await env.DB.prepare('UPDATE employees SET department_id=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3').bind(departmentId,employeeId,clientId).run();
     }
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'department.assign','department',String(departmentId),{employee_ids:employeeIds,position_reset_count:positionResetCount});
-    return json({ok:true,department_id:departmentId,assigned_count:employeeIds.length,position_reset_count:positionResetCount});
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'department.assign','department',String(departmentId),{employee_ids:employeeIds});
+    return json({ok:true,department_id:departmentId,assigned_count:employeeIds.length,position_reset_count:0});
   }
 
   const positionAssignMatch=path.match(/^\/api\/positions\/(\d+)\/assign$/);
@@ -2181,11 +2171,7 @@ async function handleApi(request, env, url, auth, ctx) {
       if(!selected.has(Number(row.id))) await env.DB.prepare('UPDATE employees SET position_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2 AND position_id=?3').bind(Number(row.id),clientId,positionId).run();
     }
     for(const employeeId of employeeIds){
-      if(position.department_id){
-        await env.DB.prepare('UPDATE employees SET position_id=?1,department_id=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3 AND client_id=?4').bind(positionId,Number(position.department_id),employeeId,clientId).run();
-      }else{
-        await env.DB.prepare('UPDATE employees SET position_id=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3').bind(positionId,employeeId,clientId).run();
-      }
+      await env.DB.prepare('UPDATE employees SET position_id=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3').bind(positionId,employeeId,clientId).run();
     }
     await safeAudit(env.DB,clientId,'user',String(auth.user.id),'position.assign','position',String(positionId),{employee_ids:employeeIds});
     return json({ok:true,position_id:positionId,assigned_count:employeeIds.length});
@@ -2238,6 +2224,18 @@ async function handleApi(request, env, url, auth, ctx) {
       for(const locationId of locationIds) await env.DB.prepare('INSERT OR IGNORE INTO employee_work_locations(employee_id,location_id) VALUES(?1,?2)').bind(id,locationId).run();
     }
     await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.people_profile.update','employee',String(id),{people_status:peopleStatus,manager_id:managerId,location_ids:Array.isArray(body.location_ids)?body.location_ids:undefined}); return json({ok:true});
+  }
+
+  const teamPlacementMatch=path.match(/^\/api\/employees\/(\d+)\/team-placement$/);
+  if(teamPlacementMatch && method==='PATCH'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดทีมพนักงาน'},403);
+    const id=Number(teamPlacementMatch[1]); const employee=await getEmployeeForClient(env.DB,id,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+    const body=await safeJson(request); const deptId=body.department_id?Number(body.department_id):null; const posId=body.position_id?Number(body.position_id):null;
+    if(deptId){const d=await env.DB.prepare('SELECT id FROM departments WHERE id=?1 AND client_id=?2').bind(deptId,clientId).first();if(!d)return json({error:'ไม่พบแผนกนี้ในบริษัท'},400);}
+    if(posId){const p=await env.DB.prepare('SELECT id FROM positions WHERE id=?1 AND client_id=?2').bind(posId,clientId).first();if(!p)return json({error:'ไม่พบตำแหน่งนี้ในบริษัท'},400);}
+    await env.DB.prepare('UPDATE employees SET department_id=?1,position_id=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3 AND client_id=?4').bind(deptId,posId,id,clientId).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.team_placement.update','employee',String(id),{department_id:deptId,position_id:posId});
+    return json({ok:true,department_id:deptId,position_id:posId});
   }
 
   const hireCandidateMatch=path.match(/^\/api\/candidates\/(\d+)\/hire$/);
@@ -2344,7 +2342,7 @@ async function handleApi(request, env, url, auth, ctx) {
     const departmentId = body.department_id ? Number(body.department_id) : null;
     const positionId = body.position_id ? Number(body.position_id) : null;
     if(departmentId){const d=await env.DB.prepare('SELECT id FROM departments WHERE id=?1 AND client_id=?2').bind(departmentId,clientId).first();if(!d)return json({error:'ไม่พบแผนกนี้ในบริษัท'},400);}
-    if(positionId){const p=await env.DB.prepare('SELECT id,department_id FROM positions WHERE id=?1 AND client_id=?2').bind(positionId,clientId).first();if(!p)return json({error:'ไม่พบตำแหน่งนี้ในบริษัท'},400);if(departmentId&&p.department_id&&Number(p.department_id)!==departmentId)return json({error:'ตำแหน่งนี้ไม่ได้อยู่ในแผนกที่เลือก'},400);}
+    if(positionId){const p=await env.DB.prepare('SELECT id FROM positions WHERE id=?1 AND client_id=?2').bind(positionId,clientId).first();if(!p)return json({error:'ไม่พบตำแหน่งนี้ในบริษัท'},400);}
     await assertSeatCapacity(env.DB,clientId,1);
 
     const result = await env.DB.prepare(`
@@ -2399,9 +2397,8 @@ async function handleApi(request, env, url, auth, ctx) {
       if (!d) return json({ error: 'ไม่พบแผนกนี้ในบริษัท' }, 400);
     }
     if (positionId) {
-      const pos = await env.DB.prepare('SELECT id,department_id FROM positions WHERE id=?1 AND client_id=?2').bind(positionId, clientId).first();
+      const pos = await env.DB.prepare('SELECT id FROM positions WHERE id=?1 AND client_id=?2').bind(positionId, clientId).first();
       if (!pos) return json({ error: 'ไม่พบตำแหน่งนี้ในบริษัท' }, 400);
-      if (departmentId && pos.department_id && Number(pos.department_id) !== departmentId) return json({ error: 'ตำแหน่งนี้ไม่ได้อยู่ในแผนกที่เลือก' }, 400);
     }
     await env.DB.prepare(`UPDATE employees SET
       employee_code=?1, nickname=?2, first_name=?3, last_name=?4, email=?5, phone=?6,
