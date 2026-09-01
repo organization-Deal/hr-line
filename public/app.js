@@ -152,24 +152,131 @@ async function loadDashboardFast({ silent = true } = {}) {
     console.info(`[Nakna] fast dashboard ${elapsed}ms`);
   }
 }
-function scheduleDeferredLoad(delay = 900) {
+function scheduleDeferredLoad(delay = 4800) {
   clearTimeout(deferredLoadTimer);
   if (deferredIdleHandle && 'cancelIdleCallback' in window) {
     try { cancelIdleCallback(deferredIdleHandle); } catch {}
   }
   const run = async () => {
-    if (deferredLoadInFlight) return;
+    if (deferredLoadInFlight || document.hidden) return;
     deferredLoadInFlight = true;
-    try { await loadAll({ silent: true, background: true }); }
-    finally { deferredLoadInFlight = false; }
+    try {
+      // Warm only the two datasets used by the most common People screens.
+      // Do NOT load Payroll / Analytics / Recruitment / Integrations in the
+      // background: those modules are fetched only when the user opens them.
+      await refreshPeopleData({ includeLookups: false, render: ['employees','organization'].includes(state.currentView) });
+      markViewLoaded('employees');
+      markViewLoaded('organization');
+    } catch (error) {
+      console.warn('[Nakna] common preload failed', error?.message || error);
+    } finally { deferredLoadInFlight = false; }
   };
   deferredLoadTimer = setTimeout(() => {
-    if ('requestIdleCallback' in window) {
-      deferredIdleHandle = requestIdleCallback(() => run(), { timeout: 2200 });
-    } else {
-      run();
-    }
+    if ('requestIdleCallback' in window) deferredIdleHandle = requestIdleCallback(() => run(), { timeout: 4000 });
+    else run();
   }, Math.max(0, delay));
+}
+
+const VIEW_CACHE_TTL_MS = 45 * 1000;
+const viewLoadedAt = new Map();
+const viewLoadInFlight = new Map();
+function markViewLoaded(name){ viewLoadedAt.set(name, Date.now()); }
+function isViewFresh(name){ return Date.now() - Number(viewLoadedAt.get(name) || 0) < VIEW_CACHE_TTL_MS; }
+function setViewLoading(name, loading, label = 'กำลังโหลดข้อมูล…'){
+  const view=$(`#view-${name}`); if(!view)return;
+  let overlay=view.querySelector(':scope > .view-loading-overlay');
+  if(loading){
+    if(!overlay){
+      overlay=document.createElement('div');
+      overlay.className='view-loading-overlay';
+      overlay.innerHTML=`<div class="view-loading-card"><span class="view-loading-spinner" aria-hidden="true"></span><div><strong>${escapeHtml(label)}</strong><small>แสดงข้อมูลที่พร้อมใช้ก่อน แล้วอัปเดตส่วนที่เหลือเบื้องหลัง</small></div></div>`;
+      view.appendChild(overlay);
+    }
+    view.classList.add('is-view-loading');
+  }else{
+    view.classList.remove('is-view-loading');
+    overlay?.remove();
+  }
+}
+function renderViewData(name){
+  try{
+    if(name==='dashboard'){ renderDashboard(); return; }
+    if(name==='employees'){ renderEmployees($('#employeeSearch')?.value || ''); renderInviteCenter(); return; }
+    if(name==='organization'){ renderPeopleCore(); return; }
+    if(name==='recruitment'){ renderCandidates(); renderRecruitmentGmail(); return; }
+    if(name==='benefits'){ renderBenefits(); return; }
+    if(name==='attendance'){ renderAttendance(); return; }
+    if(name==='leave'){ renderLeaves(); renderLeavePolicies(); return; }
+    if(name==='requests'){ renderRequests(); renderEmployeeService(); return; }
+    if(name==='broadcast'){ renderBroadcastPage(); return; }
+    if(name==='payroll'){ renderPayroll(); return; }
+    if(name==='documents'){ renderDocuments(); return; }
+    if(name==='performance'){ renderGrowth(); return; }
+    if(name==='engagement'){ renderEngagement(); return; }
+    if(name==='analytics'){ renderAnalytics(); return; }
+    if(name==='saas-admin'){ renderSaasAdmin(); return; }
+    if(name==='settings'){ renderSettings(); renderSettingsSidebar(); renderWorkLocations(); renderLeavePolicies(); return; }
+  }catch(error){ console.warn('[Nakna] render view failed', name, error); }
+}
+async function loadViewData(name,{force=false}={}){
+  if(!name || name==='dashboard'){
+    if(force || !isViewFresh('dashboard')) await loadDashboardFast({silent:true});
+    markViewLoaded('dashboard');
+    return;
+  }
+  if(!force && isViewFresh(name)){ renderViewData(name); return; }
+  if(viewLoadInFlight.has(name)) return viewLoadInFlight.get(name);
+  const role=String(activeCompanyRole()||'');
+  const isHr=['owner','co_owner','hr_admin','hr'].includes(role);
+  const canPayroll=isHr||role==='payroll_admin';
+  const canReadBroadcasts=['owner','co_owner','hr_admin','hr','manager'].includes(role);
+  const canViewPeople=['owner','co_owner','hr_admin','hr','manager','viewer'].includes(role);
+  const load=async(path,fallback=null)=>{ try{return await api(path,{timeoutMs:15000});}catch(error){console.warn('[Nakna] view load',name,path,error?.message||error);return fallback;} };
+  const run=(async()=>{
+    setViewLoading(name,true);
+    try{
+      if(name==='employees'){
+        const [employees,peopleCore,invites,workLocations]=await Promise.all([load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore),load('/api/invites',{data:state.invites}),load('/api/work-locations',{data:state.workLocations})]);
+        state.employees=employees?.data||state.employees; state.peopleCore=peopleCore||state.peopleCore; state.invites=invites?.data||state.invites; state.workLocations=workLocations?.data||state.workLocations;
+      }else if(name==='organization'){
+        const [employees,peopleCore]=await Promise.all([load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore)]); state.employees=employees?.data||state.employees; state.peopleCore=peopleCore||state.peopleCore;
+      }else if(name==='recruitment'){
+        const [candidates,gmail]=await Promise.all([load('/api/candidates',{data:state.candidates}),isHr?load('/api/recruitment/gmail/status',state.recruitmentGmail):Promise.resolve(state.recruitmentGmail)]); state.candidates=candidates?.data||state.candidates; state.recruitmentGmail=gmail||state.recruitmentGmail;
+      }else if(name==='benefits'){
+        const [benefits,employees]=await Promise.all([isHr?load('/api/benefits',state.benefits):Promise.resolve(state.benefits),load('/api/employees',{data:state.employees})]); state.benefits=benefits||state.benefits; state.employees=employees?.data||state.employees;
+      }else if(name==='attendance'){
+        const [attendance,employees]=await Promise.all([load('/api/attendance/today',{data:state.attendance}),load('/api/employees',{data:state.employees})]); state.attendance=attendance?.data||state.attendance; state.employees=employees?.data||state.employees;
+      }else if(name==='leave'){
+        const [leaves,policies,employees,peopleCore]=await Promise.all([load('/api/leaves',{data:state.leaves}),load('/api/leave-policies',{data:state.leavePolicies}),load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore)]); state.leaves=leaves?.data||state.leaves; state.leavePolicies=policies?.data||state.leavePolicies; state.employees=employees?.data||state.employees; state.peopleCore=peopleCore||state.peopleCore;
+      }else if(name==='requests'){
+        const [requests,service]=await Promise.all([load('/api/requests',{data:state.requests}),load('/api/employee-service',state.employeeService)]); state.requests=requests?.data||state.requests; state.employeeService=service||state.employeeService;
+      }else if(name==='broadcast'){
+        if(canReadBroadcasts){ const broadcasts=await load('/api/broadcasts',{data:state.broadcasts}); state.broadcasts=broadcasts?.data||state.broadcasts; }
+      }else if(name==='payroll'){
+        if(canPayroll){ const [payroll,employees]=await Promise.all([load('/api/payroll/overview',state.payroll),load('/api/employees',{data:state.employees})]); state.payroll=payroll||state.payroll; state.employees=employees?.data||state.employees; }
+      }else if(name==='documents'){
+        if(canPayroll){ const [documents,employees]=await Promise.all([load('/api/documents',state.documents),load('/api/employees',{data:state.employees})]); state.documents=documents||state.documents; state.employees=employees?.data||state.employees; }
+      }else if(name==='performance'){
+        if(canReadBroadcasts){ const [learning,performance]=await Promise.all([load('/api/learning/overview',state.learning),load('/api/performance/overview',state.performance)]); state.learning=learning||state.learning; state.performance=performance||state.performance; }
+      }else if(name==='engagement'){
+        if(canViewPeople){ state.engagement=await load('/api/engagement/overview',state.engagement)||state.engagement; }
+      }else if(name==='analytics'){
+        if(canViewPeople){ state.analytics=await load('/api/analytics/overview',state.analytics)||state.analytics; }
+      }else if(name==='saas-admin'){
+        state.saasAdmin=await load('/api/admin/saas/overview',state.saasAdmin)||state.saasAdmin;
+      }else if(name==='settings'){
+        const tasks=[load('/api/company-profile',{company:state.companyProfile}),load('/api/people-core',state.peopleCore),load('/api/work-locations',{data:state.workLocations}),load('/api/leave-policies',{data:state.leavePolicies}),load('/api/subscription',state.subscription),load('/api/integrations/google-workspace',state.googleWorkspace),load('/api/integrations/line',state.lineIntegration)];
+        if(isHr)tasks.push(load('/api/approver-access',{data:state.approverAccess,catalog:state.approverPermissionCatalog}));
+        const result=await runLoadPool(tasks.map(p=>()=>p),4);
+        const [companyProfile,peopleCore,workLocations,leavePolicies,subscription,google,line,approver]=result;
+        state.companyProfile=companyProfile?.company||companyProfile||state.companyProfile; state.peopleCore=peopleCore||state.peopleCore; state.workLocations=workLocations?.data||state.workLocations; state.leavePolicies=leavePolicies?.data||state.leavePolicies; state.subscription=subscription||state.subscription; state.googleWorkspace=google||state.googleWorkspace; state.lineIntegration=line||state.lineIntegration; if(approver){state.approverAccess=approver?.data||state.approverAccess;state.approverPermissionCatalog=approver?.catalog||state.approverPermissionCatalog;}
+      }
+      markViewLoaded(name);
+      renderViewData(name);
+    }finally{ setViewLoading(name,false); viewLoadInFlight.delete(name); }
+  })();
+  viewLoadInFlight.set(name,run);
+  return run;
 }
 
 let peopleRefreshTimer = null;
@@ -450,20 +557,22 @@ async function boot() {
   try {
     const ready = await loadSessionOnly({ forceNewBusiness: returnState.forceNewBusiness, reconcileIdentity: returnState.reconcileIdentity });
     if (!ready) return;
-    const onboardingReady = await maybeRunOnboarding({ forceNewBusiness: returnState.forceNewBusiness });
-    if (!onboardingReady) return;
 
-    // Show the application as soon as authentication is verified. Modern apps
-    // do not keep a blocking splash on screen while every dashboard request is
-    // running; they render cached/stale data first and revalidate it behind the
-    // scenes (stale-while-revalidate).
+    // Existing users see the app immediately after /api/me. Onboarding status
+    // is checked after first paint instead of blocking every reopen on mobile.
     showAppShell();
     const hadCache = hydrateDashboardCache();
     if (!hadCache) {
       try { renderFallbackShell(); } catch {}
     }
-    loadDashboardFast({ silent: true }).catch(() => {});
-    scheduleDeferredLoad(hadCache ? 1200 : 550);
+    loadDashboardFast({ silent: true }).then(()=>markViewLoaded('dashboard')).catch(() => {});
+    scheduleDeferredLoad(hadCache ? 6500 : 4800);
+    if (!returnState.forceNewBusiness) {
+      setTimeout(async()=>{
+        const onboardingReady=await maybeRunOnboarding({forceNewBusiness:false});
+        if(onboardingReady) showAppShell();
+      }, 0);
+    }
   } catch (error) {
     showAppShell();
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
@@ -477,7 +586,7 @@ function bindEvents() {
   $('#bootRetryBtn').onclick = () => window.location.reload();
   $('#googleLoginBtn').onclick = () => { window.location.href = '/auth/google/start'; };
   $('#retryDataLoadBtn').onclick = async () => {
-    if (await ensureWorkspaceReady()) await loadAll();
+    if (await ensureWorkspaceReady()) await loadViewData(state.currentView || 'dashboard',{force:true});
   };
   $$('[data-worklog-mode]').forEach(btn=>btn.onclick=()=>setTeamWorkLogMode(btn.dataset.worklogMode));
   if ($('#teamWorkLogDate')) $('#teamWorkLogDate').onchange=()=>{ if(teamWorkLogMode()==='today') state.teamWorkLogMode='day'; syncTeamWorkLogControls(); $$('[data-worklog-mode]').forEach(btn=>btn.classList.toggle('active',btn.dataset.worklogMode===state.teamWorkLogMode)); loadTeamWorkLog(); };
@@ -583,7 +692,7 @@ function bindEvents() {
   $('#approverAccessSaveBtn').onclick = saveApproverAccess;
   $('#approverRolePreset').onchange = applyApproverRolePreset;
   $('#copyLineWebhookModalBtn').onclick = copyLineWebhookFromModal;
-  $('#refreshBtn').onclick = () => loadAll();
+  $('#refreshBtn').onclick = () => loadViewData(state.currentView || 'dashboard',{force:true});
   $('#createBroadcastBtn').onclick = openBroadcastModal;
   $('#broadcastAudience').onchange = renderBroadcastAudienceFields;
   $('#broadcastSendBtn').onclick = sendBroadcast;
@@ -1387,8 +1496,10 @@ function emptyDashboard() {
 function renderFallbackShell() {
   if (!state.dashboard) state.dashboard = emptyDashboard();
   try {
-    renderAll();
+    renderDashboard();
     renderIdentity();
+    $('#todayText').textContent = formatDate(state.dashboard.today);
+    $('#sidebarCompany').textContent = state.dashboard.client?.name || activeCompany()?.name || 'บริษัทของคุณ';
   } catch {}
 }
 
@@ -1765,8 +1876,9 @@ async function savePeopleProfile(){
     modal?.close();
     clearTransientTextCaret();
     renderPeopleFast();
+    markViewLoaded('employees'); markViewLoaded('organization');
     toast('บันทึกข้อมูลพนักงานแล้ว');
-    schedulePeopleRefresh(650);
+    schedulePeopleRefresh(900);
   }catch(e){
     toast(e.message,true);
   }finally{
@@ -2420,7 +2532,9 @@ function showView(name) {
   }
   syncSettingsSidebar();
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  if (name !== 'dashboard' && !deferredLoadInFlight) scheduleDeferredLoad(0);
+  // Route-based lazy loading: opening one menu no longer downloads every HR
+  // module. This is especially important on mobile / 4G.
+  loadViewData(name).catch(error=>console.warn('[Nakna] route load failed',name,error));
 }
 
 function showSettingsHome({ scroll = true } = {}) {
