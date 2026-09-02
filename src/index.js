@@ -1447,7 +1447,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.65', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.66', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1737,7 +1737,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.65', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.66', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -2083,7 +2083,7 @@ async function handleApi(request, env, url, auth, ctx) {
       positions: positions.results||[],
       schedules: schedules.results||[],
       holidays: holidays.results||[],
-      attendance_policy: { allow_checkout_outside_geofence: Boolean(Number(client?.allow_checkout_outside_geofence||0)) },
+      attendance_policy: { allow_attendance_outside_geofence: Boolean(Number(client?.allow_checkout_outside_geofence||0)), allow_checkout_outside_geofence: Boolean(Number(client?.allow_checkout_outside_geofence||0)) },
     });
   }
 
@@ -2215,8 +2215,24 @@ async function handleApi(request, env, url, auth, ctx) {
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดการวันหยุด'},403); await env.DB.prepare('DELETE FROM company_holidays WHERE id=?1 AND client_id=?2').bind(Number(holidayDeleteMatch[1]),clientId).run(); return json({ok:true});
   }
 
+  if(path==='/api/attendance-policy' && method==='GET'){
+    await ensureV100P1Ready(env.DB);
+    const row=await env.DB.prepare('SELECT allow_checkout_outside_geofence FROM clients WHERE id=?1').bind(clientId).first();
+    const allowed=Boolean(Number(row?.allow_checkout_outside_geofence||0));
+    return json({ok:true,allow_attendance_outside_geofence:allowed,allow_checkout_outside_geofence:allowed});
+  }
+
   if(path==='/api/attendance-policy' && method==='PATCH'){
-    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์แก้นโยบายลงเวลา'},403); await ensureV100P1Ready(env.DB); const body=await safeJson(request); const allow=body.allow_checkout_outside_geofence?1:0; await env.DB.prepare('UPDATE clients SET allow_checkout_outside_geofence=?1 WHERE id=?2').bind(allow,clientId).run(); return json({ok:true,allow_checkout_outside_geofence:Boolean(allow)});
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์แก้นโยบายลงเวลา'},403);
+    await ensureV100P1Ready(env.DB);
+    const body=await safeJson(request);
+    const raw=body.allow_attendance_outside_geofence ?? body.allow_checkout_outside_geofence;
+    const allow=(raw===true||raw===1||String(raw).toLowerCase()==='true'||String(raw)==='1')?1:0;
+    await env.DB.prepare('UPDATE clients SET allow_checkout_outside_geofence=?1 WHERE id=?2').bind(allow,clientId).run();
+    const verify=await env.DB.prepare('SELECT allow_checkout_outside_geofence FROM clients WHERE id=?1').bind(clientId).first();
+    const persisted=Boolean(Number(verify?.allow_checkout_outside_geofence||0));
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'attendance.policy.update','client',String(clientId),{allow_attendance_outside_geofence:persisted});
+    return json({ok:true,allow_attendance_outside_geofence:persisted,allow_checkout_outside_geofence:persisted});
   }
 
   const peopleProfileMatch=path.match(/^\/api\/employees\/(\d+)\/people-profile$/);
@@ -3987,7 +4003,7 @@ async function checkIn(db, employeeId, lat, lng, source) {
   const existing = await db.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(employeeId, workDate).first();
   if (existing?.check_in_at) throw httpError('วันนี้เช็กอินไปแล้ว', 409);
 
-  const matchedLocation = await resolveAllowedWorkLocation(db, employee, lat, lng);
+  const matchedLocation = await resolveAllowedWorkLocation(db, employee, lat, lng, {allowOutside:Boolean(Number(employee.allow_checkout_outside_geofence||0))});
   const schedule = await resolveEffectiveWorkSchedule(db, employee, workDate);
   const lateMinutes = schedule.is_workday ? calculateLateMinutes(now, schedule.start_time, Number(schedule.late_grace_minutes || 0)) : 0;
   const status = lateMinutes > 0 ? 'late' : 'present';
@@ -4015,7 +4031,7 @@ async function checkIn(db, employeeId, lat, lng, source) {
   return {
     check_in_at: nowIso, work_date: workDate, status, late_minutes: lateMinutes,
     distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
-    scheduled_start: schedule.start_time, scheduled_end: schedule.end_time, schedule_source: schedule.source, is_workday: schedule.is_workday
+    scheduled_start: schedule.start_time, scheduled_end: schedule.end_time, schedule_source: schedule.source, is_workday: schedule.is_workday, outside_geofence:Boolean(matchedLocation?.outside)
   };
 }
 
@@ -4735,7 +4751,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.65',
+    version:'1.0-P7.66',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -6691,7 +6707,7 @@ function buildLeaveDecisionFlex(row,approved){
 }
 function buildAttendanceResultFlex(kind,result){
   const checkin=kind==='checkin'; const late=checkin&&Number(result.late_minutes||0)>0;
-  const tone=late?'warning':'success'; const status=checkin?(late?`สาย ${result.late_minutes} นาที`:'ตรงเวลา'):'บันทึกเวลาแล้ว';
+  const outside=Boolean(result.outside_geofence); const tone=late?'warning':outside?'warning':'success'; const status=checkin?(outside?(late?`นอกพื้นที่ · สาย ${result.late_minutes} นาที`:'เช็กอินนอกพื้นที่'):(late?`สาย ${result.late_minutes} นาที`:'ตรงเวลา')):(outside?'เช็กเอาต์นอกพื้นที่':'บันทึกเวลาแล้ว');
   const tm=checkin?result.check_in_at:result.check_out_at;
   const rows=[lineInfoRow('เวลา',formatBangkokTime(tm),LINE_CI.primaryDark)];
   if(result.location_name) rows.push(lineInfoRow('สถานที่',result.location_name));
