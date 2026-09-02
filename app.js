@@ -46,6 +46,8 @@ const state = {
   currentView: 'dashboard',
   activeSettingsCategory: null,
   settingsNavExpanded: false,
+  attendancePolicySaving: false,
+  attendancePolicySavedAt: 0,
   organizationViewMode: (() => { try { const saved = localStorage.getItem('nakna.organizationViewMode'); return saved === 'list' ? 'list' : 'chart'; } catch { return 'chart'; } })(),
   teamDirectorySearch: '',
   teamDirectoryDepartment: 'all',
@@ -223,6 +225,14 @@ const VIEW_CACHE_TTL_MS = 45 * 1000;
 const viewLoadedAt = new Map();
 const viewLoadInFlight = new Map();
 function markViewLoaded(name){ viewLoadedAt.set(name, Date.now()); }
+function mergePeopleCoreFromServer(incoming){
+  if(!incoming)return state.peopleCore;
+  const recentPolicyChange=state.attendancePolicySaving || (Date.now()-Number(state.attendancePolicySavedAt||0)<4000);
+  if(recentPolicyChange && state.peopleCore?.attendance_policy){
+    incoming={...incoming,attendance_policy:{...(incoming.attendance_policy||{}),...state.peopleCore.attendance_policy}};
+  }
+  return incoming;
+}
 function isViewFresh(name){ return Date.now() - Number(viewLoadedAt.get(name) || 0) < VIEW_CACHE_TTL_MS; }
 function setViewLoading(name, loading, label = 'กำลังโหลดข้อมูล…'){
   const view=$(`#view-${name}`); if(!view)return;
@@ -280,9 +290,9 @@ async function loadViewData(name,{force=false}={}){
     try{
       if(name==='employees'){
         const [employees,peopleCore,invites,workLocations]=await Promise.all([load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore),load('/api/invites',{data:state.invites}),load('/api/work-locations',{data:state.workLocations})]);
-        state.employees=employees?.data||state.employees; state.peopleCore=peopleCore||state.peopleCore; state.invites=invites?.data||state.invites; state.workLocations=workLocations?.data||state.workLocations;
+        state.employees=employees?.data||state.employees; state.peopleCore=mergePeopleCoreFromServer(peopleCore)||state.peopleCore; state.invites=invites?.data||state.invites; state.workLocations=workLocations?.data||state.workLocations;
       }else if(name==='organization'){
-        const [employees,peopleCore]=await Promise.all([load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore)]); state.employees=employees?.data||state.employees; state.peopleCore=peopleCore||state.peopleCore;
+        const [employees,peopleCore]=await Promise.all([load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore)]); state.employees=employees?.data||state.employees; state.peopleCore=mergePeopleCoreFromServer(peopleCore)||state.peopleCore;
       }else if(name==='recruitment'){
         const [candidates,gmail]=await Promise.all([load('/api/candidates',{data:state.candidates}),isHr?load('/api/recruitment/gmail/status',state.recruitmentGmail):Promise.resolve(state.recruitmentGmail)]); state.candidates=candidates?.data||state.candidates; state.recruitmentGmail=gmail||state.recruitmentGmail;
       }else if(name==='benefits'){
@@ -290,7 +300,7 @@ async function loadViewData(name,{force=false}={}){
       }else if(name==='attendance'){
         const [attendance,employees]=await Promise.all([load('/api/attendance/today',{data:state.attendance}),load('/api/employees',{data:state.employees})]); state.attendance=attendance?.data||state.attendance; state.employees=employees?.data||state.employees;
       }else if(name==='leave'){
-        const [leaves,policies,employees,peopleCore]=await Promise.all([load('/api/leaves',{data:state.leaves}),load('/api/leave-policies',{data:state.leavePolicies}),load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore)]); state.leaves=leaves?.data||state.leaves; state.leavePolicies=policies?.data||state.leavePolicies; state.employees=employees?.data||state.employees; state.peopleCore=peopleCore||state.peopleCore;
+        const [leaves,policies,employees,peopleCore]=await Promise.all([load('/api/leaves',{data:state.leaves}),load('/api/leave-policies',{data:state.leavePolicies}),load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore)]); state.leaves=leaves?.data||state.leaves; state.leavePolicies=policies?.data||state.leavePolicies; state.employees=employees?.data||state.employees; state.peopleCore=mergePeopleCoreFromServer(peopleCore)||state.peopleCore;
       }else if(name==='requests'){
         const [requests,service]=await Promise.all([load('/api/requests',{data:state.requests}),load('/api/employee-service',state.employeeService)]); state.requests=requests?.data||state.requests; state.employeeService=service||state.employeeService;
       }else if(name==='hr-inbox'){
@@ -314,7 +324,7 @@ async function loadViewData(name,{force=false}={}){
         if(isHr)tasks.push(load('/api/approver-access',{data:state.approverAccess,catalog:state.approverPermissionCatalog}));
         const result=await runLoadPool(tasks.map(p=>()=>p),4);
         const [companyProfile,peopleCore,workLocations,leavePolicies,subscription,google,line,approver]=result;
-        state.companyProfile=companyProfile?.company||companyProfile||state.companyProfile; state.peopleCore=peopleCore||state.peopleCore; state.workLocations=workLocations?.data||state.workLocations; state.leavePolicies=leavePolicies?.data||state.leavePolicies; state.subscription=subscription||state.subscription; state.googleWorkspace=google||state.googleWorkspace; state.lineIntegration=line||state.lineIntegration; if(approver){state.approverAccess=approver?.data||state.approverAccess;state.approverPermissionCatalog=approver?.catalog||state.approverPermissionCatalog;}
+        state.companyProfile=companyProfile?.company||companyProfile||state.companyProfile; state.peopleCore=mergePeopleCoreFromServer(peopleCore)||state.peopleCore; state.workLocations=workLocations?.data||state.workLocations; state.leavePolicies=leavePolicies?.data||state.leavePolicies; state.subscription=subscription||state.subscription; state.googleWorkspace=google||state.googleWorkspace; state.lineIntegration=line||state.lineIntegration; if(approver){state.approverAccess=approver?.data||state.approverAccess;state.approverPermissionCatalog=approver?.catalog||state.approverPermissionCatalog;}
       }
       markViewLoaded(name);
       renderViewData(name);
@@ -378,7 +388,7 @@ async function refreshPeopleData({ includeLookups = false, render = true } = {})
   if (includeLookups) tasks.push(api('/api/lookups'));
   const [employees, peopleCore, lookups] = await Promise.all(tasks);
   state.employees = employees?.data || state.employees || [];
-  state.peopleCore = peopleCore || state.peopleCore || { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} };
+  state.peopleCore = mergePeopleCoreFromServer(peopleCore) || state.peopleCore || { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} };
   if (includeLookups && lookups) state.lookups = lookups;
   if (render) renderPeopleFast();
   return true;
@@ -1473,7 +1483,7 @@ async function loadAll({ silent = false, background = false } = {}) {
 
     state.dashboard = dashboard || emptyDashboard();
     state.companyProfile = companyProfile?.company || companyProfile || state.companyProfile || activeCompany() || {};
-    state.peopleCore = peopleCore || { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} };
+    state.peopleCore = mergePeopleCoreFromServer(peopleCore) || { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} };
     state.employees = employees?.data || [];
     state.candidates = candidates?.data || [];
     state.attendance = attendance?.data || [];
@@ -2214,19 +2224,19 @@ function renderAttendance() {
   const checkedIn = state.attendance.filter(item => item.check_in_at).length;
   const late = state.attendance.filter(item => item.status === 'late').length;
   const checkedOut = state.attendance.filter(item => item.check_out_at).length;
-  const outside = state.attendance.filter(item => Number(item.checkout_outside_geofence)===1).length;
+  const outside = state.attendance.filter(item => Number(item.checkout_outside_geofence)===1 || Number(item.checkin_outside_geofence)===1).length;
 
   $('#attendanceSummary').innerHTML = `
     <span><strong>${checkedIn}</strong> เช็กอินแล้ว</span>
     <span><strong>${late}</strong> มาสาย</span>
     <span><strong>${checkedOut}</strong> เช็กเอาต์แล้ว</span>
-    <span><strong>${outside}</strong> ออกงานนอกพื้นที่</span>`;
+    <span><strong>${outside}</strong> ลงเวลานอกพื้นที่</span>`;
 
   $('#attendanceBody').innerHTML = state.attendance.length
     ? state.attendance.map(attendance => `
       <tr>
         <td data-label="พนักงาน"><div class="person"><div class="avatar">${initial(attendance)}</div><div><strong>${escapeHtml(attendance.nickname || attendance.first_name)} ${escapeHtml(attendance.last_name)}</strong><small>${escapeHtml(attendance.employee_code)}</small></div></div></td>
-        <td data-label="Check-in">${attendance.check_in_at ? `<strong class="table-primary">${time(attendance.check_in_at)}</strong>${attendance.scheduled_start?`<small class="table-secondary">ตาราง ${escapeHtml(attendance.scheduled_start)}${attendance.schedule_source?` · ${escapeHtml(attendance.schedule_source)}`:""}</small>`:""}` : '—'}</td>
+        <td data-label="Check-in">${attendance.check_in_at ? `<strong class="table-primary">${time(attendance.check_in_at)}</strong>${Number(attendance.checkin_outside_geofence)===1?'<br><span class="badge badge-warning">นอกพื้นที่</span>':''}${attendance.scheduled_start?`<small class="table-secondary">ตาราง ${escapeHtml(attendance.scheduled_start)}${attendance.schedule_source?` · ${escapeHtml(attendance.schedule_source)}`:""}</small>`:""}` : '—'}</td>
         <td data-label="Location">${attendance.check_in_at
           ? attendance.checkin_location_name
             ? `<div class="attendance-location"><strong>📍 ${escapeHtml(attendance.checkin_location_name)}</strong><small>${attendance.checkin_distance_m != null ? `${Math.round(Number(attendance.checkin_distance_m))} ม. จากจุดกลาง` : ''}</small>${attendance.checkin_lat != null ? `<a href="https://www.google.com/maps?q=${Number(attendance.checkin_lat)},${Number(attendance.checkin_lng)}" target="_blank" rel="noopener">ดูแผนที่</a>` : ''}</div>`
@@ -2958,7 +2968,7 @@ function renderPeopleCore(){
     $('#holidayCountBadge').textContent=`${yearItems.length} วันใน ${currentYear+543}`; $('#holidayCompliance').className=`holiday-compliance ${yearItems.length>=13?'ok':'warn'}`; $('#holidayCompliance').innerHTML=yearItems.length>=13?`<strong>✓ จำนวนวันหยุดปีนี้ ${yearItems.length} วัน</strong><span>ตรวจสอบชื่อวันหยุดและวันแรงงานให้ตรงนโยบายบริษัทอีกครั้ง</span>`:`<strong>ควรตรวจวันหยุดประจำปี</strong><span>ตอนนี้มี ${yearItems.length} วัน · ระบบแนะนำให้ HR ตรวจ requirement วันหยุดตามประเพณีก่อนประกาศใช้</span>`;
     holidayRoot.innerHTML=holidays.length?holidays.slice(0,30).map(h=>`<div class="holiday-row"><div class="holiday-date"><strong>${new Date(`${h.holiday_date}T12:00:00`).getDate()}</strong><span>${new Date(`${h.holiday_date}T12:00:00`).toLocaleDateString('th-TH',{month:'short'})}</span></div><div><strong>${escapeHtml(h.name)}</strong><small>${h.holiday_type==='traditional'?'วันหยุดตามประเพณี':escapeHtml(h.holiday_type)}${Number(h.is_paid)?' · จ่ายค่าจ้าง':' · ไม่จ่ายค่าจ้าง'}</small></div><button class="text-btn danger-text" onclick="window.deleteHoliday(${Number(h.id)})">ลบ</button></div>`).join(''):emptyState('ยังไม่ได้ตั้งวันหยุดบริษัท','เพิ่มวันหยุดประจำปีให้พนักงานตรวจสอบได้จากระบบ');
   }
-  const toggle=$('#attendancePolicyToggle'); if(toggle) toggle.checked=Boolean(core.attendance_policy?.allow_checkout_outside_geofence);
+  const toggle=$('#attendancePolicyToggle'); const outsideAllowed=Boolean(core.attendance_policy?.allow_attendance_outside_geofence ?? core.attendance_policy?.allow_checkout_outside_geofence); if(toggle && !state.attendancePolicySaving) toggle.checked=outsideAllowed; updateAttendancePolicyStatus(outsideAllowed,state.attendancePolicySaving?'saving':'ready');
 }
 
 window.editDepartment=id=>openDepartmentModal((state.peopleCore.departments||[]).find(d=>Number(d.id)===Number(id)));
@@ -3019,7 +3029,33 @@ async function saveSchedule(){const weekdays=$$('#scheduleWeekdays input:checked
 function openHolidayModal(){ $('#holidayDate').value='';$('#holidayName').value='';$('#holidayType').value='traditional';$('#holidayPaid').checked=true;$('#holidayNotes').value='';$('#holidayModal').showModal(); }
 async function saveHoliday(){const body={holiday_date:$('#holidayDate').value,name:$('#holidayName').value.trim(),holiday_type:$('#holidayType').value,is_paid:$('#holidayPaid').checked,notes:$('#holidayNotes').value.trim()};const b=$('#holidaySaveBtn');b.disabled=true;try{await api('/api/company-holidays',{method:'POST',body:JSON.stringify(body)});$('#holidayModal').close();await loadAll({silent:true});toast('เพิ่มวันหยุดบริษัทแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
 window.deleteHoliday=async id=>{if(!confirm('ลบวันหยุดนี้ใช่ไหม?'))return;try{await api(`/api/company-holidays/${id}`,{method:'DELETE'});await loadAll({silent:true});toast('ลบวันหยุดแล้ว');}catch(e){toast(e.message,true);}};
-async function saveAttendancePolicy(){const toggle=$('#attendancePolicyToggle');toggle.disabled=true;try{const result=await api('/api/attendance-policy',{method:'PATCH',body:JSON.stringify({allow_checkout_outside_geofence:toggle.checked})});state.peopleCore.attendance_policy={allow_checkout_outside_geofence:result.allow_checkout_outside_geofence};toast(toggle.checked?'อนุญาตให้ออกงานนอกพื้นที่แล้ว':'บังคับ Check-out ในพื้นที่แล้ว');}catch(e){toggle.checked=!toggle.checked;toast(e.message,true);}finally{toggle.disabled=false;}}
+function updateAttendancePolicyStatus(allowed,stateName='ready'){
+  const status=$('#attendancePolicyStatus'); if(!status)return;
+  status.classList.toggle('saving',stateName==='saving');
+  status.classList.toggle('saved',stateName==='saved');
+  status.textContent=stateName==='saving'?'กำลังบันทึกการตั้งค่า…':stateName==='saved'?'บันทึกแล้ว':allowed?'เปิดใช้งาน · พนักงานลงเวลานอกพื้นที่ได้':'ปิดใช้งาน · ต้องอยู่ใน Work Location';
+}
+async function saveAttendancePolicy(){
+  const toggle=$('#attendancePolicyToggle'); if(!toggle)return;
+  const current=Boolean(state.peopleCore?.attendance_policy?.allow_attendance_outside_geofence ?? state.peopleCore?.attendance_policy?.allow_checkout_outside_geofence);
+  const desired=Boolean(toggle.checked);
+  state.attendancePolicySaving=true; toggle.disabled=true;
+  state.peopleCore.attendance_policy={...(state.peopleCore?.attendance_policy||{}),allow_attendance_outside_geofence:desired,allow_checkout_outside_geofence:desired};
+  updateAttendancePolicyStatus(desired,'saving');
+  try{
+    const result=await api('/api/attendance-policy',{method:'PATCH',body:JSON.stringify({allow_attendance_outside_geofence:desired,allow_checkout_outside_geofence:desired})});
+    const persisted=Boolean(result.allow_attendance_outside_geofence ?? result.allow_checkout_outside_geofence);
+    if(persisted!==desired) throw new Error('ระบบยืนยันการตั้งค่าไม่ตรง กรุณาลองใหม่');
+    state.peopleCore.attendance_policy={...(state.peopleCore?.attendance_policy||{}),allow_attendance_outside_geofence:persisted,allow_checkout_outside_geofence:persisted};
+    if(state.companyProfile){state.companyProfile.allow_attendance_outside_geofence=persisted;state.companyProfile.allow_checkout_outside_geofence=persisted;}
+    toggle.checked=persisted; state.attendancePolicySavedAt=Date.now(); updateAttendancePolicyStatus(persisted,'saved');
+    setTimeout(()=>updateAttendancePolicyStatus(persisted,'ready'),900);
+    toast(persisted?'อนุญาตเช็กอินและเช็กเอาต์นอกพื้นที่แล้ว':'บังคับให้ลงเวลาใน Work Location แล้ว');
+  }catch(e){
+    state.peopleCore.attendance_policy={...(state.peopleCore?.attendance_policy||{}),allow_attendance_outside_geofence:current,allow_checkout_outside_geofence:current};
+    toggle.checked=current; updateAttendancePolicyStatus(current,'ready'); toast(e.message,true);
+  }finally{state.attendancePolicySaving=false;toggle.disabled=false;}
+}
 
 function openWorkLocationModal() {
   $('#locationForm').reset();

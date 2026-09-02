@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.65" />
-  <link rel="modulepreload" href="/app.js?v=1.0-p7.65" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.66" />
+  <link rel="modulepreload" href="/app.js?v=1.0-p7.66" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -229,7 +229,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.65</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P7.66</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -715,7 +715,7 @@
               <div><p class="kicker">ATTENDANCE LOCATION</p><h2>Work Location</h2><p>สร้างจุดที่อนุญาตให้เช็กอินได้ แล้วเลือกจุดให้พนักงานตั้งแต่ตอนส่งลิงก์เชิญ</p></div>
               <button id="addWorkLocationBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่ม Location</button>
             </div>
-            <div class="attendance-policy-card"><div><strong>Check-out นอกพื้นที่</strong><p>เปิดได้ถ้าบริษัทอนุญาตให้พนักงานออกงานนอก Location โดยระบบจะบันทึกพิกัดและติดสถานะ “นอกพื้นที่” ไว้ตรวจสอบ</p></div><label class="switch"><input id="attendancePolicyToggle" type="checkbox"/><span></span></label></div>
+            <div class="attendance-policy-card"><div><strong>เช็กอิน / เช็กเอาต์นอกพื้นที่</strong><p>เปิดเมื่อบริษัทอนุญาตให้ลงเวลานอก Work Location ระบบยังบันทึกพิกัดและระยะห่างไว้เพื่อตรวจสอบย้อนหลัง</p><small id="attendancePolicyStatus" class="attendance-policy-status">กำลังตรวจสอบการตั้งค่า…</small></div><label class="switch"><input id="attendancePolicyToggle" type="checkbox"/><span></span></label></div>
             <div id="workLocationList" class="work-location-list"></div>
           </div>
             </div>
@@ -1250,7 +1250,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.65" type="module"></script>
+  <script src="/app.js?v=1.0-p7.66" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
