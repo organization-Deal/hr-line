@@ -1447,7 +1447,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.66', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.67', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1737,7 +1737,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.66', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.67', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -3903,7 +3903,8 @@ async function processLineEvent(event, env, lineCtx) {
     if(!['checkin','checkout'].includes(session.action)) return;
     try{
       const lat=Number(event.message.latitude),lng=Number(event.message.longitude);
-      const result=session.action==='checkin'?await checkIn(env.DB,Number(emp.id),lat,lng,'line'):await checkOut(env.DB,Number(emp.id),lat,lng,'line');
+      const locationMeta={title:String(event.message.title||'').trim()||null,address:String(event.message.address||'').trim()||null};
+      const result=session.action==='checkin'?await checkIn(env.DB,Number(emp.id),lat,lng,'line',locationMeta):await checkOut(env.DB,Number(emp.id),lat,lng,'line',locationMeta);
       await clearLineSession(env.DB,sessionKey);
       const label=session.action==='checkin'?'Check-in':'Check-out'; const tm=session.action==='checkin'?result.check_in_at:result.check_out_at;
       return replyLineMessages(accessToken,event.replyToken,[buildAttendanceResultFlex(session.action,result)]);
@@ -3991,7 +3992,7 @@ async function processLineEvent(event, env, lineCtx) {
   }
 }
 
-async function checkIn(db, employeeId, lat, lng, source) {
+async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
   const employee = await db.prepare(`
     SELECT e.*, c.work_start, c.work_end, c.late_grace_minutes, c.geofence_lat, c.geofence_lng, c.geofence_radius_m, c.geofence_name, c.allow_checkout_outside_geofence
     FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.status='active'
@@ -4027,15 +4028,17 @@ async function checkIn(db, employeeId, lat, lng, source) {
 
   await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_in', 'attendance', `${employeeId}:${workDate}`, {
     lat, lng, late_minutes: lateMinutes, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
+    source_title: locationMeta?.title || null, source_address: locationMeta?.address || null,
   });
   return {
-    check_in_at: nowIso, work_date: workDate, status, late_minutes: lateMinutes,
+    check_in_at: nowIso, work_date: workDate, status, late_minutes: lateMinutes, lat:lat ?? null, lng:lng ?? null,
+    source_title: locationMeta?.title || null, source_address: locationMeta?.address || null,
     distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
     scheduled_start: schedule.start_time, scheduled_end: schedule.end_time, schedule_source: schedule.source, is_workday: schedule.is_workday, outside_geofence:Boolean(matchedLocation?.outside)
   };
 }
 
-async function checkOut(db, employeeId, lat, lng, source) {
+async function checkOut(db, employeeId, lat, lng, source, locationMeta={}) {
   const employee = await db.prepare(`
     SELECT e.*, c.geofence_lat, c.geofence_lng, c.geofence_radius_m, c.geofence_name, c.allow_checkout_outside_geofence
     FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.status='active'
@@ -4060,9 +4063,11 @@ async function checkOut(db, employeeId, lat, lng, source) {
 
   await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_out', 'attendance', `${employeeId}:${workDate}`, {
     lat, lng, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
+    source_title: locationMeta?.title || null, source_address: locationMeta?.address || null,
   });
   return {
-    check_out_at: nowIso, work_date: workDate,
+    check_out_at: nowIso, work_date: workDate, lat:lat ?? null, lng:lng ?? null,
+    source_title: locationMeta?.title || null, source_address: locationMeta?.address || null,
     distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null, outside_geofence:Boolean(matchedLocation?.outside)
   };
 }
@@ -4751,7 +4756,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.66',
+    version:'1.0-P7.67',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -6710,9 +6715,16 @@ function buildAttendanceResultFlex(kind,result){
   const outside=Boolean(result.outside_geofence); const tone=late?'warning':outside?'warning':'success'; const status=checkin?(outside?(late?`นอกพื้นที่ · สาย ${result.late_minutes} นาที`:'เช็กอินนอกพื้นที่'):(late?`สาย ${result.late_minutes} นาที`:'ตรงเวลา')):(outside?'เช็กเอาต์นอกพื้นที่':'บันทึกเวลาแล้ว');
   const tm=checkin?result.check_in_at:result.check_out_at;
   const rows=[lineInfoRow('เวลา',formatBangkokTime(tm),LINE_CI.primaryDark)];
-  if(result.location_name) rows.push(lineInfoRow('สถานที่',result.location_name));
-  if(result.distance_m!=null) rows.push(lineInfoRow('ระยะจากจุด',`${Math.round(result.distance_m)} ม.`));
-  return {type:'flex',altText:checkin?'เช็กอินสำเร็จ':'เช็กเอาต์สำเร็จ',contents:lineBubble({eyebrow:'ATTENDANCE',title:checkin?'เช็กอินสำเร็จ':'เช็กเอาต์สำเร็จ',subtitle:'บันทึกเวลาเรียบร้อยแล้ว',status,statusTone:tone,body:[lineInfoCard(rows,tone)],footer:[lineSecondaryButton('ดูสถานะวันนี้',{type:'postback',label:'ดูสถานะวันนี้',data:'action=status'},LINE_CI.mintSoft)]})};
+  const sourceLabel=checkin?'เช็กอินจาก':'เช็กเอาต์จาก';
+  const sourcePlace=result.source_title||result.source_address||((result.lat!=null&&result.lng!=null)?`${Number(result.lat).toFixed(5)}, ${Number(result.lng).toFixed(5)}`:null);
+  if(sourcePlace) rows.push(lineInfoRow(sourceLabel,sourcePlace,LINE_CI.primaryDark));
+  if(result.source_title&&result.source_address&&result.source_title!==result.source_address) rows.push(lineInfoRow('ที่อยู่',result.source_address));
+  if(result.location_name) rows.push(lineInfoRow('Work Location',result.location_name));
+  if(result.distance_m!=null){const d=Number(result.distance_m);rows.push(lineInfoRow('ระยะจากจุด',d>=1000?`${(d/1000).toFixed(d>=10000?0:1)} กม.`:`${Math.round(d)} ม.`));}
+  const footer=[];
+  if(result.lat!=null&&result.lng!=null){const mapUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${result.lat},${result.lng}`)}`;footer.push(lineSecondaryButton('ดูจุดที่ลงเวลา',{type:'uri',label:'ดูจุดที่ลงเวลา',uri:mapUrl},LINE_CI.mintSoft));}
+  footer.push(lineSecondaryButton('ดูสถานะวันนี้',{type:'postback',label:'ดูสถานะวันนี้',data:'action=status'},LINE_CI.mintSoft));
+  return {type:'flex',altText:checkin?'เช็กอินสำเร็จ':'เช็กเอาต์สำเร็จ',contents:lineBubble({eyebrow:'ATTENDANCE',title:checkin?'เช็กอินสำเร็จ':'เช็กเอาต์สำเร็จ',subtitle:'บันทึกเวลาเรียบร้อยแล้ว',status,statusTone:tone,body:[lineInfoCard(rows,tone)],footer})};
 }
 function buildLocationRequestFlex(action){
   const checkin=action==='checkin';
