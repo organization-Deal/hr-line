@@ -3144,6 +3144,7 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/attendance/today' && method === 'GET') {
+    await ensureAttendanceSourceColumns(env.DB);
     const client = await getClient(env.DB, clientId);
     if (!client) return json({ error: 'Client not found' }, 404);
     const workDate = dateInBangkok();
@@ -4017,6 +4018,7 @@ async function resolveSubmittedLocationMeta(lat,lng,meta={}) {
 }
 
 async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
+  await ensureAttendanceSourceColumns(db);
   const employee = await db.prepare(`
     SELECT e.*, c.work_start, c.work_end, c.late_grace_minutes, c.geofence_lat, c.geofence_lng, c.geofence_radius_m, c.geofence_name, c.allow_checkout_outside_geofence
     FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.status='active'
@@ -4065,6 +4067,7 @@ async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
 }
 
 async function checkOut(db, employeeId, lat, lng, source, locationMeta={}) {
+  await ensureAttendanceSourceColumns(db);
   const employee = await db.prepare(`
     SELECT e.*, c.geofence_lat, c.geofence_lng, c.geofence_radius_m, c.geofence_name, c.allow_checkout_outside_geofence
     FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.status='active'
@@ -6864,6 +6867,24 @@ async function verifyLineSignature(rawBody, signature, channelSecret) {
   return constantTimeEqual(expected, signature);
 }
 
+async function ensureAttendanceSourceColumns(db) {
+  // P7.69: attendance source metadata was introduced after some Workspaces were
+  // already live. Those databases may not have the new columns yet, especially
+  // when LINE uses the global OA fast path which intentionally skips full schema
+  // preparation. Repair only the attendance columns here and cache the result per
+  // Worker isolate so normal check-in/out remains fast after the first request.
+  if (SCHEMA_READY.has('attendance_source_meta')) return;
+  if (!db) throw new Error('D1 binding DB is not available');
+  await ensureColumns(db,'attendance',[
+    ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
+    ['checkin_source_title','TEXT'],['checkin_source_address','TEXT'],
+    ['checkout_location_id','INTEGER'],['checkout_location_name','TEXT'],['checkout_distance_m','REAL'],['checkout_accuracy_m','REAL'],
+    ['checkout_source_title','TEXT'],['checkout_source_address','TEXT'],['checkout_outside_geofence','INTEGER NOT NULL DEFAULT 0'],
+    ['scheduled_start','TEXT'],['scheduled_end','TEXT'],['schedule_source','TEXT']
+  ]);
+  SCHEMA_READY.add('attendance_source_meta');
+}
+
 async function ensureCoreSchema(db) {
   if(SCHEMA_READY.has('core')) return;
   if (!db) throw new Error('D1 binding DB is not available');
@@ -6903,12 +6924,7 @@ async function ensureCoreSchema(db) {
     ['emergency_contact_name','TEXT'],['emergency_contact_phone','TEXT'],['national_id','TEXT'],
     ['contract_type','TEXT'],['contract_number','TEXT'],['contract_start_date','TEXT'],['contract_signed_date','TEXT']
   ]);
-  await ensureColumns(db,'attendance',[
-    ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
-    ['checkin_source_title','TEXT'],['checkin_source_address','TEXT'],
-    ['checkout_location_id','INTEGER'],['checkout_location_name','TEXT'],['checkout_distance_m','REAL'],['checkout_accuracy_m','REAL'],
-    ['checkout_source_title','TEXT'],['checkout_source_address','TEXT']
-  ]);
+  await ensureAttendanceSourceColumns(db);
   await ensureV050Ready(db);
   await ensureV060Ready(db);
   await ensureV061Ready(db);
