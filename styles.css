@@ -2367,3 +2367,6 @@ body.is-mutating button[type="submit"],body.is-mutating .primary-btn[disabled]{c
   .view-loading-overlay{position:fixed;z-index:70;inset:62px 0 0;padding:18vh 14px 0;background:rgba(248,251,250,.78);backdrop-filter:blur(2px)}.view-loading-card{width:min(340px,calc(100vw - 28px));padding:14px;border-radius:18px}.view-loading-card strong{font-size:13px}.view-loading-card small{font-size:10px}
   .toast{bottom:calc(14px + env(safe-area-inset-bottom));font-size:12px;border-radius:14px}
 }
+
+/* P7.68 actual attendance location clarity */
+.attendance-location.actual-location strong{color:var(--primary-dark)}.attendance-location.actual-location small{display:block;margin-top:3px;line-height:1.45}.attendance-location.actual-location a{display:inline-flex;margin-top:5px;font-weight:600}
