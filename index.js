@@ -1,6 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
+const NAKNA_RUNTIME_RELEASE = 'P7.72';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.72';
+const NAKNA_RUNTIME_FEATURE = 'quick-attendance-no-manual-location';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -1448,7 +1451,10 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.71', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: NAKNA_RUNTIME_VERSION, release: NAKNA_RUNTIME_RELEASE, feature: NAKNA_RUNTIME_FEATURE, auth: 'line-first-web-setup+google' });
+      }
+      if (url.pathname === '/api/public/runtime' && request.method === 'GET') {
+        return json({ ok: true, service: 'Nakna HR Worker', version: NAKNA_RUNTIME_VERSION, release: NAKNA_RUNTIME_RELEASE, quick_attendance: true, manual_line_location: false, feature: NAKNA_RUNTIME_FEATURE });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1580,9 +1586,9 @@ export default {
 
       const dedicatedLineWebhookMatch = url.pathname.match(/^\/webhooks\/line\/([A-Za-z0-9_-]{32,})$/);
       if (dedicatedLineWebhookMatch && request.method === 'POST') {
+        // Keep LINE webhook hot path light. handleLineWebhook() acknowledges first,
+        // then runs schema preparation/event processing inside waitUntil().
         await ensureV060Ready(env.DB);
-        await ensureV100P1Ready(env.DB);
-        await ensureV100P2Ready(env.DB);
         const integration = await getLineIntegrationByWebhookKey(env, dedicatedLineWebhookMatch[1]);
         if (!integration) return json({ error: 'LINE integration not found' }, 404);
         return await handleLineWebhook(request, env, ctx, integration);
@@ -1744,7 +1750,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.71', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: `V${NAKNA_RUNTIME_VERSION}`, core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -3752,6 +3758,10 @@ async function processLineEvent(event, env, lineCtx) {
     const text = String(event.message.text || '').trim();
     const quickLower=text.toLowerCase();
 
+    if(['เวอร์ชัน','version','runtime','build'].includes(quickLower)){
+      return replyLineMessages(accessToken,event.replyToken,[buildRuntimeVersionFlex(providerScope)]);
+    }
+
     // Hot path for the most-used command. Avoid business-onboarding schema checks,
     // sessions, and unrelated account setup work before rendering the menu.
     if(['เมนู','menu','help','ช่วยเหลือ'].includes(quickLower)){
@@ -3905,19 +3915,10 @@ async function processLineEvent(event, env, lineCtx) {
   }
 
   if(event.type==='message' && event.message?.type==='location'){
-    const emp=await employee(); if(!emp) return replyLine(accessToken,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
-    const session=await getLineSession(env.DB,sessionKey);
-    if(!session || new Date(session.expires_at).getTime()<=Date.now()) return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('คำขอหมดเวลาแล้ว','กรุณาเริ่มเช็กอินหรือเช็กเอาต์ใหม่อีกครั้ง','warning')]);
-    if(!['checkin','checkout'].includes(session.action)) return;
-    try{
-      const lat=Number(event.message.latitude),lng=Number(event.message.longitude);
-      const rawLocationMeta={title:String(event.message.title||'').trim()||null,address:String(event.message.address||'').trim()||null};
-      const locationMeta=await resolveSubmittedLocationMeta(lat,lng,rawLocationMeta);
-      const result=session.action==='checkin'?await checkIn(env.DB,Number(emp.id),lat,lng,'line',locationMeta):await checkOut(env.DB,Number(emp.id),lat,lng,'line',locationMeta);
-      await clearLineSession(env.DB,sessionKey);
-      const label=session.action==='checkin'?'Check-in':'Check-out'; const tm=session.action==='checkin'?result.check_in_at:result.check_out_at;
-      return replyLineMessages(accessToken,event.replyToken,[buildAttendanceResultFlex(session.action,result)]);
-    }catch(e){return replyLine(accessToken,event.replyToken,`❌ ${e.message}`);}
+    // P7.72: manual LINE Location is fully retired. Clear stale sessions from
+    // older deployments and send the employee back to the one-tap attendance flow.
+    await clearLineSession(env.DB,sessionKey).catch(()=>{});
+    return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ไม่ต้องส่งตำแหน่งแล้ว',`กด “เมนู” แล้วแตะเช็กอิน/เช็กเอาต์ ระบบจะอ่าน GPS อัตโนมัติ · ${NAKNA_RUNTIME_RELEASE}`,'teal')]);
   }
 
   if(event.type==='postback'){
@@ -3947,6 +3948,10 @@ async function processLineEvent(event, env, lineCtx) {
 
     const emp=await employee(); if(!emp) return replyLine(accessToken,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
     if(action==='menu') return replyLineMessages(accessToken,event.replyToken,[await buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp)]);
+    if(action==='quick_attendance_unavailable'){
+      const mode=data.get('mode')==='checkout'?'checkout':'checkin';
+      return sendQuickAttendanceEntry(env,event.replyToken,emp,accessToken,mode);
+    }
     if(action==='checkin'||action==='checkout'){
       await clearLineSession(env.DB,sessionKey).catch(()=>{});
       return sendQuickAttendanceEntry(env,event.replyToken,emp,accessToken,action);
@@ -4649,19 +4654,30 @@ async function getQuickAttendanceTokenForMenu(db,clientId,employeeId){
 async function getQuickAttendanceAccess(db,token){
   const raw=String(token||'').trim();
   if(raw.length<20)return null;
-  await ensureQuickAttendanceTokenSchema(db);
   const hash=await sha256Hex(raw);
-  const row=await db.prepare(`SELECT t.client_id,t.employee_id,t.expires_at,
-    e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.department_id,e.position_id,e.people_status,e.status,
-    e.line_user_id,e.line_provider_scope,c.name AS company_name
-    FROM attendance_access_tokens t
-    JOIN employees e ON e.id=t.employee_id AND e.client_id=t.client_id
-    JOIN clients c ON c.id=t.client_id
-    WHERE t.token_hash=?1 AND datetime(t.expires_at)>CURRENT_TIMESTAMP AND e.status='active'`)
-    .bind(hash).first();
-  if(row) db.prepare(`UPDATE attendance_access_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(hash).run().catch(()=>{});
-  return row||null;
+  try{
+    await ensureQuickAttendanceTokenSchema(db);
+    const row=await db.prepare(`SELECT t.client_id,t.employee_id,t.expires_at,
+      e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.department_id,e.position_id,e.people_status,e.status,
+      e.line_user_id,e.line_provider_scope,c.name AS company_name
+      FROM attendance_access_tokens t
+      JOIN employees e ON e.id=t.employee_id AND e.client_id=t.client_id
+      JOIN clients c ON c.id=t.client_id
+      WHERE t.token_hash=?1 AND datetime(t.expires_at)>CURRENT_TIMESTAMP AND e.status='active'`)
+      .bind(hash).first();
+    if(row){
+      db.prepare(`UPDATE attendance_access_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(hash).run().catch(()=>{});
+      return row;
+    }
+  }catch(error){
+    console.error(JSON.stringify({level:'warn',event:'quick_attendance_token_lookup_failed',message:String(error?.message||error)}));
+  }
+  // If the dedicated attendance token table is unavailable, accept the existing
+  // employee portal token used by Leave/HR. This keeps one-tap attendance alive
+  // without ever falling back to LINE's manual location picker.
+  return getEmployeePortalAccessFast(db,raw).catch(()=>null);
 }
+
 async function getLineMenuManagementAccessFast(env,lineCtx,lineUserId,preferredClientId=null){
   const providerScope=String(lineCtx?.providerScope||'default');
   const preferred=Number(preferredClientId||0);
@@ -4704,21 +4720,25 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
   const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
-  const quickCheckInUrl=attendanceToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceToken)}&action=checkin&v=7.71`:null;
-  const quickCheckOutUrl=attendanceToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceToken)}&action=checkout&v=7.71`:null;
-  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl);
+  const attendanceAccessToken=attendanceToken||portalToken||null;
+  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.72`:null;
+  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.72`:null;
+  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,NAKNA_RUNTIME_RELEASE);
 }
 
 
 async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='checkin'){
   try{
-    const token=await getQuickAttendanceTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id));
+    let token=null;
+    try{ token=await getQuickAttendanceTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id)); }catch{}
+    if(!token) token=await getEmployeePortalTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id));
+    if(!token) throw new Error('สร้างลิงก์ Quick Attendance ไม่สำเร็จ');
     const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
     const normalized=action==='checkout'?'checkout':'checkin';
-    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.71`;
+    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.72`;
     return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
   }catch(e){
-    return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',e.message||'กรุณาลองใหม่อีกครั้ง','error')]);
+    return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
   }
 }
 
@@ -4943,7 +4963,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.71',
+    version:NAKNA_RUNTIME_VERSION,
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -6665,6 +6685,18 @@ function leavePolicyIcon(policy){
 function formatLeaveRange(row){return `${formatThaiDateOnly(row.start_date)}${row.start_date!==row.end_date?` – ${formatThaiDateOnly(row.end_date)}`:''}`;}
 function formatDayPart(part){return part==='am'?'ครึ่งวันเช้า':part==='pm'?'ครึ่งวันบ่าย':'เต็มวัน';}
 
+function buildRuntimeVersionFlex(providerScope='default'){
+  return {type:'flex',altText:`Nakna Worker ${NAKNA_RUNTIME_RELEASE}`,contents:lineBubble({
+    eyebrow:'SYSTEM · RUNTIME',title:`Worker ${NAKNA_RUNTIME_RELEASE}`,subtitle:'ใช้ตรวจว่า LINE webhook รันโค้ดชุดล่าสุดจริง',status:'QUICK ATTENDANCE ON',statusTone:'success',
+    body:[lineInfoCard([
+      lineInfoRow('Version',NAKNA_RUNTIME_VERSION,LINE_CI.primaryDark),
+      lineInfoRow('LINE Location แบบเก่า','ปิดแล้ว',LINE_CI.success),
+      lineInfoRow('Quick Attendance','เปิดใช้งาน',LINE_CI.success),
+      lineInfoRow('Provider',String(providerScope||'default')),
+    ],'success')]
+  })};
+}
+
 function buildWelcomeFlex(name,company){
   return {type:'flex',altText:`ยินดีต้อนรับสู่ ${company}`,contents:lineBubble({
     eyebrow:'NAKNA · HR TECH',title:`ยินดีต้อนรับ ${name} 👋`,subtitle:'เชื่อม LINE กับบัญชีพนักงานเรียบร้อยแล้ว',status:'พร้อมใช้งาน',statusTone:'success',
@@ -6672,7 +6704,7 @@ function buildWelcomeFlex(name,company){
     footer:[linePrimaryButton('เปิดเมนูพนักงาน',{type:'postback',label:'เปิดเมนูพนักงาน',data:'action=menu'})]
   })};
 }
-function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null,quickCheckInUrl=null,quickCheckOutUrl=null){
+function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null,quickCheckInUrl=null,quickCheckOutUrl=null,runtimeRelease=NAKNA_RUNTIME_RELEASE){
   const name=emp.nickname||emp.first_name;
   const hasManagement=Boolean(ownerAccess?.primary);
   const managementCompany=ownerAccess?.primary?.name||emp.company_name||'';
@@ -6683,12 +6715,13 @@ function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseForm
     linePrimaryButton('เปิด HR Dashboard',{type:'postback',label:'เปิด HR Dashboard',data:'action=owner_dashboard'})
   ]:[];
   return {type:'flex',altText:hasManagement?`เมนูพนักงาน + ${roleLabel} · นากนะ`:'เมนูพนักงาน · นากนะ',contents:lineBubble({
-    eyebrow:hasManagement?`นากนะ · EMPLOYEE + ${String(roleLabel).toUpperCase()}`:'นากนะ · EMPLOYEE',title:`สวัสดี ${name} 👋`,subtitle:emp.company_name||'',
+    eyebrow:hasManagement?`นากนะ · EMPLOYEE + ${String(roleLabel).toUpperCase()} · ${runtimeRelease}`:`นากนะ · EMPLOYEE · ${runtimeRelease}`,title:`สวัสดี ${name} 👋`,subtitle:emp.company_name||'',
     body:[
       lineText('เมนูพนักงาน','xs',LINE_CI.primaryDark,'bold'),
       lineText('จัดการเรื่องงานประจำวันได้จากตรงนี้','sm',LINE_CI.muted),
-      linePrimaryButton('📍  เช็กอิน',quickCheckInUrl?{type:'uri',label:'เช็กอิน',uri:quickCheckInUrl}:{type:'postback',label:'เช็กอิน',data:'action=checkin'}),
-      lineSecondaryButton('🏠  เช็กเอาต์',quickCheckOutUrl?{type:'uri',label:'เช็กเอาต์',uri:quickCheckOutUrl}:{type:'postback',label:'เช็กเอาต์',data:'action=checkout'}),
+      lineText(`Quick Attendance · ${runtimeRelease}`,'xxs',LINE_CI.primary,'bold'),
+      linePrimaryButton('📍  เช็กอิน',quickCheckInUrl?{type:'uri',label:'เช็กอิน',uri:quickCheckInUrl}:{type:'postback',label:'เช็กอิน',data:'action=quick_attendance_unavailable&mode=checkin'}),
+      lineSecondaryButton('🏠  เช็กเอาต์',quickCheckOutUrl?{type:'uri',label:'เช็กเอาต์',uri:quickCheckOutUrl}:{type:'postback',label:'เช็กเอาต์',data:'action=quick_attendance_unavailable&mode=checkout'}),
       lineSecondaryButton('🏖  ขอลางาน',leaveFormUrl?{type:'uri',label:'ขอลางาน',uri:leaveFormUrl}:{type:'postback',label:'ขอลางาน',data:'action=leave_menu'},'#F1F7F5'),
       lineSecondaryButton('📅  สิทธิ์ลา',{type:'postback',label:'สิทธิ์ลา',data:'action=leave_balance'},'#F7F9F8'),
       lineSecondaryButton('🎉  วันหยุดบริษัท',{type:'postback',label:'วันหยุดบริษัท',data:'action=holidays'},'#F7F9F8'),
@@ -7000,7 +7033,7 @@ function formatThaiShortDate(isoDate) {
 }
 
 async function replyLineWithLocationQuickReply(accessToken, replyToken, text) {
-  // Legacy compatibility only. P7.71 intentionally removes LINE's location
+  // Legacy compatibility only. P7.72 intentionally removes LINE's location
   // quick-reply so no code path can ask the employee to manually send a pin.
   const action=String(text||'').includes('เช็กเอาต์')?'checkout':'checkin';
   return replyLineMessages(accessToken,replyToken,[buildLocationRequestFlex(action)]);

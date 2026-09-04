@@ -1,0 +1,28 @@
+Nakna HR P7.72 — Deploy / LINE Runtime Check
+
+1) Deploy the Worker from THIS project root (the folder that contains wrangler.jsonc):
+   npx wrangler deploy
+
+2) Do NOT verify from the web footer alone. Static assets can update while the LINE webhook Worker is still an older deployment.
+
+3) After deploy, in LINE type:
+   เวอร์ชัน
+
+   Expected reply:
+   Worker P7.72
+   Quick Attendance: เปิดใช้งาน
+   LINE Location แบบเก่า: ปิดแล้ว
+
+4) Then type:
+   เมนู
+
+   The new employee menu MUST visibly show P7.72 / Quick Attendance.
+
+5) Tap เช็กอิน. It must open attendance.html and must NOT show the old card:
+   “เช็กอินด้วยตำแหน่ง” / “ส่งตำแหน่งปัจจุบัน”
+
+6) Optional browser runtime endpoint:
+   /api/public/runtime
+   Expected release: P7.72
+
+If LINE still replies with the old manual-location card, LINE is hitting an older Worker/webhook endpoint, not this deployment.
