@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.72';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.72';
+const NAKNA_RUNTIME_RELEASE = 'P7.73';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.73';
 const NAKNA_RUNTIME_FEATURE = 'quick-attendance-no-manual-location';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -4721,8 +4721,8 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
   const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
   const attendanceAccessToken=attendanceToken||portalToken||null;
-  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.72`:null;
-  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.72`:null;
+  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.73`:null;
+  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.73`:null;
   return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,NAKNA_RUNTIME_RELEASE);
 }
 
@@ -4735,7 +4735,7 @@ async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='c
     if(!token) throw new Error('สร้างลิงก์ Quick Attendance ไม่สำเร็จ');
     const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
     const normalized=action==='checkout'?'checkout':'checkin';
-    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.72`;
+    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.73`;
     return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
   }catch(e){
     return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
@@ -4764,52 +4764,91 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
   if(!Number.isFinite(lat)||!Number.isFinite(lng)||lat<-90||lat>90||lng<-180||lng>180){
     return json({error:'อ่านตำแหน่งไม่สำเร็จ กรุณาอนุญาต Location แล้วลองใหม่'},400);
   }
-  // Very poor fixes can put an employee kilometers away from the actual device.
-  // Ask the browser for a better fix instead of recording unreliable attendance.
   if(Number.isFinite(accuracy)&&accuracy>1200){
     return json({error:'ตำแหน่งยังไม่แม่นยำ กรุณารอสักครู่แล้วลองใหม่',code:'LOW_LOCATION_ACCURACY',accuracy_m:Math.round(accuracy)},422);
   }
   const action=routeAction==='check-out'?'checkout':'checkin';
+  const roundedAccuracy=Number.isFinite(accuracy)?Math.round(accuracy):null;
   try{
+    // P7.73: resolve the submitted place BEFORE writing attendance so the DB,
+    // the web success screen and the LINE confirmation all describe the same point.
+    const locationMeta=await resolveSubmittedLocationMeta(lat,lng,{});
     const result=action==='checkin'
-      ? await checkIn(env.DB,Number(access.employee_id),lat,lng,'line_quick')
-      : await checkOut(env.DB,Number(access.employee_id),lat,lng,'line_quick');
-    const payload={
-      ok:true,action,
+      ? await checkIn(env.DB,Number(access.employee_id),lat,lng,'line_quick',locationMeta)
+      : await checkOut(env.DB,Number(access.employee_id),lat,lng,'line_quick',locationMeta);
+    const enriched={...result,source_title:locationMeta?.title||result.source_title||null,source_address:locationMeta?.address||result.source_address||null,accuracy_m:roundedAccuracy};
+    // Do not return success until we have attempted the LINE confirmation. The
+    // attendance row is already committed, so a LINE failure never loses time data.
+    const notification=await notifyQuickAttendanceLine(env,access,action,enriched);
+    return json({
+      ok:true,action,already_recorded:false,
       employee_name:access.nickname||access.first_name||'พนักงาน',
       company_name:access.company_name||'',
-      accuracy_m:Number.isFinite(accuracy)?Math.round(accuracy):null,
-      result,
-    };
-    const background=enrichAndNotifyQuickAttendance(env,access,action,result,lat,lng,accuracy).catch(error=>{
-      console.warn(JSON.stringify({level:'warn',event:'quick_attendance_notify_failed',employee_id:Number(access.employee_id),action,message:String(error?.message||error)}));
-    });
-    if(ctx?.waitUntil)ctx.waitUntil(background); else await background;
-    return json(payload,200,{'cache-control':'no-store'});
+      accuracy_m:roundedAccuracy,
+      notification,
+      result:enriched,
+    },200,{'cache-control':'no-store'});
   }catch(e){
     const status=Number(e?.status||400);
+    // If the first tap saved correctly but LINE delivery failed, a second tap used
+    // to only say “already checked in”. P7.73 instead reads the saved row and sends
+    // its confirmation again, so the employee can always prove it reached the HR DB.
+    if(status===409){
+      const saved=await getSavedQuickAttendance(env.DB,Number(access.employee_id),action);
+      if(saved){
+        const notification=await notifyQuickAttendanceLine(env,access,action,saved);
+        return json({
+          ok:true,action,already_recorded:true,
+          employee_name:access.nickname||access.first_name||'พนักงาน',
+          company_name:access.company_name||'',
+          accuracy_m:saved.accuracy_m??roundedAccuracy,
+          notification,
+          result:saved,
+          message:action==='checkin'?'วันนี้เช็กอินไว้แล้ว ระบบยืนยันรายการเดิมให้แล้ว':'วันนี้เช็กเอาต์ไว้แล้ว ระบบยืนยันรายการเดิมให้แล้ว',
+        },200,{'cache-control':'no-store'});
+      }
+    }
     return json({error:e?.message||'ลงเวลาไม่สำเร็จ',code:status===409?'ALREADY_RECORDED':'ATTENDANCE_FAILED'},status,{'cache-control':'no-store'});
   }
 }
 
-async function enrichAndNotifyQuickAttendance(env,access,action,result,lat,lng,accuracy){
-  const locationMeta=await resolveSubmittedLocationMeta(lat,lng,{});
-  const title=locationMeta?.title||null,address=locationMeta?.address||null;
-  if(title||address){
-    await ensureAttendanceSourceColumns(env.DB);
-    if(action==='checkin'){
-      await env.DB.prepare(`UPDATE attendance SET checkin_source_title=?1,checkin_source_address=?2,updated_at=CURRENT_TIMESTAMP WHERE employee_id=?3 AND work_date=?4`)
-        .bind(title,address,Number(access.employee_id),result.work_date).run();
-    }else{
-      await env.DB.prepare(`UPDATE attendance SET checkout_source_title=?1,checkout_source_address=?2,updated_at=CURRENT_TIMESTAMP WHERE employee_id=?3 AND work_date=?4`)
-        .bind(title,address,Number(access.employee_id),result.work_date).run();
+async function getSavedQuickAttendance(db,employeeId,action){
+  await ensureAttendanceSourceColumns(db);
+  const workDate=dateInBangkok();
+  const row=await db.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(employeeId),workDate).first();
+  if(!row)return null;
+  if(action==='checkin'){
+    if(!row.check_in_at)return null;
+    let sourceTitle=row.checkin_source_title||null,sourceAddress=row.checkin_source_address||null;
+    if((!sourceTitle||!sourceAddress)&&row.checkin_lat!=null&&row.checkin_lng!=null){
+      const meta=await resolveSubmittedLocationMeta(Number(row.checkin_lat),Number(row.checkin_lng),{title:sourceTitle,address:sourceAddress});
+      sourceTitle=meta?.title||sourceTitle; sourceAddress=meta?.address||sourceAddress;
+      if(sourceTitle||sourceAddress) await db.prepare('UPDATE attendance SET checkin_source_title=?1,checkin_source_address=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3').bind(sourceTitle,sourceAddress,Number(row.id)).run().catch(()=>{});
     }
+    return {check_in_at:row.check_in_at,work_date:row.work_date,status:row.status,late_minutes:Number(row.late_minutes||0),lat:row.checkin_lat,lng:row.checkin_lng,source_title:sourceTitle,source_address:sourceAddress,distance_m:row.checkin_distance_m,location_id:row.checkin_location_id,location_name:row.checkin_location_name,scheduled_start:row.scheduled_start,scheduled_end:row.scheduled_end,schedule_source:row.schedule_source,outside_geofence:Boolean(Number(row.checkin_outside_geofence||0)),accuracy_m:row.checkin_accuracy_m??null};
   }
-  const enriched={...result,source_title:title||result.source_title||null,source_address:address||result.source_address||null,accuracy_m:Number.isFinite(Number(accuracy))?Math.round(Number(accuracy)):null};
-  if(!access.line_user_id)return;
-  const lineAccessToken=await getAccessTokenForProviderScope(env,Number(access.client_id),access.line_provider_scope||'default');
-  if(!lineAccessToken)return;
-  await pushLineMessages(lineAccessToken,access.line_user_id,[buildAttendanceResultFlex(action,enriched)]);
+  if(!row.check_out_at)return null;
+  let sourceTitle=row.checkout_source_title||null,sourceAddress=row.checkout_source_address||null;
+  if((!sourceTitle||!sourceAddress)&&row.checkout_lat!=null&&row.checkout_lng!=null){
+    const meta=await resolveSubmittedLocationMeta(Number(row.checkout_lat),Number(row.checkout_lng),{title:sourceTitle,address:sourceAddress});
+    sourceTitle=meta?.title||sourceTitle; sourceAddress=meta?.address||sourceAddress;
+    if(sourceTitle||sourceAddress) await db.prepare('UPDATE attendance SET checkout_source_title=?1,checkout_source_address=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3').bind(sourceTitle,sourceAddress,Number(row.id)).run().catch(()=>{});
+  }
+  return {check_out_at:row.check_out_at,work_date:row.work_date,lat:row.checkout_lat,lng:row.checkout_lng,source_title:sourceTitle,source_address:sourceAddress,distance_m:row.checkout_distance_m,location_id:row.checkout_location_id,location_name:row.checkout_location_name,outside_geofence:Boolean(Number(row.checkout_outside_geofence||0)),accuracy_m:row.checkout_accuracy_m??null};
+}
+
+async function notifyQuickAttendanceLine(env,access,action,result){
+  if(!access?.line_user_id)return {sent:false,reason:'LINE_NOT_LINKED'};
+  let lineAccessToken=null;
+  try{lineAccessToken=await getAccessTokenForProviderScope(env,Number(access.client_id),access.line_provider_scope||'default');}catch{}
+  // Employee provider scope can become stale after an OA reconnect. Fall back to
+  // the company’s current effective LINE integration before declaring failure.
+  if(!lineAccessToken){
+    try{lineAccessToken=(await getEffectiveLineContextForClient(env,Number(access.client_id)))?.accessToken||null;}catch{}
+  }
+  if(!lineAccessToken)return {sent:false,reason:'LINE_NOT_CONNECTED'};
+  const sent=await pushLineMessagesReliable(lineAccessToken,access.line_user_id,[buildAttendanceResultFlex(action,result)]);
+  return sent?{sent:true}:{sent:false,reason:'LINE_PUSH_FAILED'};
 }
 
 function buildQuickAttendanceEntryFlex(action,url){
@@ -6960,7 +6999,19 @@ async function replyEvidencePrompt(accessToken,replyToken,row){
   return replyLineMessages(accessToken,replyToken,[message]);
 }
 async function replyLineMessages(accessToken,replyToken,messages){const response=await fetch('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`},body:JSON.stringify({replyToken,messages})});if(!response.ok)console.error(JSON.stringify({level:'error',event:'line_reply_messages_failed',status:response.status,body:await response.text()}));}
-async function pushLineMessages(accessToken,to,messages){if(!accessToken||!to)return;const response=await fetch('https://api.line.me/v2/bot/message/push',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`},body:JSON.stringify({to,messages})});if(!response.ok)console.error(JSON.stringify({level:'error',event:'line_push_messages_failed',status:response.status,body:await response.text()}));}
+async function pushLineMessages(accessToken,to,messages){
+  if(!accessToken||!to)return false;
+  try{
+    const response=await fetch('https://api.line.me/v2/bot/message/push',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`},body:JSON.stringify({to,messages})});
+    if(!response.ok){console.error(JSON.stringify({level:'error',event:'line_push_messages_failed',status:response.status,body:await response.text()}));return false;}
+    return true;
+  }catch(error){console.error(JSON.stringify({level:'error',event:'line_push_messages_failed',message:String(error?.message||error)}));return false;}
+}
+async function pushLineMessagesReliable(accessToken,to,messages){
+  if(await pushLineMessages(accessToken,to,messages))return true;
+  await new Promise(resolve=>setTimeout(resolve,180));
+  return pushLineMessages(accessToken,to,messages);
+}
 
 async function sendDailyHrBrief(env) {
   const clients = await env.DB.prepare('SELECT * FROM clients ORDER BY id').all();

@@ -1,3 +1,19 @@
+# P7.73 — Guaranteed Attendance Confirmation
+- Quick Attendance now resolves place metadata before saving, so DB/web/LINE show the same location.
+- Successful check-in/check-out waits for a LINE push attempt and reports delivery state on the web page.
+- LINE push retries once and falls back to the company current OA integration if the employee provider scope is stale.
+- Reopening Quick Attendance after an already-saved check-in now reads the saved attendance row and re-sends the confirmation card to LINE.
+- Quick Attendance page explicitly shows “ระบบ HR: บันทึกแล้ว” and “LINE: ส่งข้อความแล้ว”.
+
+# P7.72 — LINE Runtime Proof + Hard Remove Manual Location
+
+- Added `/api/public/runtime` and LINE command `เวอร์ชัน` to verify the Worker actually running in production.
+- Employee menu visibly stamps `P7.72` and `Quick Attendance`.
+- Manual LINE Location handling is fully retired; stale sessions are cleared.
+- Quick Attendance accepts the existing employee portal token as fallback if the dedicated attendance token table is unavailable.
+- Check-in/out buttons never silently fall back to the legacy manual-location flow.
+- Dedicated LINE webhook critical path is lighter.
+
 
 ## V1.0-P7.60
 - แสดง Loading กลางหน้าจอสำหรับคำสั่งบันทึก/แก้ไข พร้อมสถานะสำเร็จ/ผิดพลาด

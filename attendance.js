@@ -31,16 +31,24 @@ function formatTime(iso){
 }
 function setSuccess(payload,position){
   const result=payload.result||{};
+  const sent=Boolean(payload.notification?.sent);
+  const already=Boolean(payload.already_recorded);
   $('#stateIcon').className='state-icon success';
   $('#stateIcon').textContent='✓';
-  $('#title').textContent=action==='checkin'?'เช็กอินสำเร็จ':'เช็กเอาต์สำเร็จ';
-  $('#message').textContent=`${payload.employee_name||'คุณ'} ลงเวลาเรียบร้อยแล้ว กลับไปที่ LINE ได้เลย`;
+  $('#title').textContent=already?(action==='checkin'?'ยืนยันว่าเช็กอินแล้ว':'ยืนยันว่าเช็กเอาต์แล้ว'):(action==='checkin'?'เช็กอินสำเร็จ':'เช็กเอาต์สำเร็จ');
+  $('#message').textContent=sent
+    ? `บันทึกเข้าระบบ HR แล้ว และส่งรายละเอียดกลับไปที่ LINE เรียบร้อย`
+    : `บันทึกเข้าระบบ HR แล้ว แต่ LINE ยังส่งข้อความยืนยันไม่สำเร็จ`;
   $('#timeText').textContent=formatTime(action==='checkin'?result.check_in_at:result.check_out_at);
-  $('#locationText').textContent=result.location_name||(result.outside_geofence?'นอก Work Location':'ตำแหน่งปัจจุบัน');
+  $('#locationText').textContent=result.source_title||result.source_address||result.location_name||(result.outside_geofence?'นอก Work Location':'ตำแหน่งปัจจุบัน');
   $('#distanceText').textContent=formatDistance(result.distance_m);
-  const acc=Number(position?.coords?.accuracy||payload.accuracy_m); $('#accuracyText').textContent=Number.isFinite(acc)?`±${Math.round(acc)} ม.`:'—';
+  const acc=Number(result.accuracy_m??position?.coords?.accuracy??payload.accuracy_m); $('#accuracyText').textContent=Number.isFinite(acc)?`±${Math.round(acc)} ม.`:'—';
+  $('#systemText').textContent='บันทึกแล้ว';
+  $('#lineText').textContent=sent?'ส่งข้อความแล้ว':'ยังส่งไม่สำเร็จ';
+  $('#lineText').className=sent?'status-ok':'status-warn';
   $('#detailCard').classList.remove('hidden');
-  $('#retryBtn').classList.add('hidden');
+  $('#retryBtn').classList.toggle('hidden',sent);
+  if(!sent)$('#retryBtn').textContent='ส่งสถานะเข้า LINE อีกครั้ง';
   $('#permissionHint').classList.add('hidden');
 }
 function locate(){
@@ -74,7 +82,9 @@ async function submit(){
       if(response.status===409){
         $('#stateIcon').className='state-icon success'; $('#stateIcon').textContent='✓';
         $('#title').textContent=action==='checkin'?'วันนี้เช็กอินแล้ว':'วันนี้เช็กเอาต์แล้ว';
-        $('#message').textContent=data.error||'รายการนี้ถูกบันทึกไว้แล้ว';
+        $('#message').textContent='พบรายการในระบบแล้ว กำลังลองส่งสถานะกลับ LINE อีกครั้ง';
+        $('#retryBtn').classList.remove('hidden');
+        $('#retryBtn').textContent='ส่งสถานะเข้า LINE อีกครั้ง';
         return;
       }
       throw new Error(data.error||'ระบบบันทึกเวลาไม่สำเร็จ');
