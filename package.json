@@ -1,6 +1,6 @@
 {
   "name": "nakna-hr",
-  "version": "1.0.84",
+  "version": "1.0.88",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "db:seed:local": "wrangler d1 execute DB --local --file=./seed.sql",
     "db:seed:remote": "wrangler d1 execute DB --remote --file=./seed.sql",
-    "check": "node --check src/index.js && node --check public/app.js && node --check public/invite.js && node --check public/learn.js && node --check public/leave.js",
+    "check": "node --check src/index.js && node --check public/app.js && node --check public/invite.js && node --check public/learn.js && node --check public/leave.js && node --check public/attendance.js",
     "audit": "npm run check && node scripts/audit.mjs"
   },
   "devDependencies": {

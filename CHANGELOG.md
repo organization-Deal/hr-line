@@ -120,3 +120,18 @@
 - Returning from the external browser refreshes Google connection state automatically.
 - Boot screen shows a retry action after 7 seconds instead of appearing stuck forever.
 - No database migration required.
+
+## V1.0-P7.70 — Quick Attendance
+- LINE employee menu Check-in / Check-out now opens a one-tap attendance page directly.
+- Browser GPS is requested automatically; employees no longer need to send a LINE Location message.
+- Public tokenized attendance endpoint validates employee access, Work Location/geofence, schedule, duplicates, and outside-area policy.
+- Successful quick attendance returns immediately in the web UI, then enriches the location and pushes the confirmation Flex back to LINE in the background.
+- Added GPS accuracy feedback and retry states for denied/weak location fixes.
+- Legacy typed/postback Check-in/Check-out commands now return the quick-attendance entry instead of asking for a Location message.
+
+## V1.0-P7.71 — Quick Attendance hardening
+- Added dedicated `attendance_access_tokens` so one-tap attendance no longer depends on Learning token schema.
+- Employee menu Check-in / Check-out now prefers direct URI one-tap flow reliably.
+- Removed the legacy LINE location quick-reply from all compatibility code paths.
+- Clears stale legacy attendance sessions before starting Quick Attendance.
+- Added build marker `Quick Attendance P7.71` to the attendance page for deployment verification.
