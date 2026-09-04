@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.73';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.73';
+const NAKNA_RUNTIME_RELEASE = 'P7.74';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.74';
 const NAKNA_RUNTIME_FEATURE = 'quick-attendance-no-manual-location';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -4721,8 +4721,8 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
   const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
   const attendanceAccessToken=attendanceToken||portalToken||null;
-  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.73`:null;
-  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.73`:null;
+  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.74`:null;
+  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.74`:null;
   return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,NAKNA_RUNTIME_RELEASE);
 }
 
@@ -4735,7 +4735,7 @@ async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='c
     if(!token) throw new Error('สร้างลิงก์ Quick Attendance ไม่สำเร็จ');
     const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
     const normalized=action==='checkout'?'checkout':'checkin';
-    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.73`;
+    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.74`;
     return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
   }catch(e){
     return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
@@ -4761,6 +4761,10 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
   if(!access)return json({error:'ลิงก์เช็กอินหมดอายุ กรุณากดเมนูใน LINE ใหม่อีกครั้ง'},401);
   const body=await safeJson(request);
   const lat=Number(body.latitude),lng=Number(body.longitude),accuracy=Number(body.accuracy||0);
+  const positionTimestamp=body.position_timestamp?Date.parse(String(body.position_timestamp)):NaN;
+  if(Number.isFinite(positionTimestamp)&&Math.abs(Date.now()-positionTimestamp)>120000){
+    return json({error:'GPS ที่ได้รับเป็นตำแหน่งเก่า กรุณาเปิด Location แล้วกดลองใหม่',code:'STALE_LOCATION_FIX'},422);
+  }
   if(!Number.isFinite(lat)||!Number.isFinite(lng)||lat<-90||lat>90||lng<-180||lng>180){
     return json({error:'อ่านตำแหน่งไม่สำเร็จ กรุณาอนุญาต Location แล้วลองใหม่'},400);
   }
@@ -4770,7 +4774,7 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
   const action=routeAction==='check-out'?'checkout':'checkin';
   const roundedAccuracy=Number.isFinite(accuracy)?Math.round(accuracy):null;
   try{
-    // P7.73: resolve the submitted place BEFORE writing attendance so the DB,
+    // P7.74: resolve the submitted place BEFORE writing attendance so the DB,
     // the web success screen and the LINE confirmation all describe the same point.
     const locationMeta=await resolveSubmittedLocationMeta(lat,lng,{});
     const result=action==='checkin'
@@ -4791,20 +4795,25 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
   }catch(e){
     const status=Number(e?.status||400);
     // If the first tap saved correctly but LINE delivery failed, a second tap used
-    // to only say “already checked in”. P7.73 instead reads the saved row and sends
+    // to only say “already checked in”. P7.74 reads the saved row but clearly labels it as the original record and also returns the GPS checked now
     // its confirmation again, so the employee can always prove it reached the HR DB.
     if(status===409){
       const saved=await getSavedQuickAttendance(env.DB,Number(access.employee_id),action);
       if(saved){
-        const notification=await notifyQuickAttendanceLine(env,access,action,saved);
+        // The employee may have moved since the original attendance record. Never
+        // present the old attendance location as if it were their current GPS.
+        const currentMeta=await resolveSubmittedLocationMeta(lat,lng,{}).catch(()=>({title:null,address:null}));
+        const currentPosition={lat,lng,accuracy_m:roundedAccuracy,source_title:currentMeta?.title||null,source_address:currentMeta?.address||null};
+        const notification=await notifyQuickAttendanceAlreadyRecordedLine(env,access,action,saved,currentPosition);
         return json({
           ok:true,action,already_recorded:true,
           employee_name:access.nickname||access.first_name||'พนักงาน',
           company_name:access.company_name||'',
-          accuracy_m:saved.accuracy_m??roundedAccuracy,
+          accuracy_m:roundedAccuracy,
           notification,
           result:saved,
-          message:action==='checkin'?'วันนี้เช็กอินไว้แล้ว ระบบยืนยันรายการเดิมให้แล้ว':'วันนี้เช็กเอาต์ไว้แล้ว ระบบยืนยันรายการเดิมให้แล้ว',
+          current_position:currentPosition,
+          message:action==='checkin'?'วันนี้มีเช็กอินอยู่แล้ว ระบบไม่ได้บันทึกซ้ำ':'วันนี้มีเช็กเอาต์อยู่แล้ว ระบบไม่ได้บันทึกซ้ำ',
         },200,{'cache-control':'no-store'});
       }
     }
@@ -4848,6 +4857,16 @@ async function notifyQuickAttendanceLine(env,access,action,result){
   }
   if(!lineAccessToken)return {sent:false,reason:'LINE_NOT_CONNECTED'};
   const sent=await pushLineMessagesReliable(lineAccessToken,access.line_user_id,[buildAttendanceResultFlex(action,result)]);
+  return sent?{sent:true}:{sent:false,reason:'LINE_PUSH_FAILED'};
+}
+
+async function notifyQuickAttendanceAlreadyRecordedLine(env,access,action,saved,currentPosition){
+  if(!access?.line_user_id)return {sent:false,reason:'LINE_NOT_LINKED'};
+  let lineAccessToken=null;
+  try{lineAccessToken=await getAccessTokenForProviderScope(env,Number(access.client_id),access.line_provider_scope||'default');}catch{}
+  if(!lineAccessToken){try{lineAccessToken=(await getEffectiveLineContextForClient(env,Number(access.client_id)))?.accessToken||null;}catch{}}
+  if(!lineAccessToken)return {sent:false,reason:'LINE_NOT_CONNECTED'};
+  const sent=await pushLineMessagesReliable(lineAccessToken,access.line_user_id,[buildAttendanceAlreadyRecordedFlex(action,saved,currentPosition)]);
   return sent?{sent:true}:{sent:false,reason:'LINE_PUSH_FAILED'};
 }
 
@@ -6985,6 +7004,31 @@ function buildAttendanceResultFlex(kind,result){
   if(result.lat!=null&&result.lng!=null){const mapUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${result.lat},${result.lng}`)}`;footer.push(lineSecondaryButton('ดูจุดที่ลงเวลา',{type:'uri',label:'ดูจุดที่ลงเวลา',uri:mapUrl},LINE_CI.mintSoft));}
   footer.push(lineSecondaryButton('ดูสถานะวันนี้',{type:'postback',label:'ดูสถานะวันนี้',data:'action=status'},LINE_CI.mintSoft));
   return {type:'flex',altText:checkin?'เช็กอินสำเร็จ':'เช็กเอาต์สำเร็จ',contents:lineBubble({eyebrow:'ATTENDANCE',title:checkin?'เช็กอินสำเร็จ':'เช็กเอาต์สำเร็จ',subtitle:'บันทึกเวลาเรียบร้อยแล้ว',status,statusTone:tone,body:[lineInfoCard(rows,tone)],footer})};
+}
+function buildAttendanceAlreadyRecordedFlex(action,saved,currentPosition={}){
+  const checkin=action==='checkin';
+  const tm=checkin?saved.check_in_at:saved.check_out_at;
+  const originalPlace=saved.source_title||saved.source_address||((saved.lat!=null&&saved.lng!=null)?`${Number(saved.lat).toFixed(5)}, ${Number(saved.lng).toFixed(5)}`:'—');
+  const currentPlace=currentPosition?.source_title||currentPosition?.source_address||((currentPosition?.lat!=null&&currentPosition?.lng!=null)?`${Number(currentPosition.lat).toFixed(5)}, ${Number(currentPosition.lng).toFixed(5)}`:'—');
+  const rows=[
+    lineInfoRow(checkin?'เวลาเช็กอินเดิม':'เวลาเช็กเอาต์เดิม',formatBangkokTime(tm),LINE_CI.primaryDark),
+    lineInfoRow(checkin?'จุดที่เช็กอินเดิม':'จุดที่เช็กเอาต์เดิม',originalPlace,LINE_CI.primaryDark),
+  ];
+  if(saved.location_name) rows.push(lineInfoRow('Work Location ที่กำหนด',saved.location_name));
+  if(saved.distance_m!=null){const d=Number(saved.distance_m);rows.push(lineInfoRow('ระยะของรายการเดิม',d>=1000?`${(d/1000).toFixed(d>=10000?0:1)} กม.`:`${Math.round(d)} ม.`));}
+  rows.push(lineInfoRow('ตำแหน่งที่ตรวจตอนนี้',currentPlace,LINE_CI.primaryDark));
+  if(currentPosition?.accuracy_m!=null) rows.push(lineInfoRow('GPS ตอนนี้',`±${Math.round(Number(currentPosition.accuracy_m))} ม.`));
+  const footer=[];
+  if(currentPosition?.lat!=null&&currentPosition?.lng!=null){
+    const url=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${currentPosition.lat},${currentPosition.lng}`)}`;
+    footer.push(lineSecondaryButton('ดูตำแหน่งตอนนี้',{type:'uri',label:'ดูตำแหน่งตอนนี้',uri:url},LINE_CI.mintSoft));
+  }
+  footer.push(lineSecondaryButton('ดูสถานะวันนี้',{type:'postback',label:'ดูสถานะวันนี้',data:'action=status'},LINE_CI.mintSoft));
+  return {type:'flex',altText:checkin?'วันนี้มีเช็กอินแล้ว':'วันนี้มีเช็กเอาต์แล้ว',contents:lineBubble({
+    eyebrow:'ATTENDANCE',title:checkin?'วันนี้มีเช็กอินแล้ว':'วันนี้มีเช็กเอาต์แล้ว',
+    subtitle:'ระบบไม่ได้บันทึกซ้ำ · รายการเดิมยังคงอยู่ใน HR',status:'ไม่บันทึกซ้ำ',statusTone:'teal',
+    body:[lineInfoCard(rows,'teal')],footer
+  })};
 }
 function buildLocationRequestFlex(action){
   const checkin=action==='checkin';
