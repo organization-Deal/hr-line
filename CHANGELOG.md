@@ -1,3 +1,11 @@
+# P7.74 — Duplicate attendance clarity + fresh GPS
+
+- Duplicate check-in/check-out no longer reuses the original location as if it were the employee current location.
+- Quick Attendance shows original attendance point separately from the GPS point checked now.
+- LINE duplicate notice says “วันนี้มีเช็กอินแล้ว / ไม่บันทึกซ้ำ” and shows both original and current locations.
+- GPS acquisition uses fresh watchPosition fixes (maximumAge=0) and rejects stale browser fixes.
+- Quick page separates actual attendance point from configured Work Location.
+
 # P7.73 — Guaranteed Attendance Confirmation
 - Quick Attendance now resolves place metadata before saving, so DB/web/LINE show the same location.
 - Successful check-in/check-out waits for a LINE push attempt and reports delivery state on the web page.
