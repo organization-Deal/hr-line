@@ -3144,7 +3144,6 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/attendance/today' && method === 'GET') {
-    await ensureAttendanceSourceColumns(env.DB);
     const client = await getClient(env.DB, clientId);
     if (!client) return json({ error: 'Client not found' }, 404);
     const workDate = dateInBangkok();
@@ -3154,9 +3153,7 @@ async function handleApi(request, env, url, auth, ctx) {
              CASE WHEN lr.id IS NOT NULL AND a.check_in_at IS NULL THEN 'leave' ELSE a.status END AS status, a.late_minutes,
              lr.id AS leave_request_id, lp.name AS leave_name,
              a.checkin_lat, a.checkin_lng, a.checkin_location_id, a.checkin_location_name, a.checkin_distance_m,
-             a.checkin_source_title, a.checkin_source_address,
              a.checkout_lat, a.checkout_lng, a.checkout_location_id, a.checkout_location_name, a.checkout_distance_m,
-             a.checkout_source_title, a.checkout_source_address,
              a.checkout_outside_geofence, a.scheduled_start, a.scheduled_end, a.schedule_source
       FROM employees e
       LEFT JOIN departments d ON d.id = e.department_id
@@ -3906,8 +3903,7 @@ async function processLineEvent(event, env, lineCtx) {
     if(!['checkin','checkout'].includes(session.action)) return;
     try{
       const lat=Number(event.message.latitude),lng=Number(event.message.longitude);
-      const rawLocationMeta={title:String(event.message.title||'').trim()||null,address:String(event.message.address||'').trim()||null};
-      const locationMeta=await resolveSubmittedLocationMeta(lat,lng,rawLocationMeta);
+      const locationMeta={title:String(event.message.title||'').trim()||null,address:String(event.message.address||'').trim()||null};
       const result=session.action==='checkin'?await checkIn(env.DB,Number(emp.id),lat,lng,'line',locationMeta):await checkOut(env.DB,Number(emp.id),lat,lng,'line',locationMeta);
       await clearLineSession(env.DB,sessionKey);
       const label=session.action==='checkin'?'Check-in':'Check-out'; const tm=session.action==='checkin'?result.check_in_at:result.check_out_at;
@@ -3996,29 +3992,7 @@ async function processLineEvent(event, env, lineCtx) {
   }
 }
 
-async function resolveSubmittedLocationMeta(lat,lng,meta={}) {
-  const direct={title:String(meta?.title||'').trim()||null,address:String(meta?.address||'').trim()||null};
-  if(direct.title&&direct.address) return direct;
-  if(!Number.isFinite(Number(lat))||!Number.isFinite(Number(lng))) return direct;
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),1800);
-  try{
-    const url=`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lng)}&localityLanguage=th`;
-    const response=await fetch(url,{headers:{accept:'application/json'},signal:controller.signal});
-    if(!response.ok)return direct;
-    const data=await response.json();
-    const locality=String(data.locality||data.city||data.principalSubdivision||'').trim();
-    const district=String(data.localityInfo?.administrative?.find?.(x=>x.order===8)?.name||data.localityInfo?.administrative?.find?.(x=>x.order===7)?.name||'').trim();
-    const province=String(data.principalSubdivision||'').trim();
-    const country=String(data.countryName||'').trim();
-    const address=[locality,district&&district!==locality?district:null,province&&province!==locality?province:null,country].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
-    const title=direct.title||String(data.locality||data.city||data.localityInfo?.informative?.[0]?.name||'').trim()||null;
-    return {title,address:direct.address||address||null};
-  }catch{return direct;}finally{clearTimeout(timer);}
-}
-
 async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
-  await ensureAttendanceSourceColumns(db);
   const employee = await db.prepare(`
     SELECT e.*, c.work_start, c.work_end, c.late_grace_minutes, c.geofence_lat, c.geofence_lng, c.geofence_radius_m, c.geofence_name, c.allow_checkout_outside_geofence
     FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.status='active'
@@ -4039,18 +4013,16 @@ async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
   await db.prepare(`
     INSERT INTO attendance (
       client_id, employee_id, work_date, check_in_at, checkin_lat, checkin_lng, source, status, late_minutes,
-      checkin_location_id, checkin_location_name, checkin_distance_m,checkin_source_title,checkin_source_address,scheduled_start,scheduled_end,schedule_source
-    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+      checkin_location_id, checkin_location_name, checkin_distance_m,scheduled_start,scheduled_end,schedule_source
+    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
     ON CONFLICT(employee_id, work_date) DO UPDATE SET
       check_in_at=excluded.check_in_at, checkin_lat=excluded.checkin_lat, checkin_lng=excluded.checkin_lng,
       source=excluded.source, status=excluded.status, late_minutes=excluded.late_minutes,
       checkin_location_id=excluded.checkin_location_id, checkin_location_name=excluded.checkin_location_name,
-      checkin_distance_m=excluded.checkin_distance_m,checkin_source_title=excluded.checkin_source_title,checkin_source_address=excluded.checkin_source_address,
-      scheduled_start=excluded.scheduled_start,scheduled_end=excluded.scheduled_end,schedule_source=excluded.schedule_source,updated_at=CURRENT_TIMESTAMP
+      checkin_distance_m=excluded.checkin_distance_m,scheduled_start=excluded.scheduled_start,scheduled_end=excluded.scheduled_end,schedule_source=excluded.schedule_source,updated_at=CURRENT_TIMESTAMP
   `).bind(
     Number(employee.client_id), employeeId, workDate, nowIso, lat ?? null, lng ?? null, source, status, lateMinutes,
     matchedLocation?.id || null, matchedLocation?.name || null, matchedLocation?.distance_m ?? null,
-    locationMeta?.title || null, locationMeta?.address || null,
     schedule.start_time || null,schedule.end_time || null,schedule.source
   ).run();
 
@@ -4067,7 +4039,6 @@ async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
 }
 
 async function checkOut(db, employeeId, lat, lng, source, locationMeta={}) {
-  await ensureAttendanceSourceColumns(db);
   const employee = await db.prepare(`
     SELECT e.*, c.geofence_lat, c.geofence_lng, c.geofence_radius_m, c.geofence_name, c.allow_checkout_outside_geofence
     FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.status='active'
@@ -4083,12 +4054,11 @@ async function checkOut(db, employeeId, lat, lng, source, locationMeta={}) {
   const nowIso = new Date().toISOString();
   await db.prepare(`
     UPDATE attendance SET check_out_at=?1, checkout_lat=?2, checkout_lng=?3,
-      checkout_location_id=?4, checkout_location_name=?5, checkout_distance_m=?6,checkout_outside_geofence=?7,
-      checkout_source_title=?8,checkout_source_address=?9,updated_at=CURRENT_TIMESTAMP
-    WHERE employee_id=?10 AND work_date=?11
+      checkout_location_id=?4, checkout_location_name=?5, checkout_distance_m=?6,checkout_outside_geofence=?7, updated_at=CURRENT_TIMESTAMP
+    WHERE employee_id=?8 AND work_date=?9
   `).bind(
     nowIso, lat ?? null, lng ?? null, matchedLocation?.id || null, matchedLocation?.name || null,
-    matchedLocation?.distance_m ?? null,matchedLocation?.outside?1:0,locationMeta?.title || null,locationMeta?.address || null,employeeId,workDate
+    matchedLocation?.distance_m ?? null,matchedLocation?.outside?1:0, employeeId, workDate
   ).run();
 
   await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_out', 'attendance', `${employeeId}:${workDate}`, {
@@ -6745,12 +6715,12 @@ function buildAttendanceResultFlex(kind,result){
   const outside=Boolean(result.outside_geofence); const tone=late?'warning':outside?'warning':'success'; const status=checkin?(outside?(late?`นอกพื้นที่ · สาย ${result.late_minutes} นาที`:'เช็กอินนอกพื้นที่'):(late?`สาย ${result.late_minutes} นาที`:'ตรงเวลา')):(outside?'เช็กเอาต์นอกพื้นที่':'บันทึกเวลาแล้ว');
   const tm=checkin?result.check_in_at:result.check_out_at;
   const rows=[lineInfoRow('เวลา',formatBangkokTime(tm),LINE_CI.primaryDark)];
-  const sourceLabel=checkin?'จุดที่เช็กอินจริง':'จุดที่เช็กเอาต์จริง';
+  const sourceLabel=checkin?'เช็กอินจาก':'เช็กเอาต์จาก';
   const sourcePlace=result.source_title||result.source_address||((result.lat!=null&&result.lng!=null)?`${Number(result.lat).toFixed(5)}, ${Number(result.lng).toFixed(5)}`:null);
   if(sourcePlace) rows.push(lineInfoRow(sourceLabel,sourcePlace,LINE_CI.primaryDark));
-  if(result.source_address&&result.source_address!==sourcePlace) rows.push(lineInfoRow('ที่อยู่จริง',result.source_address));
-  if(result.location_name) rows.push(lineInfoRow('Work Location ที่กำหนด',result.location_name));
-  if(result.distance_m!=null){const d=Number(result.distance_m);rows.push(lineInfoRow('ห่างจาก Work Location',d>=1000?`${(d/1000).toFixed(d>=10000?0:1)} กม.`:`${Math.round(d)} ม.`));}
+  if(result.source_title&&result.source_address&&result.source_title!==result.source_address) rows.push(lineInfoRow('ที่อยู่',result.source_address));
+  if(result.location_name) rows.push(lineInfoRow('Work Location',result.location_name));
+  if(result.distance_m!=null){const d=Number(result.distance_m);rows.push(lineInfoRow('ระยะจากจุด',d>=1000?`${(d/1000).toFixed(d>=10000?0:1)} กม.`:`${Math.round(d)} ม.`));}
   const footer=[];
   if(result.lat!=null&&result.lng!=null){const mapUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${result.lat},${result.lng}`)}`;footer.push(lineSecondaryButton('ดูจุดที่ลงเวลา',{type:'uri',label:'ดูจุดที่ลงเวลา',uri:mapUrl},LINE_CI.mintSoft));}
   footer.push(lineSecondaryButton('ดูสถานะวันนี้',{type:'postback',label:'ดูสถานะวันนี้',data:'action=status'},LINE_CI.mintSoft));
@@ -6867,24 +6837,6 @@ async function verifyLineSignature(rawBody, signature, channelSecret) {
   return constantTimeEqual(expected, signature);
 }
 
-async function ensureAttendanceSourceColumns(db) {
-  // P7.69: attendance source metadata was introduced after some Workspaces were
-  // already live. Those databases may not have the new columns yet, especially
-  // when LINE uses the global OA fast path which intentionally skips full schema
-  // preparation. Repair only the attendance columns here and cache the result per
-  // Worker isolate so normal check-in/out remains fast after the first request.
-  if (SCHEMA_READY.has('attendance_source_meta')) return;
-  if (!db) throw new Error('D1 binding DB is not available');
-  await ensureColumns(db,'attendance',[
-    ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
-    ['checkin_source_title','TEXT'],['checkin_source_address','TEXT'],
-    ['checkout_location_id','INTEGER'],['checkout_location_name','TEXT'],['checkout_distance_m','REAL'],['checkout_accuracy_m','REAL'],
-    ['checkout_source_title','TEXT'],['checkout_source_address','TEXT'],['checkout_outside_geofence','INTEGER NOT NULL DEFAULT 0'],
-    ['scheduled_start','TEXT'],['scheduled_end','TEXT'],['schedule_source','TEXT']
-  ]);
-  SCHEMA_READY.add('attendance_source_meta');
-}
-
 async function ensureCoreSchema(db) {
   if(SCHEMA_READY.has('core')) return;
   if (!db) throw new Error('D1 binding DB is not available');
@@ -6924,7 +6876,10 @@ async function ensureCoreSchema(db) {
     ['emergency_contact_name','TEXT'],['emergency_contact_phone','TEXT'],['national_id','TEXT'],
     ['contract_type','TEXT'],['contract_number','TEXT'],['contract_start_date','TEXT'],['contract_signed_date','TEXT']
   ]);
-  await ensureAttendanceSourceColumns(db);
+  await ensureColumns(db,'attendance',[
+    ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
+    ['checkout_location_id','INTEGER'],['checkout_location_name','TEXT'],['checkout_distance_m','REAL'],['checkout_accuracy_m','REAL']
+  ]);
   await ensureV050Ready(db);
   await ensureV060Ready(db);
   await ensureV061Ready(db);
