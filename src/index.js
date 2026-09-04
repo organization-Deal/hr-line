@@ -7,6 +7,7 @@ const SCHEMA_READY = new Set();
 const AUTH_CACHE = new Map();
 const AUTH_CACHE_TTL_MS = 15 * 1000;
 const LINE_MENU_TOKEN_CACHE = new Map();
+const QUICK_ATTENDANCE_TOKEN_CACHE = new Map();
 const LINE_MENU_ACCESS_CACHE = new Map();
 const LINE_MENU_TOKEN_TTL_MS = 10 * 60 * 1000;
 const LINE_MENU_ACCESS_TTL_MS = 60 * 1000;
@@ -1447,7 +1448,7 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/health') {
-        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.67', auth: 'line-first-web-setup+google' });
+        return json({ ok: true, service: 'Nakna HR', brand: 'นากนะ', version: '1.0-P7.71', auth: 'line-first-web-setup+google' });
       }
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
@@ -1569,6 +1570,12 @@ export default {
       if (publicRewardRedeemMatch && request.method === 'POST') {
         await ensureV100P5Ready(env.DB);
         return await redeemPublicReward(request, env, publicRewardRedeemMatch[1], Number(publicRewardRedeemMatch[2]));
+      }
+
+      const publicAttendanceMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{32,})\/(check-in|check-out)$/);
+      if (publicAttendanceMatch && request.method === 'POST') {
+        await ensureV100P1Ready(env.DB);
+        return await submitQuickAttendance(request, env, publicAttendanceMatch[1], publicAttendanceMatch[2], ctx);
       }
 
       const dedicatedLineWebhookMatch = url.pathname.match(/^\/webhooks\/line\/([A-Za-z0-9_-]{32,})$/);
@@ -1737,7 +1744,7 @@ async function handleApi(request, env, url, auth, ctx) {
         await ensurePhase5Defaults(env.DB, clientId);
         await ensureP7CompanyDefaults(env.DB, clientId, auth.user.id);
       }
-      return json({ ok: true, release: 'V1.0-P7.67', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
+      return json({ ok: true, release: 'V1.0-P7.71', core_schema: 'ready', people_core: 'ready', employee_service: 'ready', payroll: 'ready', documents: 'ready', learning: 'ready', performance: 'ready', engagement: 'ready', subscription: 'ready', analytics: 'ready', line_integrations: 'ready', approver_permissions: 'ready', google_workspace: 'ready', web_onboarding: 'ready', recruitment_gmail: 'ready', benefits: 'ready' });
     } catch (error) {
       const detail = safeCoreSchemaErrorDetail(error);
       console.error(JSON.stringify({ level: 'error', event: 'core_schema_failed', detail }));
@@ -3144,6 +3151,7 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/attendance/today' && method === 'GET') {
+    await ensureAttendanceSourceColumns(env.DB);
     const client = await getClient(env.DB, clientId);
     if (!client) return json({ error: 'Client not found' }, 404);
     const workDate = dateInBangkok();
@@ -3153,7 +3161,9 @@ async function handleApi(request, env, url, auth, ctx) {
              CASE WHEN lr.id IS NOT NULL AND a.check_in_at IS NULL THEN 'leave' ELSE a.status END AS status, a.late_minutes,
              lr.id AS leave_request_id, lp.name AS leave_name,
              a.checkin_lat, a.checkin_lng, a.checkin_location_id, a.checkin_location_name, a.checkin_distance_m,
+             a.checkin_source_title, a.checkin_source_address,
              a.checkout_lat, a.checkout_lng, a.checkout_location_id, a.checkout_location_name, a.checkout_distance_m,
+             a.checkout_source_title, a.checkout_source_address,
              a.checkout_outside_geofence, a.scheduled_start, a.scheduled_end, a.schedule_source
       FROM employees e
       LEFT JOIN departments d ON d.id = e.department_id
@@ -3865,14 +3875,12 @@ async function processLineEvent(event, env, lineCtx) {
       return sendHrCaseForm(env,event.replyToken,emp,accessToken);
     }
     if(['เช็กอิน','checkin','check-in'].includes(lower)){
-      const mustShareLocation=await employeeNeedsLocation(env.DB,emp);
-      if(mustShareLocation){ await setLineSession(env.DB,sessionKey,'checkin'); return replyLineWithLocationQuickReply(accessToken,event.replyToken,'📍 แชร์ Location ปัจจุบันเพื่อเช็กอิน\nนากนะจะตรวจเฉพาะ Work Location ที่บริษัทอนุญาต'); }
-      try{ const result=await checkIn(env.DB,Number(emp.id),null,null,'line'); return replyLineMessages(accessToken,event.replyToken,[buildAttendanceResultFlex('checkin',result)]);}catch(e){return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('เช็กอินไม่สำเร็จ',e.message,'error')]);}
+      if(session?.action==='checkin'||session?.action==='checkout') await clearLineSession(env.DB,sessionKey).catch(()=>{});
+      return sendQuickAttendanceEntry(env,event.replyToken,emp,accessToken,'checkin');
     }
     if(['เช็กเอาต์','checkout','check-out'].includes(lower)){
-      const mustShareLocation=await employeeNeedsLocation(env.DB,emp);
-      if(mustShareLocation){ await setLineSession(env.DB,sessionKey,'checkout'); return replyLineWithLocationQuickReply(accessToken,event.replyToken,'📍 แชร์ Location ปัจจุบันเพื่อเช็กเอาต์'); }
-      try{const result=await checkOut(env.DB,Number(emp.id),null,null,'line');return replyLineMessages(accessToken,event.replyToken,[buildAttendanceResultFlex('checkout',result)]);}catch(e){return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('เช็กเอาต์ไม่สำเร็จ',e.message,'error')]);}
+      if(session?.action==='checkin'||session?.action==='checkout') await clearLineSession(env.DB,sessionKey).catch(()=>{});
+      return sendQuickAttendanceEntry(env,event.replyToken,emp,accessToken,'checkout');
     }
     if(lower==='สถานะ'){
       const a=await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(emp.id),dateInBangkok()).first();
@@ -3903,7 +3911,8 @@ async function processLineEvent(event, env, lineCtx) {
     if(!['checkin','checkout'].includes(session.action)) return;
     try{
       const lat=Number(event.message.latitude),lng=Number(event.message.longitude);
-      const locationMeta={title:String(event.message.title||'').trim()||null,address:String(event.message.address||'').trim()||null};
+      const rawLocationMeta={title:String(event.message.title||'').trim()||null,address:String(event.message.address||'').trim()||null};
+      const locationMeta=await resolveSubmittedLocationMeta(lat,lng,rawLocationMeta);
       const result=session.action==='checkin'?await checkIn(env.DB,Number(emp.id),lat,lng,'line',locationMeta):await checkOut(env.DB,Number(emp.id),lat,lng,'line',locationMeta);
       await clearLineSession(env.DB,sessionKey);
       const label=session.action==='checkin'?'Check-in':'Check-out'; const tm=session.action==='checkin'?result.check_in_at:result.check_out_at;
@@ -3938,7 +3947,10 @@ async function processLineEvent(event, env, lineCtx) {
 
     const emp=await employee(); if(!emp) return replyLine(accessToken,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
     if(action==='menu') return replyLineMessages(accessToken,event.replyToken,[await buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp)]);
-    if(action==='checkin'||action==='checkout'){ await setLineSession(env.DB,sessionKey,action); return replyLineWithLocationQuickReply(accessToken,event.replyToken,`📍 ส่ง Location ปัจจุบันมาเพื่อ${action==='checkin'?'เช็กอิน':'เช็กเอาต์'}`); }
+    if(action==='checkin'||action==='checkout'){
+      await clearLineSession(env.DB,sessionKey).catch(()=>{});
+      return sendQuickAttendanceEntry(env,event.replyToken,emp,accessToken,action);
+    }
     if(action==='leave_menu') return sendLeaveTypeMenu(env,event.replyToken,emp,accessToken);
     if(action==='leave_balance') return sendLeaveBalance(env,event.replyToken,emp,accessToken);
     if(action==='holidays') return sendCompanyHolidays(env,event.replyToken,emp,accessToken);
@@ -3992,7 +4004,29 @@ async function processLineEvent(event, env, lineCtx) {
   }
 }
 
+async function resolveSubmittedLocationMeta(lat,lng,meta={}) {
+  const direct={title:String(meta?.title||'').trim()||null,address:String(meta?.address||'').trim()||null};
+  if(direct.title&&direct.address) return direct;
+  if(!Number.isFinite(Number(lat))||!Number.isFinite(Number(lng))) return direct;
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),1800);
+  try{
+    const url=`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lng)}&localityLanguage=th`;
+    const response=await fetch(url,{headers:{accept:'application/json'},signal:controller.signal});
+    if(!response.ok)return direct;
+    const data=await response.json();
+    const locality=String(data.locality||data.city||data.principalSubdivision||'').trim();
+    const district=String(data.localityInfo?.administrative?.find?.(x=>x.order===8)?.name||data.localityInfo?.administrative?.find?.(x=>x.order===7)?.name||'').trim();
+    const province=String(data.principalSubdivision||'').trim();
+    const country=String(data.countryName||'').trim();
+    const address=[locality,district&&district!==locality?district:null,province&&province!==locality?province:null,country].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
+    const title=direct.title||String(data.locality||data.city||data.localityInfo?.informative?.[0]?.name||'').trim()||null;
+    return {title,address:direct.address||address||null};
+  }catch{return direct;}finally{clearTimeout(timer);}
+}
+
 async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
+  await ensureAttendanceSourceColumns(db);
   const employee = await db.prepare(`
     SELECT e.*, c.work_start, c.work_end, c.late_grace_minutes, c.geofence_lat, c.geofence_lng, c.geofence_radius_m, c.geofence_name, c.allow_checkout_outside_geofence
     FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.status='active'
@@ -4013,16 +4047,18 @@ async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
   await db.prepare(`
     INSERT INTO attendance (
       client_id, employee_id, work_date, check_in_at, checkin_lat, checkin_lng, source, status, late_minutes,
-      checkin_location_id, checkin_location_name, checkin_distance_m,scheduled_start,scheduled_end,schedule_source
-    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+      checkin_location_id, checkin_location_name, checkin_distance_m,checkin_source_title,checkin_source_address,scheduled_start,scheduled_end,schedule_source
+    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
     ON CONFLICT(employee_id, work_date) DO UPDATE SET
       check_in_at=excluded.check_in_at, checkin_lat=excluded.checkin_lat, checkin_lng=excluded.checkin_lng,
       source=excluded.source, status=excluded.status, late_minutes=excluded.late_minutes,
       checkin_location_id=excluded.checkin_location_id, checkin_location_name=excluded.checkin_location_name,
-      checkin_distance_m=excluded.checkin_distance_m,scheduled_start=excluded.scheduled_start,scheduled_end=excluded.scheduled_end,schedule_source=excluded.schedule_source,updated_at=CURRENT_TIMESTAMP
+      checkin_distance_m=excluded.checkin_distance_m,checkin_source_title=excluded.checkin_source_title,checkin_source_address=excluded.checkin_source_address,
+      scheduled_start=excluded.scheduled_start,scheduled_end=excluded.scheduled_end,schedule_source=excluded.schedule_source,updated_at=CURRENT_TIMESTAMP
   `).bind(
     Number(employee.client_id), employeeId, workDate, nowIso, lat ?? null, lng ?? null, source, status, lateMinutes,
     matchedLocation?.id || null, matchedLocation?.name || null, matchedLocation?.distance_m ?? null,
+    locationMeta?.title || null, locationMeta?.address || null,
     schedule.start_time || null,schedule.end_time || null,schedule.source
   ).run();
 
@@ -4039,6 +4075,7 @@ async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
 }
 
 async function checkOut(db, employeeId, lat, lng, source, locationMeta={}) {
+  await ensureAttendanceSourceColumns(db);
   const employee = await db.prepare(`
     SELECT e.*, c.geofence_lat, c.geofence_lng, c.geofence_radius_m, c.geofence_name, c.allow_checkout_outside_geofence
     FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.status='active'
@@ -4054,11 +4091,12 @@ async function checkOut(db, employeeId, lat, lng, source, locationMeta={}) {
   const nowIso = new Date().toISOString();
   await db.prepare(`
     UPDATE attendance SET check_out_at=?1, checkout_lat=?2, checkout_lng=?3,
-      checkout_location_id=?4, checkout_location_name=?5, checkout_distance_m=?6,checkout_outside_geofence=?7, updated_at=CURRENT_TIMESTAMP
-    WHERE employee_id=?8 AND work_date=?9
+      checkout_location_id=?4, checkout_location_name=?5, checkout_distance_m=?6,checkout_outside_geofence=?7,
+      checkout_source_title=?8,checkout_source_address=?9,updated_at=CURRENT_TIMESTAMP
+    WHERE employee_id=?10 AND work_date=?11
   `).bind(
     nowIso, lat ?? null, lng ?? null, matchedLocation?.id || null, matchedLocation?.name || null,
-    matchedLocation?.distance_m ?? null,matchedLocation?.outside?1:0, employeeId, workDate
+    matchedLocation?.distance_m ?? null,matchedLocation?.outside?1:0,locationMeta?.title || null,locationMeta?.address || null,employeeId,workDate
   ).run();
 
   await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_out', 'attendance', `${employeeId}:${workDate}`, {
@@ -4576,6 +4614,54 @@ async function getEmployeePortalTokenForMenu(db,clientId,employeeId){
   const token=await issueEmployeePortalToken(db,Number(clientId),Number(employeeId));
   return lineMenuCacheSet(LINE_MENU_TOKEN_CACHE,key,token);
 }
+
+async function ensureQuickAttendanceTokenSchema(db){
+  if(SCHEMA_READY.has('quick_attendance_tokens')) return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_access_tokens (
+    token_hash TEXT PRIMARY KEY,
+    client_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TEXT,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_attendance_access_tokens_employee ON attendance_access_tokens(client_id,employee_id,expires_at)`).run().catch(()=>{});
+  SCHEMA_READY.add('quick_attendance_tokens');
+}
+async function issueQuickAttendanceToken(db,clientId,employeeId){
+  await ensureQuickAttendanceTokenSchema(db);
+  const token=randomToken(40);
+  const hash=await sha256Hex(token);
+  const expires=new Date(Date.now()+30*24*60*60*1000).toISOString();
+  await db.prepare(`DELETE FROM attendance_access_tokens WHERE employee_id=?1 AND client_id=?2 AND datetime(expires_at)<CURRENT_TIMESTAMP`).bind(Number(employeeId),Number(clientId)).run();
+  await db.prepare(`INSERT INTO attendance_access_tokens (token_hash,client_id,employee_id,expires_at) VALUES (?1,?2,?3,?4)`).bind(hash,Number(clientId),Number(employeeId),expires).run();
+  return token;
+}
+async function getQuickAttendanceTokenForMenu(db,clientId,employeeId){
+  const key=`${Number(clientId)}:${Number(employeeId)}`;
+  const cached=lineMenuCacheGet(QUICK_ATTENDANCE_TOKEN_CACHE,key,LINE_MENU_TOKEN_TTL_MS);
+  if(cached) return cached;
+  const token=await issueQuickAttendanceToken(db,Number(clientId),Number(employeeId));
+  return lineMenuCacheSet(QUICK_ATTENDANCE_TOKEN_CACHE,key,token);
+}
+async function getQuickAttendanceAccess(db,token){
+  const raw=String(token||'').trim();
+  if(raw.length<20)return null;
+  await ensureQuickAttendanceTokenSchema(db);
+  const hash=await sha256Hex(raw);
+  const row=await db.prepare(`SELECT t.client_id,t.employee_id,t.expires_at,
+    e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.department_id,e.position_id,e.people_status,e.status,
+    e.line_user_id,e.line_provider_scope,c.name AS company_name
+    FROM attendance_access_tokens t
+    JOIN employees e ON e.id=t.employee_id AND e.client_id=t.client_id
+    JOIN clients c ON c.id=t.client_id
+    WHERE t.token_hash=?1 AND datetime(t.expires_at)>CURRENT_TIMESTAMP AND e.status='active'`)
+    .bind(hash).first();
+  if(row) db.prepare(`UPDATE attendance_access_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(hash).run().catch(()=>{});
+  return row||null;
+}
 async function getLineMenuManagementAccessFast(env,lineCtx,lineUserId,preferredClientId=null){
   const providerScope=String(lineCtx?.providerScope||'default');
   const preferred=Number(preferredClientId||0);
@@ -4607,14 +4693,115 @@ async function getLineMenuManagementAccessFast(env,lineCtx,lineUserId,preferredC
 }
 
 async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
-  const [ownerAccess,portalToken]=await Promise.all([
+  // Attendance has its own lightweight token table. This keeps one-tap check-in
+  // independent from Learning/Leave schema readiness and prevents fallback to
+  // the old LINE location quick-reply flow.
+  const [ownerAccess,portalToken,attendanceToken]=await Promise.all([
     getLineMenuManagementAccessFast(env,lineCtx,lineUserId,Number(emp.client_id)).catch(()=>null),
     getEmployeePortalTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id)).catch(()=>null),
+    getQuickAttendanceTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id)).catch(error=>{console.error(JSON.stringify({level:'error',event:'quick_attendance_token_failed',employee_id:Number(emp.id),message:String(error?.message||error)}));return null;}),
   ]);
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
   const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
-  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl);
+  const quickCheckInUrl=attendanceToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceToken)}&action=checkin&v=7.71`:null;
+  const quickCheckOutUrl=attendanceToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceToken)}&action=checkout&v=7.71`:null;
+  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl);
+}
+
+
+async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='checkin'){
+  try{
+    const token=await getQuickAttendanceTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id));
+    const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
+    const normalized=action==='checkout'?'checkout':'checkin';
+    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.71`;
+    return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
+  }catch(e){
+    return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',e.message||'กรุณาลองใหม่อีกครั้ง','error')]);
+  }
+}
+
+async function getEmployeePortalAccessFast(db,token){
+  const raw=String(token||'').trim();
+  if(raw.length<20)return null;
+  const hash=await sha256Hex(raw);
+  return db.prepare(`SELECT t.client_id,t.employee_id,t.expires_at,
+    e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.department_id,e.position_id,e.people_status,e.status,
+    e.line_user_id,e.line_provider_scope,c.name AS company_name
+    FROM learning_access_tokens t
+    JOIN employees e ON e.id=t.employee_id AND e.client_id=t.client_id
+    JOIN clients c ON c.id=t.client_id
+    WHERE t.token_hash=?1 AND datetime(t.expires_at)>CURRENT_TIMESTAMP AND e.status='active'`)
+    .bind(hash).first();
+}
+
+async function submitQuickAttendance(request,env,token,routeAction,ctx){
+  const access=await getQuickAttendanceAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์เช็กอินหมดอายุ กรุณากดเมนูใน LINE ใหม่อีกครั้ง'},401);
+  const body=await safeJson(request);
+  const lat=Number(body.latitude),lng=Number(body.longitude),accuracy=Number(body.accuracy||0);
+  if(!Number.isFinite(lat)||!Number.isFinite(lng)||lat<-90||lat>90||lng<-180||lng>180){
+    return json({error:'อ่านตำแหน่งไม่สำเร็จ กรุณาอนุญาต Location แล้วลองใหม่'},400);
+  }
+  // Very poor fixes can put an employee kilometers away from the actual device.
+  // Ask the browser for a better fix instead of recording unreliable attendance.
+  if(Number.isFinite(accuracy)&&accuracy>1200){
+    return json({error:'ตำแหน่งยังไม่แม่นยำ กรุณารอสักครู่แล้วลองใหม่',code:'LOW_LOCATION_ACCURACY',accuracy_m:Math.round(accuracy)},422);
+  }
+  const action=routeAction==='check-out'?'checkout':'checkin';
+  try{
+    const result=action==='checkin'
+      ? await checkIn(env.DB,Number(access.employee_id),lat,lng,'line_quick')
+      : await checkOut(env.DB,Number(access.employee_id),lat,lng,'line_quick');
+    const payload={
+      ok:true,action,
+      employee_name:access.nickname||access.first_name||'พนักงาน',
+      company_name:access.company_name||'',
+      accuracy_m:Number.isFinite(accuracy)?Math.round(accuracy):null,
+      result,
+    };
+    const background=enrichAndNotifyQuickAttendance(env,access,action,result,lat,lng,accuracy).catch(error=>{
+      console.warn(JSON.stringify({level:'warn',event:'quick_attendance_notify_failed',employee_id:Number(access.employee_id),action,message:String(error?.message||error)}));
+    });
+    if(ctx?.waitUntil)ctx.waitUntil(background); else await background;
+    return json(payload,200,{'cache-control':'no-store'});
+  }catch(e){
+    const status=Number(e?.status||400);
+    return json({error:e?.message||'ลงเวลาไม่สำเร็จ',code:status===409?'ALREADY_RECORDED':'ATTENDANCE_FAILED'},status,{'cache-control':'no-store'});
+  }
+}
+
+async function enrichAndNotifyQuickAttendance(env,access,action,result,lat,lng,accuracy){
+  const locationMeta=await resolveSubmittedLocationMeta(lat,lng,{});
+  const title=locationMeta?.title||null,address=locationMeta?.address||null;
+  if(title||address){
+    await ensureAttendanceSourceColumns(env.DB);
+    if(action==='checkin'){
+      await env.DB.prepare(`UPDATE attendance SET checkin_source_title=?1,checkin_source_address=?2,updated_at=CURRENT_TIMESTAMP WHERE employee_id=?3 AND work_date=?4`)
+        .bind(title,address,Number(access.employee_id),result.work_date).run();
+    }else{
+      await env.DB.prepare(`UPDATE attendance SET checkout_source_title=?1,checkout_source_address=?2,updated_at=CURRENT_TIMESTAMP WHERE employee_id=?3 AND work_date=?4`)
+        .bind(title,address,Number(access.employee_id),result.work_date).run();
+    }
+  }
+  const enriched={...result,source_title:title||result.source_title||null,source_address:address||result.source_address||null,accuracy_m:Number.isFinite(Number(accuracy))?Math.round(Number(accuracy)):null};
+  if(!access.line_user_id)return;
+  const lineAccessToken=await getAccessTokenForProviderScope(env,Number(access.client_id),access.line_provider_scope||'default');
+  if(!lineAccessToken)return;
+  await pushLineMessages(lineAccessToken,access.line_user_id,[buildAttendanceResultFlex(action,enriched)]);
+}
+
+function buildQuickAttendanceEntryFlex(action,url){
+  const checkin=action==='checkin';
+  return {type:'flex',altText:checkin?'เช็กอินแบบอัตโนมัติ':'เช็กเอาต์แบบอัตโนมัติ',contents:lineBubble({
+    eyebrow:'ATTENDANCE · QUICK',
+    title:checkin?'เช็กอินทันที':'เช็กเอาต์ทันที',
+    subtitle:'แตะครั้งเดียว นากนะจะอ่าน GPS และตรวจ Work Location ให้อัตโนมัติ',
+    status:'ไม่ต้องส่ง Location',statusTone:'teal',
+    body:[lineInfoCard([lineText('ครั้งแรกมือถืออาจถามสิทธิ์ตำแหน่ง ให้กด “อนุญาต” จากนั้นครั้งต่อไปแตะครั้งเดียวได้เลย','sm',LINE_CI.text)],'teal')],
+    footer:[linePrimaryButton(checkin?'เช็กอินตอนนี้':'เช็กเอาต์ตอนนี้',{type:'uri',label:checkin?'เช็กอินตอนนี้':'เช็กเอาต์ตอนนี้',uri:url})]
+  })};
 }
 
 async function createCompanyForLineOwner(env,user,name,lineUserId){
@@ -4756,7 +4943,7 @@ async function getPublicDiagnostics(env){
   const started=Date.now();
   const result={
     ok:true,
-    version:'1.0-P7.67',
+    version:'1.0-P7.71',
     db:{configured:Boolean(env.DB),ok:false,latency_ms:null},
     line:{secret_present:Boolean(env.LINE_CHANNEL_SECRET),token_present:Boolean(env.LINE_CHANNEL_ACCESS_TOKEN),bot_ok:false,basic_id:null,webhook_endpoint:null,webhook_active:false,error:null},
     google:{client_id_present:Boolean(env.GOOGLE_CLIENT_ID),client_secret_present:Boolean(env.GOOGLE_CLIENT_SECRET),encryption_key_present:Boolean(integrationEncryptionKey(env))}
@@ -6485,7 +6672,7 @@ function buildWelcomeFlex(name,company){
     footer:[linePrimaryButton('เปิดเมนูพนักงาน',{type:'postback',label:'เปิดเมนูพนักงาน',data:'action=menu'})]
   })};
 }
-function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null){
+function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null,quickCheckInUrl=null,quickCheckOutUrl=null){
   const name=emp.nickname||emp.first_name;
   const hasManagement=Boolean(ownerAccess?.primary);
   const managementCompany=ownerAccess?.primary?.name||emp.company_name||'';
@@ -6500,8 +6687,8 @@ function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseForm
     body:[
       lineText('เมนูพนักงาน','xs',LINE_CI.primaryDark,'bold'),
       lineText('จัดการเรื่องงานประจำวันได้จากตรงนี้','sm',LINE_CI.muted),
-      linePrimaryButton('📍  เช็กอิน',{type:'postback',label:'เช็กอิน',data:'action=checkin'}),
-      lineSecondaryButton('🏠  เช็กเอาต์',{type:'postback',label:'เช็กเอาต์',data:'action=checkout'}),
+      linePrimaryButton('📍  เช็กอิน',quickCheckInUrl?{type:'uri',label:'เช็กอิน',uri:quickCheckInUrl}:{type:'postback',label:'เช็กอิน',data:'action=checkin'}),
+      lineSecondaryButton('🏠  เช็กเอาต์',quickCheckOutUrl?{type:'uri',label:'เช็กเอาต์',uri:quickCheckOutUrl}:{type:'postback',label:'เช็กเอาต์',data:'action=checkout'}),
       lineSecondaryButton('🏖  ขอลางาน',leaveFormUrl?{type:'uri',label:'ขอลางาน',uri:leaveFormUrl}:{type:'postback',label:'ขอลางาน',data:'action=leave_menu'},'#F1F7F5'),
       lineSecondaryButton('📅  สิทธิ์ลา',{type:'postback',label:'สิทธิ์ลา',data:'action=leave_balance'},'#F7F9F8'),
       lineSecondaryButton('🎉  วันหยุดบริษัท',{type:'postback',label:'วันหยุดบริษัท',data:'action=holidays'},'#F7F9F8'),
@@ -6715,12 +6902,13 @@ function buildAttendanceResultFlex(kind,result){
   const outside=Boolean(result.outside_geofence); const tone=late?'warning':outside?'warning':'success'; const status=checkin?(outside?(late?`นอกพื้นที่ · สาย ${result.late_minutes} นาที`:'เช็กอินนอกพื้นที่'):(late?`สาย ${result.late_minutes} นาที`:'ตรงเวลา')):(outside?'เช็กเอาต์นอกพื้นที่':'บันทึกเวลาแล้ว');
   const tm=checkin?result.check_in_at:result.check_out_at;
   const rows=[lineInfoRow('เวลา',formatBangkokTime(tm),LINE_CI.primaryDark)];
-  const sourceLabel=checkin?'เช็กอินจาก':'เช็กเอาต์จาก';
+  const sourceLabel=checkin?'จุดที่เช็กอินจริง':'จุดที่เช็กเอาต์จริง';
   const sourcePlace=result.source_title||result.source_address||((result.lat!=null&&result.lng!=null)?`${Number(result.lat).toFixed(5)}, ${Number(result.lng).toFixed(5)}`:null);
   if(sourcePlace) rows.push(lineInfoRow(sourceLabel,sourcePlace,LINE_CI.primaryDark));
-  if(result.source_title&&result.source_address&&result.source_title!==result.source_address) rows.push(lineInfoRow('ที่อยู่',result.source_address));
-  if(result.location_name) rows.push(lineInfoRow('Work Location',result.location_name));
-  if(result.distance_m!=null){const d=Number(result.distance_m);rows.push(lineInfoRow('ระยะจากจุด',d>=1000?`${(d/1000).toFixed(d>=10000?0:1)} กม.`:`${Math.round(d)} ม.`));}
+  if(result.source_address&&result.source_address!==sourcePlace) rows.push(lineInfoRow('ที่อยู่จริง',result.source_address));
+  if(result.location_name) rows.push(lineInfoRow('Work Location ที่กำหนด',result.location_name));
+  if(result.distance_m!=null){const d=Number(result.distance_m);rows.push(lineInfoRow('ห่างจาก Work Location',d>=1000?`${(d/1000).toFixed(d>=10000?0:1)} กม.`:`${Math.round(d)} ม.`));}
+  if(result.accuracy_m!=null) rows.push(lineInfoRow('ความแม่นยำ GPS',`±${Math.round(Number(result.accuracy_m))} ม.`));
   const footer=[];
   if(result.lat!=null&&result.lng!=null){const mapUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${result.lat},${result.lng}`)}`;footer.push(lineSecondaryButton('ดูจุดที่ลงเวลา',{type:'uri',label:'ดูจุดที่ลงเวลา',uri:mapUrl},LINE_CI.mintSoft));}
   footer.push(lineSecondaryButton('ดูสถานะวันนี้',{type:'postback',label:'ดูสถานะวันนี้',data:'action=status'},LINE_CI.mintSoft));
@@ -6728,7 +6916,7 @@ function buildAttendanceResultFlex(kind,result){
 }
 function buildLocationRequestFlex(action){
   const checkin=action==='checkin';
-  return {type:'flex',altText:`ส่งตำแหน่งเพื่อ${checkin?'เช็กอิน':'เช็กเอาต์'}`,contents:lineBubble({eyebrow:'ATTENDANCE',title:`${checkin?'เช็กอิน':'เช็กเอาต์'}ด้วยตำแหน่ง`,subtitle:'นากนะจะใช้ตำแหน่งนี้เฉพาะการตรวจ Work Location',status:'รอตำแหน่ง',statusTone:'teal',body:[lineInfoCard([lineText('กด “ส่งตำแหน่งปัจจุบัน” ด้านล่าง แล้ว LINE จะให้คุณเลือกตำแหน่ง','sm',LINE_CI.text)],'teal')]})};
+  return {type:'flex',altText:checkin?'เปิดเช็กอินอัตโนมัติ':'เปิดเช็กเอาต์อัตโนมัติ',contents:lineBubble({eyebrow:'ATTENDANCE · QUICK',title:checkin?'เช็กอินแบบแตะเดียว':'เช็กเอาต์แบบแตะเดียว',subtitle:'ระบบไม่ใช้การส่ง Location ในแชตแล้ว',status:'QUICK 1-TAP',statusTone:'teal',body:[lineInfoCard([lineText('กรุณากดเมนูใหม่ ระบบจะเปิดหน้าตรวจ GPS อัตโนมัติให้ทันที','sm',LINE_CI.text)],'teal')]})};
 }
 function buildSimpleNoticeFlex(title,message,tone='teal'){
   return {type:'flex',altText:title,contents:lineBubble({eyebrow:'นากนะ',title,body:[lineInfoCard([lineText(message,'sm',LINE_CI.text)],tone)],status:tone==='error'?'มีปัญหา':tone==='success'?'เรียบร้อย':null,statusTone:tone})};
@@ -6812,10 +7000,10 @@ function formatThaiShortDate(isoDate) {
 }
 
 async function replyLineWithLocationQuickReply(accessToken, replyToken, text) {
+  // Legacy compatibility only. P7.71 intentionally removes LINE's location
+  // quick-reply so no code path can ask the employee to manually send a pin.
   const action=String(text||'').includes('เช็กเอาต์')?'checkout':'checkin';
-  const message=buildLocationRequestFlex(action);
-  message.quickReply={items:[{type:'action',action:{type:'location',label:'ส่งตำแหน่งปัจจุบัน'}}]};
-  return replyLineMessages(accessToken,replyToken,[message]);
+  return replyLineMessages(accessToken,replyToken,[buildLocationRequestFlex(action)]);
 }
 
 async function replyLine(accessToken, replyToken, text) {
@@ -6835,6 +7023,24 @@ async function verifyLineSignature(rawBody, signature, channelSecret) {
   const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody));
   const expected = bytesToBase64(new Uint8Array(digest));
   return constantTimeEqual(expected, signature);
+}
+
+async function ensureAttendanceSourceColumns(db) {
+  // P7.69: attendance source metadata was introduced after some Workspaces were
+  // already live. Those databases may not have the new columns yet, especially
+  // when LINE uses the global OA fast path which intentionally skips full schema
+  // preparation. Repair only the attendance columns here and cache the result per
+  // Worker isolate so normal check-in/out remains fast after the first request.
+  if (SCHEMA_READY.has('attendance_source_meta')) return;
+  if (!db) throw new Error('D1 binding DB is not available');
+  await ensureColumns(db,'attendance',[
+    ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
+    ['checkin_source_title','TEXT'],['checkin_source_address','TEXT'],
+    ['checkout_location_id','INTEGER'],['checkout_location_name','TEXT'],['checkout_distance_m','REAL'],['checkout_accuracy_m','REAL'],
+    ['checkout_source_title','TEXT'],['checkout_source_address','TEXT'],['checkout_outside_geofence','INTEGER NOT NULL DEFAULT 0'],
+    ['scheduled_start','TEXT'],['scheduled_end','TEXT'],['schedule_source','TEXT']
+  ]);
+  SCHEMA_READY.add('attendance_source_meta');
 }
 
 async function ensureCoreSchema(db) {
@@ -6876,10 +7082,7 @@ async function ensureCoreSchema(db) {
     ['emergency_contact_name','TEXT'],['emergency_contact_phone','TEXT'],['national_id','TEXT'],
     ['contract_type','TEXT'],['contract_number','TEXT'],['contract_start_date','TEXT'],['contract_signed_date','TEXT']
   ]);
-  await ensureColumns(db,'attendance',[
-    ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
-    ['checkout_location_id','INTEGER'],['checkout_location_name','TEXT'],['checkout_distance_m','REAL'],['checkout_accuracy_m','REAL']
-  ]);
+  await ensureAttendanceSourceColumns(db);
   await ensureV050Ready(db);
   await ensureV060Ready(db);
   await ensureV061Ready(db);
