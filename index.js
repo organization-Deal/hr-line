@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.79';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.79';
+const NAKNA_RUNTIME_RELEASE = 'P7.80';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.80';
 const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -2373,7 +2373,7 @@ async function handleApi(request, env, url, auth, ctx) {
       if(days>366)return json({error:'เลือกช่วงวันที่ได้สูงสุด 366 วัน'},400);
       anchor=start;
     }
-    const employeeRes = await env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,e.position_id,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.id`).bind(clientId).all();
+    const employeeRes = await env.DB.prepare(`SELECT e.id,e.id AS employee_id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,e.position_id,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.id`).bind(clientId).all();
     const attendanceRes = await env.DB.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 ORDER BY work_date,employee_id`).bind(clientId,start,end).all();
     const workLocationRes = await env.DB.prepare(`SELECT id,name,address,radius_m FROM work_locations WHERE client_id=?1`).bind(clientId).all();
     const leaveRes = await env.DB.prepare(`SELECT lr.*,lp.name AS leave_name FROM leave_requests lr LEFT JOIN leave_policies lp ON lp.id=lr.policy_id WHERE lr.client_id=?1 AND lr.start_date<=?3 AND lr.end_date>=?2 AND lr.status IN ('approved','pending','awaiting_evidence') ORDER BY lr.id DESC`).bind(clientId,start,end).all();

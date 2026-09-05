@@ -1755,13 +1755,13 @@ function workLogMatrixCell(r){
     parts.push(`<div class="worklog-leave-note">${escapeHtml(r.leave_name)}${leaveState}</div>`);
   }
   if(!parts.length)return `<div class="worklog-day-card missing"><small>ยังไม่เช็กอิน</small></div>`;
-  const detail=(r.check_in_at||r.check_out_at)?`<button type="button" class="worklog-detail-btn" data-worklog-detail data-employee-id="${Number(r.employee_id||0)}" data-work-date="${escapeHtml(r.work_date||'')}">ดูรายละเอียด</button>`:'';
+  const detail=(r.check_in_at||r.check_out_at)?`<button type="button" class="worklog-detail-btn" data-worklog-detail data-employee-id="${Number(r.employee_id||r.id||0)}" data-work-date="${escapeHtml(r.work_date||'')}">ดูรายละเอียด</button>`:'';
   return `<div class="worklog-day-card ${r.leave_name?'has-leave':''}">${parts.join('')}${detail}</div>`;
 }
 window.openWorkLogDetail=async(employeeId,workDate)=>{
   const modal=$('#workLogDetailModal');
   if(!modal)return;
-  const cached=(state.teamWorkLog?.rows||[]).find(x=>Number(x.employee_id)===Number(employeeId)&&String(x.work_date)===String(workDate));
+  const cached=(state.teamWorkLog?.rows||[]).find(x=>Number(x.employee_id||x.id)===Number(employeeId)&&String(x.work_date)===String(workDate));
   const fallbackPerson=cached?`${cached.nickname||cached.first_name||'—'} ${cached.last_name||''}`.trim():'รายละเอียดการลงเวลา';
   $('#workLogDetailTitle').textContent=fallbackPerson;
   $('#workLogDetailSubtitle').textContent=cached?`${formatDate(cached.work_date)} · ${cached.department_name||'ยังไม่ระบุแผนก'}`:formatDate(workDate);
@@ -1802,7 +1802,35 @@ window.openWorkLogDetail=async(employeeId,workDate)=>{
       <div class="worklog-coordinate-row"><span>พิกัดจริง</span><code>${ci?.lat!=null&&ci?.lng!=null?`${Number(ci.lat).toFixed(6)}, ${Number(ci.lng).toFixed(6)}`:'—'}</code></div>
       <div class="worklog-detail-actions">${checkinMap}${checkoutMap}</div>`;
   }catch(e){
-    $('#workLogDetailBody').innerHTML=`<div class="worklog-detail-error"><strong>เปิดรายละเอียดไม่สำเร็จ</strong><span>${escapeHtml(e.message||'กรุณาลองใหม่อีกครั้ง')}</span></div>`;
+    // P7.80: team-work-log rows historically exposed employee `id` but the detail
+    // button expected `employee_id`, causing requests with employee_id=0. Keep a
+    // useful local fallback as well so HR can still inspect the saved GPS even if
+    // the detail enrichment endpoint is temporarily unavailable.
+    if(cached){
+      const outside=Number(cached.checkin_outside_geofence||0)===1;
+      const place=workLogPlace(cached,'checkin');
+      const workLocation=String(cached.checkin_location_name||'').trim()||'ไม่ได้จับคู่ Work Location';
+      const distance=workLogDistanceLabel(cached.checkin_distance_m)||'—';
+      const map=(cached.checkin_lat!=null&&cached.checkin_lng!=null)?`<a class="worklog-map-btn" href="https://www.google.com/maps?q=${Number(cached.checkin_lat)},${Number(cached.checkin_lng)}" target="_blank" rel="noopener">📍 เปิดจุด GPS จริง</a>`:'';
+      $('#workLogDetailBody').innerHTML=`
+        <div class="worklog-detail-status ${outside?'outside':Number(cached.late_minutes||0)>0?'late':'inside'}"><span>สถานะวันนี้</span><strong>${outside?'เช็กอินนอกพื้นที่':Number(cached.late_minutes||0)>0?`มาสาย ${Number(cached.late_minutes)} นาที`:'อยู่ในพื้นที่ · ตรงเวลา'}</strong></div>
+        <div class="worklog-actual-location ${outside?'outside':'inside'}"><span>จุดที่พนักงานเช็กอินจริง</span><strong>📍 ${escapeHtml(place)}</strong>${cached.checkin_actual_address?`<small>${escapeHtml(cached.checkin_actual_address)}</small>`:''}</div>
+        <div class="worklog-detail-grid">
+          <div><span>เวลาเช็กอิน</span><strong>${cached.check_in_at?time(cached.check_in_at):'—'}</strong></div>
+          <div><span>GPS</span><strong>${cached.checkin_accuracy_m!=null?`±${Math.round(Number(cached.checkin_accuracy_m))} ม.`:'—'}</strong></div>
+          <div><span>Work Location ที่ระบบเทียบ</span><strong>${escapeHtml(workLocation)}</strong></div>
+          <div><span>สถานะพื้นที่</span><strong>${outside?'นอก Work Location':'อยู่ใน Work Location'}</strong></div>
+          <div><span>ระยะจาก Work Location</span><strong>${escapeHtml(distance)}</strong></div>
+          <div><span>รัศมีที่อนุญาต</span><strong>${cached.checkin_location_radius_m!=null?`${Math.round(Number(cached.checkin_location_radius_m))} ม.`:'—'}</strong></div>
+          <div><span>เช็กเอาต์</span><strong>${cached.check_out_at?time(cached.check_out_at):'—'}</strong></div>
+          <div><span>จุดเช็กเอาต์</span><strong>${escapeHtml(workLogPlace(cached,'checkout'))}</strong></div>
+        </div>
+        <div class="worklog-coordinate-row"><span>พิกัดจริง</span><code>${cached.checkin_lat!=null&&cached.checkin_lng!=null?`${Number(cached.checkin_lat).toFixed(6)}, ${Number(cached.checkin_lng).toFixed(6)}`:'—'}</code></div>
+        <div class="worklog-detail-actions">${map}</div>
+        <div class="worklog-detail-fallback-note">แสดงข้อมูลที่บันทึกไว้ในตารางเวลา · รายละเอียด Landmark แบบสดยังโหลดไม่สำเร็จ</div>`;
+    }else{
+      $('#workLogDetailBody').innerHTML=`<div class="worklog-detail-error"><strong>เปิดรายละเอียดไม่สำเร็จ</strong><span>${escapeHtml(e.message||'กรุณาลองใหม่อีกครั้ง')}</span></div>`;
+    }
   }
 };
 function renderTeamWorkLog(){
@@ -1817,8 +1845,9 @@ function renderTeamWorkLog(){
   const dateKeys=[...new Set(rows.map(r=>r.work_date).filter(Boolean))].sort();
   const employeeMap=new Map();
   rows.forEach(r=>{
-    const key=String(r.employee_id||r.employee_code||`${r.first_name}-${r.last_name}`);
-    if(!employeeMap.has(key)) employeeMap.set(key,{key,employee_id:r.employee_id,employee_code:r.employee_code,first_name:r.first_name,last_name:r.last_name,nickname:r.nickname,department_name:r.department_name,position_name:r.position_name,days:new Map()});
+    const resolvedEmployeeId=Number(r.employee_id||r.id||0)||null;
+    const key=String(resolvedEmployeeId||r.employee_code||`${r.first_name}-${r.last_name}`);
+    if(!employeeMap.has(key)) employeeMap.set(key,{key,employee_id:resolvedEmployeeId,employee_code:r.employee_code,first_name:r.first_name,last_name:r.last_name,nickname:r.nickname,department_name:r.department_name,position_name:r.position_name,days:new Map()});
     employeeMap.get(key).days.set(r.work_date,r);
   });
   const people=[...employeeMap.values()];

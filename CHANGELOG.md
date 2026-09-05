@@ -1,3 +1,8 @@
+
+## P7.80 — Attendance detail fix
+- Fix Team Work Log rows to expose `employee_id` explicitly (previously only `id`, causing detail requests with employee_id=0).
+- Detail buttons now fall back to `row.id` for backward compatibility.
+- If live location enrichment fails, HR still sees saved check-in GPS, status, Work Location, distance and map instead of a blank error modal.
 ## V1.0-P7.78 — Nearby Landmark / POI for Attendance
 
 - ถ้าอยู่นอก Work Location ระบบพยายามระบุ Landmark/อาคาร/ห้าง/โรงแรม/สถานีที่ใกล้ที่สุดก่อนชื่อแขวง
