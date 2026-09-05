@@ -55,7 +55,9 @@ function setSuccess(payload,position){
     : (inside?'สถานที่ที่ลงเวลา':(action==='checkin'?'จุดที่เช็กอินจริง':'จุดที่เช็กเอาต์จริง'));
   $('#locationText').textContent=inside
     ? (result.location_name||result.source_title||'—')
-    : (result.source_title||result.source_address||((result.lat!=null&&result.lng!=null)?`${Number(result.lat).toFixed(5)}, ${Number(result.lng).toFixed(5)}`:'—'));
+    : (result.nearby_name
+      ? `${result.nearby_relation||'ใกล้'} ${result.nearby_name}${result.nearby_distance_text?` · ${result.nearby_distance_text}`:''}`
+      : (result.source_title||result.source_address||((result.lat!=null&&result.lng!=null)?`${Number(result.lat).toFixed(5)}, ${Number(result.lng).toFixed(5)}`:'—')));
   $('#areaStatusText').textContent=inside?'อยู่ในพื้นที่บริษัท':(result.outside_geofence?'นอกพื้นที่บริษัท':'ตรวจสอบจาก GPS');
   $('#areaStatusText').className=inside?'status-ok':(result.outside_geofence?'status-warn':'');
   $('#workLocationText').textContent=result.location_name||'—';
