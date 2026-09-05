@@ -750,7 +750,9 @@ function bindEvents() {
   $('#refreshBtn').onclick = () => loadViewData(state.currentView || 'dashboard',{force:true});
   $('#createBroadcastBtn').onclick = openBroadcastModal;
   $('#broadcastAudience').onchange = renderBroadcastAudienceFields;
+  $('#broadcastRequiresAck').onchange = renderBroadcastAckFields;
   $('#broadcastSendBtn').onclick = sendBroadcast;
+  $('#broadcastRemindPendingBtn').onclick = remindPendingBroadcast;
   if ($('#createBroadcastPageBtn')) $('#createBroadcastPageBtn').onclick = openBroadcastModal;
   $('#setupRichMenuBtn').onclick = setupRichMenu;
   $('#removeRichMenuBtn').onclick = removeRichMenu;
@@ -2238,7 +2240,7 @@ function renderAttendance() {
         <td data-label="พนักงาน"><div class="person"><div class="avatar">${initial(attendance)}</div><div><strong>${escapeHtml(attendance.nickname || attendance.first_name)} ${escapeHtml(attendance.last_name)}</strong><small>${escapeHtml(attendance.employee_code)}</small></div></div></td>
         <td data-label="Check-in">${attendance.check_in_at ? `<strong class="table-primary">${time(attendance.check_in_at)}</strong>${Number(attendance.checkin_outside_geofence)===1?'<br><span class="badge badge-warning">นอกพื้นที่</span>':''}${attendance.scheduled_start?`<small class="table-secondary">ตาราง ${escapeHtml(attendance.scheduled_start)}${attendance.schedule_source?` · ${escapeHtml(attendance.schedule_source)}`:""}</small>`:""}` : '—'}</td>
         <td data-label="Location">${attendance.check_in_at
-          ? `<div class="attendance-location actual-location"><strong>📍 ${escapeHtml(attendance.checkin_source_title||attendance.checkin_source_address||attendance.checkin_location_name||'มีพิกัด')}</strong>${attendance.checkin_source_address&&attendance.checkin_source_address!==attendance.checkin_source_title?`<small>${escapeHtml(attendance.checkin_source_address)}</small>`:''}${attendance.checkin_location_name?`<small>Work Location: ${escapeHtml(attendance.checkin_location_name)}${attendance.checkin_distance_m!=null?` · ${Number(attendance.checkin_distance_m)>=1000?`${(Number(attendance.checkin_distance_m)/1000).toFixed(1)} กม.`:`${Math.round(Number(attendance.checkin_distance_m))} ม.`}`:''}</small>`:''}${attendance.checkin_lat != null ? `<a href="https://www.google.com/maps?q=${Number(attendance.checkin_lat)},${Number(attendance.checkin_lng)}" target="_blank" rel="noopener">ดูจุดที่เช็กอินจริง</a>` : ''}</div>`
+          ? `<div class="attendance-location actual-location"><strong>📍 ${escapeHtml(Number(attendance.checkin_outside_geofence)!==1&&attendance.checkin_location_name?attendance.checkin_location_name:(attendance.checkin_source_title||attendance.checkin_source_address||attendance.checkin_location_name||'มีพิกัด'))}</strong>${Number(attendance.checkin_outside_geofence)!==1&&attendance.checkin_location_name?'<small class="success-text">อยู่ในพื้นที่บริษัท</small>':(attendance.checkin_source_address&&attendance.checkin_source_address!==attendance.checkin_source_title?`<small>${escapeHtml(attendance.checkin_source_address)}</small>`:'')}${attendance.checkin_location_name?`<small>Work Location: ${escapeHtml(attendance.checkin_location_name)}${attendance.checkin_distance_m!=null?` · ${Number(attendance.checkin_distance_m)>=1000?`${(Number(attendance.checkin_distance_m)/1000).toFixed(1)} กม.`:`${Math.round(Number(attendance.checkin_distance_m))} ม.`}`:''}</small>`:''}${attendance.checkin_lat != null ? `<a href="https://www.google.com/maps?q=${Number(attendance.checkin_lat)},${Number(attendance.checkin_lng)}" target="_blank" rel="noopener">ดูจุดที่เช็กอินจริง</a>` : ''}</div>`
           : '—'}</td>
         <td data-label="Check-out">${attendance.check_out_at ? `${time(attendance.check_out_at)}${Number(attendance.checkout_outside_geofence)===1?'<br><span class="badge badge-warning">นอกพื้นที่</span>':''}` : '—'}</td>
         <td data-label="สถานะ">${attendanceStatus(attendance)}</td>
@@ -2452,7 +2454,7 @@ function renderEmployeeService(){
   }
 
   const broadcastRoot=$('#broadcastList');
-  if(broadcastRoot) broadcastRoot.innerHTML=broadcasts.length?broadcasts.slice(0,8).map(b=>`<article class="broadcast-row"><div><strong>${escapeHtml(b.title)}</strong><p>${escapeHtml(b.message)}</p><small>${formatDateTime(b.created_at)} · ${escapeHtml(b.audience_type==='all'?'ทุกคน':b.audience_type==='department'?'เฉพาะแผนก':'เลือกพนักงาน')}</small></div><div class="broadcast-stats"><span class="badge ${b.status==='sent'?'badge-success':b.status==='partial'?'badge-warning':'badge-neutral'}">${escapeHtml(b.status)}</span><small>${Number(b.delivered_count||0)}/${Number(b.total_recipients||0)} ส่งสำเร็จ</small>${b.status==='draft'?`<button class="text-btn" onclick="window.sendBroadcastById(${Number(b.id)})">ส่งตอนนี้</button>`:''}</div></article>`).join(''):emptyState('ยังไม่มีประกาศ','ส่งประกาศจาก HR เข้า LINE ของพนักงานได้จากปุ่มด้านบน');
+  if(broadcastRoot) broadcastRoot.innerHTML=broadcasts.length?broadcasts.slice(0,8).map(b=>`<article class="broadcast-row"><div><strong>${escapeHtml(b.title)}</strong><p>${escapeHtml(b.message)}</p><small>${formatDateTime(b.created_at)} · ${escapeHtml(b.audience_type==='all'?'ทุกคน':b.audience_type==='department'?'เฉพาะแผนก':'เลือกพนักงาน')}</small></div><div class="broadcast-stats"><span class="badge ${b.status==='sent'?'badge-success':b.status==='partial'?'badge-warning':'badge-neutral'}">${escapeHtml(b.status)}</span><small>${Number(b.delivered_count||0)}/${Number(b.total_recipients||0)} ส่งสำเร็จ</small>${broadcastAckStatHtml(b)}${b.status==='draft'?`<button class="text-btn" onclick="window.sendBroadcastById(${Number(b.id)})">ส่งตอนนี้</button>`:''}</div></article>`).join(''):emptyState('ยังไม่มีประกาศ','ส่งประกาศจาก HR เข้า LINE ของพนักงานได้จากปุ่มด้านบน');
   renderBroadcastPage();
   renderHrInbox();
 }
@@ -2474,7 +2476,7 @@ function renderBroadcastPage(){
   if($('#broadcastPageFailed')) $('#broadcastPageFailed').textContent=String(totalFailed);
   const root=$('#broadcastPageList');
   if(!root) return;
-  root.innerHTML=broadcasts.length?broadcasts.map(b=>`<article class="broadcast-row"><div><strong>${escapeHtml(b.title)}</strong><p>${escapeHtml(b.message)}</p><small>${formatDateTime(b.created_at)} · ${escapeHtml(b.audience_type==='all'?'พนักงานทั้งหมด':b.audience_type==='department'?'เฉพาะแผนก':'เลือกพนักงาน')} · ${escapeHtml(b.created_by_name||'HR')}</small></div><div class="broadcast-stats"><span class="badge ${b.status==='sent'?'badge-success':b.status==='partial'?'badge-warning':'badge-neutral'}">${escapeHtml(({draft:'แบบร่าง',sending:'กำลังส่ง',sent:'ส่งแล้ว',partial:'ส่งบางส่วน'})[b.status]||b.status)}</span><small>${Number(b.delivered_count||0)}/${Number(b.total_recipients||0)} ส่งสำเร็จ</small>${b.status==='draft'&&canSend?`<button class="text-btn" onclick="window.sendBroadcastById(${Number(b.id)})">ส่งตอนนี้</button>`:''}</div></article>`).join(''):emptyState('ยังไม่มีประกาศ','กด “สร้างประกาศ” เพื่อส่งข้อความเข้า LINE ของพนักงาน');
+  root.innerHTML=broadcasts.length?broadcasts.map(b=>`<article class="broadcast-row"><div><strong>${escapeHtml(b.title)}</strong><p>${escapeHtml(b.message)}</p><small>${formatDateTime(b.created_at)} · ${escapeHtml(b.audience_type==='all'?'พนักงานทั้งหมด':b.audience_type==='department'?'เฉพาะแผนก':'เลือกพนักงาน')} · ${escapeHtml(b.created_by_name||'HR')}</small></div><div class="broadcast-stats"><span class="badge ${b.status==='sent'?'badge-success':b.status==='partial'?'badge-warning':'badge-neutral'}">${escapeHtml(({draft:'แบบร่าง',sending:'กำลังส่ง',sent:'ส่งแล้ว',partial:'ส่งบางส่วน'})[b.status]||b.status)}</span><small>${Number(b.delivered_count||0)}/${Number(b.total_recipients||0)} ส่งสำเร็จ</small>${broadcastAckStatHtml(b)}${b.status==='draft'&&canSend?`<button class="text-btn" onclick="window.sendBroadcastById(${Number(b.id)})">ส่งตอนนี้</button>`:''}</div></article>`).join(''):emptyState('ยังไม่มีประกาศ','กด “สร้างประกาศ” เพื่อส่งข้อความเข้า LINE ของพนักงาน');
 }
 
 function renderHrInbox(){
@@ -2517,8 +2519,19 @@ function renderBroadcastAudienceFields(){
   $('#broadcastDepartmentField').classList.toggle('hidden',mode!=='department');
   $('#broadcastEmployeesField').classList.toggle('hidden',mode!=='employees');
 }
+function renderBroadcastAckFields(){
+  const required=Boolean($('#broadcastRequiresAck')?.checked);
+  $('#broadcastAckDueField')?.classList.toggle('hidden',!required);
+  if(!required&&$('#broadcastAckDueAt')) $('#broadcastAckDueAt').value='';
+}
+function broadcastAckStatHtml(b,canOpen=true){
+  if(!Number(b.requires_ack||0))return '';
+  const ack=Number(b.acknowledged_count||0),pending=Number(b.pending_ack_count||0),delivered=Number(b.delivered_count||0);
+  return `<div class="broadcast-ack-inline"><span class="badge ${pending?'badge-warning':'badge-success'}">รับทราบ ${ack}/${delivered}</span>${pending?`<small>รอ ${pending} คน</small>`:'<small>ครบแล้ว ✓</small>'}${canOpen?`<button class="text-btn" type="button" onclick="window.openBroadcastAckDetail(${Number(b.id)})">ดูการรับทราบ</button>`:''}</div>`;
+}
 function openBroadcastModal(){
   $('#broadcastTitle').value=''; $('#broadcastMessage').value=''; $('#broadcastAudience').value='all';
+  $('#broadcastRequiresAck').checked=false; $('#broadcastAckDueAt').value=''; renderBroadcastAckFields();
   $('#broadcastDepartment').innerHTML=(state.peopleCore?.departments||[]).map(d=>`<option value="${Number(d.id)}">${escapeHtml(d.name)}</option>`).join('');
   $('#broadcastEmployeeChecks').innerHTML=state.employees.filter(e=>e.status==='active').map(e=>`<label class="location-check"><input type="checkbox" value="${Number(e.id)}"><span><strong>${escapeHtml(e.nickname||e.first_name)}</strong><small>${escapeHtml(e.department_name||'ไม่ระบุแผนก')}${e.line_user_id?' · LINE✓':' · ยังไม่เชื่อม LINE'}</small></span></label>`).join('');
   renderBroadcastAudienceFields(); $('#broadcastModal').showModal();
@@ -2526,13 +2539,30 @@ function openBroadcastModal(){
 async function sendBroadcast(){
   const title=$('#broadcastTitle').value.trim(),message=$('#broadcastMessage').value.trim(),audience_type=$('#broadcastAudience').value;
   if(title.length<2||message.length<2)return toast('กรุณาใส่หัวข้อและข้อความประกาศ',true);
-  const body={title,message,audience_type,send_now:true};
+  const body={title,message,audience_type,send_now:true,requires_ack:Boolean($('#broadcastRequiresAck')?.checked),ack_due_at:$('#broadcastRequiresAck')?.checked?($('#broadcastAckDueAt')?.value||null):null};
   if(audience_type==='department') body.department_id=Number($('#broadcastDepartment').value);
   if(audience_type==='employees') body.employee_ids=$$('#broadcastEmployeeChecks input:checked').map(x=>Number(x.value));
   const btn=$('#broadcastSendBtn');btn.disabled=true;btn.textContent='กำลังส่ง…';
-  try{const result=await api('/api/broadcasts',{method:'POST',body:JSON.stringify(body)});$('#broadcastModal').close();await loadAll({silent:true});toast(`ส่งประกาศแล้ว ${Number(result.delivered||0)} คน${Number(result.failed||0)+Number(result.skipped||0)>0?` · ไม่สำเร็จ ${Number(result.failed||0)+Number(result.skipped||0)}`:''}`);}catch(e){toast(e.message,true);}finally{btn.disabled=false;btn.textContent='ส่งประกาศตอนนี้';}
+  try{const result=await api('/api/broadcasts',{method:'POST',body:JSON.stringify(body)});$('#broadcastModal').close();const fresh=await api('/api/broadcasts');state.broadcasts=fresh?.data||[];renderEmployeeService();renderBroadcastPage();toast(`ส่งประกาศแล้ว ${Number(result.delivered||0)} คน${body.requires_ack?' · เปิดการรับทราบแล้ว':''}${Number(result.failed||0)+Number(result.skipped||0)>0?` · ไม่สำเร็จ ${Number(result.failed||0)+Number(result.skipped||0)}`:''}`);}catch(e){toast(e.message,true);}finally{btn.disabled=false;btn.textContent='ส่งประกาศตอนนี้';}
 }
-window.sendBroadcastById=async id=>{try{const result=await api(`/api/broadcasts/${id}/send`,{method:'POST',body:'{}'});await loadAll({silent:true});toast(`ส่งประกาศแล้ว ${Number(result.delivered||0)} คน`);}catch(e){toast(e.message,true);}};
+window.sendBroadcastById=async id=>{try{const result=await api(`/api/broadcasts/${id}/send`,{method:'POST',body:'{}'});const fresh=await api('/api/broadcasts');state.broadcasts=fresh?.data||[];renderEmployeeService();renderBroadcastPage();toast(`ส่งประกาศแล้ว ${Number(result.delivered||0)} คน`);}catch(e){toast(e.message,true);}};
+window.openBroadcastAckDetail=async id=>{
+  try{
+    const result=await api(`/api/broadcasts/${Number(id)}/acknowledgements`); const b=result.broadcast||{},summary=result.summary||{},rows=result.data||[];
+    $('#broadcastAckId').value=String(id); $('#broadcastAckTitle').textContent=`การรับทราบ · ${b.title||'ประกาศ'}`;
+    $('#broadcastAckSubtitle').textContent=`${b.ack_due_at?`กำหนดรับทราบภายใน ${formatDate(b.ack_due_at)} · `:''}กดเตือนได้เฉพาะพนักงานที่ยังไม่รับทราบ`;
+    $('#broadcastAckSummary').innerHTML=`<div><span>ส่งสำเร็จ</span><strong>${Number(summary.delivered||0)}</strong></div><div><span>รับทราบแล้ว</span><strong class="success-text">${Number(summary.acknowledged||0)}</strong></div><div><span>ยังไม่รับทราบ</span><strong>${Number(summary.pending||0)}</strong></div>`;
+    $('#broadcastRemindPendingBtn').disabled=Number(summary.pending||0)===0;
+    $('#broadcastRemindPendingBtn').textContent=Number(summary.pending||0)?`เตือน ${Number(summary.pending)} คนที่ยังไม่รับทราบ`:'รับทราบครบแล้ว';
+    $('#broadcastAckList').innerHTML=rows.length?rows.map(r=>{const name=escapeHtml(r.nickname||r.first_name||'พนักงาน');const meta=[r.employee_code,r.department_name,r.position_name].filter(Boolean).map(escapeHtml).join(' · ');const ack=Boolean(r.acknowledged_at);const deliveryOk=r.delivery_status==='delivered';return `<article class="broadcast-ack-person ${ack?'done':!deliveryOk?'failed':''}"><div class="person-mini-avatar">${escapeHtml((r.nickname||r.first_name||'?').slice(0,1).toUpperCase())}</div><div><strong>${name} ${escapeHtml(r.last_name||'')}</strong><small>${meta||'—'}</small></div><div class="broadcast-ack-person-status"><span class="badge ${ack?'badge-success':deliveryOk?'badge-warning':'badge-neutral'}">${ack?'✓ รับทราบ':deliveryOk?'รอรับทราบ':'ส่งไม่สำเร็จ'}</span><small>${ack?formatDateTime(r.acknowledged_at):(r.last_reminded_at?`เตือนล่าสุด ${formatDateTime(r.last_reminded_at)}`:'')}</small></div></article>`}).join(''):emptyState('ยังไม่มีผู้รับ','ประกาศนี้ยังไม่มีข้อมูลการส่งถึงพนักงาน');
+    $('#broadcastAckModal').showModal();
+  }catch(e){toast(e.message,true);}
+};
+async function remindPendingBroadcast(){
+  const id=Number($('#broadcastAckId').value||0); if(!id)return;
+  const btn=$('#broadcastRemindPendingBtn');btn.disabled=true;const old=btn.textContent;btn.textContent='กำลังส่งแจ้งเตือน…';
+  try{const result=await api(`/api/broadcasts/${id}/remind-pending`,{method:'POST',body:'{}'});toast(`ส่งเตือนแล้ว ${Number(result.delivered||0)} คน${Number(result.failed||0)?` · ไม่สำเร็จ ${Number(result.failed)}`:''}`);await window.openBroadcastAckDetail(id);}catch(e){toast(e.message,true);}finally{btn.disabled=false;if(btn.textContent==='กำลังส่งแจ้งเตือน…')btn.textContent=old;}
+}
 
 async function setupRichMenu(){
   const btn=$('#setupRichMenuBtn');btn.disabled=true;btn.textContent='กำลังตั้ง Rich Menu…';

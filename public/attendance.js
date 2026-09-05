@@ -49,11 +49,17 @@ function setSuccess(payload,position){
       : 'บันทึกเข้าระบบ HR แล้ว แต่ LINE ยังส่งข้อความยืนยันไม่สำเร็จ';
   }
   $('#timeText').textContent=formatTime(action==='checkin'?result.check_in_at:result.check_out_at);
+  const inside=result.location_status==='inside_work_location'||Boolean(result.matched_work_location);
   $('#locationLabel').textContent=already
     ? (action==='checkin'?'จุดที่เช็กอินเดิม':'จุดที่เช็กเอาต์เดิม')
-    : (action==='checkin'?'จุดที่เช็กอินจริง':'จุดที่เช็กเอาต์จริง');
-  $('#locationText').textContent=result.source_title||result.source_address||((result.lat!=null&&result.lng!=null)?`${Number(result.lat).toFixed(5)}, ${Number(result.lng).toFixed(5)}`:'—');
+    : (inside?'สถานที่ที่ลงเวลา':(action==='checkin'?'จุดที่เช็กอินจริง':'จุดที่เช็กเอาต์จริง'));
+  $('#locationText').textContent=inside
+    ? (result.location_name||result.source_title||'—')
+    : (result.source_title||result.source_address||((result.lat!=null&&result.lng!=null)?`${Number(result.lat).toFixed(5)}, ${Number(result.lng).toFixed(5)}`:'—'));
+  $('#areaStatusText').textContent=inside?'อยู่ในพื้นที่บริษัท':(result.outside_geofence?'นอกพื้นที่บริษัท':'ตรวจสอบจาก GPS');
+  $('#areaStatusText').className=inside?'status-ok':(result.outside_geofence?'status-warn':'');
   $('#workLocationText').textContent=result.location_name||'—';
+  $('#workLocationRow').classList.toggle('hidden',inside);
   $('#distanceText').textContent=formatDistance(result.distance_m);
   const acc=Number(position?.coords?.accuracy??payload.accuracy_m??result.accuracy_m); $('#accuracyText').textContent=Number.isFinite(acc)?`±${Math.round(acc)} ม.`:'—';
   if(already&&current){
