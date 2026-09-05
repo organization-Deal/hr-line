@@ -1732,8 +1732,23 @@ function workLogDistanceLabel(value){
 }
 function workLogMatrixCell(r){
   if(!r) return '<div class="worklog-day-card empty"><span>—</span></div>';
-  if(r.is_future) return '<div class="worklog-day-card future"><small>ยังไม่ถึงวัน</small></div>';
   const parts=[];
+  const leaveLabels={am:'ครึ่งวันเช้า',pm:'ครึ่งวันบ่าย',half:'ครึ่งวัน',full:'เต็มวัน'};
+  const leavePart=leaveLabels[String(r.leave_day_part||'full')]||'เต็มวัน';
+  const leaveDays=Number(r.leave_duration_days||0);
+  const leaveDaysLabel=Number.isFinite(leaveDays)&&leaveDays>0?`${leaveDays.toLocaleString('th-TH',{maximumFractionDigits:1})} วัน`:leavePart;
+
+  // Approved leave is a first-class attendance status. Show it even on future dates,
+  // and never mislabel an approved leave day as "ยังไม่เช็กอิน".
+  if(r.approved_leave){
+    parts.push(`<div class="worklog-approved-leave"><div class="worklog-leave-chip">ลา · อนุมัติแล้ว</div><strong>${escapeHtml(r.leave_name||'ลางาน')}</strong><small>${escapeHtml(leavePart)} · ${escapeHtml(leaveDaysLabel)}</small></div>`);
+  }else if(r.leave_name){
+    const pendingLabel=({pending:'รออนุมัติ',awaiting_evidence:'รอหลักฐาน'})[r.leave_status]||'รอดำเนินการ';
+    parts.push(`<div class="worklog-leave-note pending">${escapeHtml(r.leave_name)} · ${escapeHtml(pendingLabel)}</div>`);
+  }
+
+  if(r.is_future && !r.approved_leave && !r.leave_name) return '<div class="worklog-day-card future"><small>ยังไม่ถึงวัน</small></div>';
+
   if(r.check_in_at){
     const outside=Number(r.checkin_outside_geofence||0)===1;
     const place=workLogPlace(r,'checkin');
@@ -1759,13 +1774,14 @@ function workLogMatrixCell(r){
       parts.push(`<div class="worklog-work-location checkout-work" title="${escapeHtml(checkoutWorkLocation)}">Work: ${escapeHtml(checkoutWorkLocation)}${checkoutDistance?` · ${checkoutDistance}`:''}</div>`);
     }
   }
-  if(r.leave_name){
-    const leaveState=r.leave_status&&r.leave_status!=='approved'?` · ${escapeHtml(({pending:'รออนุมัติ',awaiting_evidence:'รอหลักฐาน',rejected:'ไม่อนุมัติ'})[r.leave_status]||r.leave_status)}`:'';
-    parts.push(`<div class="worklog-leave-note">${escapeHtml(r.leave_name)}${leaveState}</div>`);
+
+  // Pending leave does not excuse attendance yet. Keep the missing signal visible.
+  if(!r.check_in_at&&!r.approved_leave&&!r.is_future){
+    parts.push('<div class="worklog-missing-note">ยังไม่เช็กอิน</div>');
   }
   if(!parts.length)return `<div class="worklog-day-card missing"><small>ยังไม่เช็กอิน</small></div>`;
   const detail=(r.check_in_at||r.check_out_at)?`<button type="button" class="worklog-detail-btn" data-worklog-detail data-employee-id="${Number(r.employee_id||r.id||0)}" data-work-date="${escapeHtml(r.work_date||'')}">ดูรายละเอียด</button>`:'';
-  return `<div class="worklog-day-card ${r.leave_name?'has-leave':''}">${parts.join('')}${detail}</div>`;
+  return `<div class="worklog-day-card ${r.approved_leave?'has-approved-leave':r.leave_name?'has-leave':''}">${parts.join('')}${detail}</div>`;
 }
 window.openWorkLogDetail=async(employeeId,workDate)=>{
   const modal=$('#workLogDetailModal');
