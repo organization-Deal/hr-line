@@ -1711,11 +1711,19 @@ function workLogStatus(row){
 }
 function workLogPlace(row,prefix='checkin'){
   const outside=Number(row?.[`${prefix}_outside_geofence`]||0)===1;
-  const workLocation=row?.[`${prefix}_location_name`]||'';
-  const sourceTitle=row?.[`${prefix}_source_title`]||'';
-  const sourceAddress=row?.[`${prefix}_source_address`]||'';
-  if(!outside&&workLocation) return workLocation;
-  return sourceTitle||sourceAddress||workLocation||'มีพิกัด';
+  const workLocation=String(row?.[`${prefix}_location_name`]||'').trim();
+  const actualTitle=String(row?.[`${prefix}_actual_title`]||'').trim();
+  const actualAddress=String(row?.[`${prefix}_actual_address`]||'').trim();
+  const sourceTitle=String(row?.[`${prefix}_source_title`]||'').trim();
+  const sourceAddress=String(row?.[`${prefix}_source_address`]||'').trim();
+  if(!outside&&workLocation)return workLocation;
+  // Never use the nearest company Work Location as the employee's real place when outside.
+  if(actualTitle&&actualTitle!==workLocation)return actualTitle;
+  if(sourceTitle&&sourceTitle!==workLocation)return sourceTitle;
+  if(actualAddress)return actualAddress;
+  if(sourceAddress&&sourceAddress!==String(row?.[`${prefix}_work_location_address`]||'').trim())return sourceAddress;
+  if(row?.[`${prefix}_lat`]!=null&&row?.[`${prefix}_lng`]!=null)return 'มีพิกัด GPS · กดดูรายละเอียด';
+  return outside?'อยู่นอกพื้นที่ · ยังไม่มีชื่อสถานที่':(workLocation||'ยังไม่มีข้อมูลสถานที่');
 }
 function workLogDistanceLabel(value){
   if(value==null||!Number.isFinite(Number(value)))return '';
@@ -1729,10 +1737,15 @@ function workLogMatrixCell(r){
   if(r.check_in_at){
     const outside=Number(r.checkin_outside_geofence||0)===1;
     const place=workLogPlace(r,'checkin');
+    const workLocation=String(r.checkin_location_name||'').trim();
     const late=Number(r.late_minutes||0)>0;
     parts.push(`<div class="worklog-line"><span>เข้า</span><strong class="${late?'late':''}">${time(r.check_in_at)}</strong></div>`);
     parts.push(`<div class="worklog-check-state ${outside?'outside':late?'late':'inside'}">${outside?'นอกพื้นที่':late?`สาย ${Number(r.late_minutes)} นาที`:'ในพื้นที่ · ตรงเวลา'}</div>`);
     parts.push(`<div class="worklog-place" title="${escapeHtml(place)}">📍 ${escapeHtml(place)}</div>`);
+    if(workLocation){
+      const distance=workLogDistanceLabel(r.checkin_distance_m);
+      parts.push(`<div class="worklog-work-location" title="${escapeHtml(workLocation)}">Work: ${escapeHtml(workLocation)}${distance?` · ${distance}`:''}</div>`);
+    }
   }
   if(r.check_out_at){
     parts.push(`<div class="worklog-line"><span>ออก</span><strong>${time(r.check_out_at)}</strong></div>`);
@@ -1741,39 +1754,56 @@ function workLogMatrixCell(r){
     const leaveState=r.leave_status&&r.leave_status!=='approved'?` · ${escapeHtml(({pending:'รออนุมัติ',awaiting_evidence:'รอหลักฐาน',rejected:'ไม่อนุมัติ'})[r.leave_status]||r.leave_status)}`:'';
     parts.push(`<div class="worklog-leave-note">${escapeHtml(r.leave_name)}${leaveState}</div>`);
   }
-  if(!parts.length){
-    return `<div class="worklog-day-card missing"><small>ยังไม่เช็กอิน</small></div>`;
-  }
-  const clickable=(r.check_in_at||r.check_out_at)?' is-clickable':'';
-  return `<button type="button" class="worklog-day-card${clickable} ${r.leave_name?'has-leave':''}" onclick="window.openWorkLogDetail(${Number(r.employee_id||0)},'${escapeHtml(r.work_date||'')}')">${parts.join('')}<span class="worklog-detail-hint">แตะดูรายละเอียด</span></button>`;
+  if(!parts.length)return `<div class="worklog-day-card missing"><small>ยังไม่เช็กอิน</small></div>`;
+  const detail=(r.check_in_at||r.check_out_at)?`<button type="button" class="worklog-detail-btn" data-worklog-detail data-employee-id="${Number(r.employee_id||0)}" data-work-date="${escapeHtml(r.work_date||'')}">ดูรายละเอียด</button>`:'';
+  return `<div class="worklog-day-card ${r.leave_name?'has-leave':''}">${parts.join('')}${detail}</div>`;
 }
-window.openWorkLogDetail=(employeeId,workDate)=>{
-  const rows=state.teamWorkLog?.rows||[];
-  const r=rows.find(x=>Number(x.employee_id)===Number(employeeId)&&String(x.work_date)===String(workDate));
-  if(!r)return;
-  const person=`${r.nickname||r.first_name||'—'} ${r.last_name||''}`.trim();
-  const checkinPlace=workLogPlace(r,'checkin');
-  const checkoutPlace=workLogPlace(r,'checkout');
-  const inOutside=Number(r.checkin_outside_geofence||0)===1;
-  const outOutside=Number(r.checkout_outside_geofence||0)===1;
-  const status=!r.check_in_at?'ยังไม่เช็กอิน':inOutside?'เช็กอินนอกพื้นที่':Number(r.late_minutes||0)>0?`มาสาย ${Number(r.late_minutes)} นาที`:'ตรงเวลา';
-  const checkinMap=(r.checkin_lat!=null&&r.checkin_lng!=null)?`<a class="worklog-map-btn" href="https://www.google.com/maps?q=${Number(r.checkin_lat)},${Number(r.checkin_lng)}" target="_blank" rel="noopener">📍 ดูจุดเช็กอินบนแผนที่</a>`:'';
-  const checkoutMap=(r.checkout_lat!=null&&r.checkout_lng!=null)?`<a class="worklog-map-btn secondary" href="https://www.google.com/maps?q=${Number(r.checkout_lat)},${Number(r.checkout_lng)}" target="_blank" rel="noopener">ดูจุดเช็กเอาต์</a>`:'';
-  $('#workLogDetailTitle').textContent=person;
-  $('#workLogDetailSubtitle').textContent=`${formatDate(r.work_date)} · ${r.department_name||'ยังไม่ระบุแผนก'}`;
-  $('#workLogDetailBody').innerHTML=`
-    <div class="worklog-detail-status ${inOutside?'outside':Number(r.late_minutes||0)>0?'late':'inside'}"><span>สถานะวันนี้</span><strong>${escapeHtml(status)}</strong></div>
-    <div class="worklog-detail-grid">
-      <div><span>เช็กอิน</span><strong>${r.check_in_at?time(r.check_in_at):'—'}</strong></div>
-      <div><span>สถานที่เช็กอิน</span><strong>${r.check_in_at?escapeHtml(checkinPlace):'—'}</strong></div>
-      <div><span>สถานะพื้นที่</span><strong>${r.check_in_at?(inOutside?'นอก Work Location':'อยู่ใน Work Location'):'—'}</strong></div>
-      <div><span>ระยะจาก Work Location</span><strong>${r.check_in_at?(workLogDistanceLabel(r.checkin_distance_m)||'—'):'—'}</strong></div>
-      <div><span>GPS</span><strong>${r.check_in_at&&r.checkin_accuracy_m!=null?`±${Math.round(Number(r.checkin_accuracy_m))} ม.`:'—'}</strong></div>
-      <div><span>เช็กเอาต์</span><strong>${r.check_out_at?time(r.check_out_at):'—'}</strong></div>
-      ${r.check_out_at?`<div><span>สถานที่เช็กเอาต์</span><strong>${escapeHtml(checkoutPlace)}</strong></div><div><span>สถานะเช็กเอาต์</span><strong>${outOutside?'นอก Work Location':'อยู่ใน Work Location'}</strong></div>`:''}
-    </div>
-    <div class="worklog-detail-actions">${checkinMap}${checkoutMap}</div>`;
-  $('#workLogDetailModal').showModal();
+window.openWorkLogDetail=async(employeeId,workDate)=>{
+  const modal=$('#workLogDetailModal');
+  if(!modal)return;
+  const cached=(state.teamWorkLog?.rows||[]).find(x=>Number(x.employee_id)===Number(employeeId)&&String(x.work_date)===String(workDate));
+  const fallbackPerson=cached?`${cached.nickname||cached.first_name||'—'} ${cached.last_name||''}`.trim():'รายละเอียดการลงเวลา';
+  $('#workLogDetailTitle').textContent=fallbackPerson;
+  $('#workLogDetailSubtitle').textContent=cached?`${formatDate(cached.work_date)} · ${cached.department_name||'ยังไม่ระบุแผนก'}`:formatDate(workDate);
+  $('#workLogDetailBody').innerHTML='<div class="worklog-detail-loading"><i class="action-status-spinner"></i><span>กำลังอ่านจุด GPS และรายละเอียดสถานที่…</span></div>';
+  try{modal.showModal();}catch{modal.setAttribute('open','');}
+  try{
+    const detail=await api(`/api/team-work-log/location-detail?employee_id=${Number(employeeId)}&date=${encodeURIComponent(workDate)}`,{timeoutMs:12000});
+    const r=detail||{}; const ci=r.checkin||null; const co=r.checkout||null;
+    const person=`${r.employee?.nickname||r.employee?.first_name||'—'} ${r.employee?.last_name||''}`.trim();
+    $('#workLogDetailTitle').textContent=person;
+    $('#workLogDetailSubtitle').textContent=`${formatDate(r.work_date)} · ${r.employee?.department_name||'ยังไม่ระบุแผนก'}`;
+    const outside=Boolean(ci?.outside_geofence);
+    const status=!ci?'ยังไม่เช็กอิน':outside?'เช็กอินนอกพื้นที่':Number(r.late_minutes||0)>0?`มาสาย ${Number(r.late_minutes)} นาที`:'อยู่ในพื้นที่ · ตรงเวลา';
+    const actualPlace=ci?.actual_title||ci?.actual_address||(ci?.lat!=null?'มีพิกัด GPS':'—');
+    const actualAddress=ci?.actual_address&&ci.actual_address!==ci.actual_title?ci.actual_address:null;
+    const workLocation=ci?.work_location?.name||'ไม่ได้จับคู่ Work Location';
+    const workAddress=ci?.work_location?.address||null;
+    const checkinMap=(ci?.lat!=null&&ci?.lng!=null)?`<a class="worklog-map-btn" href="https://www.google.com/maps?q=${Number(ci.lat)},${Number(ci.lng)}" target="_blank" rel="noopener">📍 เปิดจุด GPS จริง</a>`:'';
+    const checkoutMap=(co?.lat!=null&&co?.lng!=null)?`<a class="worklog-map-btn secondary" href="https://www.google.com/maps?q=${Number(co.lat)},${Number(co.lng)}" target="_blank" rel="noopener">ดูจุดเช็กเอาต์</a>`:'';
+    $('#workLogDetailBody').innerHTML=`
+      <div class="worklog-detail-status ${outside?'outside':Number(r.late_minutes||0)>0?'late':'inside'}"><span>สถานะวันนี้</span><strong>${escapeHtml(status)}</strong></div>
+      <div class="worklog-actual-location ${outside?'outside':'inside'}">
+        <span>จุดที่พนักงานเช็กอินจริง</span>
+        <strong>📍 ${escapeHtml(actualPlace)}</strong>
+        ${actualAddress?`<small>${escapeHtml(actualAddress)}</small>`:''}
+        ${ci?.nearby_name?`<small class="worklog-nearby">Landmark: ${escapeHtml(`${ci.nearby_relation||'ใกล้'} ${ci.nearby_name}`)}${ci.nearby_distance_text?` · ${escapeHtml(ci.nearby_distance_text)}`:''}</small>`:''}
+      </div>
+      <div class="worklog-detail-grid">
+        <div><span>เวลาเช็กอิน</span><strong>${ci?.time?time(ci.time):'—'}</strong></div>
+        <div><span>GPS</span><strong>${ci?.accuracy_m!=null?`±${Math.round(Number(ci.accuracy_m))} ม.`:'—'}</strong></div>
+        <div><span>Work Location ที่ระบบเทียบ</span><strong>${escapeHtml(workLocation)}</strong>${workAddress?`<small>${escapeHtml(workAddress)}</small>`:''}</div>
+        <div><span>สถานะพื้นที่</span><strong>${ci?(outside?'นอก Work Location':'อยู่ใน Work Location'):'—'}</strong></div>
+        <div><span>ระยะจาก Work Location</span><strong>${ci?(workLogDistanceLabel(ci.distance_m)||'—'):'—'}</strong></div>
+        <div><span>รัศมีที่อนุญาต</span><strong>${ci?.work_location?.radius_m!=null?`${Math.round(Number(ci.work_location.radius_m))} ม.`:'—'}</strong></div>
+        <div><span>เช็กเอาต์</span><strong>${co?.time?time(co.time):'—'}</strong></div>
+        <div><span>จุดเช็กเอาต์</span><strong>${escapeHtml(co?.actual_title||co?.actual_address||'—')}</strong></div>
+      </div>
+      <div class="worklog-coordinate-row"><span>พิกัดจริง</span><code>${ci?.lat!=null&&ci?.lng!=null?`${Number(ci.lat).toFixed(6)}, ${Number(ci.lng).toFixed(6)}`:'—'}</code></div>
+      <div class="worklog-detail-actions">${checkinMap}${checkoutMap}</div>`;
+  }catch(e){
+    $('#workLogDetailBody').innerHTML=`<div class="worklog-detail-error"><strong>เปิดรายละเอียดไม่สำเร็จ</strong><span>${escapeHtml(e.message||'กรุณาลองใหม่อีกครั้ง')}</span></div>`;
+  }
 };
 function renderTeamWorkLog(){
   const report=state.teamWorkLog||{}; const s=report.summary||{}; const rows=report.rows||[];
@@ -1806,6 +1836,12 @@ function renderTeamWorkLog(){
     <td class="worklog-person-col"><div class="team-worklog-person"><span class="team-worklog-avatar">${escapeHtml((p.nickname||p.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml(p.nickname||p.first_name||'—')} ${escapeHtml(p.last_name||'')}</strong><small>${escapeHtml(p.employee_code||'')}</small><small class="worklog-role">${escapeHtml(p.department_name||'—')} · ${escapeHtml(p.position_name||'ยังไม่ระบุตำแหน่ง')}</small></div></div></td>
     ${dateKeys.map(d=>`<td class="worklog-date-col">${workLogMatrixCell(p.days.get(d))}</td>`).join('')}
   </tr>`).join(''):`<tr><td><div class="leave-report-empty">ยังไม่มีข้อมูลในช่วงเวลานี้</div></td></tr>`;
+  $$('[data-worklog-detail]').forEach(button=>{
+    button.onclick=e=>{
+      e.preventDefault(); e.stopPropagation();
+      window.openWorkLogDetail(Number(button.dataset.employeeId),String(button.dataset.workDate||''));
+    };
+  });
 }
 
 function renderDashboard() {
