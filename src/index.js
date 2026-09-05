@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.81';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.81';
+const NAKNA_RUNTIME_RELEASE = 'P7.82';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.82';
 const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -2418,11 +2418,12 @@ async function handleApi(request, env, url, auth, ctx) {
           checkout_location_name:checkoutWorkLocation?.name||a.checkout_location_name||null,checkout_work_location_address:checkoutWorkLocation?.address||null,checkout_location_radius_m:checkoutRadius,
           checkout_source_title:checkoutSourceTitle||null,checkout_source_address:checkoutSourceAddress||null,checkout_actual_title:checkoutActualTitle,checkout_actual_address:checkoutActualAddress,
           checkout_distance_m:checkoutDistance,checkout_outside_geofence:checkoutOutside?1:0,checkout_lat:a.checkout_lat==null?null:Number(a.checkout_lat),checkout_lng:a.checkout_lng==null?null:Number(a.checkout_lng),checkout_accuracy_m:a.checkout_accuracy_m==null?null:Number(a.checkout_accuracy_m),
-          leave_name:lr?.leave_name||lr?.leave_type||null,leave_status:lr?.status||null,approved_leave:lr?.status==='approved',is_future:isFuture});
+          leave_id:lr?.id?Number(lr.id):null,leave_name:lr?.leave_name||lr?.leave_type||null,leave_status:lr?.status||null,
+          leave_day_part:lr?.day_part||null,leave_duration_days:lr?.duration_days==null?null:Number(lr.duration_days),approved_leave:lr?.status==='approved',is_future:isFuture});
       }
     }
     const effectiveRows=rows.filter(r=>!r.is_future);
-    const summary={checked_in:effectiveRows.filter(r=>r.check_in_at).length,late:effectiveRows.filter(r=>r.check_in_at&&Number(r.late_minutes)>0).length,leave:effectiveRows.filter(r=>r.approved_leave&&!r.check_in_at).length,missing:effectiveRows.filter(r=>!r.check_in_at&&!r.approved_leave).length};
+    const summary={checked_in:effectiveRows.filter(r=>r.check_in_at).length,late:effectiveRows.filter(r=>r.check_in_at&&Number(r.late_minutes)>0).length,leave:effectiveRows.filter(r=>r.approved_leave).length,missing:effectiveRows.filter(r=>!r.check_in_at&&!r.approved_leave).length};
     const thDate=d=>new Intl.DateTimeFormat('th-TH',{day:'numeric',month:'short',year:'numeric',timeZone:'Asia/Bangkok'}).format(new Date(`${d}T12:00:00+07:00`));
     return json({mode,date:anchor,start_date:start,end_date:end,range_label:start===end?thDate(start):`${thDate(start)} – ${thDate(end)}`,summary,rows});
   }
