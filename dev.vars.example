@@ -9,3 +9,6 @@ NAKNA_INTEGRATION_ENCRYPTION_KEY=
 
 # Internal SaaS Admin Console (comma-separated Google login emails)
 NAKNA_ADMIN_EMAILS=
+
+# Optional: improves nearby landmark/POI naming for Quick Attendance. Store as a secret in production.
+GOOGLE_MAPS_API_KEY=

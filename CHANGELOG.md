@@ -1,3 +1,11 @@
+## V1.0-P7.78 — Nearby Landmark / POI for Attendance
+
+- ถ้าอยู่นอก Work Location ระบบพยายามระบุ Landmark/อาคาร/ห้าง/โรงแรม/สถานีที่ใกล้ที่สุดก่อนชื่อแขวง
+- รองรับ Google Places Nearby Search เมื่อกำหนด `GOOGLE_MAPS_API_KEY` และมี OpenStreetMap fallback แบบไม่ต้องตั้งค่า
+- ให้ความสำคัญกับ Landmark ขนาดใหญ่ เช่น ห้าง อาคาร โรงพยาบาล มหาวิทยาลัย โรงแรม และสถานี มากกว่าร้านเล็กใกล้ ๆ
+- LINE และ Quick Attendance แสดง `Landmark ใกล้เคียง` + ระยะโดยประมาณ โดยยังเก็บพิกัด GPS จริงเป็นหลักฐาน
+- ถ้าอยู่ในรัศมี Work Location ของบริษัท ชื่อ Work Location ของ HR ยังคงชนะเสมอ
+
 ## V1.0-P7.77 — Attendance Status + Location in Dashboard
 - Dashboard team work log now shows check-in status and location directly inside each employee/day cell.
 - Tap a checked-in cell to open Attendance Detail with check-in place, inside/outside Work Location, distance, GPS accuracy, check-out, and Google Maps links.

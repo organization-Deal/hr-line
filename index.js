@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.77';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.77';
+const NAKNA_RUNTIME_RELEASE = 'P7.78';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.78';
 const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -4062,27 +4062,135 @@ async function processLineEvent(event, env, lineCtx) {
   }
 }
 
-async function resolveSubmittedLocationMeta(lat,lng,meta={}) {
-  const direct={title:String(meta?.title||'').trim()||null,address:String(meta?.address||'').trim()||null};
-  if(direct.title&&direct.address) return direct;
-  if(!Number.isFinite(Number(lat))||!Number.isFinite(Number(lng))) return direct;
+function normalizeNearbyPlaceName(value){
+  return String(value||'').replace(/\s+/g,' ').trim();
+}
+function isGenericNearbyPlaceName(value){
+  const name=normalizeNearbyPlaceName(value).toLowerCase();
+  if(!name)return true;
+  return /^(ประเทศไทย|thailand|กรุงเทพมหานคร|bangkok|จังหวัด|อำเภอ|เขต|แขวง|ตำบล|district|subdistrict|province|road|ถนน|ซอย|หมู่|moo\b)/i.test(name)
+    || /^(แขวง|เขต|ตำบล|อำเภอ|จังหวัด)\s*/i.test(name);
+}
+function nearbyPlaceTypeScore(types=[]){
+  const list=(Array.isArray(types)?types:[types]).map(x=>String(x||'').toLowerCase());
+  const scores={
+    shopping_mall:150, hospital:145, university:140, stadium:138, airport:136,
+    train_station:132, subway_station:132, transit_station:128, convention_center:126,
+    hotel:124, lodging:122, tourist_attraction:120, museum:118, park:112,
+    department_store:110, corporate_office:106, office:104, school:100, college:100,
+    government_office:98, place_of_worship:88, supermarket:72, store:64,
+    restaurant:42, cafe:38, bar:34, convenience_store:28,
+  };
+  return list.reduce((best,t)=>Math.max(best,scores[t]||0),0);
+}
+function formatNearbyDistance(distance){
+  const d=Number(distance);
+  if(!Number.isFinite(d))return null;
+  if(d<1000)return `ประมาณ ${Math.max(1,Math.round(d))} ม.`;
+  return `ประมาณ ${(d/1000).toFixed(d>=10000?0:1)} กม.`;
+}
+async function resolveGoogleNearbyLandmark(lat,lng,env){
+  const key=String(env?.GOOGLE_MAPS_API_KEY||'').trim();
+  if(!key)return null;
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),1800);
+  const timer=setTimeout(()=>controller.abort(),1500);
+  try{
+    const response=await fetch('https://places.googleapis.com/v1/places:searchNearby',{
+      method:'POST',signal:controller.signal,
+      headers:{
+        'content-type':'application/json',
+        'X-Goog-Api-Key':key,
+        'X-Goog-FieldMask':'places.displayName,places.formattedAddress,places.location,places.primaryType,places.types,places.businessStatus',
+      },
+      body:JSON.stringify({
+        maxResultCount:12,
+        rankPreference:'DISTANCE',
+        languageCode:'th',
+        regionCode:'TH',
+        locationRestriction:{circle:{center:{latitude:Number(lat),longitude:Number(lng)},radius:250}},
+      }),
+    });
+    if(!response.ok)return null;
+    const data=await response.json();
+    const places=(data.places||[]).map(place=>{
+      const name=normalizeNearbyPlaceName(place?.displayName?.text);
+      const plat=Number(place?.location?.latitude),plng=Number(place?.location?.longitude);
+      const distance=Number.isFinite(plat)&&Number.isFinite(plng)?haversineMeters(Number(lat),Number(lng),plat,plng):null;
+      const types=[place?.primaryType,...(place?.types||[])].filter(Boolean);
+      const priority=nearbyPlaceTypeScore(types);
+      // Favor meaningful landmarks/buildings over a tiny shop a few metres closer.
+      const distancePenalty=Number.isFinite(distance)?Math.min(90,distance/4):50;
+      const closeBonus=Number.isFinite(distance)&&distance<=35?28:Number.isFinite(distance)&&distance<=80?14:0;
+      return {name,address:normalizeNearbyPlaceName(place?.formattedAddress)||null,distance_m:distance,types,priority,score:priority+closeBonus-distancePenalty};
+    }).filter(p=>p.name&&!isGenericNearbyPlaceName(p.name)&&(!Number.isFinite(p.distance_m)||p.distance_m<=300));
+    places.sort((a,b)=>b.score-a.score);
+    return places[0]||null;
+  }catch{return null;}finally{clearTimeout(timer);}
+}
+async function resolveOsmNearbyLandmark(lat,lng){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),1500);
+  try{
+    const url=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&zoom=18&addressdetails=1&namedetails=1&extratags=1&accept-language=th,en`;
+    const response=await fetch(url,{headers:{accept:'application/json','user-agent':'Nakna-HR/1.0 attendance-location-resolver'},signal:controller.signal});
+    if(!response.ok)return null;
+    const data=await response.json();
+    const address=data.address||{};
+    const named=data.namedetails||{};
+    const preferred=[address.mall,address.commercial,address.office,address.hotel,address.hospital,address.university,address.college,address.school,address.station,address.attraction,address.museum,address.stadium,address.building,address.amenity,address.shop,named['name:th'],named.name,data.name,String(data.display_name||'').split(',')[0]];
+    const name=preferred.map(normalizeNearbyPlaceName).find(x=>x&&!isGenericNearbyPlaceName(x));
+    if(!name)return null;
+    const plat=Number(data.lat),plng=Number(data.lon);
+    const distance=Number.isFinite(plat)&&Number.isFinite(plng)?haversineMeters(Number(lat),Number(lng),plat,plng):null;
+    if(Number.isFinite(distance)&&distance>300)return null;
+    const types=[data.category,data.type,address.mall?'shopping_mall':null,address.hotel?'hotel':null,address.hospital?'hospital':null,address.university?'university':null,address.station?'transit_station':null].filter(Boolean);
+    return {name,address:normalizeNearbyPlaceName(data.display_name)||null,distance_m:distance,types,priority:nearbyPlaceTypeScore(types)};
+  }catch{return null;}finally{clearTimeout(timer);}
+}
+async function resolveAreaMeta(lat,lng){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),1600);
   try{
     const url=`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lng)}&localityLanguage=th`;
     const response=await fetch(url,{headers:{accept:'application/json'},signal:controller.signal});
-    if(!response.ok)return direct;
+    if(!response.ok)return {title:null,address:null};
     const data=await response.json();
-    const locality=String(data.locality||data.city||data.principalSubdivision||'').trim();
-    const district=String(data.localityInfo?.administrative?.find?.(x=>x.order===8)?.name||data.localityInfo?.administrative?.find?.(x=>x.order===7)?.name||'').trim();
-    const province=String(data.principalSubdivision||'').trim();
-    const country=String(data.countryName||'').trim();
+    const locality=normalizeNearbyPlaceName(data.locality||data.city||data.principalSubdivision);
+    const district=normalizeNearbyPlaceName(data.localityInfo?.administrative?.find?.(x=>x.order===8)?.name||data.localityInfo?.administrative?.find?.(x=>x.order===7)?.name);
+    const province=normalizeNearbyPlaceName(data.principalSubdivision);
+    const country=normalizeNearbyPlaceName(data.countryName);
     const address=[locality,district&&district!==locality?district:null,province&&province!==locality?province:null,country].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
-    const title=direct.title||String(data.locality||data.city||data.localityInfo?.informative?.[0]?.name||'').trim()||null;
-    return {title,address:direct.address||address||null};
-  }catch{return direct;}finally{clearTimeout(timer);}
+    return {title:locality||null,address:address||null};
+  }catch{return {title:null,address:null};}finally{clearTimeout(timer);}
 }
-
+async function resolveSubmittedLocationMeta(lat,lng,meta={},env=null) {
+  const direct={title:normalizeNearbyPlaceName(meta?.title)||null,address:normalizeNearbyPlaceName(meta?.address)||null};
+  if(!Number.isFinite(Number(lat))||!Number.isFinite(Number(lng))) return direct;
+  // Keep an explicit place sent by LINE/user, but enrich a missing address in parallel.
+  if(direct.title&&!isGenericNearbyPlaceName(direct.title)&&direct.address)return direct;
+  const [googlePlace,osmPlace,area]=await Promise.all([
+    resolveGoogleNearbyLandmark(lat,lng,env).catch(()=>null),
+    resolveOsmNearbyLandmark(lat,lng).catch(()=>null),
+    resolveAreaMeta(lat,lng).catch(()=>({title:null,address:null})),
+  ]);
+  // Google Places is preferred when configured. OSM is the zero-config fallback.
+  const poi=googlePlace||osmPlace||null;
+  const poiName=normalizeNearbyPlaceName(poi?.name);
+  const poiDistance=Number(poi?.distance_m);
+  if(poiName&&!isGenericNearbyPlaceName(poiName)){
+    const relation=Number.isFinite(poiDistance)&&poiDistance<=25?'บริเวณ':'ใกล้';
+    return {
+      title:`${relation} ${poiName}`,
+      address:direct.address||area.address||poi?.address||null,
+      nearby_name:poiName,
+      nearby_distance_m:Number.isFinite(poiDistance)?Math.round(poiDistance):null,
+      nearby_distance_text:formatNearbyDistance(poiDistance),
+      nearby_relation:relation,
+      nearby_source:googlePlace?'google_places':'openstreetmap',
+    };
+  }
+  return {title:direct.title||area.title||null,address:direct.address||area.address||null,nearby_name:null,nearby_distance_m:null,nearby_distance_text:null,nearby_relation:null,nearby_source:null};
+}
 
 function resolveAttendancePointMeta(locationMeta={},matchedLocation=null){
   const inside=Boolean(matchedLocation && !matchedLocation.outside);
@@ -4094,6 +4202,11 @@ function resolveAttendancePointMeta(locationMeta={},matchedLocation=null){
     : (String(locationMeta?.address||'').trim()||String(matchedLocation?.address||'').trim()||null);
   return {
     title,address,
+    nearby_name:inside?null:(locationMeta?.nearby_name||null),
+    nearby_distance_m:inside?null:(locationMeta?.nearby_distance_m==null?null:Number(locationMeta.nearby_distance_m)),
+    nearby_distance_text:inside?null:(locationMeta?.nearby_distance_text||null),
+    nearby_relation:inside?null:(locationMeta?.nearby_relation||null),
+    nearby_source:inside?null:(locationMeta?.nearby_source||null),
     matched_work_location:inside,
     location_status:inside?'inside_work_location':(matchedLocation?.outside?'outside_work_location':'unknown'),
     location_address:String(matchedLocation?.address||'').trim()||null,
@@ -4149,6 +4262,7 @@ async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
   return {
     check_in_at: nowIso, work_date: workDate, status, late_minutes: lateMinutes, lat:lat ?? null, lng:lng ?? null,
     source_title: pointMeta.title || null, source_address: pointMeta.address || null,
+    nearby_name:pointMeta.nearby_name||null, nearby_distance_m:pointMeta.nearby_distance_m??null, nearby_distance_text:pointMeta.nearby_distance_text||null, nearby_relation:pointMeta.nearby_relation||null, nearby_source:pointMeta.nearby_source||null,
     distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
     location_address:pointMeta.location_address, location_radius_m:pointMeta.location_radius_m,
     matched_work_location:pointMeta.matched_work_location, location_status:pointMeta.location_status,
@@ -4190,6 +4304,7 @@ async function checkOut(db, employeeId, lat, lng, source, locationMeta={}) {
   return {
     check_out_at: nowIso, work_date: workDate, lat:lat ?? null, lng:lng ?? null,
     source_title: pointMeta.title || null, source_address: pointMeta.address || null,
+    nearby_name:pointMeta.nearby_name||null, nearby_distance_m:pointMeta.nearby_distance_m??null, nearby_distance_text:pointMeta.nearby_distance_text||null, nearby_relation:pointMeta.nearby_relation||null, nearby_source:pointMeta.nearby_source||null,
     distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
     location_address:pointMeta.location_address, location_radius_m:pointMeta.location_radius_m,
     matched_work_location:pointMeta.matched_work_location, location_status:pointMeta.location_status,
@@ -4803,8 +4918,8 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
   const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
   const attendanceAccessToken=attendanceToken||portalToken||null;
-  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.74`:null;
-  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.74`:null;
+  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.78`:null;
+  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.78`:null;
   return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,NAKNA_RUNTIME_RELEASE);
 }
 
@@ -4817,7 +4932,7 @@ async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='c
     if(!token) throw new Error('สร้างลิงก์ Quick Attendance ไม่สำเร็จ');
     const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
     const normalized=action==='checkout'?'checkout':'checkin';
-    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.74`;
+    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.78`;
     return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
   }catch(e){
     return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
@@ -4858,7 +4973,7 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
   try{
     // P7.74: resolve the submitted place BEFORE writing attendance so the DB,
     // the web success screen and the LINE confirmation all describe the same point.
-    const locationMeta=await resolveSubmittedLocationMeta(lat,lng,{});
+    const locationMeta=await resolveSubmittedLocationMeta(lat,lng,{},env);
     const result=action==='checkin'
       ? await checkIn(env.DB,Number(access.employee_id),lat,lng,'line_quick',locationMeta)
       : await checkOut(env.DB,Number(access.employee_id),lat,lng,'line_quick',locationMeta);
@@ -4884,7 +4999,7 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
       if(saved){
         // The employee may have moved since the original attendance record. Never
         // present the old attendance location as if it were their current GPS.
-        const currentMeta=await resolveSubmittedLocationMeta(lat,lng,{}).catch(()=>({title:null,address:null}));
+        const currentMeta=await resolveSubmittedLocationMeta(lat,lng,{},env).catch(()=>({title:null,address:null}));
         const currentPosition={lat,lng,accuracy_m:roundedAccuracy,source_title:currentMeta?.title||null,source_address:currentMeta?.address||null};
         const notification=await notifyQuickAttendanceAlreadyRecordedLine(env,access,action,saved,currentPosition);
         return json({
@@ -7128,7 +7243,12 @@ function buildAttendanceResultFlex(kind,result){
   const inside=result.location_status==='inside_work_location'||Boolean(result.matched_work_location);
   const sourceLabel=inside?'สถานที่':(checkin?'จุดที่เช็กอินจริง':'จุดที่เช็กเอาต์จริง');
   const sourcePlace=inside?(result.location_name||result.source_title):(result.source_title||result.source_address||result.location_name);
-  if(sourcePlace) rows.push(lineInfoRow(sourceLabel,sourcePlace,LINE_CI.primaryDark));
+  if(sourcePlace&&(!result.nearby_name||inside)) rows.push(lineInfoRow(sourceLabel,sourcePlace,LINE_CI.primaryDark));
+  if(!inside&&result.nearby_name){
+    rows.push(lineInfoRow('Landmark ใกล้เคียง',`${result.nearby_relation||'ใกล้'} ${result.nearby_name}`,LINE_CI.primaryDark));
+    if(result.nearby_distance_text) rows.push(lineInfoRow('ระยะโดยประมาณ',result.nearby_distance_text));
+    if(result.source_address) rows.push(lineInfoRow('พื้นที่',result.source_address));
+  }
   if(inside){
     rows.push(lineInfoRow('สถานะพื้นที่','🟢 อยู่ในพื้นที่บริษัท',LINE_CI.success));
     if(result.location_address)rows.push(lineInfoRow('ที่อยู่ Work Location',result.location_address));

@@ -1,0 +1,13 @@
+./CHANGELOG.md
+./attendance.html
+./attendance.js
+./dev.vars.example
+./index.html
+./index.js
+./package.json
+./public/attendance.html
+./public/attendance.js
+./public/index.html
+./public/styles.css
+./src/index.js
+./styles.css
