@@ -2397,3 +2397,17 @@ button.worklog-day-card{width:100%;border:0;background:#fff;text-align:left;font
 @media(max-width:700px){.worklog-detail-btn{font-size:8px;padding:5px 8px}.worklog-actual-location>strong{font-size:13px}.worklog-coordinate-row{align-items:flex-start;flex-direction:column}}
 
 .worklog-detail-fallback-note{margin-top:10px;padding:9px 11px;border:1px dashed var(--border);border-radius:12px;background:#fbfcfb;color:var(--text-tertiary);font-size:8.5px;line-height:1.5}
+
+
+/* Nakna P7.81 — full check-in + check-out place/status visibility */
+.worklog-line.checkout{margin-top:5px;padding-top:5px;border-top:1px dashed #e2ebe7}
+.checkout-place{color:#536f72}.checkout-work{color:#879694}
+.worklog-points-stack{display:grid;gap:12px}
+.worklog-point-card{display:grid;gap:11px;padding:14px;border:1px solid var(--border);border-radius:18px;background:#fff}
+.worklog-point-card.inside{border-color:#d7eae3;background:#fbfefd}.worklog-point-card.outside{border-color:#f0d8c9;background:#fffdfb}.worklog-point-card.empty{background:#fafbfa}
+.worklog-point-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.worklog-point-head>div>span{display:block;color:var(--text-tertiary);font-size:9px}.worklog-point-head>div>strong{display:block;margin-top:3px;color:var(--primary-dark);font-size:17px}
+.worklog-point-badge{display:inline-flex;align-items:center;justify-content:center;max-width:58%;padding:6px 9px;border-radius:999px;font-size:8.5px;font-weight:700;line-height:1.25;text-align:center}.worklog-point-badge.inside{background:#e9f7ef;color:#278963}.worklog-point-badge.late{background:#fff4df;color:#a96a0d}.worklog-point-badge.outside{background:#fff0e8;color:#c2632c}.worklog-point-badge.neutral{background:#eef2f0;color:#75817e}
+.worklog-point-place{display:grid;gap:4px;padding:12px 13px;border-radius:14px;background:#f4faf7}.worklog-point-card.outside .worklog-point-place{background:#fff6ef}.worklog-point-place>span{color:var(--text-tertiary);font-size:8.5px}.worklog-point-place>strong{color:var(--primary-dark);font-size:12px;line-height:1.45}.worklog-point-place>small{color:var(--text-secondary);font-size:8.5px;line-height:1.45}
+.worklog-detail-grid.compact{grid-template-columns:1fr 1fr}.worklog-detail-grid .coordinate-text{font-family:var(--font-en);font-size:9px;word-break:break-all}.worklog-point-actions{display:flex;gap:8px}.worklog-point-actions .worklog-map-btn{width:100%}
+.worklog-detail-status.neutral{background:#f2f5f3;color:#6f817f}
+@media(max-width:700px){.worklog-point-card{padding:13px}.worklog-point-head{align-items:flex-start}.worklog-point-badge{max-width:62%}.worklog-detail-grid.compact{grid-template-columns:1fr}.worklog-point-place>strong{font-size:13px}.worklog-line.checkout{margin-top:6px}}

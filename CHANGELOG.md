@@ -1,3 +1,8 @@
+## P7.81 — Check-out location & status in Team Work Log
+- แสดงสถานะเช็กเอาต์ใน/นอกพื้นที่ในตารางภาพรวม
+- แสดงจุดเช็กเอาต์จริงและ Work Location ที่เทียบ พร้อมระยะ
+- รายละเอียดลงเวลาแยก Check-in / Check-out พร้อม GPS, แผนที่, รัศมี และสถานะพื้นที่
+
 
 ## P7.80 — Attendance detail fix
 - Fix Team Work Log rows to expose `employee_id` explicitly (previously only `id`, causing detail requests with employee_id=0).
