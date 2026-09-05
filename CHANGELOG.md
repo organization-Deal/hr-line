@@ -1,3 +1,9 @@
+## V1.0-P7.77 — Attendance Status + Location in Dashboard
+- Dashboard team work log now shows check-in status and location directly inside each employee/day cell.
+- Tap a checked-in cell to open Attendance Detail with check-in place, inside/outside Work Location, distance, GPS accuracy, check-out, and Google Maps links.
+- Team work log API now returns attendance location/geofence/GPS fields used by the dashboard.
+- Attendance Today API now includes check-in geofence and GPS accuracy fields, fixing inside/outside status rendering.
+
 ## V1.0-P7.76 — Work Location First + LINE Map Label
 - Quick Attendance ใช้ชื่อ Work Location เป็นชื่อสถานที่ทันทีเมื่อ GPS อยู่ในรัศมีที่กำหนด
 - LINE ส่ง Location map เพิ่มอีก 1 ใบด้วยพิกัดจริง แต่ตั้งชื่อเป็น Work Location ของบริษัทเมื่ออยู่ในพื้นที่
