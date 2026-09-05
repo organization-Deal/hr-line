@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.78';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.78';
+const NAKNA_RUNTIME_RELEASE = 'P7.79';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.79';
 const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -2287,6 +2287,56 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
 
+  if (path === '/api/team-work-log/location-detail' && method === 'GET') {
+    await ensureAttendanceSourceColumns(env.DB);
+    const url=new URL(request.url);
+    const employeeId=Number(url.searchParams.get('employee_id')||0);
+    const workDate=String(url.searchParams.get('date')||'').trim();
+    if(!employeeId||!/^\d{4}-\d{2}-\d{2}$/.test(workDate))return json({error:'ข้อมูลพนักงานหรือวันที่ไม่ถูกต้อง'},400);
+    const row=await env.DB.prepare(`SELECT a.*,e.employee_code,e.first_name,e.last_name,e.nickname,d.name AS department_name,p.name AS position_name
+      FROM attendance a JOIN employees e ON e.id=a.employee_id AND e.client_id=a.client_id
+      LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id
+      WHERE a.client_id=?1 AND a.employee_id=?2 AND a.work_date=?3 LIMIT 1`).bind(clientId,employeeId,workDate).first();
+    if(!row)return json({error:'ไม่พบรายการลงเวลานี้'},404);
+    const enrich=async(prefix)=>{
+      const isCheckin=prefix==='checkin';
+      const lat=row[`${prefix}_lat`]==null?null:Number(row[`${prefix}_lat`]);
+      const lng=row[`${prefix}_lng`]==null?null:Number(row[`${prefix}_lng`]);
+      const locationId=row[`${prefix}_location_id`]?Number(row[`${prefix}_location_id`]):null;
+      const wl=locationId?await env.DB.prepare('SELECT id,name,address,radius_m,latitude,longitude FROM work_locations WHERE id=?1 AND client_id=?2 LIMIT 1').bind(locationId,clientId).first():null;
+      const distance=row[`${prefix}_distance_m`]==null?null:Number(row[`${prefix}_distance_m`]);
+      const radius=wl?.radius_m==null?null:Number(wl.radius_m);
+      const outside=Boolean(wl&&Number.isFinite(distance)&&Number.isFinite(radius)?distance>radius:Number(row[`${prefix}_outside_geofence`]||0));
+      let sourceTitle=String(row[`${prefix}_source_title`]||'').trim()||null;
+      let sourceAddress=String(row[`${prefix}_source_address`]||'').trim()||null;
+      const badTitle=outside&&wl?.name&&sourceTitle===String(wl.name).trim();
+      const badAddress=outside&&wl?.address&&sourceAddress===String(wl.address).trim();
+      if(badTitle)sourceTitle=null;
+      if(badAddress)sourceAddress=null;
+      let meta=null;
+      if(Number.isFinite(lat)&&Number.isFinite(lng)&&(outside||!sourceTitle||isGenericNearbyPlaceName(sourceTitle))){
+        meta=await resolveSubmittedLocationMeta(lat,lng,{title:sourceTitle,address:sourceAddress},env).catch(()=>null);
+        if(meta?.title)sourceTitle=meta.title;
+        if(meta?.address)sourceAddress=meta.address;
+        const titleCol=isCheckin?'checkin_source_title':'checkout_source_title';
+        const addressCol=isCheckin?'checkin_source_address':'checkout_source_address';
+        if(meta&&(meta.title||meta.address)) await env.DB.prepare(`UPDATE attendance SET ${titleCol}=?1,${addressCol}=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3`).bind(meta.title||sourceTitle||null,meta.address||sourceAddress||null,Number(row.id)).run().catch(()=>{});
+      }
+      const actualTitle=!outside&&wl?.name?wl.name:(sourceTitle||meta?.nearby_name||null);
+      const actualAddress=!outside&&wl?.address?wl.address:(sourceAddress||null);
+      return {
+        time:row[isCheckin?'check_in_at':'check_out_at']||null,
+        lat,lng,accuracy_m:row[`${prefix}_accuracy_m`]==null?null:Number(row[`${prefix}_accuracy_m`]),
+        actual_title:actualTitle,actual_address:actualAddress,
+        nearby_name:meta?.nearby_name||null,nearby_distance_m:meta?.nearby_distance_m??null,nearby_distance_text:meta?.nearby_distance_text||null,nearby_relation:meta?.nearby_relation||null,
+        work_location:wl?{id:Number(wl.id),name:wl.name,address:wl.address||null,radius_m:radius}:null,
+        distance_m:distance,outside_geofence:outside,inside_work_location:Boolean(wl&&!outside),
+      };
+    };
+    const [checkin,checkout]=await Promise.all([row.check_in_at?enrich('checkin'):null,row.check_out_at?enrich('checkout'):null]);
+    return json({employee:{id:employeeId,employee_code:row.employee_code,first_name:row.first_name,last_name:row.last_name,nickname:row.nickname,department_name:row.department_name,position_name:row.position_name},work_date:workDate,status:row.status,late_minutes:Number(row.late_minutes||0),checkin,checkout},200);
+  }
+
   if (path === '/api/team-work-log' && method === 'GET') {
     await ensureAttendanceSourceColumns(env.DB);
     const url = new URL(request.url);
@@ -2325,8 +2375,10 @@ async function handleApi(request, env, url, auth, ctx) {
     }
     const employeeRes = await env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,e.position_id,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.id`).bind(clientId).all();
     const attendanceRes = await env.DB.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 ORDER BY work_date,employee_id`).bind(clientId,start,end).all();
+    const workLocationRes = await env.DB.prepare(`SELECT id,name,address,radius_m FROM work_locations WHERE client_id=?1`).bind(clientId).all();
     const leaveRes = await env.DB.prepare(`SELECT lr.*,lp.name AS leave_name FROM leave_requests lr LEFT JOIN leave_policies lp ON lp.id=lr.policy_id WHERE lr.client_id=?1 AND lr.start_date<=?3 AND lr.end_date>=?2 AND lr.status IN ('approved','pending','awaiting_evidence') ORDER BY lr.id DESC`).bind(clientId,start,end).all();
     const attendanceMap = new Map((attendanceRes.results||[]).map(r=>[`${Number(r.employee_id)}|${r.work_date}`,r]));
+    const workLocationMap = new Map((workLocationRes.results||[]).map(r=>[Number(r.id),r]));
     const leaves = leaveRes.results||[];
     const dates=[]; const cursor=new Date(`${start}T00:00:00Z`), endDt=new Date(`${end}T00:00:00Z`);
     const dateKey=d=>`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
@@ -2339,7 +2391,34 @@ async function handleApi(request, env, url, auth, ctx) {
         const a=attendanceMap.get(`${Number(e.id)}|${date}`)||{};
         const lr=leaves.find(x=>Number(x.employee_id)===Number(e.id)&&date>=x.start_date&&date<=x.end_date)||null;
         const isFuture=date>today;
-        rows.push({...e,work_date:date,day_label:dayNames[dateObj.getUTCDay()],check_in_at:a.check_in_at||null,check_out_at:a.check_out_at||null,attendance_status:a.status||null,late_minutes:Number(a.late_minutes||0),checkin_location_name:a.checkin_location_name||null,checkin_source_title:a.checkin_source_title||null,checkin_source_address:a.checkin_source_address||null,checkin_distance_m:a.checkin_distance_m==null?null:Number(a.checkin_distance_m),checkin_outside_geofence:Number(a.checkin_outside_geofence||0),checkin_lat:a.checkin_lat==null?null:Number(a.checkin_lat),checkin_lng:a.checkin_lng==null?null:Number(a.checkin_lng),checkin_accuracy_m:a.checkin_accuracy_m==null?null:Number(a.checkin_accuracy_m),checkout_location_name:a.checkout_location_name||null,checkout_source_title:a.checkout_source_title||null,checkout_source_address:a.checkout_source_address||null,checkout_distance_m:a.checkout_distance_m==null?null:Number(a.checkout_distance_m),checkout_outside_geofence:Number(a.checkout_outside_geofence||0),checkout_lat:a.checkout_lat==null?null:Number(a.checkout_lat),checkout_lng:a.checkout_lng==null?null:Number(a.checkout_lng),checkout_accuracy_m:a.checkout_accuracy_m==null?null:Number(a.checkout_accuracy_m),leave_name:lr?.leave_name||lr?.leave_type||null,leave_status:lr?.status||null,approved_leave:lr?.status==='approved',is_future:isFuture});
+        const checkinWorkLocation=a.checkin_location_id?workLocationMap.get(Number(a.checkin_location_id))||null:null;
+        const checkoutWorkLocation=a.checkout_location_id?workLocationMap.get(Number(a.checkout_location_id))||null:null;
+        const checkinDistance=a.checkin_distance_m==null?null:Number(a.checkin_distance_m);
+        const checkoutDistance=a.checkout_distance_m==null?null:Number(a.checkout_distance_m);
+        const checkinRadius=checkinWorkLocation?.radius_m==null?null:Number(checkinWorkLocation.radius_m);
+        const checkoutRadius=checkoutWorkLocation?.radius_m==null?null:Number(checkoutWorkLocation.radius_m);
+        const checkinOutside=checkinWorkLocation&&Number.isFinite(checkinDistance)&&Number.isFinite(checkinRadius)?checkinDistance>checkinRadius:Number(a.checkin_outside_geofence||0)===1;
+        const checkoutOutside=checkoutWorkLocation&&Number.isFinite(checkoutDistance)&&Number.isFinite(checkoutRadius)?checkoutDistance>checkoutRadius:Number(a.checkout_outside_geofence||0)===1;
+        const checkinSourceTitle=String(a.checkin_source_title||'').trim();
+        const checkinSourceAddress=String(a.checkin_source_address||'').trim();
+        const checkoutSourceTitle=String(a.checkout_source_title||'').trim();
+        const checkoutSourceAddress=String(a.checkout_source_address||'').trim();
+        const checkinActualTitle=!checkinOutside&&checkinWorkLocation?.name
+          ? checkinWorkLocation.name
+          : (checkinSourceTitle&&checkinSourceTitle!==String(checkinWorkLocation?.name||'').trim()?checkinSourceTitle:null);
+        const checkinActualAddress=checkinSourceAddress&&checkinSourceAddress!==String(checkinWorkLocation?.address||'').trim()?checkinSourceAddress:null;
+        const checkoutActualTitle=!checkoutOutside&&checkoutWorkLocation?.name
+          ? checkoutWorkLocation.name
+          : (checkoutSourceTitle&&checkoutSourceTitle!==String(checkoutWorkLocation?.name||'').trim()?checkoutSourceTitle:null);
+        const checkoutActualAddress=checkoutSourceAddress&&checkoutSourceAddress!==String(checkoutWorkLocation?.address||'').trim()?checkoutSourceAddress:null;
+        rows.push({...e,work_date:date,day_label:dayNames[dateObj.getUTCDay()],check_in_at:a.check_in_at||null,check_out_at:a.check_out_at||null,attendance_status:a.status||null,late_minutes:Number(a.late_minutes||0),
+          checkin_location_name:checkinWorkLocation?.name||a.checkin_location_name||null,checkin_work_location_address:checkinWorkLocation?.address||null,checkin_location_radius_m:checkinRadius,
+          checkin_source_title:checkinSourceTitle||null,checkin_source_address:checkinSourceAddress||null,checkin_actual_title:checkinActualTitle,checkin_actual_address:checkinActualAddress,
+          checkin_distance_m:checkinDistance,checkin_outside_geofence:checkinOutside?1:0,checkin_lat:a.checkin_lat==null?null:Number(a.checkin_lat),checkin_lng:a.checkin_lng==null?null:Number(a.checkin_lng),checkin_accuracy_m:a.checkin_accuracy_m==null?null:Number(a.checkin_accuracy_m),
+          checkout_location_name:checkoutWorkLocation?.name||a.checkout_location_name||null,checkout_work_location_address:checkoutWorkLocation?.address||null,checkout_location_radius_m:checkoutRadius,
+          checkout_source_title:checkoutSourceTitle||null,checkout_source_address:checkoutSourceAddress||null,checkout_actual_title:checkoutActualTitle,checkout_actual_address:checkoutActualAddress,
+          checkout_distance_m:checkoutDistance,checkout_outside_geofence:checkoutOutside?1:0,checkout_lat:a.checkout_lat==null?null:Number(a.checkout_lat),checkout_lng:a.checkout_lng==null?null:Number(a.checkout_lng),checkout_accuracy_m:a.checkout_accuracy_m==null?null:Number(a.checkout_accuracy_m),
+          leave_name:lr?.leave_name||lr?.leave_type||null,leave_status:lr?.status||null,approved_leave:lr?.status==='approved',is_future:isFuture});
       }
     }
     const effectiveRows=rows.filter(r=>!r.is_future);
@@ -4918,8 +4997,8 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
   const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
   const attendanceAccessToken=attendanceToken||portalToken||null;
-  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.78`:null;
-  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.78`:null;
+  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.79`:null;
+  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.79`:null;
   return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,NAKNA_RUNTIME_RELEASE);
 }
 
@@ -4932,7 +5011,7 @@ async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='c
     if(!token) throw new Error('สร้างลิงก์ Quick Attendance ไม่สำเร็จ');
     const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
     const normalized=action==='checkout'?'checkout':'checkin';
-    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.78`;
+    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.79`;
     return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
   }catch(e){
     return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
