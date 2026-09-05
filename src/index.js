@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.76';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.76';
+const NAKNA_RUNTIME_RELEASE = 'P7.77';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.77';
 const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -2288,6 +2288,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
 
   if (path === '/api/team-work-log' && method === 'GET') {
+    await ensureAttendanceSourceColumns(env.DB);
     const url = new URL(request.url);
     const modeRaw = String(url.searchParams.get('mode') || 'today').trim();
     const mode = ['today','day','week','month','range'].includes(modeRaw) ? modeRaw : 'today';
@@ -2338,7 +2339,7 @@ async function handleApi(request, env, url, auth, ctx) {
         const a=attendanceMap.get(`${Number(e.id)}|${date}`)||{};
         const lr=leaves.find(x=>Number(x.employee_id)===Number(e.id)&&date>=x.start_date&&date<=x.end_date)||null;
         const isFuture=date>today;
-        rows.push({...e,work_date:date,day_label:dayNames[dateObj.getUTCDay()],check_in_at:a.check_in_at||null,check_out_at:a.check_out_at||null,attendance_status:a.status||null,late_minutes:Number(a.late_minutes||0),leave_name:lr?.leave_name||lr?.leave_type||null,leave_status:lr?.status||null,approved_leave:lr?.status==='approved',is_future:isFuture});
+        rows.push({...e,work_date:date,day_label:dayNames[dateObj.getUTCDay()],check_in_at:a.check_in_at||null,check_out_at:a.check_out_at||null,attendance_status:a.status||null,late_minutes:Number(a.late_minutes||0),checkin_location_name:a.checkin_location_name||null,checkin_source_title:a.checkin_source_title||null,checkin_source_address:a.checkin_source_address||null,checkin_distance_m:a.checkin_distance_m==null?null:Number(a.checkin_distance_m),checkin_outside_geofence:Number(a.checkin_outside_geofence||0),checkin_lat:a.checkin_lat==null?null:Number(a.checkin_lat),checkin_lng:a.checkin_lng==null?null:Number(a.checkin_lng),checkin_accuracy_m:a.checkin_accuracy_m==null?null:Number(a.checkin_accuracy_m),checkout_location_name:a.checkout_location_name||null,checkout_source_title:a.checkout_source_title||null,checkout_source_address:a.checkout_source_address||null,checkout_distance_m:a.checkout_distance_m==null?null:Number(a.checkout_distance_m),checkout_outside_geofence:Number(a.checkout_outside_geofence||0),checkout_lat:a.checkout_lat==null?null:Number(a.checkout_lat),checkout_lng:a.checkout_lng==null?null:Number(a.checkout_lng),checkout_accuracy_m:a.checkout_accuracy_m==null?null:Number(a.checkout_accuracy_m),leave_name:lr?.leave_name||lr?.leave_type||null,leave_status:lr?.status||null,approved_leave:lr?.status==='approved',is_future:isFuture});
       }
     }
     const effectiveRows=rows.filter(r=>!r.is_future);
@@ -3171,9 +3172,9 @@ async function handleApi(request, env, url, auth, ctx) {
              CASE WHEN lr.id IS NOT NULL AND a.check_in_at IS NULL THEN 'leave' ELSE a.status END AS status, a.late_minutes,
              lr.id AS leave_request_id, lp.name AS leave_name,
              a.checkin_lat, a.checkin_lng, a.checkin_location_id, a.checkin_location_name, a.checkin_distance_m,
-             a.checkin_source_title, a.checkin_source_address,
+             a.checkin_source_title, a.checkin_source_address, a.checkin_accuracy_m, a.checkin_outside_geofence,
              a.checkout_lat, a.checkout_lng, a.checkout_location_id, a.checkout_location_name, a.checkout_distance_m,
-             a.checkout_source_title, a.checkout_source_address,
+             a.checkout_source_title, a.checkout_source_address, a.checkout_accuracy_m,
              a.checkout_outside_geofence, a.scheduled_start, a.scheduled_end, a.schedule_source
       FROM employees e
       LEFT JOIN departments d ON d.id = e.department_id
