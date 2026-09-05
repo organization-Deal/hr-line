@@ -1,3 +1,18 @@
+## V1.0-P7.76 — Work Location First + LINE Map Label
+- Quick Attendance ใช้ชื่อ Work Location เป็นชื่อสถานที่ทันทีเมื่อ GPS อยู่ในรัศมีที่กำหนด
+- LINE ส่ง Location map เพิ่มอีก 1 ใบด้วยพิกัดจริง แต่ตั้งชื่อเป็น Work Location ของบริษัทเมื่ออยู่ในพื้นที่
+- การ์ดยืนยันแสดงสถานะ “อยู่ในพื้นที่บริษัท” และระยะจากจุดบริษัทอย่างชัดเจน
+- Reverse geocode เป็น fallback เฉพาะเมื่ออยู่นอก Work Location หรือไม่มี Location ที่จับคู่ได้
+- หน้า HR Attendance และ Quick Attendance ใช้หลัก Work Location-first เหมือนกัน
+
+
+## V1.0-P7.75 — Broadcast Acknowledgement
+- HR can mark an announcement as requiring employee acknowledgement.
+- LINE Flex announcement shows a “รับทราบแล้ว” button and records employee + timestamp.
+- HR can see acknowledged / pending / failed employees per announcement.
+- HR can remind only employees who have not acknowledged yet.
+- Optional acknowledgement due date.
+- D1 columns auto-upgrade through ensureV100P2Ready.
 # P7.74 — Duplicate attendance clarity + fresh GPS
 
 - Duplicate check-in/check-out no longer reuses the original location as if it were the employee current location.

@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.74';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.74';
-const NAKNA_RUNTIME_FEATURE = 'quick-attendance-no-manual-location';
+const NAKNA_RUNTIME_RELEASE = 'P7.76';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.76';
+const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -511,6 +511,8 @@ CREATE TABLE IF NOT EXISTS broadcasts (
   total_recipients INTEGER NOT NULL DEFAULT 0,
   delivered_count INTEGER NOT NULL DEFAULT 0,
   failed_count INTEGER NOT NULL DEFAULT 0,
+  requires_ack INTEGER NOT NULL DEFAULT 0,
+  ack_due_at TEXT,
   created_by_user_id INTEGER,
   sent_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -528,6 +530,8 @@ CREATE TABLE IF NOT EXISTS broadcast_deliveries (
   status TEXT NOT NULL DEFAULT 'pending',
   error TEXT,
   delivered_at TEXT,
+  acknowledged_at TEXT,
+  last_reminded_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(broadcast_id,employee_id,channel),
   FOREIGN KEY (broadcast_id) REFERENCES broadcasts(id) ON DELETE CASCADE,
@@ -3290,7 +3294,10 @@ async function handleApi(request, env, url, auth, ctx) {
   if(path==='/api/broadcasts' && method==='GET'){
     if(!canManagePeople(auth.role)) return json({error:'ไม่มีสิทธิ์ดูประกาศ'},403);
     await ensureV100P2Ready(env.DB);
-    const rows=await env.DB.prepare(`SELECT b.*,u.name AS created_by_name FROM broadcasts b LEFT JOIN users u ON u.id=b.created_by_user_id WHERE b.client_id=?1 ORDER BY b.created_at DESC LIMIT 200`).bind(clientId).all();
+    const rows=await env.DB.prepare(`SELECT b.*,u.name AS created_by_name,
+      (SELECT COUNT(*) FROM broadcast_deliveries bd WHERE bd.broadcast_id=b.id AND bd.status='delivered' AND bd.acknowledged_at IS NOT NULL) AS acknowledged_count,
+      (SELECT COUNT(*) FROM broadcast_deliveries bd WHERE bd.broadcast_id=b.id AND bd.status='delivered' AND bd.acknowledged_at IS NULL) AS pending_ack_count
+      FROM broadcasts b LEFT JOIN users u ON u.id=b.created_by_user_id WHERE b.client_id=?1 ORDER BY b.created_at DESC LIMIT 200`).bind(clientId).all();
     return json({data:rows.results||[]});
   }
   if(path==='/api/broadcasts' && method==='POST'){
@@ -3301,7 +3308,10 @@ async function handleApi(request, env, url, auth, ctx) {
     let audienceValue=null;
     if(audienceType==='department'){const id=Number(body.department_id);const d=await env.DB.prepare('SELECT id FROM departments WHERE id=?1 AND client_id=?2').bind(id,clientId).first();if(!d)return json({error:'ไม่พบแผนก'},400);audienceValue=String(id);}
     if(audienceType==='employees'){const ids=[...new Set((Array.isArray(body.employee_ids)?body.employee_ids:[]).map(Number).filter(Boolean))];if(!ids.length)return json({error:'กรุณาเลือกพนักงาน'},400);audienceValue=JSON.stringify(ids);}
-    const result=await env.DB.prepare(`INSERT INTO broadcasts(client_id,title,message,audience_type,audience_value,channel_line,status,created_by_user_id) VALUES(?1,?2,?3,?4,?5,1,'draft',?6)`).bind(clientId,title,message,audienceType,audienceValue,Number(auth.user.id)).run();
+    const requiresAck=body.requires_ack===true||Number(body.requires_ack)===1?1:0;
+    let ackDueAt=null;
+    if(requiresAck&&body.ack_due_at){const due=String(body.ack_due_at||'').trim();if(!/^\d{4}-\d{2}-\d{2}$/.test(due))return json({error:'วันที่กำหนดรับทราบไม่ถูกต้อง'},400);ackDueAt=due;}
+    const result=await env.DB.prepare(`INSERT INTO broadcasts(client_id,title,message,audience_type,audience_value,channel_line,status,requires_ack,ack_due_at,created_by_user_id) VALUES(?1,?2,?3,?4,?5,1,'draft',?6,?7,?8)`).bind(clientId,title,message,audienceType,audienceValue,requiresAck,ackDueAt,Number(auth.user.id)).run();
     const id=Number(result.meta.last_row_id);
     if(body.send_now!==false){const sent=await sendBroadcastNow(env,id,clientId);return json({ok:true,id,...sent},201);}
     return json({ok:true,id,status:'draft'},201);
@@ -3310,6 +3320,38 @@ async function handleApi(request, env, url, auth, ctx) {
   if(broadcastSendMatch && method==='POST'){
     if(!canManagePeopleAdmin(auth.role)) return json({error:'เฉพาะ HR ที่ส่งประกาศได้'},403);
     try{return json({ok:true,...await sendBroadcastNow(env,Number(broadcastSendMatch[1]),clientId)});}catch(e){return json({error:e.message},e.status||400);}
+  }
+  const broadcastAckDetailMatch=path.match(/^\/api\/broadcasts\/(\d+)\/acknowledgements$/);
+  if(broadcastAckDetailMatch && method==='GET'){
+    if(!canManagePeople(auth.role)) return json({error:'ไม่มีสิทธิ์ดูการรับทราบประกาศ'},403);
+    await ensureV100P2Ready(env.DB);
+    const id=Number(broadcastAckDetailMatch[1]);
+    const broadcast=await env.DB.prepare(`SELECT b.*,u.name AS created_by_name FROM broadcasts b LEFT JOIN users u ON u.id=b.created_by_user_id WHERE b.id=?1 AND b.client_id=?2`).bind(id,clientId).first();
+    if(!broadcast)return json({error:'ไม่พบประกาศ'},404);
+    const rows=await env.DB.prepare(`SELECT bd.employee_id,bd.status AS delivery_status,bd.delivered_at,bd.acknowledged_at,bd.last_reminded_at,bd.error,
+      e.employee_code,e.nickname,e.first_name,e.last_name,d.name AS department_name,p.name AS position_name
+      FROM broadcast_deliveries bd JOIN employees e ON e.id=bd.employee_id
+      LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id
+      WHERE bd.broadcast_id=?1 AND bd.client_id=?2 ORDER BY CASE WHEN bd.acknowledged_at IS NULL THEN 0 ELSE 1 END,e.nickname,e.first_name`).bind(id,clientId).all();
+    const data=rows.results||[];
+    const delivered=data.filter(r=>r.delivery_status==='delivered').length;
+    const acknowledged=data.filter(r=>r.delivery_status==='delivered'&&r.acknowledged_at).length;
+    return json({broadcast,summary:{total:data.length,delivered,acknowledged,pending:Math.max(0,delivered-acknowledged),failed:data.filter(r=>r.delivery_status!=='delivered').length},data});
+  }
+  const broadcastRemindMatch=path.match(/^\/api\/broadcasts\/(\d+)\/remind-pending$/);
+  if(broadcastRemindMatch && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role)) return json({error:'เฉพาะ HR ที่ส่งแจ้งเตือนได้'},403);
+    await ensureV100P2Ready(env.DB);
+    const id=Number(broadcastRemindMatch[1]);
+    const broadcast=await env.DB.prepare('SELECT * FROM broadcasts WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if(!broadcast)return json({error:'ไม่พบประกาศ'},404);
+    if(!Number(broadcast.requires_ack||0))return json({error:'ประกาศนี้ไม่ได้เปิดการรับทราบ'},409);
+    const pending=(await env.DB.prepare(`SELECT bd.id AS delivery_id,e.id,e.line_user_id,e.line_provider_scope FROM broadcast_deliveries bd JOIN employees e ON e.id=bd.employee_id WHERE bd.broadcast_id=?1 AND bd.client_id=?2 AND bd.status='delivered' AND bd.acknowledged_at IS NULL AND e.status='active'`).bind(id,clientId).all()).results||[];
+    let delivered=0,failed=0;
+    for(const emp of pending){
+      try{const token=await getAccessTokenForProviderScope(env,clientId,emp.line_provider_scope);if(!token||!emp.line_user_id)throw new Error('LINE_NOT_CONNECTED');if(!await pushLineMessages(token,emp.line_user_id,[buildBroadcastReminderFlex(broadcast)]))throw new Error('LINE_PUSH_FAILED');delivered++;await env.DB.prepare('UPDATE broadcast_deliveries SET last_reminded_at=CURRENT_TIMESTAMP WHERE id=?1').bind(Number(emp.delivery_id)).run();}catch{failed++;}
+    }
+    return json({ok:true,total:pending.length,delivered,failed});
   }
 
   if(path==='/api/integrations/line/rich-menu' && method==='GET'){
@@ -3947,6 +3989,16 @@ async function processLineEvent(event, env, lineCtx) {
     }
 
     const emp=await employee(); if(!emp) return replyLine(accessToken,event.replyToken,'ยังไม่ได้เชื่อมบัญชีพนักงาน');
+    if(action==='broadcast_ack'){
+      await ensureV100P2Ready(env.DB);
+      const broadcastId=Number(data.get('id')||0);
+      const row=await env.DB.prepare(`SELECT b.id,b.title,b.requires_ack,bd.id AS delivery_id,bd.status AS delivery_status,bd.acknowledged_at FROM broadcasts b JOIN broadcast_deliveries bd ON bd.broadcast_id=b.id WHERE b.id=?1 AND b.client_id=?2 AND bd.employee_id=?3 AND bd.client_id=?2 LIMIT 1`).bind(broadcastId,Number(emp.client_id),Number(emp.id)).first();
+      if(!row||!Number(row.requires_ack||0))return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ไม่พบรายการรับทราบ','ประกาศนี้อาจไม่ได้กำหนดให้กดรับทราบ หรือไม่ได้ส่งถึงบัญชีนี้','warning')]);
+      if(row.delivery_status!=='delivered')return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ยังยืนยันไม่ได้','ระบบยังไม่มีสถานะว่าส่งประกาศนี้ถึง LINE สำเร็จ กรุณาติดต่อ HR','warning')]);
+      const already=Boolean(row.acknowledged_at);
+      if(!already)await env.DB.prepare(`UPDATE broadcast_deliveries SET acknowledged_at=CURRENT_TIMESTAMP WHERE id=?1 AND acknowledged_at IS NULL`).bind(Number(row.delivery_id)).run();
+      return replyLineMessages(accessToken,event.replyToken,[buildBroadcastAcknowledgedFlex(row,already)]);
+    }
     if(action==='menu') return replyLineMessages(accessToken,event.replyToken,[await buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp)]);
     if(action==='quick_attendance_unavailable'){
       const mode=data.get('mode')==='checkout'?'checkout':'checkin';
@@ -4030,6 +4082,24 @@ async function resolveSubmittedLocationMeta(lat,lng,meta={}) {
   }catch{return direct;}finally{clearTimeout(timer);}
 }
 
+
+function resolveAttendancePointMeta(locationMeta={},matchedLocation=null){
+  const inside=Boolean(matchedLocation && !matchedLocation.outside);
+  const title=inside
+    ? (String(matchedLocation?.name||'').trim()||String(locationMeta?.title||'').trim()||null)
+    : (String(locationMeta?.title||'').trim()||String(matchedLocation?.name||'').trim()||null);
+  const address=inside
+    ? (String(matchedLocation?.address||'').trim()||String(locationMeta?.address||'').trim()||null)
+    : (String(locationMeta?.address||'').trim()||String(matchedLocation?.address||'').trim()||null);
+  return {
+    title,address,
+    matched_work_location:inside,
+    location_status:inside?'inside_work_location':(matchedLocation?.outside?'outside_work_location':'unknown'),
+    location_address:String(matchedLocation?.address||'').trim()||null,
+    location_radius_m:matchedLocation?.radius_m==null?null:Number(matchedLocation.radius_m),
+  };
+}
+
 async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
   await ensureAttendanceSourceColumns(db);
   const employee = await db.prepare(`
@@ -4044,6 +4114,9 @@ async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
   if (existing?.check_in_at) throw httpError('วันนี้เช็กอินไปแล้ว', 409);
 
   const matchedLocation = await resolveAllowedWorkLocation(db, employee, lat, lng, {allowOutside:Boolean(Number(employee.allow_checkout_outside_geofence||0))});
+  // Work Location wins over reverse geocoding when the GPS is inside the configured radius.
+  // This makes a 13 m office check-in say “บริษัท/สำนักงานใหญ่” instead of only “แขวง…”.
+  const pointMeta=resolveAttendancePointMeta(locationMeta,matchedLocation);
   const schedule = await resolveEffectiveWorkSchedule(db, employee, workDate);
   const lateMinutes = schedule.is_workday ? calculateLateMinutes(now, schedule.start_time, Number(schedule.late_grace_minutes || 0)) : 0;
   const status = lateMinutes > 0 ? 'late' : 'present';
@@ -4052,29 +4125,32 @@ async function checkIn(db, employeeId, lat, lng, source, locationMeta={}) {
   await db.prepare(`
     INSERT INTO attendance (
       client_id, employee_id, work_date, check_in_at, checkin_lat, checkin_lng, source, status, late_minutes,
-      checkin_location_id, checkin_location_name, checkin_distance_m,checkin_source_title,checkin_source_address,scheduled_start,scheduled_end,schedule_source
-    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+      checkin_location_id, checkin_location_name, checkin_distance_m,checkin_outside_geofence,checkin_source_title,checkin_source_address,scheduled_start,scheduled_end,schedule_source
+    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
     ON CONFLICT(employee_id, work_date) DO UPDATE SET
       check_in_at=excluded.check_in_at, checkin_lat=excluded.checkin_lat, checkin_lng=excluded.checkin_lng,
       source=excluded.source, status=excluded.status, late_minutes=excluded.late_minutes,
       checkin_location_id=excluded.checkin_location_id, checkin_location_name=excluded.checkin_location_name,
-      checkin_distance_m=excluded.checkin_distance_m,checkin_source_title=excluded.checkin_source_title,checkin_source_address=excluded.checkin_source_address,
+      checkin_distance_m=excluded.checkin_distance_m,checkin_outside_geofence=excluded.checkin_outside_geofence,checkin_source_title=excluded.checkin_source_title,checkin_source_address=excluded.checkin_source_address,
       scheduled_start=excluded.scheduled_start,scheduled_end=excluded.scheduled_end,schedule_source=excluded.schedule_source,updated_at=CURRENT_TIMESTAMP
   `).bind(
     Number(employee.client_id), employeeId, workDate, nowIso, lat ?? null, lng ?? null, source, status, lateMinutes,
-    matchedLocation?.id || null, matchedLocation?.name || null, matchedLocation?.distance_m ?? null,
-    locationMeta?.title || null, locationMeta?.address || null,
+    matchedLocation?.id || null, matchedLocation?.name || null, matchedLocation?.distance_m ?? null,matchedLocation?.outside?1:0,
+    pointMeta.title || null, pointMeta.address || null,
     schedule.start_time || null,schedule.end_time || null,schedule.source
   ).run();
 
   await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_in', 'attendance', `${employeeId}:${workDate}`, {
     lat, lng, late_minutes: lateMinutes, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
-    source_title: locationMeta?.title || null, source_address: locationMeta?.address || null,
+    source_title: pointMeta.title || null, source_address: pointMeta.address || null,
+    matched_work_location:pointMeta.matched_work_location, location_status:pointMeta.location_status,
   });
   return {
     check_in_at: nowIso, work_date: workDate, status, late_minutes: lateMinutes, lat:lat ?? null, lng:lng ?? null,
-    source_title: locationMeta?.title || null, source_address: locationMeta?.address || null,
+    source_title: pointMeta.title || null, source_address: pointMeta.address || null,
     distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
+    location_address:pointMeta.location_address, location_radius_m:pointMeta.location_radius_m,
+    matched_work_location:pointMeta.matched_work_location, location_status:pointMeta.location_status,
     scheduled_start: schedule.start_time, scheduled_end: schedule.end_time, schedule_source: schedule.source, is_workday: schedule.is_workday, outside_geofence:Boolean(matchedLocation?.outside)
   };
 }
@@ -4093,6 +4169,7 @@ async function checkOut(db, employeeId, lat, lng, source, locationMeta={}) {
   if (existing?.check_out_at) throw httpError('วันนี้เช็กเอาต์ไปแล้ว', 409);
 
   const matchedLocation = await resolveAllowedWorkLocation(db, employee, lat, lng, {allowOutside:Boolean(Number(employee.allow_checkout_outside_geofence||0))});
+  const pointMeta=resolveAttendancePointMeta(locationMeta,matchedLocation);
   const nowIso = new Date().toISOString();
   await db.prepare(`
     UPDATE attendance SET check_out_at=?1, checkout_lat=?2, checkout_lng=?3,
@@ -4101,17 +4178,21 @@ async function checkOut(db, employeeId, lat, lng, source, locationMeta={}) {
     WHERE employee_id=?10 AND work_date=?11
   `).bind(
     nowIso, lat ?? null, lng ?? null, matchedLocation?.id || null, matchedLocation?.name || null,
-    matchedLocation?.distance_m ?? null,matchedLocation?.outside?1:0,locationMeta?.title || null,locationMeta?.address || null,employeeId,workDate
+    matchedLocation?.distance_m ?? null,matchedLocation?.outside?1:0,pointMeta.title || null,pointMeta.address || null,employeeId,workDate
   ).run();
 
   await audit(db, Number(employee.client_id), source, String(employeeId), 'attendance.check_out', 'attendance', `${employeeId}:${workDate}`, {
     lat, lng, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
-    source_title: locationMeta?.title || null, source_address: locationMeta?.address || null,
+    source_title: pointMeta.title || null, source_address: pointMeta.address || null,
+    matched_work_location:pointMeta.matched_work_location, location_status:pointMeta.location_status,
   });
   return {
     check_out_at: nowIso, work_date: workDate, lat:lat ?? null, lng:lng ?? null,
-    source_title: locationMeta?.title || null, source_address: locationMeta?.address || null,
-    distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null, outside_geofence:Boolean(matchedLocation?.outside)
+    source_title: pointMeta.title || null, source_address: pointMeta.address || null,
+    distance_m: matchedLocation?.distance_m ?? null, location_id: matchedLocation?.id || null, location_name: matchedLocation?.name || null,
+    location_address:pointMeta.location_address, location_radius_m:pointMeta.location_radius_m,
+    matched_work_location:pointMeta.matched_work_location, location_status:pointMeta.location_status,
+    outside_geofence:Boolean(matchedLocation?.outside)
   };
 }
 
@@ -4780,7 +4861,7 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
     const result=action==='checkin'
       ? await checkIn(env.DB,Number(access.employee_id),lat,lng,'line_quick',locationMeta)
       : await checkOut(env.DB,Number(access.employee_id),lat,lng,'line_quick',locationMeta);
-    const enriched={...result,source_title:locationMeta?.title||result.source_title||null,source_address:locationMeta?.address||result.source_address||null,accuracy_m:roundedAccuracy};
+    const enriched={...result,source_title:result.source_title||locationMeta?.title||null,source_address:result.source_address||locationMeta?.address||null,accuracy_m:roundedAccuracy};
     // Do not return success until we have attempted the LINE confirmation. The
     // attendance row is already committed, so a LINE failure never loses time data.
     const notification=await notifyQuickAttendanceLine(env,access,action,enriched);
@@ -4828,22 +4909,26 @@ async function getSavedQuickAttendance(db,employeeId,action){
   if(!row)return null;
   if(action==='checkin'){
     if(!row.check_in_at)return null;
-    let sourceTitle=row.checkin_source_title||null,sourceAddress=row.checkin_source_address||null;
+    const wl=row.checkin_location_id?await db.prepare('SELECT id,name,address,radius_m FROM work_locations WHERE id=?1 LIMIT 1').bind(Number(row.checkin_location_id)).first():null;
+    const inside=Boolean(wl && !Number(row.checkin_outside_geofence||0));
+    let sourceTitle=inside?(wl.name||row.checkin_source_title||null):(row.checkin_source_title||null),sourceAddress=inside?(wl.address||row.checkin_source_address||null):(row.checkin_source_address||null);
     if((!sourceTitle||!sourceAddress)&&row.checkin_lat!=null&&row.checkin_lng!=null){
       const meta=await resolveSubmittedLocationMeta(Number(row.checkin_lat),Number(row.checkin_lng),{title:sourceTitle,address:sourceAddress});
       sourceTitle=meta?.title||sourceTitle; sourceAddress=meta?.address||sourceAddress;
       if(sourceTitle||sourceAddress) await db.prepare('UPDATE attendance SET checkin_source_title=?1,checkin_source_address=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3').bind(sourceTitle,sourceAddress,Number(row.id)).run().catch(()=>{});
     }
-    return {check_in_at:row.check_in_at,work_date:row.work_date,status:row.status,late_minutes:Number(row.late_minutes||0),lat:row.checkin_lat,lng:row.checkin_lng,source_title:sourceTitle,source_address:sourceAddress,distance_m:row.checkin_distance_m,location_id:row.checkin_location_id,location_name:row.checkin_location_name,scheduled_start:row.scheduled_start,scheduled_end:row.scheduled_end,schedule_source:row.schedule_source,outside_geofence:Boolean(Number(row.checkin_outside_geofence||0)),accuracy_m:row.checkin_accuracy_m??null};
+    return {check_in_at:row.check_in_at,work_date:row.work_date,status:row.status,late_minutes:Number(row.late_minutes||0),lat:row.checkin_lat,lng:row.checkin_lng,source_title:sourceTitle,source_address:sourceAddress,distance_m:row.checkin_distance_m,location_id:row.checkin_location_id,location_name:wl?.name||row.checkin_location_name,location_address:wl?.address||null,location_radius_m:wl?.radius_m??null,matched_work_location:inside,location_status:inside?'inside_work_location':(Number(row.checkin_outside_geofence||0)?'outside_work_location':'unknown'),scheduled_start:row.scheduled_start,scheduled_end:row.scheduled_end,schedule_source:row.schedule_source,outside_geofence:Boolean(Number(row.checkin_outside_geofence||0)),accuracy_m:row.checkin_accuracy_m??null};
   }
   if(!row.check_out_at)return null;
-  let sourceTitle=row.checkout_source_title||null,sourceAddress=row.checkout_source_address||null;
+  const wl=row.checkout_location_id?await db.prepare('SELECT id,name,address,radius_m FROM work_locations WHERE id=?1 LIMIT 1').bind(Number(row.checkout_location_id)).first():null;
+  const inside=Boolean(wl && !Number(row.checkout_outside_geofence||0));
+  let sourceTitle=inside?(wl.name||row.checkout_source_title||null):(row.checkout_source_title||null),sourceAddress=inside?(wl.address||row.checkout_source_address||null):(row.checkout_source_address||null);
   if((!sourceTitle||!sourceAddress)&&row.checkout_lat!=null&&row.checkout_lng!=null){
     const meta=await resolveSubmittedLocationMeta(Number(row.checkout_lat),Number(row.checkout_lng),{title:sourceTitle,address:sourceAddress});
     sourceTitle=meta?.title||sourceTitle; sourceAddress=meta?.address||sourceAddress;
     if(sourceTitle||sourceAddress) await db.prepare('UPDATE attendance SET checkout_source_title=?1,checkout_source_address=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3').bind(sourceTitle,sourceAddress,Number(row.id)).run().catch(()=>{});
   }
-  return {check_out_at:row.check_out_at,work_date:row.work_date,lat:row.checkout_lat,lng:row.checkout_lng,source_title:sourceTitle,source_address:sourceAddress,distance_m:row.checkout_distance_m,location_id:row.checkout_location_id,location_name:row.checkout_location_name,outside_geofence:Boolean(Number(row.checkout_outside_geofence||0)),accuracy_m:row.checkout_accuracy_m??null};
+  return {check_out_at:row.check_out_at,work_date:row.work_date,lat:row.checkout_lat,lng:row.checkout_lng,source_title:sourceTitle,source_address:sourceAddress,distance_m:row.checkout_distance_m,location_id:row.checkout_location_id,location_name:wl?.name||row.checkout_location_name,location_address:wl?.address||null,location_radius_m:wl?.radius_m??null,matched_work_location:inside,location_status:inside?'inside_work_location':(Number(row.checkout_outside_geofence||0)?'outside_work_location':'unknown'),outside_geofence:Boolean(Number(row.checkout_outside_geofence||0)),accuracy_m:row.checkout_accuracy_m??null};
 }
 
 async function notifyQuickAttendanceLine(env,access,action,result){
@@ -4856,8 +4941,11 @@ async function notifyQuickAttendanceLine(env,access,action,result){
     try{lineAccessToken=(await getEffectiveLineContextForClient(env,Number(access.client_id)))?.accessToken||null;}catch{}
   }
   if(!lineAccessToken)return {sent:false,reason:'LINE_NOT_CONNECTED'};
-  const sent=await pushLineMessagesReliable(lineAccessToken,access.line_user_id,[buildAttendanceResultFlex(action,result)]);
-  return sent?{sent:true}:{sent:false,reason:'LINE_PUSH_FAILED'};
+  const messages=[buildAttendanceResultFlex(action,result)];
+  const locationMessage=buildAttendanceLocationMessage(action,result);
+  if(locationMessage)messages.push(locationMessage);
+  const sent=await pushLineMessagesReliable(lineAccessToken,access.line_user_id,messages);
+  return sent?{sent:true,map_sent:Boolean(locationMessage)}:{sent:false,reason:'LINE_PUSH_FAILED'};
 }
 
 async function notifyQuickAttendanceAlreadyRecordedLine(env,access,action,saved,currentPosition){
@@ -6075,6 +6163,8 @@ async function ensureV100P2Ready(db){
   await ensureColumns(db,'leave_policies',[['available_during_probation','INTEGER NOT NULL DEFAULT 0']]);
   await ensureColumns(db,'line_integrations',[['rich_menu_id','TEXT'],['rich_menu_updated_at','TEXT']]);
   await ensureColumns(db,'hr_cases',[['category','TEXT'],['contact_preference','TEXT']]);
+  await ensureColumns(db,'broadcasts',[['requires_ack','INTEGER NOT NULL DEFAULT 0'],['ack_due_at','TEXT']]);
+  await ensureColumns(db,'broadcast_deliveries',[['acknowledged_at','TEXT'],['last_reminded_at','TEXT']]);
   await db.prepare(`CREATE TABLE IF NOT EXISTS hr_case_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,case_id INTEGER NOT NULL,file_name TEXT NOT NULL,content_type TEXT,file_size INTEGER,storage_provider TEXT,drive_file_id TEXT,drive_url TEXT,storage_key TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,FOREIGN KEY (case_id) REFERENCES hr_cases(id) ON DELETE CASCADE)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_hr_case_attachments_case ON hr_case_attachments(case_id,created_at)`).run().catch(()=>{});
   SCHEMA_READY.add('p2');
@@ -6631,7 +6721,37 @@ function buildHrCaseReplyFlex(row){
   return {type:'flex',altText:'HR ตอบกลับเรื่องของคุณ',contents:lineBubble({eyebrow:'HR REPLY',title:'HR ตอบกลับเรื่องของคุณ',body:[lineText(`#HR-${String(row.id).padStart(4,'0')} · ${row.subject}`,'sm',LINE_CI.primaryDark,'bold'),lineInfoCard([lineText(row.message,'sm',LINE_CI.text,'regular')]),lineText('พิมพ์ “คำขอของฉัน” เพื่อเช็กสถานะล่าสุด','xxs',LINE_CI.muted)]})};
 }
 function buildBroadcastFlex(row){
-  return {type:'flex',altText:`ประกาศ: ${String(row.title||'อัปเดตจากบริษัท').slice(0,80)}`,contents:lineBubble({eyebrow:'COMPANY UPDATE',title:row.title,body:[lineText(row.message,'sm',LINE_CI.text,'regular'),lineText('ประกาศจาก HR · Nakna','xxs',LINE_CI.muted)]})};
+  const body=[lineText(row.message,'sm',LINE_CI.text,'regular')];
+  const footer=[];
+  if(Number(row.requires_ack||0)){
+    body.push(lineInfoCard([lineInfoRow('สถานะ','รอการรับทราบ',LINE_CI.warning),...(row.ack_due_at?[lineInfoRow('รับทราบภายใน',formatThaiDateOnly(row.ack_due_at))]:[])]));
+    body.push(lineText('กดปุ่มด้านล่างเพื่อยืนยันว่าคุณได้รับทราบประกาศนี้แล้ว','xs',LINE_CI.muted));
+    footer.push(linePrimaryButton('✅  รับทราบแล้ว',{type:'postback',label:'รับทราบแล้ว',data:`action=broadcast_ack&id=${Number(row.id)}`}));
+  }
+  body.push(lineText('ประกาศจาก HR · Nakna','xxs',LINE_CI.muted));
+  return {type:'flex',altText:`ประกาศ: ${String(row.title||'อัปเดตจากบริษัท').slice(0,80)}`,contents:lineBubble({eyebrow:Number(row.requires_ack||0)?'COMPANY UPDATE · ACK REQUIRED':'COMPANY UPDATE',title:row.title,status:Number(row.requires_ack||0)?'ต้องรับทราบ':null,statusTone:Number(row.requires_ack||0)?'warning':null,body,footer})};
+}
+function buildBroadcastReminderFlex(row){
+  const body=[lineChip('ยังไม่ได้รับทราบ','warning'),lineText(row.message,'sm',LINE_CI.text,'regular')];
+  if(row.ack_due_at) body.push(lineInfoCard([lineInfoRow('รับทราบภายใน',formatThaiDateOnly(row.ack_due_at),LINE_CI.warning)]));
+  body.push(lineText('HR ส่งการแจ้งเตือนนี้เฉพาะพนักงานที่ยังไม่ได้กดรับทราบ','xs',LINE_CI.muted));
+  const footer=[linePrimaryButton('✅  รับทราบแล้ว',{type:'postback',label:'รับทราบแล้ว',data:`action=broadcast_ack&id=${Number(row.id)}`})];
+  return {
+    type:'flex',
+    altText:`เตือนรับทราบ: ${String(row.title||'ประกาศบริษัท').slice(0,70)}`,
+    contents:lineBubble({eyebrow:'REMINDER · ACK REQUIRED',title:row.title,status:'รอรับทราบ',statusTone:'warning',body,footer})
+  };
+}
+function buildBroadcastAcknowledgedFlex(row,already=false){
+  const body=[
+    lineText(row.title,'md',LINE_CI.primaryDark,'bold'),
+    lineText(already?'ระบบมีประวัติการรับทราบประกาศนี้ของคุณอยู่แล้ว':'นากนะบันทึกการรับทราบของคุณพร้อมวันและเวลาเรียบร้อยแล้ว','xs',LINE_CI.muted)
+  ];
+  return {
+    type:'flex',
+    altText:'รับทราบประกาศเรียบร้อยแล้ว',
+    contents:lineBubble({eyebrow:'COMPANY UPDATE',title:already?'รับทราบไว้แล้ว':'รับทราบเรียบร้อย ✅',status:'บันทึกแล้ว',statusTone:'success',body})
+  };
 }
 function leaveStatusLabel(status){return ({pending:'รออนุมัติ',awaiting_evidence:'รอหลักฐาน',approved:'อนุมัติแล้ว',rejected:'ไม่อนุมัติ',cancelled:'ยกเลิก'})[status]||status;}
 function caseStatusLabel(status){return ({open:'HR รับเรื่องแล้ว',in_progress:'กำลังดำเนินการ',waiting_employee:'HR ตอบแล้ว',resolved:'แก้ไขแล้ว',closed:'ปิดเรื่อง'})[status]||status;}
@@ -6988,17 +7108,34 @@ function buildLeaveDecisionFlex(row,approved){
   else body.push(lineText('ระบบอัปเดตสิทธิ์ลาและ Attendance ให้เรียบร้อยแล้ว','xs',LINE_CI.muted));
   return {type:'flex',altText:approved?'คำขอลาได้รับอนุมัติ':'คำขอลาไม่ผ่านการอนุมัติ',contents:lineBubble({eyebrow:'LEAVE UPDATE',title:approved?'อนุมัติคำขอแล้ว':'คำขอไม่ผ่านการอนุมัติ',subtitle:`#LV-${String(row.id).padStart(4,'0')}`,status:approved?'อนุมัติแล้ว':'ไม่อนุมัติ',statusTone:approved?'success':'error',body,footer:[lineSecondaryButton('กลับเมนู',{type:'postback',label:'กลับเมนู',data:'action=menu'},LINE_CI.mintSoft)]})};
 }
+function buildAttendanceLocationMessage(kind,result){
+  const lat=Number(result?.lat),lng=Number(result?.lng);
+  if(!Number.isFinite(lat)||!Number.isFinite(lng))return null;
+  const checkin=kind==='checkin';
+  const inside=result?.location_status==='inside_work_location'||Boolean(result?.matched_work_location);
+  const place=inside?(result?.location_name||result?.source_title):(result?.source_title||result?.location_name);
+  const title=`${checkin?'เช็กอิน':'เช็กเอาต์'} · ${place||'จุดที่ลงเวลา'}`.slice(0,100);
+  const address=String((inside?(result?.location_address||result?.source_address):(result?.source_address||result?.location_address))||`${lat.toFixed(6)}, ${lng.toFixed(6)}`).slice(0,100);
+  return {type:'location',title,address,latitude:lat,longitude:lng};
+}
+
 function buildAttendanceResultFlex(kind,result){
   const checkin=kind==='checkin'; const late=checkin&&Number(result.late_minutes||0)>0;
   const outside=Boolean(result.outside_geofence); const tone=late?'warning':outside?'warning':'success'; const status=checkin?(outside?(late?`นอกพื้นที่ · สาย ${result.late_minutes} นาที`:'เช็กอินนอกพื้นที่'):(late?`สาย ${result.late_minutes} นาที`:'ตรงเวลา')):(outside?'เช็กเอาต์นอกพื้นที่':'บันทึกเวลาแล้ว');
   const tm=checkin?result.check_in_at:result.check_out_at;
   const rows=[lineInfoRow('เวลา',formatBangkokTime(tm),LINE_CI.primaryDark)];
-  const sourceLabel=checkin?'จุดที่เช็กอินจริง':'จุดที่เช็กเอาต์จริง';
-  const sourcePlace=result.source_title||result.source_address||((result.lat!=null&&result.lng!=null)?`${Number(result.lat).toFixed(5)}, ${Number(result.lng).toFixed(5)}`:null);
+  const inside=result.location_status==='inside_work_location'||Boolean(result.matched_work_location);
+  const sourceLabel=inside?'สถานที่':(checkin?'จุดที่เช็กอินจริง':'จุดที่เช็กเอาต์จริง');
+  const sourcePlace=inside?(result.location_name||result.source_title):(result.source_title||result.source_address||result.location_name);
   if(sourcePlace) rows.push(lineInfoRow(sourceLabel,sourcePlace,LINE_CI.primaryDark));
-  if(result.source_address&&result.source_address!==sourcePlace) rows.push(lineInfoRow('ที่อยู่จริง',result.source_address));
-  if(result.location_name) rows.push(lineInfoRow('Work Location ที่กำหนด',result.location_name));
-  if(result.distance_m!=null){const d=Number(result.distance_m);rows.push(lineInfoRow('ห่างจาก Work Location',d>=1000?`${(d/1000).toFixed(d>=10000?0:1)} กม.`:`${Math.round(d)} ม.`));}
+  if(inside){
+    rows.push(lineInfoRow('สถานะพื้นที่','🟢 อยู่ในพื้นที่บริษัท',LINE_CI.success));
+    if(result.location_address)rows.push(lineInfoRow('ที่อยู่ Work Location',result.location_address));
+  }else{
+    if(result.source_address&&result.source_address!==sourcePlace) rows.push(lineInfoRow('ที่อยู่จริง',result.source_address));
+    if(result.location_name) rows.push(lineInfoRow('Work Location ที่กำหนด',result.location_name));
+  }
+  if(result.distance_m!=null){const d=Number(result.distance_m);rows.push(lineInfoRow(inside?'ห่างจากจุดบริษัท':'ห่างจาก Work Location',d>=1000?`${(d/1000).toFixed(d>=10000?0:1)} กม.`:`${Math.round(d)} ม.`));}
   if(result.accuracy_m!=null) rows.push(lineInfoRow('ความแม่นยำ GPS',`±${Math.round(Number(result.accuracy_m))} ม.`));
   const footer=[];
   if(result.lat!=null&&result.lng!=null){const mapUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${result.lat},${result.lng}`)}`;footer.push(lineSecondaryButton('ดูจุดที่ลงเวลา',{type:'uri',label:'ดูจุดที่ลงเวลา',uri:mapUrl},LINE_CI.mintSoft));}
@@ -7162,7 +7299,7 @@ async function ensureAttendanceSourceColumns(db) {
   if (SCHEMA_READY.has('attendance_source_meta')) return;
   if (!db) throw new Error('D1 binding DB is not available');
   await ensureColumns(db,'attendance',[
-    ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],
+    ['checkin_location_id','INTEGER'],['checkin_location_name','TEXT'],['checkin_distance_m','REAL'],['checkin_accuracy_m','REAL'],['checkin_outside_geofence','INTEGER NOT NULL DEFAULT 0'],
     ['checkin_source_title','TEXT'],['checkin_source_address','TEXT'],
     ['checkout_location_id','INTEGER'],['checkout_location_name','TEXT'],['checkout_distance_m','REAL'],['checkout_accuracy_m','REAL'],
     ['checkout_source_title','TEXT'],['checkout_source_address','TEXT'],['checkout_outside_geofence','INTEGER NOT NULL DEFAULT 0'],

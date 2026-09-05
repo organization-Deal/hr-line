@@ -1,0 +1,22 @@
+P7.76 — Work Location First + LINE Map Label
+
+Changed files:
+- src/index.js
+- index.js
+- public/attendance.js
+- attendance.js
+- public/attendance.html
+- attendance.html
+- public/app.js
+- app.js
+- public/index.html
+- index.html
+- package.json
+- CHANGELOG.md
+
+Main behavior changes:
+1. When GPS is inside a configured Work Location radius, the Work Location name becomes the attendance place name.
+2. LINE confirmation shows “อยู่ในพื้นที่บริษัท” and the distance from the configured point.
+3. LINE sends a Location map message using the employee's exact GPS coordinates, labeled with the matched Work Location name.
+4. Reverse geocoding is now fallback context, not the primary label, when inside a Work Location.
+5. Check-in outside-geofence state is persisted explicitly.
