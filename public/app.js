@@ -1748,7 +1748,16 @@ function workLogMatrixCell(r){
     }
   }
   if(r.check_out_at){
-    parts.push(`<div class="worklog-line"><span>ออก</span><strong>${time(r.check_out_at)}</strong></div>`);
+    const checkoutOutside=Number(r.checkout_outside_geofence||0)===1;
+    const checkoutPlace=workLogPlace(r,'checkout');
+    const checkoutWorkLocation=String(r.checkout_location_name||'').trim();
+    parts.push(`<div class="worklog-line checkout"><span>ออก</span><strong>${time(r.check_out_at)}</strong></div>`);
+    parts.push(`<div class="worklog-check-state ${checkoutOutside?'outside':'inside'}">${checkoutOutside?'เช็กเอาต์นอกพื้นที่':'เช็กเอาต์ในพื้นที่'}</div>`);
+    parts.push(`<div class="worklog-place checkout-place" title="${escapeHtml(checkoutPlace)}">📍 ${escapeHtml(checkoutPlace)}</div>`);
+    if(checkoutWorkLocation){
+      const checkoutDistance=workLogDistanceLabel(r.checkout_distance_m);
+      parts.push(`<div class="worklog-work-location checkout-work" title="${escapeHtml(checkoutWorkLocation)}">Work: ${escapeHtml(checkoutWorkLocation)}${checkoutDistance?` · ${checkoutDistance}`:''}</div>`);
+    }
   }
   if(r.leave_name){
     const leaveState=r.leave_status&&r.leave_status!=='approved'?` · ${escapeHtml(({pending:'รออนุมัติ',awaiting_evidence:'รอหลักฐาน',rejected:'ไม่อนุมัติ'})[r.leave_status]||r.leave_status)}`:'';
@@ -1767,67 +1776,86 @@ window.openWorkLogDetail=async(employeeId,workDate)=>{
   $('#workLogDetailSubtitle').textContent=cached?`${formatDate(cached.work_date)} · ${cached.department_name||'ยังไม่ระบุแผนก'}`:formatDate(workDate);
   $('#workLogDetailBody').innerHTML='<div class="worklog-detail-loading"><i class="action-status-spinner"></i><span>กำลังอ่านจุด GPS และรายละเอียดสถานที่…</span></div>';
   try{modal.showModal();}catch{modal.setAttribute('open','');}
+
+  const pointStatus=(item,kind,lateMinutes=0)=>{
+    if(!item)return kind==='checkout'?'ยังไม่เช็กเอาต์':'ยังไม่เช็กอิน';
+    if(Boolean(item.outside_geofence))return kind==='checkout'?'เช็กเอาต์นอกพื้นที่':'เช็กอินนอกพื้นที่';
+    if(kind==='checkin'&&Number(lateMinutes||0)>0)return `อยู่ในพื้นที่ · สาย ${Number(lateMinutes)} นาที`;
+    return kind==='checkout'?'เช็กเอาต์ในพื้นที่':'อยู่ในพื้นที่ · ตรงเวลา';
+  };
+  const pointPlace=item=>item?.actual_title||item?.nearby_name||item?.actual_address||(item?.lat!=null?'มีพิกัด GPS':'—');
+  const renderPoint=(kind,item,{lateMinutes=0,fallback=false}={})=>{
+    const isCheckout=kind==='checkout';
+    const label=isCheckout?'เช็กเอาต์':'เช็กอิน';
+    if(!item){
+      return `<section class="worklog-point-card empty"><div class="worklog-point-head"><div><span>${label}</span><strong>${isCheckout?'ยังไม่เช็กเอาต์':'ยังไม่เช็กอิน'}</strong></div><span class="worklog-point-badge neutral">—</span></div></section>`;
+    }
+    const outside=Boolean(item.outside_geofence);
+    const place=pointPlace(item);
+    const address=item.actual_address&&item.actual_address!==item.actual_title?item.actual_address:null;
+    const workName=item.work_location?.name||item.location_name||'ไม่ได้จับคู่ Work Location';
+    const workAddress=item.work_location?.address||item.location_address||null;
+    const radius=item.work_location?.radius_m??item.location_radius_m??null;
+    const map=(item.lat!=null&&item.lng!=null)?`<a class="worklog-map-btn ${isCheckout?'secondary':''}" href="https://www.google.com/maps?q=${Number(item.lat)},${Number(item.lng)}" target="_blank" rel="noopener">📍 ดูจุด${label}บนแผนที่</a>`:'';
+    const nearby=item.nearby_name?`<small class="worklog-nearby">Landmark: ${escapeHtml(`${item.nearby_relation||'ใกล้'} ${item.nearby_name}`)}${item.nearby_distance_text?` · ${escapeHtml(item.nearby_distance_text)}`:''}</small>`:'';
+    const badgeClass=outside?'outside':(kind==='checkin'&&Number(lateMinutes||0)>0?'late':'inside');
+    return `<section class="worklog-point-card ${outside?'outside':'inside'}">
+      <div class="worklog-point-head"><div><span>${label}</span><strong>${item.time?time(item.time):'—'}</strong></div><span class="worklog-point-badge ${badgeClass}">${escapeHtml(pointStatus(item,kind,lateMinutes))}</span></div>
+      <div class="worklog-point-place"><span>จุดที่${label}จริง</span><strong>📍 ${escapeHtml(place)}</strong>${address?`<small>${escapeHtml(address)}</small>`:''}${nearby}</div>
+      <div class="worklog-detail-grid compact">
+        <div><span>สถานะพื้นที่</span><strong>${outside?'นอก Work Location':'อยู่ใน Work Location'}</strong></div>
+        <div><span>GPS</span><strong>${item.accuracy_m!=null?`±${Math.round(Number(item.accuracy_m))} ม.`:'—'}</strong></div>
+        <div><span>Work Location ที่ระบบเทียบ</span><strong>${escapeHtml(workName)}</strong>${workAddress?`<small>${escapeHtml(workAddress)}</small>`:''}</div>
+        <div><span>ระยะจาก Work Location</span><strong>${workLogDistanceLabel(item.distance_m)||'—'}</strong></div>
+        <div><span>รัศมีที่อนุญาต</span><strong>${radius!=null?`${Math.round(Number(radius))} ม.`:'—'}</strong></div>
+        <div><span>พิกัดจริง</span><strong class="coordinate-text">${item.lat!=null&&item.lng!=null?`${Number(item.lat).toFixed(6)}, ${Number(item.lng).toFixed(6)}`:'—'}</strong></div>
+      </div>
+      ${map?`<div class="worklog-point-actions">${map}</div>`:''}
+      ${fallback?'<div class="worklog-detail-fallback-note">แสดงข้อมูลที่บันทึกไว้ในตารางเวลา</div>':''}
+    </section>`;
+  };
+
   try{
     const detail=await api(`/api/team-work-log/location-detail?employee_id=${Number(employeeId)}&date=${encodeURIComponent(workDate)}`,{timeoutMs:12000});
     const r=detail||{}; const ci=r.checkin||null; const co=r.checkout||null;
     const person=`${r.employee?.nickname||r.employee?.first_name||'—'} ${r.employee?.last_name||''}`.trim();
     $('#workLogDetailTitle').textContent=person;
     $('#workLogDetailSubtitle').textContent=`${formatDate(r.work_date)} · ${r.employee?.department_name||'ยังไม่ระบุแผนก'}`;
-    const outside=Boolean(ci?.outside_geofence);
-    const status=!ci?'ยังไม่เช็กอิน':outside?'เช็กอินนอกพื้นที่':Number(r.late_minutes||0)>0?`มาสาย ${Number(r.late_minutes)} นาที`:'อยู่ในพื้นที่ · ตรงเวลา';
-    const actualPlace=ci?.actual_title||ci?.actual_address||(ci?.lat!=null?'มีพิกัด GPS':'—');
-    const actualAddress=ci?.actual_address&&ci.actual_address!==ci.actual_title?ci.actual_address:null;
-    const workLocation=ci?.work_location?.name||'ไม่ได้จับคู่ Work Location';
-    const workAddress=ci?.work_location?.address||null;
-    const checkinMap=(ci?.lat!=null&&ci?.lng!=null)?`<a class="worklog-map-btn" href="https://www.google.com/maps?q=${Number(ci.lat)},${Number(ci.lng)}" target="_blank" rel="noopener">📍 เปิดจุด GPS จริง</a>`:'';
-    const checkoutMap=(co?.lat!=null&&co?.lng!=null)?`<a class="worklog-map-btn secondary" href="https://www.google.com/maps?q=${Number(co.lat)},${Number(co.lng)}" target="_blank" rel="noopener">ดูจุดเช็กเอาต์</a>`:'';
+    const overall=!ci?'ยังไม่เช็กอิน':Boolean(ci.outside_geofence)?'เช็กอินนอกพื้นที่':Number(r.late_minutes||0)>0?`มาสาย ${Number(r.late_minutes)} นาที`:'มาทำงาน';
+    const overallClass=!ci?'neutral':Boolean(ci.outside_geofence)?'outside':Number(r.late_minutes||0)>0?'late':'inside';
     $('#workLogDetailBody').innerHTML=`
-      <div class="worklog-detail-status ${outside?'outside':Number(r.late_minutes||0)>0?'late':'inside'}"><span>สถานะวันนี้</span><strong>${escapeHtml(status)}</strong></div>
-      <div class="worklog-actual-location ${outside?'outside':'inside'}">
-        <span>จุดที่พนักงานเช็กอินจริง</span>
-        <strong>📍 ${escapeHtml(actualPlace)}</strong>
-        ${actualAddress?`<small>${escapeHtml(actualAddress)}</small>`:''}
-        ${ci?.nearby_name?`<small class="worklog-nearby">Landmark: ${escapeHtml(`${ci.nearby_relation||'ใกล้'} ${ci.nearby_name}`)}${ci.nearby_distance_text?` · ${escapeHtml(ci.nearby_distance_text)}`:''}</small>`:''}
-      </div>
-      <div class="worklog-detail-grid">
-        <div><span>เวลาเช็กอิน</span><strong>${ci?.time?time(ci.time):'—'}</strong></div>
-        <div><span>GPS</span><strong>${ci?.accuracy_m!=null?`±${Math.round(Number(ci.accuracy_m))} ม.`:'—'}</strong></div>
-        <div><span>Work Location ที่ระบบเทียบ</span><strong>${escapeHtml(workLocation)}</strong>${workAddress?`<small>${escapeHtml(workAddress)}</small>`:''}</div>
-        <div><span>สถานะพื้นที่</span><strong>${ci?(outside?'นอก Work Location':'อยู่ใน Work Location'):'—'}</strong></div>
-        <div><span>ระยะจาก Work Location</span><strong>${ci?(workLogDistanceLabel(ci.distance_m)||'—'):'—'}</strong></div>
-        <div><span>รัศมีที่อนุญาต</span><strong>${ci?.work_location?.radius_m!=null?`${Math.round(Number(ci.work_location.radius_m))} ม.`:'—'}</strong></div>
-        <div><span>เช็กเอาต์</span><strong>${co?.time?time(co.time):'—'}</strong></div>
-        <div><span>จุดเช็กเอาต์</span><strong>${escapeHtml(co?.actual_title||co?.actual_address||'—')}</strong></div>
-      </div>
-      <div class="worklog-coordinate-row"><span>พิกัดจริง</span><code>${ci?.lat!=null&&ci?.lng!=null?`${Number(ci.lat).toFixed(6)}, ${Number(ci.lng).toFixed(6)}`:'—'}</code></div>
-      <div class="worklog-detail-actions">${checkinMap}${checkoutMap}</div>`;
+      <div class="worklog-detail-status ${overallClass}"><span>สถานะวันนี้</span><strong>${escapeHtml(overall)}</strong></div>
+      <div class="worklog-points-stack">
+        ${renderPoint('checkin',ci,{lateMinutes:Number(r.late_minutes||0)})}
+        ${renderPoint('checkout',co)}
+      </div>`;
   }catch(e){
-    // P7.80: team-work-log rows historically exposed employee `id` but the detail
-    // button expected `employee_id`, causing requests with employee_id=0. Keep a
-    // useful local fallback as well so HR can still inspect the saved GPS even if
-    // the detail enrichment endpoint is temporarily unavailable.
     if(cached){
-      const outside=Number(cached.checkin_outside_geofence||0)===1;
-      const place=workLogPlace(cached,'checkin');
-      const workLocation=String(cached.checkin_location_name||'').trim()||'ไม่ได้จับคู่ Work Location';
-      const distance=workLogDistanceLabel(cached.checkin_distance_m)||'—';
-      const map=(cached.checkin_lat!=null&&cached.checkin_lng!=null)?`<a class="worklog-map-btn" href="https://www.google.com/maps?q=${Number(cached.checkin_lat)},${Number(cached.checkin_lng)}" target="_blank" rel="noopener">📍 เปิดจุด GPS จริง</a>`:'';
+      const ci=cached.check_in_at?{
+        time:cached.check_in_at,
+        actual_title:workLogPlace(cached,'checkin'),
+        actual_address:cached.checkin_actual_address||cached.checkin_source_address||null,
+        lat:cached.checkin_lat,lng:cached.checkin_lng,accuracy_m:cached.checkin_accuracy_m,
+        distance_m:cached.checkin_distance_m,outside_geofence:Number(cached.checkin_outside_geofence||0)===1,
+        location_name:cached.checkin_location_name,location_address:cached.checkin_work_location_address,location_radius_m:cached.checkin_location_radius_m,
+      }:null;
+      const co=cached.check_out_at?{
+        time:cached.check_out_at,
+        actual_title:workLogPlace(cached,'checkout'),
+        actual_address:cached.checkout_actual_address||cached.checkout_source_address||null,
+        lat:cached.checkout_lat,lng:cached.checkout_lng,accuracy_m:cached.checkout_accuracy_m,
+        distance_m:cached.checkout_distance_m,outside_geofence:Number(cached.checkout_outside_geofence||0)===1,
+        location_name:cached.checkout_location_name,location_address:cached.checkout_work_location_address,location_radius_m:cached.checkout_location_radius_m,
+      }:null;
+      const overall=!ci?'ยังไม่เช็กอิน':ci.outside_geofence?'เช็กอินนอกพื้นที่':Number(cached.late_minutes||0)>0?`มาสาย ${Number(cached.late_minutes)} นาที`:'มาทำงาน';
+      const overallClass=!ci?'neutral':ci.outside_geofence?'outside':Number(cached.late_minutes||0)>0?'late':'inside';
       $('#workLogDetailBody').innerHTML=`
-        <div class="worklog-detail-status ${outside?'outside':Number(cached.late_minutes||0)>0?'late':'inside'}"><span>สถานะวันนี้</span><strong>${outside?'เช็กอินนอกพื้นที่':Number(cached.late_minutes||0)>0?`มาสาย ${Number(cached.late_minutes)} นาที`:'อยู่ในพื้นที่ · ตรงเวลา'}</strong></div>
-        <div class="worklog-actual-location ${outside?'outside':'inside'}"><span>จุดที่พนักงานเช็กอินจริง</span><strong>📍 ${escapeHtml(place)}</strong>${cached.checkin_actual_address?`<small>${escapeHtml(cached.checkin_actual_address)}</small>`:''}</div>
-        <div class="worklog-detail-grid">
-          <div><span>เวลาเช็กอิน</span><strong>${cached.check_in_at?time(cached.check_in_at):'—'}</strong></div>
-          <div><span>GPS</span><strong>${cached.checkin_accuracy_m!=null?`±${Math.round(Number(cached.checkin_accuracy_m))} ม.`:'—'}</strong></div>
-          <div><span>Work Location ที่ระบบเทียบ</span><strong>${escapeHtml(workLocation)}</strong></div>
-          <div><span>สถานะพื้นที่</span><strong>${outside?'นอก Work Location':'อยู่ใน Work Location'}</strong></div>
-          <div><span>ระยะจาก Work Location</span><strong>${escapeHtml(distance)}</strong></div>
-          <div><span>รัศมีที่อนุญาต</span><strong>${cached.checkin_location_radius_m!=null?`${Math.round(Number(cached.checkin_location_radius_m))} ม.`:'—'}</strong></div>
-          <div><span>เช็กเอาต์</span><strong>${cached.check_out_at?time(cached.check_out_at):'—'}</strong></div>
-          <div><span>จุดเช็กเอาต์</span><strong>${escapeHtml(workLogPlace(cached,'checkout'))}</strong></div>
+        <div class="worklog-detail-status ${overallClass}"><span>สถานะวันนี้</span><strong>${escapeHtml(overall)}</strong></div>
+        <div class="worklog-points-stack">
+          ${renderPoint('checkin',ci,{lateMinutes:Number(cached.late_minutes||0),fallback:true})}
+          ${renderPoint('checkout',co,{fallback:true})}
         </div>
-        <div class="worklog-coordinate-row"><span>พิกัดจริง</span><code>${cached.checkin_lat!=null&&cached.checkin_lng!=null?`${Number(cached.checkin_lat).toFixed(6)}, ${Number(cached.checkin_lng).toFixed(6)}`:'—'}</code></div>
-        <div class="worklog-detail-actions">${map}</div>
-        <div class="worklog-detail-fallback-note">แสดงข้อมูลที่บันทึกไว้ในตารางเวลา · รายละเอียด Landmark แบบสดยังโหลดไม่สำเร็จ</div>`;
+        <div class="worklog-detail-fallback-note">รายละเอียด Landmark แบบสดโหลดไม่สำเร็จ แต่ข้อมูล GPS / เวลา / พื้นที่ที่บันทึกไว้ยังแสดงครบ</div>`;
     }else{
       $('#workLogDetailBody').innerHTML=`<div class="worklog-detail-error"><strong>เปิดรายละเอียดไม่สำเร็จ</strong><span>${escapeHtml(e.message||'กรุณาลองใหม่อีกครั้ง')}</span></div>`;
     }
