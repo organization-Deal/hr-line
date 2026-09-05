@@ -2411,3 +2411,14 @@ button.worklog-day-card{width:100%;border:0;background:#fff;text-align:left;font
 .worklog-detail-grid.compact{grid-template-columns:1fr 1fr}.worklog-detail-grid .coordinate-text{font-family:var(--font-en);font-size:9px;word-break:break-all}.worklog-point-actions{display:flex;gap:8px}.worklog-point-actions .worklog-map-btn{width:100%}
 .worklog-detail-status.neutral{background:#f2f5f3;color:#6f817f}
 @media(max-width:700px){.worklog-point-card{padding:13px}.worklog-point-head{align-items:flex-start}.worklog-point-badge{max-width:62%}.worklog-detail-grid.compact{grid-template-columns:1fr}.worklog-point-place>strong{font-size:13px}.worklog-line.checkout{margin-top:6px}}
+
+
+/* Nakna P7.82 — approved leave merged into attendance matrix */
+.worklog-approved-leave{display:grid;gap:3px;margin:1px 0 5px;padding:7px 8px;border:1px solid #dcd6fb;border-radius:10px;background:#f6f3ff;color:#57458c;line-height:1.25}
+.worklog-approved-leave strong{font-size:9.5px;color:#493a7b;white-space:normal;overflow-wrap:anywhere}
+.worklog-approved-leave small{font-size:8px;color:#7869a4}
+.worklog-leave-chip{width:max-content;padding:3px 6px;border-radius:999px;background:#e9e3ff;color:#644db2;font-size:7.7px;font-weight:700}
+.worklog-leave-note.pending{border:1px solid #f2dfb2;background:#fff8e8;color:#9a6a18}
+.worklog-missing-note{margin-top:3px;padding:4px 6px;border-radius:8px;background:#fff0ee;color:#c5574d;font-size:8.4px;font-weight:600}
+.worklog-day-card.has-approved-leave{background:#fcfbff}
+@media(max-width:720px){.worklog-approved-leave{padding:6px}.worklog-approved-leave strong{font-size:9px}.worklog-approved-leave small{font-size:7.8px}}

@@ -1,3 +1,10 @@
+# P7.82 — Leave-aware attendance matrix
+
+- Approved leave now appears directly in the daily/monthly attendance matrix with leave type, approval status, full/half-day detail and duration.
+- Approved leave is never shown as “ยังไม่เช็กอิน” and is excluded from missing-attendance counts.
+- Pending/awaiting-evidence leave is shown as pending but does not suppress the missing check-in warning until approved.
+- Dashboard missing-attendance logic continues to exclude employees with approved leave.
+
 ## P7.81 — Check-out location & status in Team Work Log
 - แสดงสถานะเช็กเอาต์ใน/นอกพื้นที่ในตารางภาพรวม
 - แสดงจุดเช็กเอาต์จริงและ Work Location ที่เทียบ พร้อมระยะ
