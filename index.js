@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.82';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.82';
+const NAKNA_RUNTIME_RELEASE = 'P7.85';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.85';
 const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -5189,11 +5189,12 @@ async function notifyQuickAttendanceLine(env,access,action,result){
     try{lineAccessToken=(await getEffectiveLineContextForClient(env,Number(access.client_id)))?.accessToken||null;}catch{}
   }
   if(!lineAccessToken)return {sent:false,reason:'LINE_NOT_CONNECTED'};
+  // P7.85: keep the attendance confirmation compact. Do not auto-push a LINE
+  // Location message because it clutters the chat. The Flex card already has
+  // “ดูจุดที่ลงเวลา”, so the employee can open Google Maps only when needed.
   const messages=[buildAttendanceResultFlex(action,result)];
-  const locationMessage=buildAttendanceLocationMessage(action,result);
-  if(locationMessage)messages.push(locationMessage);
   const sent=await pushLineMessagesReliable(lineAccessToken,access.line_user_id,messages);
-  return sent?{sent:true,map_sent:Boolean(locationMessage)}:{sent:false,reason:'LINE_PUSH_FAILED'};
+  return sent?{sent:true,map_sent:false}:{sent:false,reason:'LINE_PUSH_FAILED'};
 }
 
 async function notifyQuickAttendanceAlreadyRecordedLine(env,access,action,saved,currentPosition){
