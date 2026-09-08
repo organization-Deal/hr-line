@@ -2422,3 +2422,23 @@ button.worklog-day-card{width:100%;border:0;background:#fff;text-align:left;font
 .worklog-missing-note{margin-top:3px;padding:4px 6px;border-radius:8px;background:#fff0ee;color:#c5574d;font-size:8.4px;font-weight:600}
 .worklog-day-card.has-approved-leave{background:#fcfbff}
 @media(max-width:720px){.worklog-approved-leave{padding:6px}.worklog-approved-leave strong{font-size:9px}.worklog-approved-leave small{font-size:7.8px}}
+
+
+/* Nakna HR V1.0-P7.83 — Dedicated Attendance Center */
+.attendance-center-view{padding-bottom:26px}
+.attendance-center-intro{align-items:flex-end}
+.attendance-center-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.attendance-worklog-panel{margin-top:8px;padding:20px;border-radius:22px}
+.attendance-worklog-head{padding-bottom:4px}
+.attendance-summary-expanded{grid-template-columns:repeat(6,minmax(0,1fr));margin-top:14px}
+.attendance-filterbar{display:grid;grid-template-columns:minmax(280px,1fr) 190px 190px auto;gap:10px;align-items:center;margin:12px 0 10px}
+.attendance-filterbar .search-box{min-width:0}
+.attendance-filterbar select{height:42px;border:1px solid var(--border);border-radius:12px;background:#fff;padding:0 34px 0 12px;color:var(--text);font:inherit}
+.attendance-filterbar .compact-btn{height:42px;white-space:nowrap}
+.attendance-legend{display:flex;gap:7px;flex-wrap:wrap;margin:0 2px 10px}
+.legend-chip{display:inline-flex;align-items:center;min-height:26px;padding:5px 9px;border-radius:999px;font-size:8.5px;font-weight:600;background:#f4f7f6;color:#627371}
+.legend-chip.ok{background:#ecf8f1;color:#2e9b68}.legend-chip.warn{background:#fff7e8;color:#a46c0a}.legend-chip.leave{background:#f3efff;color:#7656b8}.legend-chip.danger{background:#fff0ee;color:#c45b50}
+.attendance-matrix-wrap{max-height:calc(100dvh - 390px);min-height:480px}
+.attendance-worklog-panel .team-worklog-matrix .worklog-person-col{width:270px;min-width:270px;max-width:270px}
+@media(max-width:1200px){.attendance-summary-expanded{grid-template-columns:repeat(3,1fr)}.attendance-filterbar{grid-template-columns:minmax(220px,1fr) 170px 170px}.attendance-filterbar .compact-btn{grid-column:1/-1;justify-self:start}}
+@media(max-width:760px){.attendance-center-intro{align-items:flex-start}.attendance-center-actions{width:100%;justify-content:space-between}.attendance-worklog-panel{margin-left:-6px;margin-right:-6px;padding:14px 12px;border-radius:18px}.attendance-summary-expanded{display:flex!important;overflow:auto;grid-template-columns:none!important;scrollbar-width:none}.attendance-summary-expanded>div{min-width:128px}.attendance-filterbar{display:grid;grid-template-columns:1fr 1fr;gap:8px}.attendance-filterbar .attendance-search{grid-column:1/-1}.attendance-filterbar .compact-btn{grid-column:1/-1;width:100%;justify-content:center}.attendance-filterbar select{width:100%;min-width:0}.attendance-matrix-wrap{max-height:none;min-height:0}.attendance-worklog-panel .team-worklog-matrix .worklog-person-col{width:190px;min-width:190px;max-width:190px}}
