@@ -257,7 +257,7 @@ function renderViewData(name){
     if(name==='organization'){ renderPeopleCore(); return; }
     if(name==='recruitment'){ renderCandidates(); renderRecruitmentGmail(); return; }
     if(name==='benefits'){ renderBenefits(); return; }
-    if(name==='attendance'){ renderAttendance(); return; }
+    if(name==='attendance'){ renderTeamWorkLog(); return; }
     if(name==='leave'){ renderLeaves(); renderLeavePolicies(); return; }
     if(name==='requests'){ renderRequests(); renderEmployeeService(); return; }
     if(name==='hr-inbox'){ renderHrInbox(); return; }
@@ -298,7 +298,7 @@ async function loadViewData(name,{force=false}={}){
       }else if(name==='benefits'){
         const [benefits,employees]=await Promise.all([isHr?load('/api/benefits',state.benefits):Promise.resolve(state.benefits),load('/api/employees',{data:state.employees})]); state.benefits=benefits||state.benefits; state.employees=employees?.data||state.employees;
       }else if(name==='attendance'){
-        const [attendance,employees]=await Promise.all([load('/api/attendance/today',{data:state.attendance}),load('/api/employees',{data:state.employees})]); state.attendance=attendance?.data||state.attendance; state.employees=employees?.data||state.employees;
+        await loadTeamWorkLog();
       }else if(name==='leave'){
         const [leaves,policies,employees,peopleCore]=await Promise.all([load('/api/leaves',{data:state.leaves}),load('/api/leave-policies',{data:state.leavePolicies}),load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore)]); state.leaves=leaves?.data||state.leaves; state.leavePolicies=policies?.data||state.leavePolicies; state.employees=employees?.data||state.employees; state.peopleCore=mergePeopleCoreFromServer(peopleCore)||state.peopleCore;
       }else if(name==='requests'){
@@ -442,7 +442,7 @@ const viewMeta = {
   organization: ['ทีมและตำแหน่ง', 'TEAM DIRECTORY'],
   recruitment: ['Recruitment', 'TALENT'],
   benefits: ['สวัสดิการ', 'BENEFITS'],
-  attendance: ['เวลาเข้างาน', 'WORKDAY'],
+  attendance: ['เวลาเข้างาน', 'ATTENDANCE CENTER'],
   leave: ['การลา', 'LEAVE'],
   requests: ['Employee Service', 'EMPLOYEE SERVICE'],
   broadcast: ['ประกาศ', 'BROADCAST'],
@@ -650,6 +650,10 @@ function bindEvents() {
   if ($('#teamWorkLogMonth')) $('#teamWorkLogMonth').onchange=()=>loadTeamWorkLog();
   if ($('#teamWorkLogApplyRangeBtn')) $('#teamWorkLogApplyRangeBtn').onclick=()=>loadTeamWorkLog();
   if ($('#teamWorkLogStartDate')) $('#teamWorkLogStartDate').onchange=()=>{if($('#teamWorkLogEndDate')&&$('#teamWorkLogEndDate').value<$('#teamWorkLogStartDate').value) $('#teamWorkLogEndDate').value=$('#teamWorkLogStartDate').value;};
+  if ($('#teamWorkLogSearch')) $('#teamWorkLogSearch').addEventListener('input', renderTeamWorkLog);
+  if ($('#teamWorkLogDepartmentFilter')) $('#teamWorkLogDepartmentFilter').addEventListener('change', renderTeamWorkLog);
+  if ($('#teamWorkLogStatusFilter')) $('#teamWorkLogStatusFilter').addEventListener('change', renderTeamWorkLog);
+  if ($('#teamWorkLogClearFilterBtn')) $('#teamWorkLogClearFilterBtn').onclick=()=>{if($('#teamWorkLogSearch'))$('#teamWorkLogSearch').value='';if($('#teamWorkLogDepartmentFilter'))$('#teamWorkLogDepartmentFilter').value='';if($('#teamWorkLogStatusFilter'))$('#teamWorkLogStatusFilter').value='all';renderTeamWorkLog();};
   $('#logoutBtn').onclick = logout;
   $('#onboardingLogoutBtn').onclick = logout;
   $('#createCompanyBtn').onclick = createCompany;
@@ -1878,13 +1882,24 @@ window.openWorkLogDetail=async(employeeId,workDate)=>{
   }
 };
 function renderTeamWorkLog(){
-  const report=state.teamWorkLog||{}; const s=report.summary||{}; const rows=report.rows||[];
+  const report=state.teamWorkLog||{}; const rows=report.rows||[];
   if($('#teamWorkLogRangeLabel')) $('#teamWorkLogRangeLabel').textContent=report.range_label||'—';
+  const effectiveRows=rows.filter(r=>!r.is_future);
+  const metrics={
+    checked_in:effectiveRows.filter(r=>r.check_in_at).length,
+    ontime:effectiveRows.filter(r=>r.check_in_at&&Number(r.late_minutes||0)<=0).length,
+    late:effectiveRows.filter(r=>r.check_in_at&&Number(r.late_minutes||0)>0).length,
+    leave:effectiveRows.filter(r=>r.approved_leave).length,
+    outside:effectiveRows.filter(r=>Number(r.checkin_outside_geofence||0)===1||Number(r.checkout_outside_geofence||0)===1).length,
+    missing:effectiveRows.filter(r=>!r.check_in_at&&!r.approved_leave).length,
+  };
   if($('#teamWorkLogSummary')) $('#teamWorkLogSummary').innerHTML=`
-    <div><span>เช็กอินแล้ว</span><strong>${Number(s.checked_in||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
-    <div><span>มาสาย</span><strong>${Number(s.late||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
-    <div><span>ลา</span><strong>${Number(s.leave||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
-    <div><span>ยังไม่เช็กอิน</span><strong>${Number(s.missing||0).toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>`;
+    <div><span>เช็กอินแล้ว</span><strong>${metrics.checked_in.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
+    <div><span>ตรงเวลา</span><strong>${metrics.ontime.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
+    <div><span>มาสาย</span><strong>${metrics.late.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
+    <div><span>ลา</span><strong>${metrics.leave.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
+    <div><span>นอกพื้นที่</span><strong>${metrics.outside.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
+    <div><span>ยังไม่เช็กอิน</span><strong>${metrics.missing.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>`;
 
   const dateKeys=[...new Set(rows.map(r=>r.work_date).filter(Boolean))].sort();
   const employeeMap=new Map();
@@ -1895,7 +1910,33 @@ function renderTeamWorkLog(){
     employeeMap.get(key).days.set(r.work_date,r);
   });
   const people=[...employeeMap.values()];
-  if($('#teamWorkLogRowCount')) $('#teamWorkLogRowCount').textContent=`${people.length.toLocaleString('th-TH')} คน · ${dateKeys.length.toLocaleString('th-TH')} วัน`;
+
+  const deptSelect=$('#teamWorkLogDepartmentFilter');
+  if(deptSelect){
+    const current=deptSelect.value;
+    const departments=[...new Set(people.map(p=>String(p.department_name||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'th'));
+    deptSelect.innerHTML=`<option value="">ทุกแผนก</option>${departments.map(d=>`<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('')}`;
+    if(departments.includes(current))deptSelect.value=current;
+  }
+  const query=String($('#teamWorkLogSearch')?.value||'').trim().toLowerCase();
+  const dept=String($('#teamWorkLogDepartmentFilter')?.value||'').trim();
+  const status=String($('#teamWorkLogStatusFilter')?.value||'all');
+  const dayMatches=(row)=>{
+    if(!row||row.is_future)return false;
+    if(status==='checked_in')return Boolean(row.check_in_at);
+    if(status==='late')return Boolean(row.check_in_at)&&Number(row.late_minutes||0)>0;
+    if(status==='leave')return Boolean(row.approved_leave);
+    if(status==='outside')return Number(row.checkin_outside_geofence||0)===1||Number(row.checkout_outside_geofence||0)===1;
+    if(status==='missing')return !row.check_in_at&&!row.approved_leave;
+    return true;
+  };
+  const visiblePeople=people.filter(p=>{
+    if(query&&!([p.nickname,p.first_name,p.last_name,p.employee_code,p.department_name,p.position_name].some(v=>String(v||'').toLowerCase().includes(query))))return false;
+    if(dept&&String(p.department_name||'')!==dept)return false;
+    if(status!=='all'&&![...p.days.values()].some(dayMatches))return false;
+    return true;
+  });
+  if($('#teamWorkLogRowCount')) $('#teamWorkLogRowCount').textContent=`${visiblePeople.length.toLocaleString('th-TH')} / ${people.length.toLocaleString('th-TH')} คน · ${dateKeys.length.toLocaleString('th-TH')} วัน`;
 
   const head=$('#teamWorkLogHead');
   if(head){
@@ -1905,10 +1946,10 @@ function renderTeamWorkLog(){
     }).join('')}</tr>`;
   }
   const body=$('#teamWorkLogBody'); if(!body)return;
-  body.innerHTML=people.length?people.map(p=>`<tr>
+  body.innerHTML=visiblePeople.length?visiblePeople.map(p=>`<tr>
     <td class="worklog-person-col"><div class="team-worklog-person"><span class="team-worklog-avatar">${escapeHtml((p.nickname||p.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml(p.nickname||p.first_name||'—')} ${escapeHtml(p.last_name||'')}</strong><small>${escapeHtml(p.employee_code||'')}</small><small class="worklog-role">${escapeHtml(p.department_name||'—')} · ${escapeHtml(p.position_name||'ยังไม่ระบุตำแหน่ง')}</small></div></div></td>
     ${dateKeys.map(d=>`<td class="worklog-date-col">${workLogMatrixCell(p.days.get(d))}</td>`).join('')}
-  </tr>`).join(''):`<tr><td><div class="leave-report-empty">ยังไม่มีข้อมูลในช่วงเวลานี้</div></td></tr>`;
+  </tr>`).join(''):`<tr><td colspan="${Math.max(1,dateKeys.length+1)}"><div class="leave-report-empty">ไม่พบพนักงานที่ตรงกับตัวกรองนี้</div></td></tr>`;
   $$('[data-worklog-detail]').forEach(button=>{
     button.onclick=e=>{
       e.preventDefault(); e.stopPropagation();
@@ -1919,20 +1960,21 @@ function renderTeamWorkLog(){
 
 function renderDashboard() {
   const d = state.dashboard;
-  if (!state.teamWorkLog && $('#teamWorkLogBody')) setTimeout(()=>loadTeamWorkLog(),0);
-  const total = d.attention.reduce((sum, item) => sum + item.count, 0);
+  const dashboardAttention=(d.attention||[]).filter(item=>item.key!=='missing');
+  const total = dashboardAttention.reduce((sum, item) => sum + item.count, 0);
 
   $('#attentionTotal').textContent = total;
   $('#navAttention').textContent = total;
   $('#navAttention').dataset.empty = total ? 'false' : 'true';
   $('#heroSub').textContent = `${d.client.name} · ${d.summary.employees} คน · ${formatDate(d.today)}${d.summary.holiday_name ? ` · 🎉 ${d.summary.holiday_name}` : ''}`;
 
+  const activeCandidates=Object.entries(d.recruitment||{}).filter(([stage])=>!['hired','rejected'].includes(String(stage))).reduce((sum,[,count])=>sum+Number(count||0),0);
   const summary = [
     ['พนักงานทั้งหมด', d.summary.employees, 'brand'],
-    ['มาทำงานวันนี้', d.summary.present, 'success'],
-    ['มาสาย', d.summary.late, 'warning'],
     ['ลาวันนี้', d.summary.leave, 'info'],
-    ['ยังไม่เช็กอิน', d.summary.missing, 'danger'],
+    ['เรื่อง HR เปิดอยู่', Number(d.hr_cases_open||0), 'danger'],
+    ['ผู้สมัครที่กำลังดำเนินการ', activeCandidates, 'success'],
+    ['งานต้องจัดการ', total, 'warning'],
   ];
 
   $('#summaryGrid').innerHTML = summary.map(([label, value, tone]) => `
@@ -1941,8 +1983,8 @@ function renderDashboard() {
       <div class="summary-value">${value}<small>คน</small></div>
     </div>`).join('');
 
-  $('#attentionList').innerHTML = d.attention.length
-    ? d.attention.map(item => `
+  $('#attentionList').innerHTML = dashboardAttention.length
+    ? dashboardAttention.map(item => `
       <div class="list-row actionable" data-attention="${escapeHtml(item.key)}">
         <div class="list-icon ${attentionTone(item)}">${attentionIcon(item.key)}</div>
         <div class="list-copy">

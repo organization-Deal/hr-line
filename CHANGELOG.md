@@ -1,3 +1,9 @@
+## V1.0-P7.83 — Dedicated Attendance Center
+- แยกตารางเวลาเข้างานออกจาก Dashboard ไปอยู่หน้าเวลาเข้างานแบบเต็มจอ
+- Dashboard ไม่แสดงข้อมูลเช็กอิน/มาสาย/ยังไม่เช็กอินอีกต่อไป
+- เพิ่มตัวกรองชื่อ แผนก และสถานะ พร้อมสรุปตรงเวลา/สาย/ลา/นอกพื้นที่
+- ตารางลงเวลาขยายพื้นที่และยังดูรายละเอียด GPS/Work Location/แผนที่ได้
+
 # P7.82 — Leave-aware attendance matrix
 
 - Approved leave now appears directly in the daily/monthly attendance matrix with leave type, approval status, full/half-day detail and duration.
