@@ -654,6 +654,7 @@ function bindEvents() {
   if ($('#teamWorkLogDepartmentFilter')) $('#teamWorkLogDepartmentFilter').addEventListener('change', renderTeamWorkLog);
   if ($('#teamWorkLogStatusFilter')) $('#teamWorkLogStatusFilter').addEventListener('change', renderTeamWorkLog);
   if ($('#teamWorkLogClearFilterBtn')) $('#teamWorkLogClearFilterBtn').onclick=()=>{if($('#teamWorkLogSearch'))$('#teamWorkLogSearch').value='';if($('#teamWorkLogDepartmentFilter'))$('#teamWorkLogDepartmentFilter').value='';if($('#teamWorkLogStatusFilter'))$('#teamWorkLogStatusFilter').value='all';renderTeamWorkLog();};
+  if ($('#attendanceSummaryExportBtn')) $('#attendanceSummaryExportBtn').onclick=exportAttendancePeriodSummaryCsv;
   $('#logoutBtn').onclick = logout;
   $('#onboardingLogoutBtn').onclick = logout;
   $('#createCompanyBtn').onclick = createCompany;
@@ -1711,6 +1712,7 @@ function workLogStatus(row){
   if(row.approved_leave && !row.check_in_at) return '<span class="worklog-status leave">ลา</span>';
   if(row.check_in_at && Number(row.late_minutes||0)>0) return `<span class="worklog-status warn">สาย ${Number(row.late_minutes)} นาที</span>`;
   if(row.check_in_at) return '<span class="worklog-status ok">มาทำงาน</span>';
+  if(row.is_workday===false)return `<span class="worklog-status future">${row.holiday_name?'วันหยุดบริษัท':'วันหยุด'}</span>`;
   return '<span class="worklog-status danger">ยังไม่เช็กอิน</span>';
 }
 function workLogPlace(row,prefix='checkin'){
@@ -1752,6 +1754,10 @@ function workLogMatrixCell(r){
   }
 
   if(r.is_future && !r.approved_leave && !r.leave_name) return '<div class="worklog-day-card future"><small>ยังไม่ถึงวัน</small></div>';
+  if(r.is_active_date===false&&!r.check_in_at&&!r.leave_name)return '<div class="worklog-day-card future"><small>ยังไม่เริ่มงาน</small></div>';
+  if(r.is_workday===false&&!r.check_in_at&&!r.approved_leave&&!r.leave_name){
+    return `<div class="worklog-day-card future"><small>${escapeHtml(r.holiday_name||'วันหยุด')}</small></div>`;
+  }
 
   if(r.check_in_at){
     const outside=Number(r.checkin_outside_geofence||0)===1;
@@ -1780,7 +1786,7 @@ function workLogMatrixCell(r){
   }
 
   // Pending leave does not excuse attendance yet. Keep the missing signal visible.
-  if(!r.check_in_at&&!r.approved_leave&&!r.is_future){
+  if(!r.check_in_at&&!r.approved_leave&&!r.is_future&&r.is_workday!==false){
     parts.push('<div class="worklog-missing-note">ยังไม่เช็กอิน</div>');
   }
   if(!parts.length)return `<div class="worklog-day-card missing"><small>ยังไม่เช็กอิน</small></div>`;
@@ -1881,25 +1887,94 @@ window.openWorkLogDetail=async(employeeId,workDate)=>{
     }
   }
 };
+function attendanceSummaryNumber(value){
+  const n=Number(value||0);
+  return n.toLocaleString('th-TH',{maximumFractionDigits:1});
+}
+function attendanceLeaveBreakdown(summary){
+  const rows=Array.isArray(summary?.leave_breakdown)?summary.leave_breakdown:[];
+  return rows.length?rows.map(x=>`${escapeHtml(x.name||'ลา')} ${attendanceSummaryNumber(x.days)} วัน`).join(' · '):'—';
+}
+function attendanceSummaryMatches(summary,query,dept,status){
+  if(query&&!([summary.nickname,summary.first_name,summary.last_name,summary.employee_code,summary.department_name,summary.position_name].some(v=>String(v||'').toLowerCase().includes(query))))return false;
+  if(dept&&String(summary.department_name||'')!==dept)return false;
+  if(status==='checked_in'&&Number(summary.present_days||0)<=0)return false;
+  if(status==='late'&&Number(summary.late_days||0)<=0)return false;
+  if(status==='leave'&&Number(summary.leave_days||0)<=0)return false;
+  if(status==='outside'&&Number(summary.outside_days||0)<=0)return false;
+  if(status==='missing'&&Number(summary.absent_days||0)<=0)return false;
+  return true;
+}
+function renderAttendancePersonSummary({query='',dept='',status='all'}={}){
+  const report=state.teamWorkLog||{};
+  const body=$('#attendancePersonSummaryBody'); if(!body)return;
+  const summaries=(report.employee_summary||[]).filter(s=>attendanceSummaryMatches(s,query,dept,status));
+  body.innerHTML=summaries.length?summaries.map(s=>{
+    const fullName=`${s.nickname||s.first_name||'—'} ${s.last_name||''}`.trim();
+    const presentNote=Number(s.extra_work_days||0)>0?`<small>+ ทำงานวันหยุด ${attendanceSummaryNumber(s.extra_work_days)} วัน</small>`:'';
+    const late=Number(s.late_days||0)>0?`<strong class="summary-warn">${attendanceSummaryNumber(s.late_days)} วัน</strong><small>${Number(s.late_minutes||0).toLocaleString('th-TH')} นาที</small>`:'<strong>0 วัน</strong>';
+    const absent=Number(s.absent_days||0)>0?`<strong class="summary-danger">${attendanceSummaryNumber(s.absent_days)} วัน</strong>`:'<strong>0 วัน</strong>';
+    const leave=Number(s.leave_days||0)>0?`<strong class="summary-leave">${attendanceSummaryNumber(s.leave_days)} วัน</strong>`:'<strong>0 วัน</strong>';
+    return `<tr>
+      <td><div class="attendance-summary-person"><span>${escapeHtml((s.nickname||s.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml(fullName)}</strong><small>${escapeHtml(s.employee_code||'')} · ${escapeHtml(s.department_name||'—')} · ${escapeHtml(s.position_name||'ยังไม่ระบุตำแหน่ง')}</small></div></div></td>
+      <td><strong>${attendanceSummaryNumber(s.scheduled_days)} วัน</strong></td>
+      <td><strong>${attendanceSummaryNumber(s.present_days)} วัน</strong>${presentNote}</td>
+      <td><strong class="summary-ok">${attendanceSummaryNumber(s.on_time_days)} วัน</strong></td>
+      <td>${late}</td>
+      <td>${absent}</td>
+      <td>${leave}</td>
+      <td class="attendance-leave-breakdown">${attendanceLeaveBreakdown(s)}</td>
+      <td><strong>${attendanceSummaryNumber(s.outside_days)} วัน</strong></td>
+      <td><strong>${attendanceSummaryNumber(s.missing_checkout_days)} วัน</strong></td>
+    </tr>`;
+  }).join(''):`<tr><td colspan="10"><div class="leave-report-empty">ไม่พบข้อมูลสรุปที่ตรงกับตัวกรอง</div></td></tr>`;
+  const asOf=$('#attendanceSummaryAsOf');
+  if(asOf){
+    const hasFuture=String(report.end_date||'')>String(report.as_of_date||report.end_date||'');
+    asOf.textContent=hasFuture?`สรุปวันทำงาน/ขาดถึง ${formatDate(report.as_of_date)} · วันที่ในอนาคตยังไม่นำมาคิด`: `สรุปตามช่วง ${report.range_label||''}`;
+  }
+}
+function csvEscapeCell(value){
+  const text=String(value??'');
+  return /[",\n]/.test(text)?`"${text.replace(/"/g,'""')}"`:text;
+}
+function exportAttendancePeriodSummaryCsv(){
+  const report=state.teamWorkLog||{};
+  const query=String($('#teamWorkLogSearch')?.value||'').trim().toLowerCase();
+  const dept=String($('#teamWorkLogDepartmentFilter')?.value||'').trim();
+  const status=String($('#teamWorkLogStatusFilter')?.value||'all');
+  const summaries=(report.employee_summary||[]).filter(s=>attendanceSummaryMatches(s,query,dept,status));
+  if(!summaries.length)return toast('ไม่มีข้อมูลสรุปสำหรับดาวน์โหลด',true);
+  const header=['พนักงาน','รหัสพนักงาน','แผนก','ตำแหน่ง','วันทำงาน','มาทำงาน','ตรงเวลา','สาย (วัน)','สายนาทีรวม','ขาด (วัน)','ลา (วัน)','ประเภทการลา','นอกพื้นที่ (วัน)','ยังไม่เช็กเอาต์ (วัน)'];
+  const lines=[header,...summaries.map(s=>[
+    `${s.nickname||s.first_name||''} ${s.last_name||''}`.trim(),s.employee_code||'',s.department_name||'',s.position_name||'',
+    s.scheduled_days||0,s.present_days||0,s.on_time_days||0,s.late_days||0,s.late_minutes||0,s.absent_days||0,s.leave_days||0,
+    (s.leave_breakdown||[]).map(x=>`${x.name} ${x.days} วัน`).join(' | '),s.outside_days||0,s.missing_checkout_days||0
+  ])];
+  const csv='\uFEFF'+lines.map(row=>row.map(csvEscapeCell).join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a');
+  a.href=url;a.download=`nakna-attendance-${report.start_date||'start'}-${report.end_date||'end'}.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
 function renderTeamWorkLog(){
   const report=state.teamWorkLog||{}; const rows=report.rows||[];
   if($('#teamWorkLogRangeLabel')) $('#teamWorkLogRangeLabel').textContent=report.range_label||'—';
-  const effectiveRows=rows.filter(r=>!r.is_future);
+  const effectiveRows=rows.filter(r=>!r.is_future&&r.is_active_date!==false);
   const metrics={
     checked_in:effectiveRows.filter(r=>r.check_in_at).length,
-    ontime:effectiveRows.filter(r=>r.check_in_at&&Number(r.late_minutes||0)<=0).length,
-    late:effectiveRows.filter(r=>r.check_in_at&&Number(r.late_minutes||0)>0).length,
-    leave:effectiveRows.filter(r=>r.approved_leave).length,
+    ontime:effectiveRows.filter(r=>r.is_workday!==false&&r.check_in_at&&Number(r.late_minutes||0)<=0).length,
+    late:effectiveRows.filter(r=>r.is_workday!==false&&r.check_in_at&&Number(r.late_minutes||0)>0).length,
+    leave:(report.employee_summary||[]).reduce((sum,s)=>sum+Number(s.leave_days||0),0),
     outside:effectiveRows.filter(r=>Number(r.checkin_outside_geofence||0)===1||Number(r.checkout_outside_geofence||0)===1).length,
-    missing:effectiveRows.filter(r=>!r.check_in_at&&!r.approved_leave).length,
+    missing:(report.employee_summary||[]).reduce((sum,s)=>sum+Number(s.absent_days||0),0),
   };
   if($('#teamWorkLogSummary')) $('#teamWorkLogSummary').innerHTML=`
     <div><span>เช็กอินแล้ว</span><strong>${metrics.checked_in.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
     <div><span>ตรงเวลา</span><strong>${metrics.ontime.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
     <div><span>มาสาย</span><strong>${metrics.late.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
-    <div><span>ลา</span><strong>${metrics.leave.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
+    <div><span>ลา</span><strong>${attendanceSummaryNumber(metrics.leave)}</strong><small>วัน</small></div>
     <div><span>นอกพื้นที่</span><strong>${metrics.outside.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>
-    <div><span>ยังไม่เช็กอิน</span><strong>${metrics.missing.toLocaleString('th-TH')}</strong><small>ครั้ง</small></div>`;
+    <div><span>ขาด / ไม่ลงเวลา</span><strong>${attendanceSummaryNumber(metrics.missing)}</strong><small>วัน</small></div>`;
 
   const dateKeys=[...new Set(rows.map(r=>r.work_date).filter(Boolean))].sort();
   const employeeMap=new Map();
@@ -1927,7 +2002,7 @@ function renderTeamWorkLog(){
     if(status==='late')return Boolean(row.check_in_at)&&Number(row.late_minutes||0)>0;
     if(status==='leave')return Boolean(row.approved_leave);
     if(status==='outside')return Number(row.checkin_outside_geofence||0)===1||Number(row.checkout_outside_geofence||0)===1;
-    if(status==='missing')return !row.check_in_at&&!row.approved_leave;
+    if(status==='missing')return row.is_workday!==false&&!row.check_in_at&&!row.approved_leave;
     return true;
   };
   const visiblePeople=people.filter(p=>{
@@ -1936,6 +2011,7 @@ function renderTeamWorkLog(){
     if(status!=='all'&&![...p.days.values()].some(dayMatches))return false;
     return true;
   });
+  renderAttendancePersonSummary({query,dept,status});
   if($('#teamWorkLogRowCount')) $('#teamWorkLogRowCount').textContent=`${visiblePeople.length.toLocaleString('th-TH')} / ${people.length.toLocaleString('th-TH')} คน · ${dateKeys.length.toLocaleString('th-TH')} วัน`;
 
   const head=$('#teamWorkLogHead');

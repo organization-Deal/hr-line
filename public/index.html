@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css?v=1.0-p7.83" />
-  <link rel="modulepreload" href="/app.js?v=1.0-p7.83" />
+  <link rel="modulepreload" href="/app.js?v=1.0-p7.84" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -419,10 +419,24 @@
             <div><span>เช็กอินแล้ว</span><strong>0</strong><small>ครั้ง</small></div>
             <div><span>ตรงเวลา</span><strong>0</strong><small>ครั้ง</small></div>
             <div><span>มาสาย</span><strong>0</strong><small>ครั้ง</small></div>
-            <div><span>ลา</span><strong>0</strong><small>ครั้ง</small></div>
+            <div><span>ลา</span><strong>0</strong><small>วัน</small></div>
             <div><span>นอกพื้นที่</span><strong>0</strong><small>ครั้ง</small></div>
-            <div><span>ยังไม่เช็กอิน</span><strong>0</strong><small>ครั้ง</small></div>
+            <div><span>ขาด / ไม่ลงเวลา</span><strong>0</strong><small>วัน</small></div>
           </div>
+
+          <section class="attendance-person-summary-panel" aria-labelledby="attendancePersonSummaryTitle">
+            <div class="attendance-person-summary-head">
+              <div><p class="kicker">HR PERIOD SUMMARY</p><h3 id="attendancePersonSummaryTitle">สรุปเวลารายบุคคล</h3><p>สรุปจำนวนวันทำงาน มาทำงาน สาย ขาด ลา และลงเวลานอกพื้นที่ตามช่วงที่เลือก ใช้ปิดสรุปรายสัปดาห์หรือรายเดือนได้ทันที</p></div>
+              <button id="attendanceSummaryExportBtn" class="secondary-btn compact-btn" type="button">ดาวน์โหลด CSV</button>
+            </div>
+            <div class="attendance-person-summary-wrap">
+              <table class="attendance-person-summary-table">
+                <thead><tr><th>พนักงาน</th><th>วันทำงาน</th><th>มาทำงาน</th><th>ตรงเวลา</th><th>สาย</th><th>ขาด</th><th>ลา</th><th>ประเภทการลา</th><th>นอกพื้นที่</th><th>ยังไม่เช็กเอาต์</th></tr></thead>
+                <tbody id="attendancePersonSummaryBody"><tr><td colspan="10">กำลังโหลดข้อมูล…</td></tr></tbody>
+              </table>
+            </div>
+            <div id="attendanceSummaryAsOf" class="attendance-summary-asof"></div>
+          </section>
 
           <div class="attendance-filterbar">
             <label class="search-box attendance-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="teamWorkLogSearch" type="search" placeholder="ค้นหาชื่อ รหัสพนักงาน แผนก หรือตำแหน่ง" /></label>
@@ -1285,7 +1299,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.83" type="module"></script>
+  <script src="/app.js?v=1.0-p7.84" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
