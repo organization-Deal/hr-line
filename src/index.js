@@ -2373,12 +2373,19 @@ async function handleApi(request, env, url, auth, ctx) {
       if(days>366)return json({error:'เลือกช่วงวันที่ได้สูงสุด 366 วัน'},400);
       anchor=start;
     }
-    const employeeRes = await env.DB.prepare(`SELECT e.id,e.id AS employee_id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,e.position_id,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.id`).bind(clientId).all();
-    const attendanceRes = await env.DB.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 ORDER BY work_date,employee_id`).bind(clientId,start,end).all();
-    const workLocationRes = await env.DB.prepare(`SELECT id,name,address,radius_m FROM work_locations WHERE client_id=?1`).bind(clientId).all();
-    const leaveRes = await env.DB.prepare(`SELECT lr.*,lp.name AS leave_name FROM leave_requests lr LEFT JOIN leave_policies lp ON lp.id=lr.policy_id WHERE lr.client_id=?1 AND lr.start_date<=?3 AND lr.end_date>=?2 AND lr.status IN ('approved','pending','awaiting_evidence') ORDER BY lr.id DESC`).bind(clientId,start,end).all();
+    const [employeeRes,attendanceRes,workLocationRes,leaveRes,scheduleRes,holidayRes,client] = await Promise.all([
+      env.DB.prepare(`SELECT e.id,e.id AS employee_id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,e.position_id,e.start_date,e.end_date,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.id`).bind(clientId).all(),
+      env.DB.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 ORDER BY work_date,employee_id`).bind(clientId,start,end).all(),
+      env.DB.prepare(`SELECT id,name,address,radius_m FROM work_locations WHERE client_id=?1`).bind(clientId).all(),
+      env.DB.prepare(`SELECT lr.*,lp.name AS leave_name,lp.code AS leave_code FROM leave_requests lr LEFT JOIN leave_policies lp ON lp.id=lr.policy_id WHERE lr.client_id=?1 AND lr.start_date<=?3 AND lr.end_date>=?2 AND lr.status IN ('approved','pending','awaiting_evidence') ORDER BY lr.id DESC`).bind(clientId,start,end).all(),
+      env.DB.prepare(`SELECT * FROM work_schedule_rules WHERE client_id=?1`).bind(clientId).all(),
+      env.DB.prepare(`SELECT * FROM company_holidays WHERE client_id=?1 AND holiday_date BETWEEN ?2 AND ?3`).bind(clientId,start,end).all(),
+      getClient(env.DB,clientId),
+    ]);
     const attendanceMap = new Map((attendanceRes.results||[]).map(r=>[`${Number(r.employee_id)}|${r.work_date}`,r]));
     const workLocationMap = new Map((workLocationRes.results||[]).map(r=>[Number(r.id),r]));
+    const schedules = scheduleRes.results||[];
+    const holidayMap = new Map((holidayRes.results||[]).map(r=>[String(r.holiday_date),r]));
     const leaves = leaveRes.results||[];
     const dates=[]; const cursor=new Date(`${start}T00:00:00Z`), endDt=new Date(`${end}T00:00:00Z`);
     const dateKey=d=>`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
@@ -2391,6 +2398,10 @@ async function handleApi(request, env, url, auth, ctx) {
         const a=attendanceMap.get(`${Number(e.id)}|${date}`)||{};
         const lr=leaves.find(x=>Number(x.employee_id)===Number(e.id)&&date>=x.start_date&&date<=x.end_date)||null;
         const isFuture=date>today;
+        const isActiveDate=(!e.start_date||date>=String(e.start_date))&&(!e.end_date||date<=String(e.end_date));
+        const schedule=payrollScheduleFor(e,date,schedules,holidayMap,client||{});
+        const isWorkday=Boolean(isActiveDate&&schedule.is_workday);
+        const holiday=holidayMap.get(date)||null;
         const checkinWorkLocation=a.checkin_location_id?workLocationMap.get(Number(a.checkin_location_id))||null:null;
         const checkoutWorkLocation=a.checkout_location_id?workLocationMap.get(Number(a.checkout_location_id))||null:null;
         const checkinDistance=a.checkin_distance_m==null?null:Number(a.checkin_distance_m);
@@ -2418,14 +2429,55 @@ async function handleApi(request, env, url, auth, ctx) {
           checkout_location_name:checkoutWorkLocation?.name||a.checkout_location_name||null,checkout_work_location_address:checkoutWorkLocation?.address||null,checkout_location_radius_m:checkoutRadius,
           checkout_source_title:checkoutSourceTitle||null,checkout_source_address:checkoutSourceAddress||null,checkout_actual_title:checkoutActualTitle,checkout_actual_address:checkoutActualAddress,
           checkout_distance_m:checkoutDistance,checkout_outside_geofence:checkoutOutside?1:0,checkout_lat:a.checkout_lat==null?null:Number(a.checkout_lat),checkout_lng:a.checkout_lng==null?null:Number(a.checkout_lng),checkout_accuracy_m:a.checkout_accuracy_m==null?null:Number(a.checkout_accuracy_m),
-          leave_id:lr?.id?Number(lr.id):null,leave_name:lr?.leave_name||lr?.leave_type||null,leave_status:lr?.status||null,
-          leave_day_part:lr?.day_part||null,leave_duration_days:lr?.duration_days==null?null:Number(lr.duration_days),approved_leave:lr?.status==='approved',is_future:isFuture});
+          leave_id:lr?.id?Number(lr.id):null,leave_name:lr?.leave_name||lr?.leave_type||null,leave_code:lr?.leave_code||null,leave_status:lr?.status||null,
+          leave_day_part:lr?.day_part||null,leave_duration_days:lr?.duration_days==null?null:Number(lr.duration_days),approved_leave:lr?.status==='approved',
+          is_future:isFuture,is_active_date:isActiveDate,is_workday:isWorkday,scheduled_start:schedule?.start_time||null,scheduled_end:schedule?.end_time||null,schedule_source:schedule?.source||null,holiday_name:holiday?.name||null});
       }
     }
-    const effectiveRows=rows.filter(r=>!r.is_future);
-    const summary={checked_in:effectiveRows.filter(r=>r.check_in_at).length,late:effectiveRows.filter(r=>r.check_in_at&&Number(r.late_minutes)>0).length,leave:effectiveRows.filter(r=>r.approved_leave).length,missing:effectiveRows.filter(r=>!r.check_in_at&&!r.approved_leave).length};
+    const effectiveRows=rows.filter(r=>!r.is_future&&r.is_active_date!==false);
+    const leaveFraction=r=>r?.approved_leave?(['am','pm','half'].includes(String(r.leave_day_part||'').toLowerCase())?.5:1):0;
+    const employeeSummary=[];
+    for(const e of (employeeRes.results||[])){
+      const personRows=effectiveRows.filter(r=>Number(r.employee_id)===Number(e.id));
+      const scheduled=personRows.filter(r=>r.is_workday);
+      const leaveBreakdown=new Map();
+      let leaveDays=0,absentDays=0;
+      for(const r of scheduled){
+        const leavePart=leaveFraction(r);
+        if(leavePart>0){
+          leaveDays+=leavePart;
+          const leaveName=String(r.leave_name||'ลางาน');
+          leaveBreakdown.set(leaveName,(leaveBreakdown.get(leaveName)||0)+leavePart);
+        }
+        if(!r.check_in_at){
+          absentDays+=Math.max(0,1-leavePart);
+        }
+      }
+      const presentRows=personRows.filter(r=>r.check_in_at);
+      const scheduledPresent=scheduled.filter(r=>r.check_in_at);
+      const lateRows=scheduledPresent.filter(r=>Number(r.late_minutes||0)>0);
+      const onTimeRows=scheduledPresent.filter(r=>Number(r.late_minutes||0)<=0);
+      const outsideRows=personRows.filter(r=>Number(r.checkin_outside_geofence||0)===1||Number(r.checkout_outside_geofence||0)===1);
+      const missingCheckoutRows=personRows.filter(r=>r.check_in_at&&!r.check_out_at&&String(r.work_date)<today);
+      const extraWorkRows=personRows.filter(r=>r.check_in_at&&!r.is_workday);
+      employeeSummary.push({
+        employee_id:Number(e.id),employee_code:e.employee_code,first_name:e.first_name,last_name:e.last_name,nickname:e.nickname,department_name:e.department_name||null,position_name:e.position_name||null,
+        scheduled_days:scheduled.length,present_days:presentRows.length,scheduled_present_days:scheduledPresent.length,extra_work_days:extraWorkRows.length,
+        on_time_days:onTimeRows.length,late_days:lateRows.length,late_minutes:lateRows.reduce((sum,r)=>sum+Number(r.late_minutes||0),0),
+        absent_days:Math.round(absentDays*10)/10,leave_days:Math.round(leaveDays*10)/10,
+        leave_breakdown:[...leaveBreakdown.entries()].map(([name,days])=>({name,days:Math.round(days*10)/10})).sort((a,b)=>b.days-a.days||String(a.name).localeCompare(String(b.name),'th')),
+        outside_days:outsideRows.length,missing_checkout_days:missingCheckoutRows.length,
+      });
+    }
+    const summary={
+      checked_in:effectiveRows.filter(r=>r.check_in_at).length,
+      late:effectiveRows.filter(r=>r.is_workday&&r.check_in_at&&Number(r.late_minutes)>0).length,
+      leave:effectiveRows.filter(r=>r.is_workday&&r.approved_leave).reduce((sum,r)=>sum+leaveFraction(r),0),
+      missing:employeeSummary.reduce((sum,r)=>sum+Number(r.absent_days||0),0),
+      scheduled_days:employeeSummary.reduce((sum,r)=>sum+Number(r.scheduled_days||0),0),
+    };
     const thDate=d=>new Intl.DateTimeFormat('th-TH',{day:'numeric',month:'short',year:'numeric',timeZone:'Asia/Bangkok'}).format(new Date(`${d}T12:00:00+07:00`));
-    return json({mode,date:anchor,start_date:start,end_date:end,range_label:start===end?thDate(start):`${thDate(start)} – ${thDate(end)}`,summary,rows});
+    return json({mode,date:anchor,start_date:start,end_date:end,as_of_date:end>today?today:end,range_label:start===end?thDate(start):`${thDate(start)} – ${thDate(end)}`,summary,employee_summary:employeeSummary,rows});
   }
 
   if (path === '/api/dashboard' && method === 'GET') {
