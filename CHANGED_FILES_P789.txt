@@ -1,0 +1,27 @@
+Nakna HR V1.0-P7.89 — Nakna Move AI Pose Tracking
+
+Changed files:
+- index.js
+- src/index.js
+- index.html
+- public/index.html
+- app.js
+- public/app.js
+- wellness.html
+- public/wellness.html
+- wellness.js
+- public/wellness.js
+- wellness.css
+- public/wellness.css
+- package.json
+- CHANGELOG.md
+- CHANGED_FILES_P789.txt
+
+Highlights:
+- MediaPipe Pose Landmarker (browser/on-device)
+- Live skeleton overlay + pose guide
+- Real-time feedback, rep/hold counting, pass gating
+- 6 AI-trackable stretch exercises
+- Manual fallback / skip per exercise
+- AI result summary and server persistence (score/pass/skips only; no video)
+- HR toggle for AI Pose Tracking and team score visibility

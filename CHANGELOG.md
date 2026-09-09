@@ -1,3 +1,13 @@
+# P7.89 — Nakna Move AI Pose Tracking
+
+- เพิ่ม MediaPipe Pose Landmarker บนเว็บสำหรับตรวจโครงร่างแบบ on-device
+- Overlay skeleton + guide บนกล้อง พร้อม feedback แบบ real-time
+- ตรวจท่า 6 แบบ: ไหล่, คอ, เปิดอก, ข้อมือ, บิดลำตัว, ยืดตัว
+- นับรอบ/เวลาค้างอัตโนมัติ และปลดล็อกท่าถัดไปเมื่อผ่าน
+- มี Manual fallback / ข้ามท่าสำหรับอุปกรณ์หรือกล้องที่ตรวจไม่ได้
+- เก็บเฉพาะผล AI (คะแนน/จำนวนท่าผ่าน) ไม่เก็บภาพหรือวิดีโอ
+- ฝั่ง HR เลือกเปิด/ปิด AI Pose Tracking และเห็นคะแนนวันนี้ได้
+
 ## V1.0-P7.88 — Direct Wellness Preview
 - เพิ่มปุ่ม “เปิดหน้า Stretch ทดสอบ” ในหน้า Nakna Move เพื่อทดลองได้ทันทีโดยไม่ส่ง LINE หาใคร
 - โหมด Preview ไม่ต้องมี Employee Profile ที่ตรงกับผู้ล็อกอิน และไม่ต้องเชื่อม LINE

@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.88" />
-  <link rel="modulepreload" href="/app.js?v=1.0-p7.88" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.89" />
+  <link rel="modulepreload" href="/app.js?v=1.0-p7.89" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -650,7 +650,7 @@
       </section>
 
       <section id="view-wellness" class="view">
-        <div class="page-intro"><div><p class="kicker">NAKNA MOVE</p><h1>พักยืดกับนากนะ</h1><p>ชวนพนักงานลุกขยับวันละครั้งผ่าน LINE · กล้องใช้เป็นกระจกในเครื่อง ไม่อัปโหลดวิดีโอ</p></div><div class="page-actions"><button id="wellnessSaveBtn" class="primary-btn" type="button">บันทึกการตั้งค่า</button></div></div>
+        <div class="page-intro"><div><p class="kicker">NAKNA MOVE</p><h1>พักยืดกับนากนะ</h1><p>ชวนพนักงานลุกขยับวันละครั้งผ่าน LINE · AI Pose Tracking ตรวจท่าและนับรอบบนเครื่อง ไม่อัปโหลดวิดีโอ</p></div><div class="page-actions"><button id="wellnessSaveBtn" class="primary-btn" type="button">บันทึกการตั้งค่า</button></div></div>
         <div id="wellnessSummary" class="wellness-summary"></div>
         <div class="wellness-grid">
           <article class="panel wellness-settings-card">
@@ -663,7 +663,8 @@
               <label><span>แต้มเมื่อทำครบ</span><input id="wellnessPoints" type="number" min="0" step="1" value="0"><small>0 = ไม่ให้แต้ม</small></label>
             </div>
             <div class="wellness-toggle-list">
-              <label class="toggle-line"><input id="wellnessCamera" type="checkbox" checked><span><strong>ใช้กล้องเป็นกระจก</strong><small>ภาพอยู่บนเครื่องพนักงานเท่านั้น ไม่มีการอัปโหลดหรือบันทึกวิดีโอ</small></span></label>
+              <label class="toggle-line"><input id="wellnessCamera" type="checkbox" checked><span><strong>ใช้กล้องในกิจกรรม</strong><small>เปิดกล้องหน้าให้พนักงานเห็นตัวเอง ภาพไม่ถูกอัปโหลดหรือบันทึก</small></span></label>
+              <label class="toggle-line"><input id="wellnessPoseTracking" type="checkbox" checked><span><strong>AI Pose Tracking · แนะนำ</strong><small>ตรวจจุดข้อต่อบนเครื่อง บอกท่า นับรอบ/เวลาค้าง และให้ผ่านเมื่อทำครบ</small></span></label>
               <label class="toggle-line"><input id="wellnessWorkdayOnly" type="checkbox" checked><span><strong>เตือนเฉพาะวันทำงาน</strong><small>ข้ามวันหยุดบริษัทและพนักงานที่ลา</small></span></label>
             </div>
             <div class="wellness-live-actions"><button id="wellnessRemindNowBtn" class="secondary-btn danger-outline" type="button">ส่งเตือนทั้งทีมตอนนี้</button><small>ใช้เฉพาะตอนพร้อมเปิดจริง ระบบจะถามยืนยันอีกครั้งก่อนส่ง</small></div>
@@ -686,7 +687,7 @@
             <div class="wellness-test-note"><b>🧪 ข้อความทดสอบจะมีป้าย TEST MODE</b><span>ทำ Routine ได้เหมือนของจริง แต่ไม่เปลี่ยนสถานะ “ทำแล้ววันนี้” และไม่กระทบแต้มของพนักงาน</span></div>
           </article>
 
-          <article class="panel wellness-routine-card"><div class="panel-head"><div><p class="kicker">3-MIN ROUTINE</p><h3>ท่าที่พนักงานจะเห็น</h3><p class="panel-subtitle">เน้นคอ บ่า ไหล่ ข้อมือ หลัง และการลุกยืน</p></div><span class="badge badge-soft">ไม่ใช่การรักษา</span></div><div id="wellnessRoutinePreview" class="wellness-routine-preview"></div></article>
+          <article class="panel wellness-routine-card"><div class="panel-head"><div><p class="kicker">3-MIN ROUTINE</p><h3>ท่าที่พนักงานจะเห็น</h3><p class="panel-subtitle">6 ท่าที่ AI ตรวจได้ · คอ บ่า ไหล่ แขน ลำตัว และการยืดตัว</p></div><span class="badge badge-soft">ไม่ใช่การรักษา</span></div><div id="wellnessRoutinePreview" class="wellness-routine-preview"></div></article>
           <article class="panel wellness-team-card"><div class="panel-head"><div><p class="kicker">TODAY</p><h3>สถานะวันนี้</h3><p class="panel-subtitle">ดูว่าใครทำแล้ว ใครข้าม และใครยังไม่ได้เริ่ม · การทดสอบจะไม่ถูกนับตรงนี้</p></div><span id="wellnessTodayBadge" class="badge badge-soft">วันนี้</span></div><div id="wellnessTeamList" class="wellness-team-list"></div></article>
         </div>
       </section>
@@ -1342,7 +1343,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.88" type="module"></script>
+  <script src="/app.js?v=1.0-p7.89" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
