@@ -3,29 +3,71 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="theme-color" content="#f5faf8"/>
 <title>พักยืดกับนากนะ</title>
-<link rel="stylesheet" href="/wellness.css?v=1.0-p7.88"/>
+<link rel="stylesheet" href="/wellness.css?v=1.0-p7.89"/>
 </head>
 <body>
 <main class="shell">
-  <header><img src="/logo.png" alt="นากนะ"/><div><span>NAKNA · MOVE</span><strong>พักยืดกับนากนะ</strong><small id="employeeText">กำลังเตรียมกิจกรรม…</small></div></header>
+  <header><img src="/logo.png" alt="นากนะ"/><div><span>NAKNA · MOVE AI</span><strong>พักยืดกับนากนะ</strong><small id="employeeText">กำลังเตรียมกิจกรรม…</small></div></header>
   <div id="testBanner" class="test-banner hidden"><b>🧪 TEST MODE</b><span>ส่งเฉพาะผู้ทดสอบ · ไม่บันทึก Activity จริง · ไม่ให้แต้ม</span></div>
+
   <section id="intro" class="card intro-card">
-    <div class="hero-icon">🧘</div><h1>ลุกมาขยับตัวกัน 3 นาที</h1><p>ท่ายืดเบา ๆ สำหรับคนทำงานหน้าจอ ช่วยให้เปลี่ยนอิริยาบถและพักจากท่าเดิมระหว่างวัน</p>
-    <div class="privacy"><b>กล้องเป็นแค่กระจก</b><span>ภาพประมวลผลบนเครื่องของคุณเท่านั้น นากนะไม่อัปโหลดหรือบันทึกวิดีโอ</span></div>
-    <div class="intro-actions"><button id="cameraBtn" class="secondary">เปิดกล้องเป็นกระจก</button><button id="startBtn" class="primary">เริ่มยืด</button></div>
+    <div class="hero-icon">🧘</div>
+    <p class="ai-kicker">AI POSE TRACKING</p>
+    <h1>ลุกมาขยับตัวกัน 3 นาที</h1>
+    <p>กล้องจะช่วยติดตามโครงร่าง บอกวิธีทำ และให้ผ่านเมื่อทำท่าตามเงื่อนไขครบ</p>
+    <div class="feature-strip">
+      <span>◉ ตรวจโครงร่าง</span><span>✓ เช็กท่า</span><span>↻ นับรอบ</span><span>⏱ นับเวลาค้าง</span>
+    </div>
+    <div class="privacy"><b>ประมวลผลบนเครื่องของคุณ</b><span>ภาพกล้องใช้เพื่อวิเคราะห์จุดข้อต่อแบบเรียลไทม์ นากนะไม่อัปโหลดหรือบันทึกรูป/วิดีโอ การประเมินเป็นเพียงตัวช่วย ไม่ใช่การวินิจฉัยทางการแพทย์</span></div>
+    <div id="aiSupport" class="ai-support"><span class="support-dot"></span><div><b>กำลังตรวจความพร้อม AI</b><small>ครั้งแรกอาจใช้เวลาสักครู่เพื่อโหลดโมเดล</small></div></div>
+    <div class="intro-actions"><button id="cameraBtn" class="secondary">ทดลองเปิดกล้อง</button><button id="startBtn" class="primary">เริ่ม AI Stretch</button></div>
     <button id="skipBtn" class="text">ข้ามวันนี้</button>
-    <small class="safety">เลือกพื้นที่ที่ปลอดภัย ขยับเบา ๆ และหยุดทันทีหากรู้สึกเจ็บหรือเวียนหัว</small>
+    <small class="safety">เลือกพื้นที่ที่ปลอดภัย ขยับช้า ๆ ไม่ฝืนช่วงการเคลื่อนไหว และหยุดทันทีหากรู้สึกเจ็บหรือเวียนหัว</small>
   </section>
+
   <section id="routine" class="card routine-card hidden">
-    <div class="camera-wrap hidden" id="cameraWrap"><video id="camera" playsinline autoplay muted></video><div class="mirror-label">กระจกส่วนตัว · ไม่บันทึก</div></div>
+    <div class="camera-wrap" id="cameraWrap">
+      <video id="camera" playsinline autoplay muted></video>
+      <canvas id="poseCanvas"></canvas>
+      <div class="camera-topbar">
+        <span id="trackingBadge" class="tracking-badge loading"><i></i><b>กำลังเตรียม AI</b></span>
+        <span id="poseScore" class="pose-score">0%</span>
+      </div>
+      <div class="pose-coach">
+        <small id="poseCoachLabel">จัดตัวให้อยู่กลางเฟรม</small>
+        <strong id="poseFeedback">กำลังเปิดกล้อง…</strong>
+        <span id="poseDetail">ให้เห็นศีรษะ ไหล่ แขน และสะโพก</span>
+      </div>
+      <div class="privacy-chip">AI บนเครื่อง · ไม่บันทึกวิดีโอ</div>
+    </div>
+
     <div class="progress"><span id="stepCount">1/6</span><div><i id="progressBar"></i></div><span id="totalTime">03:00</span></div>
-    <div class="step-visual" id="stepVisual">↻</div><p class="eyebrow" id="stepCue">ท่าที่ 1</p><h2 id="stepTitle">หมุนหัวไหล่</h2><p id="stepInstruction">ค่อย ๆ หมุนไปด้านหลัง</p><div class="timer" id="timer">30</div>
-    <div class="routine-actions"><button id="prevBtn" class="secondary">ย้อนกลับ</button><button id="nextBtn" class="primary">ท่าถัดไป</button></div>
+
+    <div class="coach-row">
+      <div class="step-visual" id="stepVisual">↻</div>
+      <div class="coach-copy"><p class="eyebrow" id="stepCue">ท่าที่ 1</p><h2 id="stepTitle">ยกและหมุนหัวไหล่</h2><p id="stepInstruction">ยกไหล่ขึ้น หมุนไปด้านหลัง แล้วปล่อยลงช้า ๆ</p></div>
+    </div>
+
+    <div class="validation-panel">
+      <div class="validation-head"><span id="validationState" class="validation-state waiting">รอท่าที่ถูกต้อง</span><strong id="repCounter">0 / 6 รอบ</strong></div>
+      <div class="validation-meter"><i id="validationMeter"></i></div>
+      <small id="validationHint">ทำตามคำแนะนำในกล้อง ระบบจะนับให้อัตโนมัติ</small>
+    </div>
+
+    <div class="timer-row"><span>เวลาแนะนำ</span><div class="timer" id="timer">30</div><span>วินาที</span></div>
+    <div class="routine-actions"><button id="prevBtn" class="secondary">ย้อนกลับ</button><button id="nextBtn" class="primary" disabled>ทำให้ผ่านก่อน</button></div>
+    <button id="skipStepBtn" class="text subtle">กล้องจับท่านี้ไม่ถนัด · ข้ามท่านี้</button>
   </section>
-  <section id="done" class="card done-card hidden"><div class="done-icon">✓</div><h1>พักยืดครบแล้ว</h1><p>พักสายตา ดื่มน้ำ แล้วค่อยกลับไปทำงานต่อได้เลย</p><div id="pointsText" class="points hidden"></div><button id="closeBtn" class="primary">ปิดหน้านี้</button></section>
+
+  <section id="done" class="card done-card hidden">
+    <div class="done-icon">✓</div><h1>พักยืดครบแล้ว</h1><p>พักสายตา ดื่มน้ำ แล้วค่อยกลับไปทำงานต่อได้เลย</p>
+    <div id="aiResult" class="ai-result hidden"></div>
+    <div id="pointsText" class="points hidden"></div><button id="closeBtn" class="primary">ปิดหน้านี้</button>
+  </section>
   <section id="error" class="card error-card hidden"><h2>เปิดกิจกรรมไม่สำเร็จ</h2><p id="errorText"></p><button onclick="location.reload()" class="primary">ลองใหม่</button></section>
 </main>
-<script src="/wellness.js?v=1.0-p7.88" type="module"></script>
+<script src="/wellness.js?v=1.0-p7.89" type="module"></script>
 </body>
 </html>
