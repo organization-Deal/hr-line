@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.88';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.88';
+const NAKNA_RUNTIME_RELEASE = 'P7.89';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.89';
 const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -3714,7 +3714,7 @@ async function handleApi(request, env, url, auth, ctx) {
     await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB);
     const settings=await getWellnessSettings(env.DB,clientId);
     const company=await env.DB.prepare('SELECT name FROM clients WHERE id=?1').bind(clientId).first();
-    return json({ok:true,preview_mode:true,employee:{id:0,name:'โหมดทดสอบหน้าเว็บ',company_name:company?.name||'บริษัทของคุณ'},settings:{enabled:false,duration_minutes:Number(settings.duration_minutes||3),camera_enabled:Boolean(Number(settings.camera_enabled)),points_reward:0},session:null,routine:wellnessRoutine(settings.duration_minutes),today:dateInBangkok()});
+    return json({ok:true,preview_mode:true,employee:{id:0,name:'โหมดทดสอบหน้าเว็บ',company_name:company?.name||'บริษัทของคุณ'},settings:{enabled:false,duration_minutes:Number(settings.duration_minutes||3),camera_enabled:Boolean(Number(settings.camera_enabled)),pose_tracking_enabled:Boolean(Number(settings.pose_tracking_enabled)),points_reward:0},session:null,routine:wellnessRoutine(settings.duration_minutes),today:dateInBangkok()});
   }
   if(path==='/api/wellness/overview' && method==='GET'){
     if(!canViewEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ดู Wellness'},403);
@@ -3729,10 +3729,11 @@ async function handleApi(request, env, url, auth, ctx) {
     const reminderTime=normalizeQuarterHour(String(body.reminder_time||'15:00'));
     const duration=[3,5].includes(Number(body.duration_minutes))?Number(body.duration_minutes):3;
     const snooze=[15,30,45,60].includes(Number(body.snooze_minutes))?Number(body.snooze_minutes):30;
-    await env.DB.prepare(`INSERT INTO wellness_settings (client_id,enabled,reminder_time,duration_minutes,snooze_minutes,points_reward,camera_enabled,workday_only,updated_at)
-      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,CURRENT_TIMESTAMP)
-      ON CONFLICT(client_id) DO UPDATE SET enabled=excluded.enabled,reminder_time=excluded.reminder_time,duration_minutes=excluded.duration_minutes,snooze_minutes=excluded.snooze_minutes,points_reward=excluded.points_reward,camera_enabled=excluded.camera_enabled,workday_only=excluded.workday_only,updated_at=CURRENT_TIMESTAMP`)
-      .bind(clientId,body.enabled?1:0,reminderTime,duration,snooze,Math.max(0,num(body.points_reward,0)),body.camera_enabled===false?0:1,body.workday_only===false?0:1).run();
+    const poseTracking=body.pose_tracking_enabled===false?0:1; const cameraEnabled=poseTracking?1:(body.camera_enabled===false?0:1);
+    await env.DB.prepare(`INSERT INTO wellness_settings (client_id,enabled,reminder_time,duration_minutes,snooze_minutes,points_reward,camera_enabled,pose_tracking_enabled,workday_only,updated_at)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,CURRENT_TIMESTAMP)
+      ON CONFLICT(client_id) DO UPDATE SET enabled=excluded.enabled,reminder_time=excluded.reminder_time,duration_minutes=excluded.duration_minutes,snooze_minutes=excluded.snooze_minutes,points_reward=excluded.points_reward,camera_enabled=excluded.camera_enabled,pose_tracking_enabled=excluded.pose_tracking_enabled,workday_only=excluded.workday_only,updated_at=CURRENT_TIMESTAMP`)
+      .bind(clientId,body.enabled?1:0,reminderTime,duration,snooze,Math.max(0,num(body.points_reward,0)),cameraEnabled,poseTracking,body.workday_only===false?0:1).run();
     return json({ok:true,settings:await getWellnessSettings(env.DB,clientId)});
   }
   if(path==='/api/wellness/remind-now' && method==='POST'){
@@ -6353,6 +6354,8 @@ async function ensureWellnessReady(db){
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
   )`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_wellness_test_due ON wellness_test_schedules(status,scheduled_for)`).run().catch(()=>{});
+  await ensureColumns(db,'wellness_settings',[['pose_tracking_enabled','INTEGER NOT NULL DEFAULT 1']]);
+  await ensureColumns(db,'wellness_sessions',[['ai_tracking_used','INTEGER NOT NULL DEFAULT 0'],['ai_score','REAL'],['ai_passed_steps','INTEGER NOT NULL DEFAULT 0'],['ai_total_steps','INTEGER NOT NULL DEFAULT 0'],['ai_skipped_steps','INTEGER NOT NULL DEFAULT 0'],['ai_summary_json','TEXT']]);
 }
 
 function bangkokClock(date=new Date()){
@@ -6373,15 +6376,15 @@ async function getWellnessSettings(db,clientId){
 }
 function wellnessRoutine(durationMinutes=3){
   const base=[
-    ['shoulders','หมุนหัวไหล่','หมุนหัวไหล่ไปด้านหลังช้า ๆ ให้ไหล่ผ่อนคลาย','10 รอบ'],
-    ['neck','ยืดคอซ้าย–ขวา','เอียงศีรษะเข้าหาไหล่เบา ๆ ไม่กดหรือฝืน','15 วินาที / ข้าง'],
-    ['chest','เปิดอกและไหล่','ประสานมือด้านหลังหรือวางมือที่เอว แล้วเปิดอกเบา ๆ','ค้างไว้'],
-    ['wrists','ยืดข้อมือ','เหยียดแขนไปด้านหน้า ใช้อีกมือดึงฝ่ามือเบา ๆ','15 วินาที / ข้าง'],
-    ['twist','บิดลำตัวเบา ๆ','นั่งหรือยืนหลังตรง บิดลำตัวช้า ๆ ไปทีละข้าง','15 วินาที / ข้าง'],
-    ['reach','ลุกยืนและยืดตัว','ยืนขึ้น ยกแขนเหนือศีรษะ หายใจสบาย ๆ แล้วยืดตัว','ค้างไว้'],
+    {id:'shoulders',title:'ยกและหมุนหัวไหล่',instruction:'ยกไหล่ขึ้น หมุนไปด้านหลัง แล้วปล่อยลงช้า ๆ',cue:'6 รอบ',target_type:'reps',target_value:6,trackable:true,camera_hint:'ให้เห็นหัว ไหล่ และสะโพก แล้วขยับไหล่ขึ้น–ลงชัดเจน'},
+    {id:'neck',title:'ยืดคอซ้าย–ขวา',instruction:'เอียงศีรษะเข้าหาไหล่ทีละข้างเบา ๆ ไม่ใช้มือกด',cue:'3 วินาที / ข้าง',target_type:'bilateral_hold',target_value:3,trackable:true,camera_hint:'มองกล้องตรง ไหล่อยู่ระดับเดิม แล้วเอียงศีรษะช้า ๆ'},
+    {id:'chest',title:'เปิดอกและไหล่',instruction:'กางแขนออกด้านข้างใกล้ระดับไหล่ เปิดอกเบา ๆ แล้วค้างไว้',cue:'ค้าง 4 วินาที',target_type:'hold',target_value:4,trackable:true,camera_hint:'ถอยให้เห็นแขนทั้งสองข้าง กางแขนออกกว้างระดับไหล่'},
+    {id:'wrists',title:'ยืดข้อมือ',instruction:'เหยียดแขนหนึ่งข้าง ใช้อีกมือจับบริเวณฝ่ามือเบา ๆ แล้วสลับข้าง',cue:'3 วินาที / ข้าง',target_type:'bilateral_hold',target_value:3,trackable:true,camera_hint:'ให้เห็นศอกและข้อมือทั้งสองข้างในเฟรม'},
+    {id:'twist',title:'บิดลำตัวเบา ๆ',instruction:'นั่งหรือยืนหลังตรง บิดช่วงอกช้า ๆ ไปทีละข้าง โดยไม่กระชาก',cue:'3 วินาที / ข้าง',target_type:'bilateral_hold',target_value:3,trackable:true,camera_hint:'ให้เห็นไหล่และสะโพก แล้วบิดช่วงอกโดยให้สะโพกค่อนข้างนิ่ง'},
+    {id:'reach',title:'ลุกยืนและยืดตัว',instruction:'ยกแขนทั้งสองขึ้นเหนือศีรษะ เหยียดตัวขึ้น และหายใจสบาย ๆ',cue:'ค้าง 5 วินาที',target_type:'hold',target_value:5,trackable:true,camera_hint:'ถอยให้เห็นแขนทั้งสอง ยกมือเหนือศีรษะและเหยียดศอกเกือบตรง'},
   ];
   const total=Math.max(180,Number(durationMinutes||3)*60); const per=Math.floor(total/base.length); let remaining=total;
-  return base.map((x,i)=>{const seconds=i===base.length-1?remaining:per;remaining-=seconds;return {id:x[0],title:x[1],instruction:x[2],cue:x[3],seconds};});
+  return base.map((x,i)=>{const seconds=i===base.length-1?remaining:per;remaining-=seconds;return {...x,seconds};});
 }
 async function getWellnessTestEmployee(db,clientId,user){
   const email=String(user?.email||'').trim(); if(!email)return null;
@@ -6404,12 +6407,12 @@ async function getWellnessOverview(db,clientId){
   ]);
   const eligible=eligibleRes.results||[],sessions=sessionsRes.results||[]; const completed=sessions.filter(x=>x.status==='completed').length,skipped=sessions.filter(x=>x.status==='skipped').length,started=sessions.filter(x=>x.status==='started').length,reminded=sessions.filter(x=>x.status==='reminded').length;
   const lineEligible=eligible.filter(x=>x.line_user_id).length;
-  return {settings:{...settings,enabled:Boolean(Number(settings.enabled)),camera_enabled:Boolean(Number(settings.camera_enabled)),workday_only:Boolean(Number(settings.workday_only))},summary:{eligible:eligible.length,line_connected:lineEligible,completed,skipped,started,reminded,pending:Math.max(0,lineEligible-completed-skipped)},today_sessions:sessions,routine:wellnessRoutine(settings.duration_minutes),today};
+  return {settings:{...settings,enabled:Boolean(Number(settings.enabled)),camera_enabled:Boolean(Number(settings.camera_enabled)),pose_tracking_enabled:Boolean(Number(settings.pose_tracking_enabled)),workday_only:Boolean(Number(settings.workday_only))},summary:{eligible:eligible.length,line_connected:lineEligible,completed,skipped,started,reminded,pending:Math.max(0,lineEligible-completed-skipped)},today_sessions:sessions,routine:wellnessRoutine(settings.duration_minutes),today};
 }
 async function getPublicWellness(env,token,testMode=false){
   const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิด “พักยืด” จาก LINE ใหม่'},401);
   await ensureWellnessReady(env.DB); const settings=await getWellnessSettings(env.DB,Number(access.client_id)); const today=dateInBangkok(); const session=await env.DB.prepare(`SELECT * FROM wellness_sessions WHERE client_id=?1 AND employee_id=?2 AND session_date=?3`).bind(Number(access.client_id),Number(access.employee_id),today).first();
-  return json({ok:true,test_mode:Boolean(testMode),employee:{id:Number(access.employee_id),name:access.nickname||access.first_name,company_name:access.company_name||''},settings:{enabled:Boolean(Number(settings.enabled)),duration_minutes:Number(settings.duration_minutes||3),camera_enabled:Boolean(Number(settings.camera_enabled)),points_reward:testMode?0:Number(settings.points_reward||0)},session:testMode?null:(session||null),routine:wellnessRoutine(settings.duration_minutes),today});
+  return json({ok:true,test_mode:Boolean(testMode),employee:{id:Number(access.employee_id),name:access.nickname||access.first_name,company_name:access.company_name||''},settings:{enabled:Boolean(Number(settings.enabled)),duration_minutes:Number(settings.duration_minutes||3),camera_enabled:Boolean(Number(settings.camera_enabled)),pose_tracking_enabled:Boolean(Number(settings.pose_tracking_enabled)),points_reward:testMode?0:Number(settings.points_reward||0)},session:testMode?null:(session||null),routine:wellnessRoutine(settings.duration_minutes),today});
 }
 async function startPublicWellness(request,env,token,testMode=false){
   const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ'},401); await ensureWellnessReady(env.DB); if(testMode)return json({ok:true,test_mode:true}); const today=dateInBangkok();
@@ -6424,9 +6427,11 @@ async function completePublicWellness(request,env,token,testMode=false){
   const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ'},401); await ensureWellnessReady(env.DB); if(testMode){await pushWellnessTestCompleted(env,access).catch(()=>{});return json({ok:true,test_mode:true,points_awarded:0});} await ensurePhase5Defaults(env.DB,Number(access.client_id)); const today=dateInBangkok(); const body=await safeJson(request); const settings=await getWellnessSettings(env.DB,Number(access.client_id));
   let session=await env.DB.prepare(`SELECT * FROM wellness_sessions WHERE client_id=?1 AND employee_id=?2 AND session_date=?3`).bind(Number(access.client_id),Number(access.employee_id),today).first(); const already=session?.status==='completed';
   if(!already){
-    await env.DB.prepare(`INSERT INTO wellness_sessions (client_id,employee_id,session_date,status,started_at,completed_at,duration_seconds,snoozed_until,updated_at) VALUES (?1,?2,?3,'completed',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?4,NULL,CURRENT_TIMESTAMP)
-      ON CONFLICT(client_id,employee_id,session_date) DO UPDATE SET status='completed',started_at=COALESCE(wellness_sessions.started_at,CURRENT_TIMESTAMP),completed_at=CURRENT_TIMESTAMP,duration_seconds=?4,snoozed_until=NULL,updated_at=CURRENT_TIMESTAMP`)
-      .bind(Number(access.client_id),Number(access.employee_id),today,Math.max(0,Math.floor(Number(body.duration_seconds||0)))).run();
+    const aiUsed=body.ai_tracking_used?1:0, aiScore=Math.max(0,Math.min(100,num(body.ai_score,0))), aiPassed=Math.max(0,Math.floor(num(body.ai_passed_steps,0))), aiTotal=Math.max(0,Math.floor(num(body.ai_total_steps,0))), aiSkipped=Math.max(0,Math.floor(num(body.ai_skipped_steps,0)));
+    const aiSummary=Array.isArray(body.ai_summary)?JSON.stringify(body.ai_summary.slice(0,12).map(x=>({id:String(x?.id||'').slice(0,40),status:String(x?.status||'').slice(0,24),score:Math.max(0,Math.min(100,num(x?.score,0))),seconds_used:Math.max(0,Math.floor(num(x?.seconds_used,0)))}))):null;
+    await env.DB.prepare(`INSERT INTO wellness_sessions (client_id,employee_id,session_date,status,started_at,completed_at,duration_seconds,ai_tracking_used,ai_score,ai_passed_steps,ai_total_steps,ai_skipped_steps,ai_summary_json,snoozed_until,updated_at) VALUES (?1,?2,?3,'completed',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?4,?5,?6,?7,?8,?9,?10,NULL,CURRENT_TIMESTAMP)
+      ON CONFLICT(client_id,employee_id,session_date) DO UPDATE SET status='completed',started_at=COALESCE(wellness_sessions.started_at,CURRENT_TIMESTAMP),completed_at=CURRENT_TIMESTAMP,duration_seconds=?4,ai_tracking_used=?5,ai_score=?6,ai_passed_steps=?7,ai_total_steps=?8,ai_skipped_steps=?9,ai_summary_json=?10,snoozed_until=NULL,updated_at=CURRENT_TIMESTAMP`)
+      .bind(Number(access.client_id),Number(access.employee_id),today,Math.max(0,Math.floor(Number(body.duration_seconds||0))),aiUsed,aiScore,aiPassed,aiTotal,aiSkipped,aiSummary).run();
     const points=Math.max(0,Number(settings.points_reward||0));
     if(points>0){
       try{await addPointTransaction(env.DB,{clientId:Number(access.client_id),employeeId:Number(access.employee_id),transactionType:'earn',points,cashValue:0,referenceType:'wellness',referenceId:today,idempotencyKey:`wellness:${access.client_id}:${access.employee_id}:${today}`,note:'พักยืดกับนากนะครบวันนี้',createdByUserId:null}); await env.DB.prepare(`UPDATE wellness_sessions SET points_awarded=?1 WHERE client_id=?2 AND employee_id=?3 AND session_date=?4`).bind(points,Number(access.client_id),Number(access.employee_id),today).run();}catch(e){if(!/UNIQUE/i.test(String(e?.message||e)))console.warn('wellness points',e);}
@@ -6444,13 +6449,13 @@ async function skipPublicWellness(request,env,token,testMode=false){
 }
 function buildWellnessReminderFlex(emp,url,settings){
   const minutes=Number(settings.duration_minutes||3),snooze=Number(settings.snooze_minutes||30),points=Number(settings.points_reward||0);
-  return {type:'flex',altText:`ถึงเวลาพักยืด ${minutes} นาที · นากนะ`,contents:lineBubble({eyebrow:'NAKNA · MOVE',title:'ถึงเวลาขยับตัวแล้ว 🧘',subtitle:`พักจากหน้าจอ ${minutes} นาที แล้วค่อยกลับมาลุยต่อ`,status:'Wellness break',statusTone:'success',body:[lineInfoCard([lineInfoRow('ใช้เวลา',`${minutes} นาที`),lineInfoRow('กล้อง','ใช้เป็นกระจกเท่านั้น · ไม่อัปโหลดวิดีโอ',LINE_CI.primary),...(points>0?[lineInfoRow('ทำครบ',`+${points} แต้ม`,LINE_CI.warning)]:[])],'teal'),lineText('เลือกพื้นที่ที่ปลอดภัย ขยับเบา ๆ และหยุดทันทีหากรู้สึกเจ็บหรือเวียนหัว','xs',LINE_CI.muted)],footer:[linePrimaryButton(`เริ่มยืด ${minutes} นาที`,{type:'uri',label:'เริ่มยืด',uri:url}),lineSecondaryButton(`เตือนอีก ${snooze} นาที`,{type:'postback',label:`เตือนอีก ${snooze} นาที`,data:'action=wellness_snooze'},LINE_CI.mintSoft),lineSecondaryButton('ข้ามวันนี้',{type:'postback',label:'ข้ามวันนี้',data:'action=wellness_skip'},'#F7F9F8')]})};
+  return {type:'flex',altText:`ถึงเวลาพักยืด ${minutes} นาที · นากนะ`,contents:lineBubble({eyebrow:'NAKNA · MOVE',title:'ถึงเวลาขยับตัวแล้ว 🧘',subtitle:`พักจากหน้าจอ ${minutes} นาที แล้วค่อยกลับมาลุยต่อ`,status:'Wellness break',statusTone:'success',body:[lineInfoCard([lineInfoRow('ใช้เวลา',`${minutes} นาที`),lineInfoRow('AI กล้อง',Number(settings.pose_tracking_enabled)?'ตรวจโครงร่างบนเครื่อง · ไม่อัปโหลดวิดีโอ':'ใช้เป็นกระจก · ไม่อัปโหลดวิดีโอ',LINE_CI.primary),...(points>0?[lineInfoRow('ทำครบ',`+${points} แต้ม`,LINE_CI.warning)]:[])],'teal'),lineText(Number(settings.pose_tracking_enabled)?'AI จะช่วยบอกท่า นับรอบ และให้ผ่านเมื่อทำครบ · หยุดทันทีหากรู้สึกเจ็บหรือเวียนหัว':'เลือกพื้นที่ที่ปลอดภัย ขยับเบา ๆ และหยุดทันทีหากรู้สึกเจ็บหรือเวียนหัว','xs',LINE_CI.muted)],footer:[linePrimaryButton(`เริ่มยืด ${minutes} นาที`,{type:'uri',label:'เริ่มยืด',uri:url}),lineSecondaryButton(`เตือนอีก ${snooze} นาที`,{type:'postback',label:`เตือนอีก ${snooze} นาที`,data:'action=wellness_snooze'},LINE_CI.mintSoft),lineSecondaryButton('ข้ามวันนี้',{type:'postback',label:'ข้ามวันนี้',data:'action=wellness_skip'},'#F7F9F8')]})};
 }
 async function sendWellnessPortal(env,replyToken,emp,accessToken){
   await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB); const token=await getEmployeePortalTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id)); if(!token)return replyLine(accessToken,replyToken,'เปิดพักยืดไม่สำเร็จ กรุณาลองใหม่'); const settings=await getWellnessSettings(env.DB,Number(emp.client_id)); const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,''); const url=`${base}/wellness.html?token=${encodeURIComponent(token)}`; return replyLineMessages(accessToken,replyToken,[buildWellnessReminderFlex(emp,url,settings)]);
 }
 async function pushWellnessCompleted(env,access,session){
-  const employee=await env.DB.prepare(`SELECT line_user_id,line_provider_scope,nickname,first_name FROM employees WHERE id=?1 AND client_id=?2`).bind(Number(access.employee_id),Number(access.client_id)).first(); if(!employee?.line_user_id)return false; const token=await getAccessTokenForProviderScope(env,Number(access.client_id),employee.line_provider_scope); if(!token)return false; const pts=Number(session?.points_awarded||0); return pushLineMessages(token,employee.line_user_id,[{type:'flex',altText:'พักยืดกับนากนะเรียบร้อย',contents:lineBubble({eyebrow:'NAKNA · MOVE',title:'พักยืดครบแล้ว ✅',subtitle:'ขอบคุณที่ลุกมาขยับตัวระหว่างวัน',status:pts>0?`+${pts} แต้ม`:'ทำครบวันนี้',statusTone:'success',body:[lineText('พักสายตา ดื่มน้ำ แล้วค่อยกลับไปทำงานต่อได้เลย','sm',LINE_CI.muted)]})}]);
+  const employee=await env.DB.prepare(`SELECT line_user_id,line_provider_scope,nickname,first_name FROM employees WHERE id=?1 AND client_id=?2`).bind(Number(access.employee_id),Number(access.client_id)).first(); if(!employee?.line_user_id)return false; const token=await getAccessTokenForProviderScope(env,Number(access.client_id),employee.line_provider_scope); if(!token)return false; const pts=Number(session?.points_awarded||0),aiUsed=Boolean(Number(session?.ai_tracking_used)),score=Math.round(Number(session?.ai_score||0)),passed=Number(session?.ai_passed_steps||0),total=Number(session?.ai_total_steps||0); const body=[...(aiUsed&&total?[lineInfoCard([lineInfoRow('AI ผ่าน',`${passed}/${total} ท่า`,LINE_CI.primary),lineInfoRow('คะแนนการทำท่า',`${score}%`,LINE_CI.success)],'teal')]:[]),lineText('พักสายตา ดื่มน้ำ แล้วค่อยกลับไปทำงานต่อได้เลย','sm',LINE_CI.muted)]; return pushLineMessages(token,employee.line_user_id,[{type:'flex',altText:'พักยืดกับนากนะเรียบร้อย',contents:lineBubble({eyebrow:'NAKNA · MOVE',title:'พักยืดครบแล้ว ✅',subtitle:'ขอบคุณที่ลุกมาขยับตัวระหว่างวัน',status:pts>0?`+${pts} แต้ม`:'ทำครบวันนี้',statusTone:'success',body})}]);
 }
 function buildWellnessTestReminderFlex(emp,url,settings){
   const minutes=Number(settings.duration_minutes||3);
