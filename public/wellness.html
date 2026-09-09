@@ -5,24 +5,24 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#f5faf8"/>
 <title>พักยืดกับนากนะ</title>
-<link rel="stylesheet" href="/wellness.css?v=1.0-p7.90"/>
+<link rel="stylesheet" href="/wellness.css?v=1.0-p7.91"/>
 </head>
 <body>
 <main class="shell">
   <header><img src="/logo.png" alt="นากนะ"/><div><span>NAKNA · MOVE AI</span><strong>พักยืดกับนากนะ</strong><small id="employeeText">กำลังเตรียมกิจกรรม…</small></div></header>
-  <div id="testBanner" class="test-banner hidden"><b>🧪 TEST MODE</b><span>ส่งเฉพาะผู้ทดสอบ · ไม่บันทึก Activity จริง · ไม่ให้แต้ม</span></div>
+  <div id="testBanner" class="test-banner hidden"><b>โหมดพรีวิวสำหรับ HR</b><span>เปิดจาก HR · ไม่ส่ง LINE · ไม่บันทึก Activity · ไม่ให้แต้ม</span></div>
 
   <section id="intro" class="card intro-card">
     <div class="hero-icon">🧘</div>
     <p class="ai-kicker">AI POSE TRACKING</p>
-    <h1>ลุกมาขยับตัวกัน 3 นาที</h1>
+    <h1>พักยืด 3 นาทีกับนากนะ</h1>
     <p>กล้องจะช่วยติดตามโครงร่าง บอกวิธีทำ และให้ผ่านเมื่อทำท่าตามเงื่อนไขครบ</p>
     <div class="feature-strip">
       <span>◉ ตรวจโครงร่าง</span><span>✓ เช็กท่า</span><span>↻ นับรอบ</span><span>⏱ นับเวลาค้าง</span>
     </div>
     <div class="privacy"><b>ประมวลผลบนเครื่องของคุณ</b><span>ภาพกล้องใช้เพื่อวิเคราะห์จุดข้อต่อแบบเรียลไทม์ นากนะไม่อัปโหลดหรือบันทึกรูป/วิดีโอ การประเมินเป็นเพียงตัวช่วย ไม่ใช่การวินิจฉัยทางการแพทย์</span></div>
     <div id="aiSupport" class="ai-support"><span class="support-dot"></span><div><b>กำลังตรวจความพร้อม AI</b><small>ครั้งแรกอาจใช้เวลาสักครู่เพื่อโหลดโมเดล</small></div></div>
-    <div class="intro-actions"><button id="cameraBtn" class="secondary">ทดลองเปิดกล้อง</button><button id="startBtn" class="primary">เริ่ม AI Stretch</button></div>
+    <div class="intro-actions single"><button id="startBtn" class="primary">เริ่มพักยืด 3 นาที</button></div>
     <button id="skipBtn" class="text">ข้ามวันนี้</button>
     <small class="safety">เลือกพื้นที่ที่ปลอดภัย ขยับช้า ๆ ไม่ฝืนช่วงการเคลื่อนไหว และหยุดทันทีหากรู้สึกเจ็บหรือเวียนหัว</small>
   </section>
@@ -77,7 +77,7 @@
     <div id="aiResult" class="ai-result hidden"></div>
     <div id="pointsText" class="points hidden"></div><button id="closeBtn" class="primary">ปิดหน้านี้</button>
   </section>
-  <section id="error" class="card error-card hidden"><h2>เปิดกิจกรรมไม่สำเร็จ</h2><p id="errorText"></p><button onclick="location.reload()" class="primary">ลองใหม่</button></section>
+  <section id="error" class="card error-card hidden"><h2>เปิดกิจกรรมไม่สำเร็จ</h2><p id="errorText"></p><button onclick="location.reload()" class="primary">เปิดใหม่</button></section>
 </main>
 
 <div id="guideSheet" class="guide-sheet" aria-hidden="true">
@@ -104,6 +104,6 @@
   </section>
 </div>
 
-<script src="/wellness.js?v=1.0-p7.90" type="module"></script>
+<script src="/wellness.js?v=1.0-p7.91" type="module"></script>
 </body>
 </html>
