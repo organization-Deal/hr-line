@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.90" />
-  <link rel="modulepreload" href="/app.js?v=1.0-p7.90" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.91" />
+  <link rel="modulepreload" href="/app.js?v=1.0-p7.91" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -655,7 +655,7 @@
         <div class="wellness-grid">
           <article class="panel wellness-settings-card">
             <div class="panel-head"><div><p class="kicker">DAILY WELLNESS</p><h3>การแจ้งเตือนจริง</h3><p class="panel-subtitle">เปิดเมื่อพร้อมใช้งานจริงเท่านั้น · ระบบจะส่งให้พนักงานที่เข้าเงื่อนไข</p></div><label class="switch"><input id="wellnessEnabled" type="checkbox"><span></span></label></div>
-            <div class="wellness-live-warning"><strong>การแจ้งเตือนทีมงาน</strong><span>ถ้าสวิตช์ด้านบนปิดอยู่ ระบบจะไม่ส่งแจ้งเตือนจริงตามเวลา แต่โหมดทดสอบด้านล่างยังใช้ได้</span></div>
+            <div class="wellness-live-warning"><strong>การแจ้งเตือนทีมงาน</strong><span>ถ้าสวิตช์ด้านบนปิดอยู่ ระบบจะไม่ส่งแจ้งเตือนจริงตามเวลา แต่โหมดพรีวิวสำหรับ HR ด้านล่างยังเปิดดูได้</span></div>
             <div class="wellness-setting-grid">
               <label><span>เวลาเตือนจริง</span><input id="wellnessReminderTime" type="time" step="900" value="15:00"><small>เลือกได้ทุก 15 นาที</small></label>
               <label><span>ระยะเวลา</span><select id="wellnessDuration"><option value="3">3 นาที</option><option value="5">5 นาที</option></select><small>6 ท่ายืดมาตรฐาน</small></label>
@@ -671,24 +671,24 @@
           </article>
 
           <article class="panel wellness-test-card">
-            <div class="panel-head"><div><p class="kicker">TEST MODE</p><h3>โหมดทดสอบ</h3><p class="panel-subtitle">เปิดลองหน้า Stretch ได้ทันทีโดยไม่ส่งหาใคร หรือทดสอบผ่าน LINE ของคุณเมื่อพร้อม</p></div><span class="badge badge-soft">ปลอดภัย</span></div>
+            <div class="panel-head"><div><p class="kicker">HR PREVIEW</p><h3>พรีวิวสำหรับ HR</h3><p class="panel-subtitle">เปิดดูหน้า Stretch ได้ทันทีโดยไม่ส่งหาใคร หรือส่งตรวจสอบเฉพาะ LINE ของคุณก่อนเปิดใช้จริง</p></div><span class="badge badge-soft">ไม่ส่งทีมงาน</span></div>
             <div class="wellness-preview-launch">
-              <div><strong>เปิดทดสอบบนเว็บทันที</strong><small>ไม่ส่ง LINE · ไม่ต้องผูก Employee Profile · ไม่บันทึก Activity · ไม่ให้แต้ม</small></div>
-              <button id="wellnessPreviewBtn" class="secondary-btn" type="button">เปิดหน้า Stretch ทดสอบ</button>
+              <div><strong>เปิดพรีวิวบนเว็บ</strong><small>ไม่ส่ง LINE · ไม่ต้องผูก Employee Profile · ไม่บันทึก Activity · ไม่ให้แต้ม</small></div>
+              <button id="wellnessPreviewBtn" class="secondary-btn" type="button">เปิดหน้าพรีวิว</button>
             </div>
-            <div class="wellness-test-divider"><span>หรือทดสอบผ่าน LINE ของฉัน</span></div>
-            <div id="wellnessTestRecipient" class="wellness-test-recipient"><span class="wellness-test-avatar">T</span><div><strong>กำลังตรวจบัญชีผู้ทดสอบ…</strong><small>ต้องมี Employee Profile ที่ใช้อีเมลเดียวกับบัญชีนี้ และเชื่อม LINE แล้ว</small></div></div>
+            <div class="wellness-test-divider"><span>หรือส่งตรวจสอบผ่าน LINE ของฉัน</span></div>
+            <div id="wellnessTestRecipient" class="wellness-test-recipient"><span class="wellness-test-avatar">H</span><div><strong>กำลังตรวจบัญชี HR…</strong><small>ต้องมี Employee Profile ที่ใช้อีเมลเดียวกับบัญชีนี้ และเชื่อม LINE แล้ว</small></div></div>
             <div class="wellness-test-controls">
-              <label><span>เวลาทดสอบ</span><select id="wellnessTestTiming"><option value="now">ส่งตอนนี้</option><option value="1">อีก 1 นาที</option><option value="5">อีก 5 นาที</option><option value="custom">กำหนดเวลา</option></select></label>
+              <label><span>เวลาส่งตรวจสอบ</span><select id="wellnessTestTiming"><option value="now">ส่งตอนนี้</option><option value="1">อีก 1 นาที</option><option value="5">อีก 5 นาที</option><option value="custom">กำหนดเวลา</option></select></label>
               <label id="wellnessTestTimeField" class="hidden"><span>เวลา (ประเทศไทย)</span><input id="wellnessTestTime" type="time" step="60"></label>
-              <button id="wellnessTestSendBtn" class="primary-btn" type="button">ส่งทดสอบตอนนี้</button>
+              <button id="wellnessTestSendBtn" class="primary-btn" type="button">ส่งให้ฉันตอนนี้</button>
             </div>
             <div id="wellnessTestScheduleStatus" class="wellness-test-status hidden"></div>
-            <div class="wellness-test-note"><b>🧪 ข้อความทดสอบจะมีป้าย TEST MODE</b><span>ทำ Routine ได้เหมือนของจริง แต่ไม่เปลี่ยนสถานะ “ทำแล้ววันนี้” และไม่กระทบแต้มของพนักงาน</span></div>
+            <div class="wellness-test-note"><b>ข้อความตรวจสอบจะส่งเฉพาะบัญชีของคุณ</b><span>ทำ Routine ได้เหมือนของจริง แต่ไม่เปลี่ยนสถานะ “ทำแล้ววันนี้” และไม่กระทบแต้มของพนักงาน</span></div>
           </article>
 
           <article class="panel wellness-routine-card"><div class="panel-head"><div><p class="kicker">3-MIN ROUTINE</p><h3>ท่าที่พนักงานจะเห็น</h3><p class="panel-subtitle">6 ท่าที่ AI ตรวจได้ · คอ บ่า ไหล่ แขน ลำตัว และการยืดตัว</p></div><span class="badge badge-soft">ไม่ใช่การรักษา</span></div><div id="wellnessRoutinePreview" class="wellness-routine-preview"></div></article>
-          <article class="panel wellness-team-card"><div class="panel-head"><div><p class="kicker">TODAY</p><h3>สถานะวันนี้</h3><p class="panel-subtitle">ดูว่าใครทำแล้ว ใครข้าม และใครยังไม่ได้เริ่ม · การทดสอบจะไม่ถูกนับตรงนี้</p></div><span id="wellnessTodayBadge" class="badge badge-soft">วันนี้</span></div><div id="wellnessTeamList" class="wellness-team-list"></div></article>
+          <article class="panel wellness-team-card"><div class="panel-head"><div><p class="kicker">TODAY</p><h3>สถานะวันนี้</h3><p class="panel-subtitle">ดูว่าใครทำแล้ว ใครข้าม และใครยังไม่ได้เริ่ม · พรีวิว/การตรวจสอบของ HR จะไม่ถูกนับตรงนี้</p></div><span id="wellnessTodayBadge" class="badge badge-soft">วันนี้</span></div><div id="wellnessTeamList" class="wellness-team-list"></div></article>
         </div>
       </section>
 
@@ -1343,7 +1343,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.90" type="module"></script>
+  <script src="/app.js?v=1.0-p7.91" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

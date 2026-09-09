@@ -96,11 +96,21 @@ async function boot(){
   if(!previewMode&&!token)return error('ไม่พบลิงก์จาก LINE');
   try{
     data=await api('');
-    if(testMode){$('#testBanner').classList.remove('hidden');const b=$('#testBanner b'),sp=$('#testBanner span');if(previewMode){if(b)b.textContent='🧪 PREVIEW MODE';if(sp)sp.textContent='เปิดตรงจาก HR · ไม่ส่ง LINE · ไม่บันทึก Activity · ไม่ให้แต้ม';}$('#skipBtn').classList.add('hidden');}
+    if(testMode){
+      $('#testBanner').classList.remove('hidden');
+      const b=$('#testBanner b'),sp=$('#testBanner span');
+      if(previewMode){
+        if(b)b.textContent='โหมดพรีวิวสำหรับ HR';
+        if(sp)sp.textContent='เปิดจาก HR · ไม่ส่ง LINE · ไม่บันทึก Activity · ไม่ให้แต้ม';
+      }else if(lineTestMode){
+        if(b)b.textContent='โหมดตรวจสอบสำหรับ HR';
+        if(sp)sp.textContent='ส่งเฉพาะบัญชีของคุณ · ไม่บันทึก Activity จริง · ไม่ให้แต้ม';
+      }
+      $('#skipBtn').classList.add('hidden');
+    }
     $('#employeeText').textContent=`${data.employee.name} · ${data.employee.company_name}`;
     const aiOn=data.settings.pose_tracking_enabled!==false&&data.settings.camera_enabled!==false;
-    $('#cameraBtn').classList.toggle('hidden',!data.settings.camera_enabled);
-    $('#startBtn').textContent=aiOn?(previewMode?'เปิดลอง AI Stretch':lineTestMode?'เริ่มทดสอบ AI Stretch':'เริ่ม AI Stretch'):(previewMode?'เปิดลอง Routine':'เริ่มยืด');
+    $('#startBtn').textContent=aiOn?'เริ่มพักยืด 3 นาที':'เริ่มพักยืด 3 นาที';
     if(aiOn){setSupport('', 'พร้อมใช้ AI Pose Tracking','ตอนเริ่ม ระบบจะเปิดกล้องและโหลดโมเดลตรวจโครงร่างบนเครื่อง');prewarmPose().catch(()=>{});}else setSupport('warn','โหมดทำตามคำแนะนำ','บริษัทปิด AI Pose Tracking ไว้ ระบบจะใช้กล้องเป็นกระจกและให้กดผ่านเอง');
     if(!testMode&&data.session?.status==='completed'){renderDone(data.session.points_awarded||0,data.session);return;}
     show('intro');
@@ -121,29 +131,54 @@ async function prewarmPose(){
 
 async function openCamera({forRoutine=false}={}){
   try{
+    if(!navigator.mediaDevices?.getUserMedia)throw new Error('อุปกรณ์นี้ไม่รองรับการเปิดกล้องจากเว็บ');
     if(!stream)stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:720},height:{ideal:960}},audio:false});
     $('#camera').srcObject=stream;
     await new Promise(resolve=>{const v=$('#camera');if(v.readyState>=2)return resolve();const done=()=>{v.removeEventListener('loadeddata',done);resolve();};v.addEventListener('loadeddata',done);setTimeout(done,1600);});
-    if(!forRoutine){$('#cameraBtn').textContent='กล้องพร้อมแล้ว ✓';setSupport('ready','กล้องพร้อมแล้ว','กดเริ่ม AI Stretch เพื่อให้ระบบตรวจโครงร่าง');}
     return true;
-  }catch(e){if(!forRoutine)$('#cameraBtn').textContent='เปิดกล้องไม่ได้';manualFallback=true;setSupport('error','เปิดกล้องไม่ได้','ตรวจสิทธิ์กล้องใน LINE/Browser หรือทำ Routine แบบกดผ่านเอง');return false;}
+  }catch(e){
+    manualFallback=true;
+    const denied=['NotAllowedError','PermissionDeniedError'].includes(String(e?.name||''));
+    setSupport('error',denied?'ยังไม่ได้อนุญาตให้ใช้กล้อง':'เปิดกล้องไม่ได้',denied?'กดปุ่มเริ่มอีกครั้ง แล้วเลือก “อนุญาต” เมื่อ LINE หรือ Browser ขอสิทธิ์กล้อง':'ตรวจสิทธิ์กล้องใน LINE/Browser แล้วลองอีกครั้ง');
+    return false;
+  }
 }
 function stopCamera(){trackingActive=false;cancelAnimationFrame(rafId);stream?.getTracks?.().forEach(t=>t.stop());stream=null;const v=$('#camera');if(v)v.srcObject=null;clearCanvas();}
 
 async function start(){
+  const button=$('#startBtn');
+  if(button?.disabled)return;
+  const original=button?.textContent||'เริ่มพักยืด 3 นาที';
+  if(button){button.disabled=true;button.textContent='กำลังขอสิทธิ์กล้อง…';}
   try{
+    const wantsAI=data.settings.pose_tracking_enabled!==false&&data.settings.camera_enabled!==false;
+    let cameraOk=true;
+    if(wantsAI){
+      // ขอสิทธิ์กล้องทันทีจากการแตะปุ่มหลัก เพื่อให้ iOS/LINE แสดง Permission Prompt จาก user gesture โดยตรง
+      cameraOk=await openCamera({forRoutine:true});
+      if(!cameraOk){
+        if(button){button.disabled=false;button.textContent='เริ่มพักยืด 3 นาที';}
+        return;
+      }
+    }
+    if(button)button.textContent='กำลังเตรียม AI…';
     if(!previewMode)await api('/start',{method:'POST',body:'{}'});
     startedAt=Date.now();step=0;stepResults=[];show('routine');
-    const wantsAI=data.settings.pose_tracking_enabled!==false&&data.settings.camera_enabled!==false;
     if(wantsAI){
-      setTrackingBadge('loading','กำลังเปิดกล้อง');setCoach('เตรียมตัว','กำลังเปิดกล้อง…','ให้มือถืออยู่มั่นคงและเห็นช่วงตัวส่วนบนชัดเจน');
-      const [cameraOk]=await Promise.all([openCamera({forRoutine:true}),prewarmPose().catch(()=>null)]);
+      setTrackingBadge('loading','กำลังเตรียม AI');
+      setCoach('เตรียมตัว','กำลังตรวจโครงร่าง…','ให้มือถืออยู่มั่นคงและเห็นช่วงตัวส่วนบนชัดเจน');
+      await prewarmPose().catch(()=>null);
       manualFallback=!cameraOk||!poseLandmarker;
     }else manualFallback=true;
     renderStep();
     if(!manualFallback){trackingActive=true;setTrackingBadge('warn','กำลังหาโครงร่าง');startTrackingLoop();}
     else{setTrackingBadge('bad','โหมด Manual');setCoach('ทำตามคำแนะนำ','AI ไม่พร้อมบนอุปกรณ์นี้','ทำท่าตามคำแนะนำ แล้วกด “ทำเองแล้ว” เพื่อไปท่าถัดไป');}
-  }catch(e){error(e.message);}
+  }catch(e){
+    stopCamera();
+    error(e.message);
+  }finally{
+    if(button){button.disabled=false;button.textContent=original;}
+  }
 }
 
 function resetExerciseState(){currentState={started:performance.now(),lastTick:performance.now(),maxScore:0,baselineSamples:[],baselineShoulderY:null,phase:'down',reps:0,leftHold:0,rightHold:0,hold:0,lastSide:null};stepPassed=false;}
@@ -203,7 +238,7 @@ async function finish(){
     let r={points_awarded:0};if(!previewMode)r=await api('/complete',{method:'POST',body:JSON.stringify(payload)});stopCamera();renderDone(r.points_awarded||0,{...payload,...(r.session||{})});
   }catch(e){error(e.message);}
 }
-function renderDone(points,session={}){show('done');const passed=Number(session.ai_passed_steps||0),total=Number(session.ai_total_steps||data?.routine?.length||0),score=Number(session.ai_score||0),skipped=Number(session.ai_skipped_steps||0);if(previewMode){$('#done h1').textContent='ทดสอบ AI Stretch ครบแล้ว ✓';$('#done p').textContent='Flow ทำงานครบ โดยไม่ได้ส่ง LINE ไม่บันทึก Activity จริง และไม่ให้แต้ม';}else if(lineTestMode){$('#done h1').textContent='ทดสอบ AI Stretch ครบแล้ว ✓';$('#done p').textContent='Flow ทำงานครบ โดยไม่บันทึก Activity จริงและไม่ให้แต้ม';}if(total){$('#aiResult').innerHTML=`<article><strong>${score}%</strong><span>คะแนนการทำท่า</span></article><article><strong>${passed}/${total}</strong><span>AI ผ่าน</span></article><article><strong>${skipped}</strong><span>ข้ามท่า</span></article>`;$('#aiResult').classList.remove('hidden');}if(!testMode&&Number(points)>0){$('#pointsText').textContent=`🎁 ได้รับ +${Number(points)} แต้ม`;$('#pointsText').classList.remove('hidden');}}
+function renderDone(points,session={}){show('done');const passed=Number(session.ai_passed_steps||0),total=Number(session.ai_total_steps||data?.routine?.length||0),score=Number(session.ai_score||0),skipped=Number(session.ai_skipped_steps||0);if(previewMode){$('#done h1').textContent='พรีวิวกิจกรรมครบแล้ว ✓';$('#done p').textContent='คุณดู Flow ครบแล้ว โดยไม่ได้ส่ง LINE ไม่บันทึก Activity จริง และไม่ให้แต้ม';}else if(lineTestMode){$('#done h1').textContent='ตรวจสอบกิจกรรมครบแล้ว ✓';$('#done p').textContent='Flow ทำงานครบ โดยไม่บันทึก Activity จริงและไม่ให้แต้ม';}if(total){$('#aiResult').innerHTML=`<article><strong>${score}%</strong><span>คะแนนการทำท่า</span></article><article><strong>${passed}/${total}</strong><span>AI ผ่าน</span></article><article><strong>${skipped}</strong><span>ข้ามท่า</span></article>`;$('#aiResult').classList.remove('hidden');}if(!testMode&&Number(points)>0){$('#pointsText').textContent=`🎁 ได้รับ +${Number(points)} แต้ม`;$('#pointsText').classList.remove('hidden');}}
 async function skip(){try{await api('/skip',{method:'POST',body:'{}'});stopCamera();$('#done h1').textContent='ข้ามวันนี้แล้ว';$('#done p').textContent='ไม่เป็นไร ไว้วันทำงานถัดไปค่อยขยับไปด้วยกัน';show('done');}catch(e){error(e.message);}}
 
-$('#cameraBtn').onclick=()=>openCamera();$('#startBtn').onclick=start;$('#skipBtn').onclick=skip;$('#prevBtn').onclick=()=>{if(step>0){step--;renderStep();}};$('#nextBtn').onclick=advance;$('#skipStepBtn').onclick=skipCurrentStep;$('#openGuideBtn').onclick=openGuide;$('#demoTeaser').onclick=openGuide;$('#guideClose').onclick=closeGuide;$('#guideReady').onclick=closeGuide;document.querySelectorAll('[data-close-guide]').forEach(el=>el.onclick=closeGuide);document.addEventListener('keydown',e=>{if(e.key==='Escape'&&guideOpen)closeGuide();});$('#closeBtn').onclick=()=>{stopCamera();try{if(history.length>1){history.back();return;}window.close();}catch{}};window.addEventListener('pagehide',stopCamera);boot();
+$('#startBtn').onclick=start;$('#skipBtn').onclick=skip;$('#prevBtn').onclick=()=>{if(step>0){step--;renderStep();}};$('#nextBtn').onclick=advance;$('#skipStepBtn').onclick=skipCurrentStep;$('#openGuideBtn').onclick=openGuide;$('#demoTeaser').onclick=openGuide;$('#guideClose').onclick=closeGuide;$('#guideReady').onclick=closeGuide;document.querySelectorAll('[data-close-guide]').forEach(el=>el.onclick=closeGuide);document.addEventListener('keydown',e=>{if(e.key==='Escape'&&guideOpen)closeGuide();});$('#closeBtn').onclick=()=>{stopCamera();try{if(history.length>1){history.back();return;}window.close();}catch{}};window.addEventListener('pagehide',stopCamera);boot();

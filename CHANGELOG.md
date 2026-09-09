@@ -1,3 +1,11 @@
+# P7.91 — Nakna Move One-Tap Camera Permission
+
+- หน้าเริ่มกิจกรรมเหลือปุ่มหลักสีเขียวเพียงปุ่มเดียว: “เริ่มพักยืด 3 นาที”
+- แตะปุ่มเดียวแล้วขอสิทธิ์กล้องทันทีจาก user gesture บน LINE/iOS จากนั้นจึงเข้าสู่ AI Pose Tracking
+- ถ้าผู้ใช้ไม่อนุญาตกล้อง จะยังอยู่หน้าเดิมพร้อมคำแนะนำให้เปิดสิทธิ์ ไม่สร้าง session ค้าง
+- เปลี่ยนคำว่า ทดลอง/TEST MODE ในหน้า Wellness สำหรับ HR เป็น พรีวิว/ตรวจสอบ เพื่อสะท้อนว่าเป็นฟีเจอร์จริงแล้ว
+- คงการประมวลผล AI บนอุปกรณ์และไม่บันทึกวิดีโอ
+
 # P7.90 — Nakna Move Mobile Camera-First + Animated Exercise Coach
 
 - Redesigned mobile wellness routine so the live camera is the dominant surface (about 68svh on phones).

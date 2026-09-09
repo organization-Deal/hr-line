@@ -1,0 +1,13 @@
+Nakna HR V1.0-P7.91 — Nakna Move One-Tap Camera Permission
+
+Changed:
+- wellness.html
+- wellness.js
+- wellness.css
+- index.html
+- app.js
+- index.js
+- package.json
+- CHANGELOG.md
+
+Mirrored copies under public/ and src/ are synced.
