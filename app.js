@@ -28,6 +28,7 @@ const state = {
   learning: { courses: [], assignments: [], summary: {} },
   performance: { cycles: [], goals: [], one_on_ones: [], probation_reviews: [], probation_due: [], summary: {} },
   engagement: { rules: [], rewards: [], redemptions: [], leaderboard: [], recent_transactions: [], summary: {} },
+  wellness: { settings: {}, summary: {}, today_sessions: [], routine: [] },
   analytics: { summary: {}, headcount_trend: [], departments: [], recruitment: {}, moments: [] },
   subscription: null,
   saasAdmin: null,
@@ -266,6 +267,7 @@ function renderViewData(name){
     if(name==='documents'){ renderDocuments(); return; }
     if(name==='performance'){ renderGrowth(); return; }
     if(name==='engagement'){ renderEngagement(); return; }
+    if(name==='wellness'){ renderWellness(); return; }
     if(name==='analytics'){ renderAnalytics(); return; }
     if(name==='saas-admin'){ renderSaasAdmin(); return; }
     if(name==='settings'){ renderSettings(); renderSettingsSidebar(); renderWorkLocations(); renderLeavePolicies(); return; }
@@ -315,6 +317,8 @@ async function loadViewData(name,{force=false}={}){
         if(canReadBroadcasts){ const [learning,performance]=await Promise.all([load('/api/learning/overview',state.learning),load('/api/performance/overview',state.performance)]); state.learning=learning||state.learning; state.performance=performance||state.performance; }
       }else if(name==='engagement'){
         if(canViewPeople){ state.engagement=await load('/api/engagement/overview',state.engagement)||state.engagement; }
+      }else if(name==='wellness'){
+        if(canViewPeople){ state.wellness=await load('/api/wellness/overview',state.wellness)||state.wellness; }
       }else if(name==='analytics'){
         if(canViewPeople){ state.analytics=await load('/api/analytics/overview',state.analytics)||state.analytics; }
       }else if(name==='saas-admin'){
@@ -450,6 +454,7 @@ const viewMeta = {
   documents: ['เอกสาร', 'DOCUMENTS'],
   performance: ['Learning & KPI', 'GROWTH OS'],
   engagement: ['แต้ม & ของรางวัล', 'ENGAGEMENT'],
+  wellness: ['พักยืดกับนากนะ', 'NAKNA MOVE'],
   analytics: ['People Analytics', 'PEOPLE INTELLIGENCE'],
   'saas-admin': ['Nakna Admin', 'SAAS CONTROL'],
   settings: ['ตั้งค่า', 'SYSTEM'],
@@ -791,6 +796,11 @@ function bindEvents() {
   $('#documentGenerateSaveBtn').onclick = generateEmployeeDocument;
   $('#runPointRulesBtn').onclick = runPointRules;
   $('#manualAwardBtn').onclick = openManualAward;
+  if($('#wellnessSaveBtn')) $('#wellnessSaveBtn').onclick = saveWellnessSettings;
+  if($('#wellnessRemindNowBtn')) $('#wellnessRemindNowBtn').onclick = sendWellnessReminderNow;
+  if($('#wellnessTestTiming')) $('#wellnessTestTiming').onchange = syncWellnessTestTimingUi;
+  if($('#wellnessTestSendBtn')) $('#wellnessTestSendBtn').onclick = sendWellnessTestReminder;
+  if($('#wellnessTestScheduleStatus')) $('#wellnessTestScheduleStatus').onclick = event => { const btn=event.target.closest('[data-cancel-wellness-test]'); if(btn) cancelWellnessTestSchedule(Number(btn.dataset.cancelWellnessTest)); };
   $('#createPointRuleBtn').onclick = openPointRule;
   $('#createRewardBtn').onclick = openReward;
   $('#subscriptionPlanBtn').onclick = openSubscriptionPlan;
@@ -4487,7 +4497,31 @@ function renderEngagement(){
   const rewards=d.rewards||[];$('#rewardCatalogList').innerHTML=rewards.length?rewards.map(r=>`<article class="reward-card ${r.status!=='active'?'inactive':''}"><div class="reward-emoji">${rewardEmoji(r.reward_type)}</div><div><strong>${escapeHtml(r.title)}</strong><p>${escapeHtml(r.description||'')}</p><small>${Number(r.points_cost||0).toLocaleString('th-TH')} แต้ม${Number(r.cash_value||0)>0?` · มูลค่า ${money(r.cash_value)}`:''}${r.stock_qty!=null?` · เหลือ ${r.stock_qty}`:' · ไม่จำกัดจำนวน'}</small></div><span class="badge ${r.status==='active'?'badge-success':'badge-neutral'}">${r.status==='active'?'พร้อมแลก':'ปิด'}</span></article>`).join(''):emptyState('ยังไม่มีของรางวัล','เพิ่มของขวัญ เงินรางวัล หรือสิทธิพิเศษให้ทีม');
   const reds=d.redemptions||[],pending=reds.filter(x=>x.status==='pending').length;$('#redemptionQueueBadge').textContent=`${pending} รอจัดการ`;$('#redemptionList').innerHTML=reds.length?reds.slice(0,30).map(r=>`<div class="phase5-row"><div class="reward-emoji small">${rewardEmoji(r.reward_type)}</div><div class="phase5-copy"><strong>${escapeHtml(r.nickname||r.first_name)} · ${escapeHtml(r.reward_title)}</strong><p>${Number(r.points_cost||0).toLocaleString('th-TH')} แต้ม · ${formatDateTime(r.requested_at)}</p></div><span class="badge ${r.status==='pending'?'badge-warning':r.status==='approved'?'badge-success':r.status==='delivered'?'badge-soft':'badge-neutral'}">${redemptionLabel(r.status)}</span>${canManage?redemptionActions(r):''}</div>`).join(''):emptyState('ยังไม่มีคำขอแลก','คำขอจาก Employee Portal จะมาอยู่ตรงนี้');
 }
-function eventRuleLabel(v){return ({attendance_streak:'มาตรงเวลาเป็นชุด',learning_complete:'เรียนจบหลักสูตร',kpi_complete:'KPI สำเร็จ',birthday:'วันเกิด',work_anniversary:'ครบรอบงาน',manual:'HR ให้เอง',custom:'กำหนดเอง'})[v]||v;}
+function wellnessStatusLabel(status){return ({completed:'ทำแล้ว',started:'กำลังทำ',reminded:'รอทำ',skipped:'ข้ามวันนี้'})[status]||'ยังไม่ได้เริ่ม';}
+function renderWellness(){
+  const d=state.wellness||{},settings=d.settings||{},summary=d.summary||{}; if(!$('#wellnessSummary'))return; const canManage=canManageEngagementUi();
+  $('#wellnessSaveBtn')?.classList.toggle('hidden',!canManage); $('#wellnessRemindNowBtn')?.classList.toggle('hidden',!canManage); $$('#view-wellness input,#view-wellness select').forEach(el=>el.disabled=!canManage);
+  $('#wellnessSummary').innerHTML=[['พนักงานที่เชื่อม LINE',summary.line_connected||0,'LINE'],['ทำแล้ววันนี้',summary.completed||0,'DONE'],['กำลังทำ',summary.started||0,'ACTIVE'],['ข้ามวันนี้',summary.skipped||0,'SKIP'],['ยังรอ',summary.pending||0,'PENDING']].map(([label,value,key])=>`<article><span>${key}</span><strong>${Number(value||0)}</strong><p>${label}</p></article>`).join('');
+  $('#wellnessEnabled').checked=Boolean(settings.enabled); $('#wellnessReminderTime').value=settings.reminder_time||'15:00'; $('#wellnessDuration').value=String(settings.duration_minutes||3); $('#wellnessSnooze').value=String(settings.snooze_minutes||30); $('#wellnessPoints').value=String(Number(settings.points_reward||0)); $('#wellnessCamera').checked=settings.camera_enabled!==false; $('#wellnessWorkdayOnly').checked=settings.workday_only!==false;
+  const test=d.test_mode||{},tester=test.employee||null,testRoot=$('#wellnessTestRecipient');
+  if(testRoot){if(tester){testRoot.classList.remove('unavailable');testRoot.innerHTML=`<span class="wellness-test-avatar">${escapeHtml(String(tester.nickname||tester.first_name||'T').slice(0,1).toUpperCase())}</span><div><strong>${escapeHtml(tester.nickname||tester.first_name)} · ส่งเฉพาะ LINE ของคุณ</strong><small>${escapeHtml(tester.employee_code||'')} · ${tester.line_connected?'LINE เชื่อมแล้ว':'ยังไม่ได้เชื่อม LINE'}</small></div>`;}else{testRoot.classList.add('unavailable');testRoot.innerHTML=`<span class="wellness-test-avatar">!</span><div><strong>ยังหาพนักงานที่ตรงกับบัญชีนี้ไม่เจอ</strong><small>ตั้ง Email ใน Employee Profile ให้ตรงกับบัญชีที่ล็อกอิน และเชื่อม LINE ก่อนทดสอบ</small></div>`;}}
+  const testBtn=$('#wellnessTestSendBtn');if(testBtn)testBtn.disabled=!tester?.line_connected;
+  const scheduled=test.scheduled||null,status=$('#wellnessTestScheduleStatus');if(status){status.classList.toggle('hidden',!scheduled);status.innerHTML=scheduled?`<span>🧪 ทดสอบถัดไป: <strong>${formatDateTime(scheduled.scheduled_for)}</strong> · ${escapeHtml(tester?.nickname||tester?.first_name||'ฉัน')}</span><button type="button" data-cancel-wellness-test="${Number(scheduled.id)}">ยกเลิก</button>`:'';}
+  syncWellnessTestTimingUi();
+  const routine=d.routine||[]; $('#wellnessRoutinePreview').innerHTML=routine.length?routine.map((step,i)=>`<div class="wellness-routine-row"><span>${i+1}</span><div><strong>${escapeHtml(step.title)}</strong><small>${escapeHtml(step.instruction)}</small></div><em>${Number(step.seconds||0)} วิ</em></div>`).join(''):emptyState('กำลังเตรียมท่ายืด','เปิดหน้านี้ใหม่อีกครั้ง');
+  const sessions=d.today_sessions||[]; $('#wellnessTodayBadge').textContent=`${Number(summary.completed||0)}/${Number(summary.line_connected||0)} ทำแล้ว`;
+  $('#wellnessTeamList').innerHTML=sessions.length?sessions.map(row=>`<div class="wellness-team-row"><span class="mini-avatar">${initial(row)}</span><div><strong>${escapeHtml(row.nickname||row.first_name)}</strong><small>${escapeHtml(row.department_name||'ไม่ระบุแผนก')}${row.completed_at?` · ${formatDateTime(row.completed_at)}`:''}</small></div><span class="badge ${row.status==='completed'?'badge-success':row.status==='skipped'?'badge-neutral':row.status==='started'?'badge-soft':'badge-warning'}">${wellnessStatusLabel(row.status)}</span>${Number(row.points_awarded||0)>0?`<b>+${Number(row.points_awarded||0)} pts</b>`:''}</div>`).join(''):emptyState('ยังไม่มี Activity วันนี้','เมื่อระบบส่งเตือน หรือพนักงานเปิดพักยืด รายชื่อจะมาอยู่ตรงนี้');
+}
+async function saveWellnessSettings(){
+  const button=$('#wellnessSaveBtn');button.disabled=true;try{const result=await api('/api/wellness/settings',{method:'PATCH',body:JSON.stringify({enabled:$('#wellnessEnabled').checked,reminder_time:$('#wellnessReminderTime').value,duration_minutes:Number($('#wellnessDuration').value||3),snooze_minutes:Number($('#wellnessSnooze').value||30),points_reward:Number($('#wellnessPoints').value||0),camera_enabled:$('#wellnessCamera').checked,workday_only:$('#wellnessWorkdayOnly').checked})});state.wellness.settings=result.settings||state.wellness.settings;markViewLoaded('wellness');renderWellness();toast('บันทึกการตั้งค่า Wellness แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function sendWellnessReminderNow(){
+  if(!confirm('ส่ง Wellness Reminder ให้ทีมงานที่เข้าเงื่อนไขตอนนี้ใช่ไหม?\n\nถ้าต้องการทดลองเฉพาะตัวเอง ให้ใช้ “ทดลองกับฉันเท่านั้น” แทน'))return;
+  const button=$('#wellnessRemindNowBtn');button.disabled=true;button.textContent='กำลังส่งทั้งทีม…';try{const r=await api('/api/wellness/remind-now',{method:'POST',body:'{}'});state.wellness=await api('/api/wellness/overview');markViewLoaded('wellness');renderWellness();toast(`ส่งเตือนแล้ว ${Number(r.sent||0)} คน${Number(r.failed||0)?` · ไม่สำเร็จ ${r.failed}`:''}`);}catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='ส่งเตือนทั้งทีมตอนนี้';}}
+function syncWellnessTestTimingUi(){const timing=$('#wellnessTestTiming')?.value||'now';$('#wellnessTestTimeField')?.classList.toggle('hidden',timing!=='custom');const btn=$('#wellnessTestSendBtn');if(btn)btn.textContent=timing==='now'?'ส่งทดสอบตอนนี้':timing==='1'?'ทดสอบอีก 1 นาที':timing==='5'?'ทดสอบอีก 5 นาที':'ตั้งเวลาทดสอบ';}
+async function sendWellnessTestReminder(){const btn=$('#wellnessTestSendBtn'),timing=$('#wellnessTestTiming')?.value||'now';const body=timing==='now'?{mode:'now'}:timing==='custom'?{mode:'time',scheduled_time:$('#wellnessTestTime')?.value||''}:{mode:'delay',delay_minutes:Number(timing)};if(timing==='custom'&&!body.scheduled_time)return toast('กรุณาเลือกเวลาทดสอบ',true);btn.disabled=true;try{const r=await api('/api/wellness/test-reminder',{method:'POST',body:JSON.stringify(body)});state.wellness=await api('/api/wellness/overview');markViewLoaded('wellness');renderWellness();toast(r.sent?'ส่งข้อความทดสอบให้คุณแล้ว':'ตั้งเวลาทดสอบแล้ว · ส่งเฉพาะคุณ');}catch(e){toast(e.message,true)}finally{btn.disabled=false;syncWellnessTestTimingUi();}}
+async function cancelWellnessTestSchedule(id){if(!id)return;try{await api(`/api/wellness/test-schedules/${id}`,{method:'DELETE'});state.wellness=await api('/api/wellness/overview');renderWellness();toast('ยกเลิกเวลาทดสอบแล้ว');}catch(e){toast(e.message,true)}}
+
+function eventRuleLabel(v){return ({attendance_streak:'มาตรงเวลาเป็นชุด' ,learning_complete:'เรียนจบหลักสูตร',kpi_complete:'KPI สำเร็จ',birthday:'วันเกิด',work_anniversary:'ครบรอบงาน',manual:'HR ให้เอง',custom:'กำหนดเอง'})[v]||v;}
 function rewardEmoji(v){return ({gift:'🎁',cash:'💸',leave:'🌴',perk:'✨',custom:'⭐'})[v]||'🎁';}
 function redemptionLabel(v){return ({pending:'รออนุมัติ',approved:'อนุมัติแล้ว',rejected:'ปฏิเสธ',delivered:'ส่งมอบแล้ว',cancelled:'ยกเลิก'})[v]||v;}
 function redemptionActions(r){if(r.status==='pending')return `<div class="row-actions"><button class="text-btn success-text" onclick="window.rewardDecision(${r.id},'approve')">อนุมัติ</button><button class="text-btn danger-text" onclick="window.rewardDecision(${r.id},'reject')">ปฏิเสธ</button></div>`;if(r.status==='approved')return `<button class="text-btn" onclick="window.rewardDecision(${r.id},'deliver')">ส่งมอบแล้ว</button>`;return '';}

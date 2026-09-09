@@ -1,3 +1,12 @@
+## V1.0-P7.87 — Nakna Move Test Mode
+- เพิ่มโหมด “ทดลองกับฉันเท่านั้น” แยกจากการแจ้งเตือนทีมงานจริง
+- ส่งทดสอบทันที / อีก 1 นาที / อีก 5 นาที / กำหนดเวลาได้
+- ข้อความทดสอบส่งเฉพาะ Employee Profile ของผู้ใช้ที่ล็อกอินและเชื่อม LINE แล้ว
+- Test Routine ไม่บันทึกสถานะ Wellness จริงและไม่ให้แต้ม
+- เพิ่มป้าย TEST MODE ทั้งใน LINE และหน้า Stretch
+- ปุ่มส่งเตือนทั้งทีมมี Confirm ป้องกันกดผิด
+- Cron เปลี่ยนเป็นทุก 1 นาทีเพื่อรองรับเวลาทดสอบ โดยการเตือนจริงยังทำตามเวลาที่ตั้งไว้เท่านั้น
+
 ## V1.0-P7.85 — Compact Attendance LINE Reply
 - หยุดส่ง LINE Location/Map อัตโนมัติหลังเช็กอินและเช็กเอาต์ เพื่อไม่ให้แชทยาวเกินจำเป็น
 - การ์ดยืนยันยังคงแสดง เวลา สถานที่ สถานะพื้นที่ ระยะ และ GPS ตามเดิม
@@ -223,3 +232,11 @@
 - Removed the legacy LINE location quick-reply from all compatibility code paths.
 - Clears stale legacy attendance sessions before starting Quick Attendance.
 - Added build marker `Quick Attendance P7.71` to the attendance page for deployment verification.
+
+
+## V1.0-P7.86 — Nakna Move / Daily Wellness
+- เพิ่มฟีเจอร์พักยืดกับนากนะ: LINE เตือนวันละครั้งตามเวลาที่ HR ตั้ง (Cron ทุก 15 นาที)
+- พนักงานเปิดหน้าพักยืด 3/5 นาที พร้อมกล้องเป็นกระจก (วิดีโอไม่อัปโหลด) และ 6 ท่ามาตรฐาน
+- รองรับ Snooze / ข้ามวันนี้ / ไม่เตือนวันลาและวันหยุด / แจ้งเฉพาะวันทำงาน
+- HR ดูสถานะวันนี้และส่งเตือนทดสอบได้
+- เชื่อมแต้มของรางวัลแบบ idempotent เมื่อทำครบ

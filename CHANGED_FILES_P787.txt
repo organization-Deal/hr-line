@@ -1,0 +1,28 @@
+Nakna HR V1.0-P7.87 — Nakna Move Test Mode
+
+Changed / added in this release:
+- index.html
+- app.js
+- styles.css
+- wellness.html
+- wellness.js
+- wellness.css
+- index.js
+- src/index.js
+- public/index.html
+- public/app.js
+- public/styles.css
+- public/wellness.html
+- public/wellness.js
+- public/wellness.css
+- wrangler.jsonc
+- package.json
+- CHANGELOG.md
+
+Highlights:
+- Private “ทดลองกับฉันเท่านั้น” mode
+- Test now / +1 min / +5 min / custom time
+- TEST MODE does not create real wellness activity and does not award points
+- Real team reminder remains independently enabled/disabled
+- “Send whole team now” requires explicit confirmation
+- Cron every minute for private scheduled tests; real reminders still fire only at configured reminder time

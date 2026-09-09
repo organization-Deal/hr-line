@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.85';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.85';
+const NAKNA_RUNTIME_RELEASE = 'P7.87';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.87';
 const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -1588,6 +1588,17 @@ export default {
         return await submitQuickAttendance(request, env, publicAttendanceMatch[1], publicAttendanceMatch[2], ctx);
       }
 
+      const publicWellnessMatch = url.pathname.match(/^\/api\/public\/wellness\/([A-Za-z0-9_-]{32,})(?:\/(start|complete|skip))?$/);
+      if (publicWellnessMatch) {
+        await ensureV100P4Ready(env.DB);
+        await ensureWellnessReady(env.DB);
+        const action=publicWellnessMatch[2]||null,testMode=url.searchParams.get('test')==='1';
+        if (!action && request.method === 'GET') return await getPublicWellness(env, publicWellnessMatch[1],testMode);
+        if (action==='start' && request.method === 'POST') return await startPublicWellness(request, env, publicWellnessMatch[1],testMode);
+        if (action==='complete' && request.method === 'POST') return await completePublicWellness(request, env, publicWellnessMatch[1],testMode);
+        if (action==='skip' && request.method === 'POST') return await skipPublicWellness(request, env, publicWellnessMatch[1],testMode);
+      }
+
       const dedicatedLineWebhookMatch = url.pathname.match(/^\/webhooks\/line\/([A-Za-z0-9_-]{32,})$/);
       if (dedicatedLineWebhookMatch && request.method === 'POST') {
         // Keep LINE webhook hot path light. handleLineWebhook() acknowledges first,
@@ -1627,12 +1638,19 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // Cloudflare Cron runs in UTC. 01:00 UTC = 08:00 Asia/Bangkok.
-    await Promise.all([
-      sendDailyHrBrief(env),
-      runPhase5DailyAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'phase5_daily_failed',message:String(error?.message||error)}))),
-      syncAllRecruitmentGmail(env).catch(error=>console.error(JSON.stringify({level:'error',event:'recruitment_gmail_daily_failed',message:String(error?.message||error)})))
-    ]);
+    // P7.87: cron runs every minute so private test reminders can be scheduled precisely.
+    // Real team Wellness reminders still fire only at the configured quarter-hour.
+    // Existing once-a-day jobs still run only at 08:00 Asia/Bangkok.
+    const clock=bangkokClock();
+    const jobs=[runWellnessReminderAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'wellness_reminder_failed',message:String(error?.message||error)}))),runWellnessTestAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'wellness_test_failed',message:String(error?.message||error)})))];
+    if(clock.hour===8 && clock.minute===0){
+      jobs.push(
+        sendDailyHrBrief(env),
+        runPhase5DailyAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'phase5_daily_failed',message:String(error?.message||error)}))),
+        syncAllRecruitmentGmail(env).catch(error=>console.error(JSON.stringify({level:'error',event:'recruitment_gmail_daily_failed',message:String(error?.message||error)})))
+      );
+    }
+    await Promise.all(jobs);
   },
 };
 
@@ -3691,6 +3709,46 @@ async function handleApi(request, env, url, auth, ctx) {
     if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์จัดการการแลกของ'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); try{const result=await decideRewardRedemption(env,clientId,Number(redemptionDecisionMatch[1]),redemptionDecisionMatch[2],Number(auth.user.id),String(body.note||'').trim());return json({ok:true,...result});}catch(e){return json({error:e.message},e.status||400);}
   }
 
+  if(path==='/api/wellness/overview' && method==='GET'){
+    if(!canViewEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ดู Wellness'},403);
+    await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB);
+    const overview=await getWellnessOverview(env.DB,clientId),tester=await getWellnessTestEmployee(env.DB,clientId,auth.user),scheduled=await getPendingWellnessTest(env.DB,clientId,auth.user.id);
+    overview.test_mode={employee:tester?{id:Number(tester.id),employee_code:tester.employee_code,first_name:tester.first_name,nickname:tester.nickname,line_connected:Boolean(tester.line_user_id)}:null,scheduled:scheduled||null};
+    return json(overview);
+  }
+  if(path==='/api/wellness/settings' && method==='PATCH'){
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ตั้งค่า Wellness'},403);
+    await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB); const body=await safeJson(request);
+    const reminderTime=normalizeQuarterHour(String(body.reminder_time||'15:00'));
+    const duration=[3,5].includes(Number(body.duration_minutes))?Number(body.duration_minutes):3;
+    const snooze=[15,30,45,60].includes(Number(body.snooze_minutes))?Number(body.snooze_minutes):30;
+    await env.DB.prepare(`INSERT INTO wellness_settings (client_id,enabled,reminder_time,duration_minutes,snooze_minutes,points_reward,camera_enabled,workday_only,updated_at)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,CURRENT_TIMESTAMP)
+      ON CONFLICT(client_id) DO UPDATE SET enabled=excluded.enabled,reminder_time=excluded.reminder_time,duration_minutes=excluded.duration_minutes,snooze_minutes=excluded.snooze_minutes,points_reward=excluded.points_reward,camera_enabled=excluded.camera_enabled,workday_only=excluded.workday_only,updated_at=CURRENT_TIMESTAMP`)
+      .bind(clientId,body.enabled?1:0,reminderTime,duration,snooze,Math.max(0,num(body.points_reward,0)),body.camera_enabled===false?0:1,body.workday_only===false?0:1).run();
+    return json({ok:true,settings:await getWellnessSettings(env.DB,clientId)});
+  }
+  if(path==='/api/wellness/remind-now' && method==='POST'){
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ส่ง Wellness Reminder'},403);
+    await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB);
+    const result=await sendWellnessReminderForClient(env,clientId,{mode:'force'});
+    return json({ok:true,...result});
+  }
+  if(path==='/api/wellness/test-reminder' && method==='POST'){
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ทดสอบ Wellness'},403);
+    await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB); const tester=await getWellnessTestEmployee(env.DB,clientId,auth.user); if(!tester)return json({error:'ไม่พบ Employee Profile ที่ใช้อีเมลเดียวกับบัญชีนี้'},409); if(!tester.line_user_id)return json({error:'Employee Profile ของคุณยังไม่ได้เชื่อม LINE'},409);
+    const body=await safeJson(request),mode=String(body.mode||'now');
+    if(mode==='now'){const result=await sendWellnessTestReminderToEmployee(env,clientId,Number(tester.id));return json({ok:true,...result});}
+    let scheduledFor=null;if(mode==='delay'){const mins=[1,5].includes(Number(body.delay_minutes))?Number(body.delay_minutes):1;scheduledFor=sqliteUtc(Date.now()+mins*60000);}else if(mode==='time'){scheduledFor=nextBangkokTimeSql(body.scheduled_time);if(!scheduledFor)return json({error:'กรุณาระบุเวลาทดสอบ'},400);}else return json({error:'รูปแบบเวลาทดสอบไม่ถูกต้อง'},400);
+    await env.DB.prepare(`UPDATE wellness_test_schedules SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND requested_by_user_id=?2 AND status='scheduled'`).bind(clientId,Number(auth.user.id)).run();
+    const r=await env.DB.prepare(`INSERT INTO wellness_test_schedules (client_id,requested_by_user_id,employee_id,scheduled_for,status) VALUES (?1,?2,?3,?4,'scheduled')`).bind(clientId,Number(auth.user.id),Number(tester.id),scheduledFor).run();
+    return json({ok:true,scheduled:true,id:Number(r.meta.last_row_id),scheduled_for:scheduledFor});
+  }
+  const wellnessTestScheduleMatch=path.match(/^\/api\/wellness\/test-schedules\/(\d+)$/);
+  if(wellnessTestScheduleMatch && method==='DELETE'){
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ยกเลิกการทดสอบ'},403); await ensureWellnessReady(env.DB); const id=Number(wellnessTestScheduleMatch[1]); await env.DB.prepare(`UPDATE wellness_test_schedules SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2 AND requested_by_user_id=?3 AND status='scheduled'`).bind(id,clientId,Number(auth.user.id)).run(); return json({ok:true});
+  }
+
   if(path==='/api/analytics/overview' && method==='GET'){
     if(!canViewAnalytics(auth.role))return json({error:'ไม่มีสิทธิ์ดู People Analytics'},403); await ensureV100P5Ready(env.DB); return json(await getPeopleAnalytics(env.DB,clientId));
   }
@@ -4056,6 +4114,7 @@ async function processLineEvent(event, env, lineCtx) {
     if(['คำขอของฉัน','my requests','คำขอ','สถานะคำขอ'].includes(lower)) return sendEmployeeServiceHistory(env,event.replyToken,emp,accessToken);
     if(['เรียน','เรียนรู้','onboarding','learning','kpi','kpi ของฉัน','เป้าหมาย'].includes(lower)) return sendLearningPortal(env,event.replyToken,emp,accessToken);
     if(['แต้ม','คะแนน','ของรางวัล','reward','rewards','points','อันดับ'].includes(lower)) return sendEngagementPortal(env,event.replyToken,emp,accessToken);
+    if(['ยืด','ยืดเส้น','พักยืด','stretch','wellness','move'].includes(lower)) return sendWellnessPortal(env,event.replyToken,emp,accessToken);
     if(['แจ้ง hr','แจ้งhr','hr','แจ้งปัญหา','ติดต่อ hr'].includes(lower)){
       return sendHrCaseForm(env,event.replyToken,emp,accessToken);
     }
@@ -4132,6 +4191,21 @@ async function processLineEvent(event, env, lineCtx) {
       if(!already)await env.DB.prepare(`UPDATE broadcast_deliveries SET acknowledged_at=CURRENT_TIMESTAMP WHERE id=?1 AND acknowledged_at IS NULL`).bind(Number(row.delivery_id)).run();
       return replyLineMessages(accessToken,event.replyToken,[buildBroadcastAcknowledgedFlex(row,already)]);
     }
+    if(action==='wellness_snooze'){
+      await ensureWellnessReady(env.DB); const settings=await getWellnessSettings(env.DB,Number(emp.client_id)); const mins=Number(settings.snooze_minutes||30); const today=dateInBangkok(); const until=new Date(Date.now()+mins*60000).toISOString();
+      await env.DB.prepare(`INSERT INTO wellness_sessions (client_id,employee_id,session_date,status,snoozed_until,updated_at) VALUES (?1,?2,?3,'reminded',?4,CURRENT_TIMESTAMP)
+        ON CONFLICT(client_id,employee_id,session_date) DO UPDATE SET status=CASE WHEN wellness_sessions.status IN ('completed','skipped') THEN wellness_sessions.status ELSE 'reminded' END,snoozed_until=CASE WHEN wellness_sessions.status IN ('completed','skipped') THEN wellness_sessions.snoozed_until ELSE excluded.snoozed_until END,updated_at=CURRENT_TIMESTAMP`)
+        .bind(Number(emp.client_id),Number(emp.id),today,until).run();
+      return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ไว้เตือนให้อีกที',`นากนะจะเตือนอีกประมาณ ${mins} นาที · ถ้าทำไปแล้ว ระบบจะไม่เตือนซ้ำ`,'teal')]);
+    }
+    if(action==='wellness_skip'){
+      await ensureWellnessReady(env.DB); const today=dateInBangkok();
+      await env.DB.prepare(`INSERT INTO wellness_sessions (client_id,employee_id,session_date,status,skipped_at,snoozed_until,updated_at) VALUES (?1,?2,?3,'skipped',CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP)
+        ON CONFLICT(client_id,employee_id,session_date) DO UPDATE SET status=CASE WHEN wellness_sessions.status='completed' THEN 'completed' ELSE 'skipped' END,skipped_at=CASE WHEN wellness_sessions.status='completed' THEN wellness_sessions.skipped_at ELSE CURRENT_TIMESTAMP END,snoozed_until=NULL,updated_at=CURRENT_TIMESTAMP`)
+        .bind(Number(emp.client_id),Number(emp.id),today).run();
+      return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ข้ามวันนี้แล้ว','ไม่เป็นไร ไว้วันทำงานถัดไปนากนะค่อยชวนใหม่ 🙂','teal')]);
+    }
+    if(action==='wellness') return sendWellnessPortal(env,event.replyToken,emp,accessToken);
     if(action==='menu') return replyLineMessages(accessToken,event.replyToken,[await buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp)]);
     if(action==='quick_attendance_unavailable'){
       const mode=data.get('mode')==='checkout'?'checkout':'checkin';
@@ -5052,7 +5126,8 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const attendanceAccessToken=attendanceToken||portalToken||null;
   const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.79`:null;
   const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.79`:null;
-  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,NAKNA_RUNTIME_RELEASE);
+  const wellnessUrl=portalToken?`${base}/wellness.html?token=${encodeURIComponent(portalToken)}`:null;
+  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,wellnessUrl,NAKNA_RUNTIME_RELEASE);
 }
 
 
@@ -6220,6 +6295,201 @@ async function sendEngagementPortal(env,replyToken,emp,accessToken){
   return replyLineMessages(accessToken,replyToken,[{type:'flex',altText:'แต้ม & ของรางวัล',contents:lineBubble({eyebrow:'NAKNA REWARDS',title:`${Number(wallet?.balance||0).toLocaleString('th-TH')} แต้ม`,subtitle:emp.nickname||emp.first_name,status:`อันดับ #${rank}`,statusTone:'warning',body:[lineInfoCard([lineInfoRow('แต้มคงเหลือ',`${Number(wallet?.balance||0).toLocaleString('th-TH')} แต้ม`,LINE_CI.warning),lineInfoRow('ได้สะสม',`${Number(wallet?.lifetime_earned||0).toLocaleString('th-TH')} แต้ม`),lineInfoRow('ของรางวัล',`${Number(rewards?.n||0)} รายการ`)]),lineText('เปิด Employee Portal เพื่อดูประวัติแต้ม แลกของรางวัล และดู Leaderboard','xs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดแต้ม & ของรางวัล',{type:'uri',label:'เปิดของรางวัล',uri:url})]})}]);
 }
 
+async function ensureWellnessReady(db){
+  await db.prepare(`CREATE TABLE IF NOT EXISTS wellness_settings (
+    client_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    reminder_time TEXT NOT NULL DEFAULT '15:00',
+    duration_minutes INTEGER NOT NULL DEFAULT 3,
+    snooze_minutes INTEGER NOT NULL DEFAULT 30,
+    points_reward REAL NOT NULL DEFAULT 0,
+    camera_enabled INTEGER NOT NULL DEFAULT 1,
+    workday_only INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS wellness_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    session_date TEXT NOT NULL,
+    routine_code TEXT NOT NULL DEFAULT 'office_stretch_v1',
+    status TEXT NOT NULL DEFAULT 'reminded',
+    reminder_sent_at TEXT,
+    reminder_count INTEGER NOT NULL DEFAULT 0,
+    snoozed_until TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    skipped_at TEXT,
+    duration_seconds INTEGER,
+    points_awarded REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(client_id,employee_id,session_date),
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_wellness_sessions_client_date ON wellness_sessions(client_id,session_date,status)`).run().catch(()=>{});
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_wellness_sessions_snooze ON wellness_sessions(snoozed_until,status)`).run().catch(()=>{});
+  await db.prepare(`CREATE TABLE IF NOT EXISTS wellness_test_schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    requested_by_user_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    scheduled_for TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'scheduled',
+    sent_at TEXT,
+    error_text TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_wellness_test_due ON wellness_test_schedules(status,scheduled_for)`).run().catch(()=>{});
+}
+
+function bangkokClock(date=new Date()){
+  const local=new Date(date.getTime()+7*60*60*1000);
+  const hour=local.getUTCHours(),minute=local.getUTCMinutes();
+  return {date:local.toISOString().slice(0,10),hour,minute,time:`${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`,weekday:(local.getUTCDay()||7)};
+}
+function normalizeQuarterHour(value){
+  const m=String(value||'15:00').match(/^(\d{1,2}):(\d{2})$/); if(!m)return '15:00';
+  let h=Math.max(0,Math.min(23,Number(m[1]))),min=Math.max(0,Math.min(59,Number(m[2])));
+  min=Math.round(min/15)*15; if(min===60){min=0;h=(h+1)%24;}
+  return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+}
+async function getWellnessSettings(db,clientId){
+  await ensureWellnessReady(db); const cid=Number(clientId);
+  await db.prepare(`INSERT OR IGNORE INTO wellness_settings (client_id) VALUES (?1)`).bind(cid).run();
+  return db.prepare('SELECT * FROM wellness_settings WHERE client_id=?1').bind(cid).first();
+}
+function wellnessRoutine(durationMinutes=3){
+  const base=[
+    ['shoulders','หมุนหัวไหล่','หมุนหัวไหล่ไปด้านหลังช้า ๆ ให้ไหล่ผ่อนคลาย','10 รอบ'],
+    ['neck','ยืดคอซ้าย–ขวา','เอียงศีรษะเข้าหาไหล่เบา ๆ ไม่กดหรือฝืน','15 วินาที / ข้าง'],
+    ['chest','เปิดอกและไหล่','ประสานมือด้านหลังหรือวางมือที่เอว แล้วเปิดอกเบา ๆ','ค้างไว้'],
+    ['wrists','ยืดข้อมือ','เหยียดแขนไปด้านหน้า ใช้อีกมือดึงฝ่ามือเบา ๆ','15 วินาที / ข้าง'],
+    ['twist','บิดลำตัวเบา ๆ','นั่งหรือยืนหลังตรง บิดลำตัวช้า ๆ ไปทีละข้าง','15 วินาที / ข้าง'],
+    ['reach','ลุกยืนและยืดตัว','ยืนขึ้น ยกแขนเหนือศีรษะ หายใจสบาย ๆ แล้วยืดตัว','ค้างไว้'],
+  ];
+  const total=Math.max(180,Number(durationMinutes||3)*60); const per=Math.floor(total/base.length); let remaining=total;
+  return base.map((x,i)=>{const seconds=i===base.length-1?remaining:per;remaining-=seconds;return {id:x[0],title:x[1],instruction:x[2],cue:x[3],seconds};});
+}
+async function getWellnessTestEmployee(db,clientId,user){
+  const email=String(user?.email||'').trim(); if(!email)return null;
+  return db.prepare(`SELECT id,employee_code,first_name,last_name,nickname,email,line_user_id,line_provider_scope FROM employees WHERE client_id=?1 AND status='active' AND lower(email)=lower(?2) LIMIT 1`).bind(Number(clientId),email).first();
+}
+function sqliteUtc(date){return new Date(date).toISOString().slice(0,19).replace('T',' ');}
+function nextBangkokTimeSql(value){
+  const m=String(value||'').match(/^(\d{1,2}):(\d{2})$/); if(!m)return null;
+  const c=bangkokClock(),[y,mo,d]=c.date.split('-').map(Number),h=Math.max(0,Math.min(23,Number(m[1]))),mi=Math.max(0,Math.min(59,Number(m[2])));
+  let ms=Date.UTC(y,mo-1,d,h-7,mi,0); if(ms<=Date.now()+5000)ms+=86400000; return sqliteUtc(ms);
+}
+async function getPendingWellnessTest(db,clientId,userId){
+  return db.prepare(`SELECT id,employee_id,scheduled_for,status FROM wellness_test_schedules WHERE client_id=?1 AND requested_by_user_id=?2 AND status='scheduled' ORDER BY scheduled_for LIMIT 1`).bind(Number(clientId),Number(userId)).first();
+}
+async function getWellnessOverview(db,clientId){
+  await ensureV100P4Ready(db); await ensureWellnessReady(db); const cid=Number(clientId),today=dateInBangkok(); const settings=await getWellnessSettings(db,cid);
+  const [eligibleRes,sessionsRes]=await Promise.all([
+    db.prepare(`SELECT id,employee_code,first_name,last_name,nickname,department_id,line_user_id FROM employees WHERE client_id=?1 AND status='active' AND COALESCE(people_status,'employee') IN ('probation','employee') ORDER BY nickname,first_name`).bind(cid).all(),
+    db.prepare(`SELECT ws.*,e.employee_code,e.first_name,e.last_name,e.nickname,d.name AS department_name FROM wellness_sessions ws JOIN employees e ON e.id=ws.employee_id LEFT JOIN departments d ON d.id=e.department_id WHERE ws.client_id=?1 AND ws.session_date=?2 ORDER BY COALESCE(ws.completed_at,ws.started_at,ws.reminder_sent_at,ws.updated_at) DESC`).bind(cid,today).all(),
+  ]);
+  const eligible=eligibleRes.results||[],sessions=sessionsRes.results||[]; const completed=sessions.filter(x=>x.status==='completed').length,skipped=sessions.filter(x=>x.status==='skipped').length,started=sessions.filter(x=>x.status==='started').length,reminded=sessions.filter(x=>x.status==='reminded').length;
+  const lineEligible=eligible.filter(x=>x.line_user_id).length;
+  return {settings:{...settings,enabled:Boolean(Number(settings.enabled)),camera_enabled:Boolean(Number(settings.camera_enabled)),workday_only:Boolean(Number(settings.workday_only))},summary:{eligible:eligible.length,line_connected:lineEligible,completed,skipped,started,reminded,pending:Math.max(0,lineEligible-completed-skipped)},today_sessions:sessions,routine:wellnessRoutine(settings.duration_minutes),today};
+}
+async function getPublicWellness(env,token,testMode=false){
+  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิด “พักยืด” จาก LINE ใหม่'},401);
+  await ensureWellnessReady(env.DB); const settings=await getWellnessSettings(env.DB,Number(access.client_id)); const today=dateInBangkok(); const session=await env.DB.prepare(`SELECT * FROM wellness_sessions WHERE client_id=?1 AND employee_id=?2 AND session_date=?3`).bind(Number(access.client_id),Number(access.employee_id),today).first();
+  return json({ok:true,test_mode:Boolean(testMode),employee:{id:Number(access.employee_id),name:access.nickname||access.first_name,company_name:access.company_name||''},settings:{enabled:Boolean(Number(settings.enabled)),duration_minutes:Number(settings.duration_minutes||3),camera_enabled:Boolean(Number(settings.camera_enabled)),points_reward:testMode?0:Number(settings.points_reward||0)},session:testMode?null:(session||null),routine:wellnessRoutine(settings.duration_minutes),today});
+}
+async function startPublicWellness(request,env,token,testMode=false){
+  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ'},401); await ensureWellnessReady(env.DB); if(testMode)return json({ok:true,test_mode:true}); const today=dateInBangkok();
+  const existing=await env.DB.prepare(`SELECT * FROM wellness_sessions WHERE client_id=?1 AND employee_id=?2 AND session_date=?3`).bind(Number(access.client_id),Number(access.employee_id),today).first();
+  if(existing?.status==='completed')return json({ok:true,already_completed:true,session:existing});
+  await env.DB.prepare(`INSERT INTO wellness_sessions (client_id,employee_id,session_date,status,started_at,snoozed_until,updated_at) VALUES (?1,?2,?3,'started',CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP)
+    ON CONFLICT(client_id,employee_id,session_date) DO UPDATE SET status=CASE WHEN wellness_sessions.status='completed' THEN 'completed' ELSE 'started' END,started_at=COALESCE(wellness_sessions.started_at,CURRENT_TIMESTAMP),snoozed_until=NULL,updated_at=CURRENT_TIMESTAMP`)
+    .bind(Number(access.client_id),Number(access.employee_id),today).run();
+  return json({ok:true});
+}
+async function completePublicWellness(request,env,token,testMode=false){
+  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ'},401); await ensureWellnessReady(env.DB); if(testMode){await pushWellnessTestCompleted(env,access).catch(()=>{});return json({ok:true,test_mode:true,points_awarded:0});} await ensurePhase5Defaults(env.DB,Number(access.client_id)); const today=dateInBangkok(); const body=await safeJson(request); const settings=await getWellnessSettings(env.DB,Number(access.client_id));
+  let session=await env.DB.prepare(`SELECT * FROM wellness_sessions WHERE client_id=?1 AND employee_id=?2 AND session_date=?3`).bind(Number(access.client_id),Number(access.employee_id),today).first(); const already=session?.status==='completed';
+  if(!already){
+    await env.DB.prepare(`INSERT INTO wellness_sessions (client_id,employee_id,session_date,status,started_at,completed_at,duration_seconds,snoozed_until,updated_at) VALUES (?1,?2,?3,'completed',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?4,NULL,CURRENT_TIMESTAMP)
+      ON CONFLICT(client_id,employee_id,session_date) DO UPDATE SET status='completed',started_at=COALESCE(wellness_sessions.started_at,CURRENT_TIMESTAMP),completed_at=CURRENT_TIMESTAMP,duration_seconds=?4,snoozed_until=NULL,updated_at=CURRENT_TIMESTAMP`)
+      .bind(Number(access.client_id),Number(access.employee_id),today,Math.max(0,Math.floor(Number(body.duration_seconds||0)))).run();
+    const points=Math.max(0,Number(settings.points_reward||0));
+    if(points>0){
+      try{await addPointTransaction(env.DB,{clientId:Number(access.client_id),employeeId:Number(access.employee_id),transactionType:'earn',points,cashValue:0,referenceType:'wellness',referenceId:today,idempotencyKey:`wellness:${access.client_id}:${access.employee_id}:${today}`,note:'พักยืดกับนากนะครบวันนี้',createdByUserId:null}); await env.DB.prepare(`UPDATE wellness_sessions SET points_awarded=?1 WHERE client_id=?2 AND employee_id=?3 AND session_date=?4`).bind(points,Number(access.client_id),Number(access.employee_id),today).run();}catch(e){if(!/UNIQUE/i.test(String(e?.message||e)))console.warn('wellness points',e);}
+    }
+  }
+  session=await env.DB.prepare(`SELECT * FROM wellness_sessions WHERE client_id=?1 AND employee_id=?2 AND session_date=?3`).bind(Number(access.client_id),Number(access.employee_id),today).first();
+  if(!already) await pushWellnessCompleted(env,access,session).catch(()=>{});
+  return json({ok:true,already_completed:already,session,points_awarded:Number(session?.points_awarded||0)});
+}
+async function skipPublicWellness(request,env,token,testMode=false){
+  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ'},401); await ensureWellnessReady(env.DB); if(testMode)return json({ok:true,test_mode:true}); const today=dateInBangkok();
+  await env.DB.prepare(`INSERT INTO wellness_sessions (client_id,employee_id,session_date,status,skipped_at,snoozed_until,updated_at) VALUES (?1,?2,?3,'skipped',CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP)
+    ON CONFLICT(client_id,employee_id,session_date) DO UPDATE SET status=CASE WHEN wellness_sessions.status='completed' THEN 'completed' ELSE 'skipped' END,skipped_at=CASE WHEN wellness_sessions.status='completed' THEN wellness_sessions.skipped_at ELSE CURRENT_TIMESTAMP END,snoozed_until=NULL,updated_at=CURRENT_TIMESTAMP`)
+    .bind(Number(access.client_id),Number(access.employee_id),today).run(); return json({ok:true});
+}
+function buildWellnessReminderFlex(emp,url,settings){
+  const minutes=Number(settings.duration_minutes||3),snooze=Number(settings.snooze_minutes||30),points=Number(settings.points_reward||0);
+  return {type:'flex',altText:`ถึงเวลาพักยืด ${minutes} นาที · นากนะ`,contents:lineBubble({eyebrow:'NAKNA · MOVE',title:'ถึงเวลาขยับตัวแล้ว 🧘',subtitle:`พักจากหน้าจอ ${minutes} นาที แล้วค่อยกลับมาลุยต่อ`,status:'Wellness break',statusTone:'success',body:[lineInfoCard([lineInfoRow('ใช้เวลา',`${minutes} นาที`),lineInfoRow('กล้อง','ใช้เป็นกระจกเท่านั้น · ไม่อัปโหลดวิดีโอ',LINE_CI.primary),...(points>0?[lineInfoRow('ทำครบ',`+${points} แต้ม`,LINE_CI.warning)]:[])],'teal'),lineText('เลือกพื้นที่ที่ปลอดภัย ขยับเบา ๆ และหยุดทันทีหากรู้สึกเจ็บหรือเวียนหัว','xs',LINE_CI.muted)],footer:[linePrimaryButton(`เริ่มยืด ${minutes} นาที`,{type:'uri',label:'เริ่มยืด',uri:url}),lineSecondaryButton(`เตือนอีก ${snooze} นาที`,{type:'postback',label:`เตือนอีก ${snooze} นาที`,data:'action=wellness_snooze'},LINE_CI.mintSoft),lineSecondaryButton('ข้ามวันนี้',{type:'postback',label:'ข้ามวันนี้',data:'action=wellness_skip'},'#F7F9F8')]})};
+}
+async function sendWellnessPortal(env,replyToken,emp,accessToken){
+  await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB); const token=await getEmployeePortalTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id)); if(!token)return replyLine(accessToken,replyToken,'เปิดพักยืดไม่สำเร็จ กรุณาลองใหม่'); const settings=await getWellnessSettings(env.DB,Number(emp.client_id)); const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,''); const url=`${base}/wellness.html?token=${encodeURIComponent(token)}`; return replyLineMessages(accessToken,replyToken,[buildWellnessReminderFlex(emp,url,settings)]);
+}
+async function pushWellnessCompleted(env,access,session){
+  const employee=await env.DB.prepare(`SELECT line_user_id,line_provider_scope,nickname,first_name FROM employees WHERE id=?1 AND client_id=?2`).bind(Number(access.employee_id),Number(access.client_id)).first(); if(!employee?.line_user_id)return false; const token=await getAccessTokenForProviderScope(env,Number(access.client_id),employee.line_provider_scope); if(!token)return false; const pts=Number(session?.points_awarded||0); return pushLineMessages(token,employee.line_user_id,[{type:'flex',altText:'พักยืดกับนากนะเรียบร้อย',contents:lineBubble({eyebrow:'NAKNA · MOVE',title:'พักยืดครบแล้ว ✅',subtitle:'ขอบคุณที่ลุกมาขยับตัวระหว่างวัน',status:pts>0?`+${pts} แต้ม`:'ทำครบวันนี้',statusTone:'success',body:[lineText('พักสายตา ดื่มน้ำ แล้วค่อยกลับไปทำงานต่อได้เลย','sm',LINE_CI.muted)]})}]);
+}
+function buildWellnessTestReminderFlex(emp,url,settings){
+  const minutes=Number(settings.duration_minutes||3);
+  return {type:'flex',altText:`🧪 ทดสอบ Nakna Move ${minutes} นาที`,contents:lineBubble({eyebrow:'NAKNA · MOVE · TEST',title:'🧪 โหมดทดสอบ',subtitle:'ข้อความนี้ส่งเฉพาะคุณ ไม่ส่งให้ทีมงาน',status:'TEST MODE',statusTone:'warning',body:[lineInfoCard([lineInfoRow('ผู้ทดสอบ',emp.nickname||emp.first_name||'คุณ'),lineInfoRow('ใช้เวลา',`${minutes} นาที`),lineInfoRow('Activity','ไม่บันทึกสถานะจริง',LINE_CI.warning),lineInfoRow('แต้ม','ไม่ให้แต้มในการทดสอบ')],'teal'),lineText('ลองเปิดกล้อง ทำ Routine และ Flow ให้ครบได้เหมือนของจริง','xs',LINE_CI.muted)],footer:[linePrimaryButton(`เริ่มทดสอบ ${minutes} นาที`,{type:'uri',label:'เริ่มทดสอบ',uri:url})]})};
+}
+async function sendWellnessTestReminderToEmployee(env,clientId,employeeId){
+  await ensureWellnessReady(env.DB); const cid=Number(clientId),eid=Number(employeeId),settings=await getWellnessSettings(env.DB,cid);
+  const emp=await env.DB.prepare(`SELECT e.*,c.name AS company_name FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.client_id=?2 AND e.status='active'`).bind(eid,cid).first();
+  if(!emp)throw httpError('ไม่พบ Employee Profile สำหรับทดสอบ',404); if(!emp.line_user_id)throw httpError('Employee Profile นี้ยังไม่ได้เชื่อม LINE',409);
+  const portalToken=await getEmployeePortalTokenForMenu(env.DB,cid,eid); if(!portalToken)throw httpError('สร้างลิงก์ทดสอบไม่สำเร็จ',500);
+  const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,''); const url=`${base}/wellness.html?token=${encodeURIComponent(portalToken)}&test=1`;
+  const accessToken=await getAccessTokenForProviderScope(env,cid,emp.line_provider_scope); if(!accessToken)throw httpError('ไม่พบ LINE access token ของบริษัท',409);
+  const ok=await pushLineMessages(accessToken,emp.line_user_id,[buildWellnessTestReminderFlex(emp,url,settings)]); if(!ok)throw httpError('ส่ง LINE ทดสอบไม่สำเร็จ',502);
+  return {sent:true,employee_id:eid,employee_name:emp.nickname||emp.first_name};
+}
+async function pushWellnessTestCompleted(env,access){
+  const employee=await env.DB.prepare(`SELECT line_user_id,line_provider_scope,nickname,first_name FROM employees WHERE id=?1 AND client_id=?2`).bind(Number(access.employee_id),Number(access.client_id)).first(); if(!employee?.line_user_id)return false;
+  const token=await getAccessTokenForProviderScope(env,Number(access.client_id),employee.line_provider_scope); if(!token)return false;
+  return pushLineMessages(token,employee.line_user_id,[{type:'flex',altText:'🧪 ทดสอบ Nakna Move ครบแล้ว',contents:lineBubble({eyebrow:'NAKNA · MOVE · TEST',title:'ทดสอบครบแล้ว ✓',subtitle:'Flow ทำงานครบ โดยไม่บันทึก Activity จริง',status:'TEST MODE',statusTone:'warning',body:[lineText('ไม่มีการให้แต้ม และไม่กระทบสถานะ Wellness ของพนักงาน','sm',LINE_CI.muted)]})}]);
+}
+async function sendWellnessReminderForClient(env,clientId,{mode='normal',employeeIds=null}={}){
+  await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB); const cid=Number(clientId),settings=await getWellnessSettings(env.DB,cid),today=dateInBangkok(); if(mode!=='force'&&!Number(settings.enabled||0))return {eligible:0,sent:0,skipped:0,failed:0};
+  const rows=(await env.DB.prepare(`SELECT e.*,c.name AS company_name FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.client_id=?1 AND e.status='active' AND COALESCE(e.people_status,'employee') IN ('probation','employee') AND e.line_user_id IS NOT NULL`).bind(cid).all()).results||[]; const wanted=employeeIds?new Set(employeeIds.map(Number)):null; const employees=wanted?rows.filter(e=>wanted.has(Number(e.id))):rows;
+  const sessions=(await env.DB.prepare(`SELECT * FROM wellness_sessions WHERE client_id=?1 AND session_date=?2`).bind(cid,today).all()).results||[]; const byEmployee=new Map(sessions.map(x=>[Number(x.employee_id),x])); const leaveRows=(await env.DB.prepare(`SELECT DISTINCT employee_id FROM leave_requests WHERE client_id=?1 AND status='approved' AND start_date<=?2 AND end_date>=?2`).bind(cid,today).all()).results||[]; const onLeave=new Set(leaveRows.map(x=>Number(x.employee_id)));
+  let sent=0,skipped=0,failed=0;
+  for(const emp of employees){
+    const existing=byEmployee.get(Number(emp.id)); if(['completed','skipped'].includes(String(existing?.status||''))){skipped++;continue;} if(mode==='normal'&&Number(existing?.reminder_count||0)>0){skipped++;continue;} if(mode==='snooze'&&!existing?.snoozed_until){skipped++;continue;}
+    if(Number(settings.workday_only||0)){const schedule=await resolveEffectiveWorkSchedule(env.DB,emp,today); if(!schedule.is_workday||onLeave.has(Number(emp.id))){skipped++;continue;}}
+    try{const token=await getEmployeePortalTokenForMenu(env.DB,cid,Number(emp.id)); if(!token){failed++;continue;} const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,''); const url=`${base}/wellness.html?token=${encodeURIComponent(token)}`; const accessToken=await getAccessTokenForProviderScope(env,cid,emp.line_provider_scope); if(!accessToken){failed++;continue;} const ok=await pushLineMessages(accessToken,emp.line_user_id,[buildWellnessReminderFlex(emp,url,settings)]); if(!ok){failed++;continue;} sent++; await env.DB.prepare(`INSERT INTO wellness_sessions (client_id,employee_id,session_date,status,reminder_sent_at,reminder_count,snoozed_until,updated_at) VALUES (?1,?2,?3,'reminded',CURRENT_TIMESTAMP,1,NULL,CURRENT_TIMESTAMP)
+      ON CONFLICT(client_id,employee_id,session_date) DO UPDATE SET status=CASE WHEN wellness_sessions.status IN ('completed','skipped') THEN wellness_sessions.status ELSE 'reminded' END,reminder_sent_at=CURRENT_TIMESTAMP,reminder_count=wellness_sessions.reminder_count+1,snoozed_until=NULL,updated_at=CURRENT_TIMESTAMP`).bind(cid,Number(emp.id),today).run();}catch(e){failed++;console.warn(JSON.stringify({event:'wellness_push_failed',client_id:cid,employee_id:Number(emp.id),message:String(e?.message||e)}));}
+  }
+  return {eligible:employees.length,sent,skipped,failed};
+}
+async function runWellnessTestAutomation(env){
+  await ensureWellnessReady(env.DB); const due=(await env.DB.prepare(`SELECT * FROM wellness_test_schedules WHERE status='scheduled' AND datetime(scheduled_for)<=CURRENT_TIMESTAMP ORDER BY scheduled_for LIMIT 20`).all()).results||[]; let sent=0,failed=0;
+  for(const row of due){try{await sendWellnessTestReminderToEmployee(env,Number(row.client_id),Number(row.employee_id));await env.DB.prepare(`UPDATE wellness_test_schedules SET status='sent',sent_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(row.id)).run();sent++;}catch(e){await env.DB.prepare(`UPDATE wellness_test_schedules SET status='failed',error_text=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2`).bind(String(e?.message||e).slice(0,500),Number(row.id)).run();failed++;}}
+  return {sent,failed};
+}
+async function runWellnessReminderAutomation(env){
+  await ensureWellnessReady(env.DB); const clock=bangkokClock(); const settingsRows=(await env.DB.prepare(`SELECT * FROM wellness_settings WHERE enabled=1`).all()).results||[]; let sent=0,clients=0;
+  for(const settings of settingsRows){if(normalizeQuarterHour(settings.reminder_time)===clock.time){const r=await sendWellnessReminderForClient(env,Number(settings.client_id),{mode:'normal'});sent+=Number(r.sent||0);clients++;}}
+  const due=(await env.DB.prepare(`SELECT client_id,GROUP_CONCAT(employee_id) AS employee_ids FROM wellness_sessions WHERE status='reminded' AND snoozed_until IS NOT NULL AND datetime(snoozed_until)<=CURRENT_TIMESTAMP GROUP BY client_id`).all()).results||[];
+  for(const row of due){const ids=String(row.employee_ids||'').split(',').map(Number).filter(Boolean);if(!ids.length)continue;const r=await sendWellnessReminderForClient(env,Number(row.client_id),{mode:'snooze',employeeIds:ids});sent+=Number(r.sent||0);}
+  return {clients,sent,time:clock.time};
+}
+
 function safeJsonParse(value,fallback=null){try{return JSON.parse(value);}catch{return fallback;}}
 
 function canManagePeople(role) {
@@ -7131,7 +7401,7 @@ function buildWelcomeFlex(name,company){
     footer:[linePrimaryButton('เปิดเมนูพนักงาน',{type:'postback',label:'เปิดเมนูพนักงาน',data:'action=menu'})]
   })};
 }
-function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null,quickCheckInUrl=null,quickCheckOutUrl=null,runtimeRelease=NAKNA_RUNTIME_RELEASE){
+function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null,quickCheckInUrl=null,quickCheckOutUrl=null,wellnessUrl=null,runtimeRelease=NAKNA_RUNTIME_RELEASE){
   const name=emp.nickname||emp.first_name;
   const hasManagement=Boolean(ownerAccess?.primary);
   const managementCompany=ownerAccess?.primary?.name||emp.company_name||'';
@@ -7152,6 +7422,7 @@ function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseForm
       lineSecondaryButton('🏖  ขอลางาน',leaveFormUrl?{type:'uri',label:'ขอลางาน',uri:leaveFormUrl}:{type:'postback',label:'ขอลางาน',data:'action=leave_menu'},'#F1F7F5'),
       lineSecondaryButton('📅  สิทธิ์ลา',{type:'postback',label:'สิทธิ์ลา',data:'action=leave_balance'},'#F7F9F8'),
       lineSecondaryButton('🎉  วันหยุดบริษัท',{type:'postback',label:'วันหยุดบริษัท',data:'action=holidays'},'#F7F9F8'),
+      lineSecondaryButton('🧘  พักยืด 3 นาที',wellnessUrl?{type:'uri',label:'พักยืด 3 นาที',uri:wellnessUrl}:{type:'postback',label:'พักยืด 3 นาที',data:'action=wellness'},'#EEF9F5'),
       lineSecondaryButton('🎁  แต้ม & ของรางวัล',{type:'postback',label:'แต้ม & ของรางวัล',data:'action=rewards'},'#FFF7E8'),
       lineSecondaryButton('🔒  แจ้งเรื่องส่วนตัวถึง HR',hrCaseFormUrl?{type:'uri',label:'แจ้ง HR',uri:hrCaseFormUrl}:{type:'postback',label:'แจ้ง HR',data:'action=hr_case'},LINE_CI.coralSoft),
     ],

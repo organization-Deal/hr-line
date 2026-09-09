@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>พักยืดกับนากนะ</title>
+<link rel="stylesheet" href="/wellness.css?v=1.0-p7.87"/>
+</head>
+<body>
+<main class="shell">
+  <header><img src="/logo.png" alt="นากนะ"/><div><span>NAKNA · MOVE</span><strong>พักยืดกับนากนะ</strong><small id="employeeText">กำลังเตรียมกิจกรรม…</small></div></header>
+  <div id="testBanner" class="test-banner hidden"><b>🧪 TEST MODE</b><span>ส่งเฉพาะผู้ทดสอบ · ไม่บันทึก Activity จริง · ไม่ให้แต้ม</span></div>
+  <section id="intro" class="card intro-card">
+    <div class="hero-icon">🧘</div><h1>ลุกมาขยับตัวกัน 3 นาที</h1><p>ท่ายืดเบา ๆ สำหรับคนทำงานหน้าจอ ช่วยให้เปลี่ยนอิริยาบถและพักจากท่าเดิมระหว่างวัน</p>
+    <div class="privacy"><b>กล้องเป็นแค่กระจก</b><span>ภาพประมวลผลบนเครื่องของคุณเท่านั้น นากนะไม่อัปโหลดหรือบันทึกวิดีโอ</span></div>
+    <div class="intro-actions"><button id="cameraBtn" class="secondary">เปิดกล้องเป็นกระจก</button><button id="startBtn" class="primary">เริ่มยืด</button></div>
+    <button id="skipBtn" class="text">ข้ามวันนี้</button>
+    <small class="safety">เลือกพื้นที่ที่ปลอดภัย ขยับเบา ๆ และหยุดทันทีหากรู้สึกเจ็บหรือเวียนหัว</small>
+  </section>
+  <section id="routine" class="card routine-card hidden">
+    <div class="camera-wrap hidden" id="cameraWrap"><video id="camera" playsinline autoplay muted></video><div class="mirror-label">กระจกส่วนตัว · ไม่บันทึก</div></div>
+    <div class="progress"><span id="stepCount">1/6</span><div><i id="progressBar"></i></div><span id="totalTime">03:00</span></div>
+    <div class="step-visual" id="stepVisual">↻</div><p class="eyebrow" id="stepCue">ท่าที่ 1</p><h2 id="stepTitle">หมุนหัวไหล่</h2><p id="stepInstruction">ค่อย ๆ หมุนไปด้านหลัง</p><div class="timer" id="timer">30</div>
+    <div class="routine-actions"><button id="prevBtn" class="secondary">ย้อนกลับ</button><button id="nextBtn" class="primary">ท่าถัดไป</button></div>
+  </section>
+  <section id="done" class="card done-card hidden"><div class="done-icon">✓</div><h1>พักยืดครบแล้ว</h1><p>พักสายตา ดื่มน้ำ แล้วค่อยกลับไปทำงานต่อได้เลย</p><div id="pointsText" class="points hidden"></div><button id="closeBtn" class="primary">ปิดหน้านี้</button></section>
+  <section id="error" class="card error-card hidden"><h2>เปิดกิจกรรมไม่สำเร็จ</h2><p id="errorText"></p><button onclick="location.reload()" class="primary">ลองใหม่</button></section>
+</main>
+<script src="/wellness.js?v=1.0-p7.87" type="module"></script>
+</body>
+</html>
