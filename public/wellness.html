@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#f5faf8"/>
 <title>พักยืดกับนากนะ</title>
-<link rel="stylesheet" href="/wellness.css?v=1.0-p7.89"/>
+<link rel="stylesheet" href="/wellness.css?v=1.0-p7.90"/>
 </head>
 <body>
 <main class="shell">
@@ -40,25 +40,36 @@
         <strong id="poseFeedback">กำลังเปิดกล้อง…</strong>
         <span id="poseDetail">ให้เห็นศีรษะ ไหล่ แขน และสะโพก</span>
       </div>
-      <div class="privacy-chip">AI บนเครื่อง · ไม่บันทึกวิดีโอ</div>
+      <div class="camera-bottom-tools">
+        <span class="privacy-chip">AI บนเครื่อง · ไม่บันทึกวิดีโอ</span>
+        <button id="openGuideBtn" class="camera-guide-btn" type="button"><span>▶</span> ดูตัวอย่างท่า</button>
+      </div>
     </div>
 
-    <div class="progress"><span id="stepCount">1/6</span><div><i id="progressBar"></i></div><span id="totalTime">03:00</span></div>
+    <div class="routine-body">
+      <div class="progress"><span id="stepCount">1/6</span><div><i id="progressBar"></i></div><span id="totalTime">03:00</span></div>
 
-    <div class="coach-row">
-      <div class="step-visual" id="stepVisual">↻</div>
-      <div class="coach-copy"><p class="eyebrow" id="stepCue">ท่าที่ 1</p><h2 id="stepTitle">ยกและหมุนหัวไหล่</h2><p id="stepInstruction">ยกไหล่ขึ้น หมุนไปด้านหลัง แล้วปล่อยลงช้า ๆ</p></div>
+      <div class="coach-row">
+        <div class="step-visual" id="stepVisual">↻</div>
+        <div class="coach-copy"><p class="eyebrow" id="stepCue">ท่าที่ 1</p><h2 id="stepTitle">ยกและหมุนหัวไหล่</h2><p id="stepInstruction">ยกไหล่ขึ้น หมุนไปด้านหลัง แล้วปล่อยลงช้า ๆ</p></div>
+      </div>
+
+      <button id="demoTeaser" class="demo-teaser" type="button" aria-label="ดูตัวอย่างท่า">
+        <div id="demoMini" class="demo-mini" aria-hidden="true"></div>
+        <div class="demo-copy"><span>ตัวอย่างท่าแบบแอนิเมชัน</span><strong id="demoTitle">ดูท่าก่อนเริ่ม</strong><small id="demoHint">แตะเพื่อดูขั้นตอนและทิศทางการเคลื่อนไหว</small></div>
+        <b class="demo-arrow">›</b>
+      </button>
+
+      <div class="validation-panel">
+        <div class="validation-head"><span id="validationState" class="validation-state waiting">รอท่าที่ถูกต้อง</span><strong id="repCounter">0 / 6 รอบ</strong></div>
+        <div class="validation-meter"><i id="validationMeter"></i></div>
+        <small id="validationHint">ทำตามคำแนะนำในกล้อง ระบบจะนับให้อัตโนมัติ</small>
+      </div>
+
+      <div class="timer-row"><span>เวลาแนะนำ</span><div class="timer" id="timer">30</div><span>วินาที</span></div>
+      <div class="routine-actions"><button id="prevBtn" class="secondary">ย้อนกลับ</button><button id="nextBtn" class="primary" disabled>ทำให้ผ่านก่อน</button></div>
+      <button id="skipStepBtn" class="text subtle">กล้องจับท่านี้ไม่ถนัด · ข้ามท่านี้</button>
     </div>
-
-    <div class="validation-panel">
-      <div class="validation-head"><span id="validationState" class="validation-state waiting">รอท่าที่ถูกต้อง</span><strong id="repCounter">0 / 6 รอบ</strong></div>
-      <div class="validation-meter"><i id="validationMeter"></i></div>
-      <small id="validationHint">ทำตามคำแนะนำในกล้อง ระบบจะนับให้อัตโนมัติ</small>
-    </div>
-
-    <div class="timer-row"><span>เวลาแนะนำ</span><div class="timer" id="timer">30</div><span>วินาที</span></div>
-    <div class="routine-actions"><button id="prevBtn" class="secondary">ย้อนกลับ</button><button id="nextBtn" class="primary" disabled>ทำให้ผ่านก่อน</button></div>
-    <button id="skipStepBtn" class="text subtle">กล้องจับท่านี้ไม่ถนัด · ข้ามท่านี้</button>
   </section>
 
   <section id="done" class="card done-card hidden">
@@ -68,6 +79,31 @@
   </section>
   <section id="error" class="card error-card hidden"><h2>เปิดกิจกรรมไม่สำเร็จ</h2><p id="errorText"></p><button onclick="location.reload()" class="primary">ลองใหม่</button></section>
 </main>
-<script src="/wellness.js?v=1.0-p7.89" type="module"></script>
+
+<div id="guideSheet" class="guide-sheet" aria-hidden="true">
+  <div class="guide-backdrop" data-close-guide></div>
+  <section class="guide-panel" role="dialog" aria-modal="true" aria-labelledby="guideTitle">
+    <div class="guide-head">
+      <button id="guideClose" class="guide-close" type="button" aria-label="ปิด">×</button>
+      <div><span>NAKNA · MOVE COACH</span><strong>ดูตัวอย่างก่อนทำ</strong></div>
+      <span class="guide-step" id="guideStepBadge">1/6</span>
+    </div>
+    <div class="guide-hero">
+      <div class="guide-glow"></div>
+      <div id="guideVisual" class="guide-visual" aria-hidden="true"></div>
+      <div class="guide-motion-note"><span>↻</span><div><small>ดูทิศทาง</small><strong id="guideMotionText">ขยับช้า ๆ ตามลูกศร</strong></div></div>
+    </div>
+    <div class="guide-content">
+      <p class="guide-kicker">3D-STYLE MOTION GUIDE</p>
+      <h2 id="guideTitle">ยกและหมุนหัวไหล่</h2>
+      <p id="guideSubtitle">ดูตัวอย่างให้เข้าใจก่อน แล้วค่อยกลับไปทำหน้ากล้อง</p>
+      <div id="guideSteps" class="guide-steps"></div>
+      <div class="guide-tip"><span>💡</span><p id="guideTip">ขยับช้า ๆ ไม่ฝืน และหยุดทันทีเมื่อรู้สึกเจ็บ</p></div>
+      <button id="guideReady" class="primary guide-ready" type="button">เข้าใจแล้ว · เริ่มทำท่านี้</button>
+    </div>
+  </section>
+</div>
+
+<script src="/wellness.js?v=1.0-p7.90" type="module"></script>
 </body>
 </html>
