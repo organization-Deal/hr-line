@@ -798,6 +798,7 @@ function bindEvents() {
   $('#manualAwardBtn').onclick = openManualAward;
   if($('#wellnessSaveBtn')) $('#wellnessSaveBtn').onclick = saveWellnessSettings;
   if($('#wellnessRemindNowBtn')) $('#wellnessRemindNowBtn').onclick = sendWellnessReminderNow;
+  if($('#wellnessPreviewBtn')) $('#wellnessPreviewBtn').onclick = openWellnessPreview;
   if($('#wellnessTestTiming')) $('#wellnessTestTiming').onchange = syncWellnessTestTimingUi;
   if($('#wellnessTestSendBtn')) $('#wellnessTestSendBtn').onclick = sendWellnessTestReminder;
   if($('#wellnessTestScheduleStatus')) $('#wellnessTestScheduleStatus').onclick = event => { const btn=event.target.closest('[data-cancel-wellness-test]'); if(btn) cancelWellnessTestSchedule(Number(btn.dataset.cancelWellnessTest)); };
@@ -4500,7 +4501,7 @@ function renderEngagement(){
 function wellnessStatusLabel(status){return ({completed:'ทำแล้ว',started:'กำลังทำ',reminded:'รอทำ',skipped:'ข้ามวันนี้'})[status]||'ยังไม่ได้เริ่ม';}
 function renderWellness(){
   const d=state.wellness||{},settings=d.settings||{},summary=d.summary||{}; if(!$('#wellnessSummary'))return; const canManage=canManageEngagementUi();
-  $('#wellnessSaveBtn')?.classList.toggle('hidden',!canManage); $('#wellnessRemindNowBtn')?.classList.toggle('hidden',!canManage); $$('#view-wellness input,#view-wellness select').forEach(el=>el.disabled=!canManage);
+  $('#wellnessSaveBtn')?.classList.toggle('hidden',!canManage); $('#wellnessRemindNowBtn')?.classList.toggle('hidden',!canManage); $('#wellnessPreviewBtn')?.classList.toggle('hidden',!canManage); $$('#view-wellness input,#view-wellness select').forEach(el=>el.disabled=!canManage);
   $('#wellnessSummary').innerHTML=[['พนักงานที่เชื่อม LINE',summary.line_connected||0,'LINE'],['ทำแล้ววันนี้',summary.completed||0,'DONE'],['กำลังทำ',summary.started||0,'ACTIVE'],['ข้ามวันนี้',summary.skipped||0,'SKIP'],['ยังรอ',summary.pending||0,'PENDING']].map(([label,value,key])=>`<article><span>${key}</span><strong>${Number(value||0)}</strong><p>${label}</p></article>`).join('');
   $('#wellnessEnabled').checked=Boolean(settings.enabled); $('#wellnessReminderTime').value=settings.reminder_time||'15:00'; $('#wellnessDuration').value=String(settings.duration_minutes||3); $('#wellnessSnooze').value=String(settings.snooze_minutes||30); $('#wellnessPoints').value=String(Number(settings.points_reward||0)); $('#wellnessCamera').checked=settings.camera_enabled!==false; $('#wellnessWorkdayOnly').checked=settings.workday_only!==false;
   const test=d.test_mode||{},tester=test.employee||null,testRoot=$('#wellnessTestRecipient');
@@ -4511,6 +4512,11 @@ function renderWellness(){
   const routine=d.routine||[]; $('#wellnessRoutinePreview').innerHTML=routine.length?routine.map((step,i)=>`<div class="wellness-routine-row"><span>${i+1}</span><div><strong>${escapeHtml(step.title)}</strong><small>${escapeHtml(step.instruction)}</small></div><em>${Number(step.seconds||0)} วิ</em></div>`).join(''):emptyState('กำลังเตรียมท่ายืด','เปิดหน้านี้ใหม่อีกครั้ง');
   const sessions=d.today_sessions||[]; $('#wellnessTodayBadge').textContent=`${Number(summary.completed||0)}/${Number(summary.line_connected||0)} ทำแล้ว`;
   $('#wellnessTeamList').innerHTML=sessions.length?sessions.map(row=>`<div class="wellness-team-row"><span class="mini-avatar">${initial(row)}</span><div><strong>${escapeHtml(row.nickname||row.first_name)}</strong><small>${escapeHtml(row.department_name||'ไม่ระบุแผนก')}${row.completed_at?` · ${formatDateTime(row.completed_at)}`:''}</small></div><span class="badge ${row.status==='completed'?'badge-success':row.status==='skipped'?'badge-neutral':row.status==='started'?'badge-soft':'badge-warning'}">${wellnessStatusLabel(row.status)}</span>${Number(row.points_awarded||0)>0?`<b>+${Number(row.points_awarded||0)} pts</b>`:''}</div>`).join(''):emptyState('ยังไม่มี Activity วันนี้','เมื่อระบบส่งเตือน หรือพนักงานเปิดพักยืด รายชื่อจะมาอยู่ตรงนี้');
+}
+function openWellnessPreview(){
+  const url=`/wellness.html?preview=1&v=${Date.now()}`;
+  const win=window.open(url,'_blank');
+  if(win){try{win.opener=null;}catch{}}else location.href=url;
 }
 async function saveWellnessSettings(){
   const button=$('#wellnessSaveBtn');button.disabled=true;try{const result=await api('/api/wellness/settings',{method:'PATCH',body:JSON.stringify({enabled:$('#wellnessEnabled').checked,reminder_time:$('#wellnessReminderTime').value,duration_minutes:Number($('#wellnessDuration').value||3),snooze_minutes:Number($('#wellnessSnooze').value||30),points_reward:Number($('#wellnessPoints').value||0),camera_enabled:$('#wellnessCamera').checked,workday_only:$('#wellnessWorkdayOnly').checked})});state.wellness.settings=result.settings||state.wellness.settings;markViewLoaded('wellness');renderWellness();toast('บันทึกการตั้งค่า Wellness แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}

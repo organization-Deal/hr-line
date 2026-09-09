@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.87';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.87';
+const NAKNA_RUNTIME_RELEASE = 'P7.88';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.88';
 const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -3709,6 +3709,13 @@ async function handleApi(request, env, url, auth, ctx) {
     if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์จัดการการแลกของ'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); try{const result=await decideRewardRedemption(env,clientId,Number(redemptionDecisionMatch[1]),redemptionDecisionMatch[2],Number(auth.user.id),String(body.note||'').trim());return json({ok:true,...result});}catch(e){return json({error:e.message},e.status||400);}
   }
 
+  if(path==='/api/wellness/preview' && method==='GET'){
+    if(!canViewEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ดู Wellness'},403);
+    await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB);
+    const settings=await getWellnessSettings(env.DB,clientId);
+    const company=await env.DB.prepare('SELECT name FROM clients WHERE id=?1').bind(clientId).first();
+    return json({ok:true,preview_mode:true,employee:{id:0,name:'โหมดทดสอบหน้าเว็บ',company_name:company?.name||'บริษัทของคุณ'},settings:{enabled:false,duration_minutes:Number(settings.duration_minutes||3),camera_enabled:Boolean(Number(settings.camera_enabled)),points_reward:0},session:null,routine:wellnessRoutine(settings.duration_minutes),today:dateInBangkok()});
+  }
   if(path==='/api/wellness/overview' && method==='GET'){
     if(!canViewEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ดู Wellness'},403);
     await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB);

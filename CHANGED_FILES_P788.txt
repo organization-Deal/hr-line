@@ -1,0 +1,16 @@
+Nakna HR V1.0-P7.88 — Direct Wellness Preview
+
+Changed:
+- app.js / public/app.js
+- index.html / public/index.html
+- styles.css / public/styles.css
+- wellness.html / public/wellness.html
+- wellness.js / public/wellness.js
+- index.js / src/index.js
+- package.json
+- CHANGELOG.md
+
+Feature:
+- Open Stretch preview directly from HR without sending LINE
+- No employee/LINE binding required
+- No Activity writes or points in Preview mode
