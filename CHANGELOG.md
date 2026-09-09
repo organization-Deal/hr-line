@@ -1,3 +1,13 @@
+# P7.90 — Nakna Move Mobile Camera-First + Animated Exercise Coach
+
+- Redesigned mobile wellness routine so the live camera is the dominant surface (about 68svh on phones).
+- Added a one-tap "ดูตัวอย่างท่า" control inside the camera and an animated guide card below the camera.
+- Added a full-screen/bottom-sheet exercise guide for every routine step with a 3D-style animated coach, motion arrows, 3-step instructions, and safety tips.
+- The routine timer pauses while the employee is viewing the exercise guide, so watching the demo does not consume exercise time.
+- Kept MediaPipe real-time pose validation, automatic rep/hold counting, pass-to-continue logic, manual fallback, and on-device privacy behavior.
+- Mobile routine view hides the redundant web header and uses a camera-first layout, sticky bottom actions, larger live feedback, and clearer hierarchy.
+- No generated image assets are required: the coach animation is rendered from inline SVG/CSS and works offline once the page assets are loaded.
+
 # P7.89 — Nakna Move AI Pose Tracking
 
 - เพิ่ม MediaPipe Pose Landmarker บนเว็บสำหรับตรวจโครงร่างแบบ on-device

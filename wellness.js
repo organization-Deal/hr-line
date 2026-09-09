@@ -11,13 +11,66 @@ const MP_MODEL='https://storage.googleapis.com/mediapipe-models/pose_landmarker/
 
 let data=null,step=0,remaining=0,timerId=null,startedAt=0,stream=null;
 let poseLandmarker=null,poseConnections=[],trackingActive=false,trackingReady=false,trackingSupported=true,lastDetectAt=0,lastVideoTime=-1,rafId=0;
-let currentState=null,stepPassed=false,stepResults=[],manualFallback=false,poseModule=null;
+let currentState=null,stepPassed=false,stepResults=[],manualFallback=false,poseModule=null,guideOpen=false;
 const symbols={shoulders:'↻',neck:'↔',chest:'↗',wrists:'✋',twist:'⟳',reach:'↑'};
+const MOVE_GUIDES={
+  shoulders:{motion:'ยกขึ้น → หมุนไปด้านหลัง → ปล่อยลง',subtitle:'ท่าคลายความตึงของบ่าและหัวไหล่ ทำช้า ๆ เป็นวงเล็ก ๆ',tip:'ไม่ต้องยกไหล่สูงจนเกร็งคอ และไม่หมุนเร็ว',steps:[['ยกหัวไหล่ขึ้น','ยกไหล่ทั้งสองข้างขึ้นพร้อมกันเบา ๆ'],['หมุนไปด้านหลัง','พาหัวไหล่หมุนถอยหลังเป็นวงช้า ๆ'],['ปล่อยลง','ผ่อนไหล่ลงกลับสู่ท่าปกติ แล้วเริ่มรอบใหม่']]},
+  neck:{motion:'เอียงซ้าย → กลาง → เอียงขวา',subtitle:'เอียงคอเข้าหาไหล่ทีละข้าง โดยให้หัวไหล่อยู่นิ่ง',tip:'ไม่ใช้มือกดศีรษะ และหยุดหากมีอาการปวดร้าวหรือเวียนหัว',steps:[['ตั้งศีรษะตรง','นั่งหรือยืนหลังตรง มองไปด้านหน้า'],['เอียงไปด้านหนึ่ง','เอียงหูเข้าหาไหล่เบา ๆ โดยไม่ยกไหล่'],['สลับอีกด้าน','กลับมาตรงกลาง แล้วเอียงไปอีกข้าง']]},
+  chest:{motion:'กางแขนออก → เปิดอก → ค้าง',subtitle:'เปิดช่วงอกและหัวไหล่ เหมาะกับคนที่นั่งพิมพ์งานนาน ๆ',tip:'อย่าแอ่นหลังมาก ให้การเปิดอกเกิดจากหัวไหล่และแขน',steps:[['ตั้งแขนระดับไหล่','ยกแขนทั้งสองขึ้นใกล้ระดับหัวไหล่'],['กางแขนออก','ค่อย ๆ เปิดแขนไปด้านข้างและถอยหลังเล็กน้อย'],['ค้างไว้','เปิดอก หายใจตามปกติ แล้วค้างตามเวลา']]},
+  wrists:{motion:'เหยียดแขน → จับฝ่ามือ → สลับข้าง',subtitle:'ยืดข้อมือและปลายแขนสำหรับคนที่ใช้เมาส์หรือคีย์บอร์ดนาน',tip:'ดึงเพียงเบา ๆ ไม่ต้องงอข้อมือจนรู้สึกเจ็บ',steps:[['เหยียดแขน','เหยียดแขนหนึ่งข้างไปด้านหน้าให้ศอกเกือบตรง'],['จับใกล้ฝ่ามือ','ใช้อีกมือจับบริเวณฝ่ามือและค่อย ๆ ดึง'],['สลับข้าง','กลับสู่ท่าปกติ แล้วทำอีกข้าง']]},
+  twist:{motion:'ตรงกลาง → บิดซ้าย → บิดขวา',subtitle:'บิดช่วงลำตัวเบา ๆ โดยพยายามให้สะโพกอยู่นิ่ง',tip:'ไม่กระชากและไม่บิดจนสุดช่วงการเคลื่อนไหว',steps:[['ตั้งลำตัวตรง','นั่งหรือยืนหลังตรง ผ่อนหัวไหล่'],['บิดไปด้านหนึ่ง','หมุนอกและหัวไหล่ช้า ๆ ไปด้านหนึ่ง'],['สลับอีกด้าน','กลับตรงกลาง แล้วหมุนไปอีกข้าง']]},
+  reach:{motion:'แขนลง → ยกขึ้น → ยืดค้าง',subtitle:'ยืดตัวขึ้นด้านบน ช่วยให้ลุกจากท่านั่งและขยับลำตัวทั้งช่วงบน',tip:'เก็บหน้าท้องเบา ๆ และอย่าแอ่นหลังมากขณะยกแขน',steps:[['ตั้งตัวตรง','ให้เท้าวางมั่นคงและหลังตรง'],['ยกแขนขึ้น','ยกแขนทั้งสองขึ้นเหนือศีรษะอย่างช้า ๆ'],['ยืดและค้าง','ยืดปลายนิ้วขึ้น หายใจสบาย ๆ แล้วค้างไว้']]}
+};
+function guideFor(id){return MOVE_GUIDES[id]||{motion:'ขยับช้า ๆ ตามตัวอย่าง',subtitle:'ดูแนวทางการเคลื่อนไหวก่อนเริ่ม',tip:'ขยับในช่วงที่สบายและไม่ฝืน',steps:[['เตรียมตัว','จัดตัวให้อยู่ในท่าที่มั่นคง'],['ทำตามตัวอย่าง','ขยับช้า ๆ ตามทิศทางที่แสดง'],['กลับสู่ท่าเริ่ม','ผ่อนคลายแล้วทำซ้ำตามจำนวน']]};}
+function coachSvg(id='shoulders'){
+  const safe=['shoulders','neck','chest','wrists','twist','reach'].includes(id)?id:'shoulders';
+  const arrows={
+    shoulders:'<path class="motion" d="M76 112 C70 84 82 65 103 58"/><path class="motion" d="M224 112 C230 84 218 65 197 58"/>',
+    neck:'<path class="motion" d="M136 64 C112 70 101 88 100 104"/><path class="motion" d="M164 64 C188 70 199 88 200 104"/>',
+    chest:'<path class="motion" d="M92 130 C62 122 43 111 28 92"/><path class="motion" d="M208 130 C238 122 257 111 272 92"/>',
+    wrists:'<path class="motion" d="M112 148 C134 136 157 136 181 148"/>',
+    twist:'<path class="motion" d="M110 174 C86 164 72 149 68 132"/><path class="motion" d="M190 174 C214 164 228 149 232 132"/>',
+    reach:'<path class="motion" d="M98 142 C92 111 94 84 110 54"/><path class="motion" d="M202 142 C208 111 206 84 190 54"/>'
+  }[safe];
+  return `<svg class="coach-svg demo-${safe}" viewBox="0 0 300 320" role="img" aria-label="ตัวอย่างท่าบริหาร">
+    <defs>
+      <linearGradient id="skinGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd5bc"/><stop offset=".58" stop-color="#e8a987"/><stop offset="1" stop-color="#c98668"/></linearGradient>
+      <linearGradient id="skinStroke" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6c6a7"/><stop offset="1" stop-color="#cb896c"/></linearGradient>
+      <linearGradient id="shirtGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#19a29c"/><stop offset=".55" stop-color="#087f83"/><stop offset="1" stop-color="#075e68"/></linearGradient>
+      <linearGradient id="shortGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#344d55"/><stop offset="1" stop-color="#183139"/></linearGradient>
+    </defs>
+    <ellipse cx="150" cy="294" rx="72" ry="12" fill="rgba(18,60,74,.10)"/>
+    <g class="torso-group">
+      <path class="shirt edge" d="M105 124 Q118 106 150 106 Q182 106 195 124 L205 220 Q180 240 150 240 Q120 240 95 220 Z"/>
+      <path class="shorts edge" d="M107 220 Q150 233 193 220 L188 275 L112 275 Z"/>
+      <rect class="skin" x="140" y="91" width="20" height="26" rx="9"/>
+    </g>
+    <g class="head">
+      <ellipse class="skin edge" cx="150" cy="69" rx="38" ry="43"/>
+      <path class="hair" d="M113 66 Q111 26 150 24 Q190 25 188 63 Q174 47 151 47 Q127 47 113 66 Z"/>
+      <ellipse cx="137" cy="70" rx="3.5" ry="4" fill="#20343a"/><ellipse cx="163" cy="70" rx="3.5" ry="4" fill="#20343a"/>
+      <path d="M141 85 Q150 91 159 85" fill="none" stroke="#a15e55" stroke-width="3" stroke-linecap="round"/>
+    </g>
+    <g class="arm-l"><path class="limb" d="M108 134 Q79 148 67 185"/><circle class="skin" cx="67" cy="186" r="10"/></g>
+    <g class="arm-r"><path class="limb" d="M192 134 Q221 148 233 185"/><circle class="skin" cx="233" cy="186" r="10"/></g>
+    <path d="M150 115 L150 214" stroke="rgba(255,255,255,.15)" stroke-width="3"/>
+    ${arrows}
+  </svg>`;
+}
+function renderMovementGuide(s){
+  if(!s)return;const g=guideFor(s.id);const mini=$('#demoMini'),visual=$('#guideVisual');
+  if(mini)mini.innerHTML=coachSvg(s.id);if(visual)visual.innerHTML=coachSvg(s.id);
+  $('#demoTitle').textContent=s.title||'ดูตัวอย่างท่า';$('#demoHint').textContent=g.motion;
+  $('#guideTitle').textContent=s.title||'ตัวอย่างท่า';$('#guideSubtitle').textContent=g.subtitle;$('#guideMotionText').textContent=g.motion;$('#guideTip').textContent=g.tip;$('#guideStepBadge').textContent=`${step+1}/${data?.routine?.length||6}`;
+  $('#guideSteps').innerHTML=g.steps.map((x,i)=>`<article class="guide-step-card"><b>${i+1}</b><strong>${x[0]}</strong><span>${x[1]}</span></article>`).join('');
+}
+function openGuide(){const s=data?.routine?.[step];if(!s)return;renderMovementGuide(s);guideOpen=true;$('#guideSheet').classList.add('open');$('#guideSheet').setAttribute('aria-hidden','false');document.body.style.overflow='hidden';}
+function closeGuide(){guideOpen=false;$('#guideSheet').classList.remove('open');$('#guideSheet').setAttribute('aria-hidden','true');document.body.style.overflow='';}
 const ESSENTIAL={
   shoulders:[11,12,23,24],neck:[0,7,8,11,12],chest:[11,12,13,14,15,16],wrists:[11,12,13,14,15,16],twist:[0,11,12,23,24],reach:[11,12,13,14,15,16]
 };
 
-function show(id){['intro','routine','done','error'].forEach(x=>$('#'+x).classList.toggle('hidden',x!==id));}
+function show(id){['intro','routine','done','error'].forEach(x=>$('#'+x).classList.toggle('hidden',x!==id));document.body.classList.toggle('routine-active',id==='routine');if(id!=='routine')closeGuide();}
 function error(msg){$('#errorText').textContent=msg||'กรุณาลองใหม่';show('error');}
 async function api(path,opt={}){
   let url;
@@ -98,12 +151,12 @@ function renderStep(){
   clearInterval(timerId);const s=data.routine[step];if(!s)return finish();resetExerciseState();remaining=Number(s.seconds||30);
   $('#stepCount').textContent=`${step+1}/${data.routine.length}`;$('#progressBar').style.width=`${step/data.routine.length*100}%`;
   const total=data.routine.reduce((a,x)=>a+Number(x.seconds||0),0);$('#totalTime').textContent=`${String(Math.floor(total/60)).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`;
-  $('#stepVisual').textContent=symbols[s.id]||'•';$('#stepCue').textContent=s.cue||`ท่าที่ ${step+1}`;$('#stepTitle').textContent=s.title;$('#stepInstruction').textContent=s.instruction;$('#timer').textContent=remaining;$('#prevBtn').disabled=step===0;
+  $('#stepVisual').textContent=symbols[s.id]||'•';$('#stepCue').textContent=s.cue||`ท่าที่ ${step+1}`;$('#stepTitle').textContent=s.title;$('#stepInstruction').textContent=s.instruction;$('#timer').textContent=remaining;$('#prevBtn').disabled=step===0;renderMovementGuide(s);
   $('#validationState').className='validation-state waiting';$('#validationState').textContent=manualFallback?'Manual':'รอท่าที่ถูกต้อง';$('#validationMeter').style.width='0%';$('#poseScore').textContent='0%';
   $('#nextBtn').disabled=!manualFallback;$('#nextBtn').textContent=manualFallback?(step===data.routine.length-1?'ทำเองแล้ว · เสร็จ':'ทำเองแล้ว · ท่าถัดไป'):'ทำให้ผ่านก่อน';
   $('#skipStepBtn').textContent=manualFallback?'ข้ามท่านี้':'กล้องจับท่านี้ไม่ถนัด · ข้ามท่านี้';
   updateCounter({detail:targetLabel(s),progress:0});setCoach(s.camera_hint||'ทำตามตัวอย่าง',manualFallback?'ทำท่าตามคำแนะนำ':'จัดตัวให้อยู่กลางเฟรม',manualFallback?'เมื่อทำแล้วกดปุ่มด้านล่าง':'AI จะตรวจและนับให้อัตโนมัติ');
-  timerId=setInterval(()=>{remaining--;$('#timer').textContent=Math.max(0,remaining);if(remaining<=0){clearInterval(timerId);if(!stepPassed&&!manualFallback){$('#validationHint').textContent='ครบเวลาแนะนำแล้ว · ลองทำให้ผ่านอีกครั้ง หรือกดข้ามท่านี้หากกล้องจับไม่ถนัด';}}},1000);
+  timerId=setInterval(()=>{if(guideOpen)return;remaining--;$('#timer').textContent=Math.max(0,remaining);if(remaining<=0){clearInterval(timerId);if(!stepPassed&&!manualFallback){$('#validationHint').textContent='ครบเวลาแนะนำแล้ว · ลองทำให้ผ่านอีกครั้ง หรือกดข้ามท่านี้หากกล้องจับไม่ถนัด';}}},1000);
 }
 
 function targetLabel(s){if(s.target_type==='reps')return `0 / ${Number(s.target_value||1)} รอบ`;if(s.target_type==='bilateral_hold')return `ซ้าย 0 / ${s.target_value||3} วิ · ขวา 0 / ${s.target_value||3} วิ`;if(s.target_type==='hold')return `0 / ${s.target_value||5} วิ`;return s.cue||'กำลังตรวจ';}
@@ -153,4 +206,4 @@ async function finish(){
 function renderDone(points,session={}){show('done');const passed=Number(session.ai_passed_steps||0),total=Number(session.ai_total_steps||data?.routine?.length||0),score=Number(session.ai_score||0),skipped=Number(session.ai_skipped_steps||0);if(previewMode){$('#done h1').textContent='ทดสอบ AI Stretch ครบแล้ว ✓';$('#done p').textContent='Flow ทำงานครบ โดยไม่ได้ส่ง LINE ไม่บันทึก Activity จริง และไม่ให้แต้ม';}else if(lineTestMode){$('#done h1').textContent='ทดสอบ AI Stretch ครบแล้ว ✓';$('#done p').textContent='Flow ทำงานครบ โดยไม่บันทึก Activity จริงและไม่ให้แต้ม';}if(total){$('#aiResult').innerHTML=`<article><strong>${score}%</strong><span>คะแนนการทำท่า</span></article><article><strong>${passed}/${total}</strong><span>AI ผ่าน</span></article><article><strong>${skipped}</strong><span>ข้ามท่า</span></article>`;$('#aiResult').classList.remove('hidden');}if(!testMode&&Number(points)>0){$('#pointsText').textContent=`🎁 ได้รับ +${Number(points)} แต้ม`;$('#pointsText').classList.remove('hidden');}}
 async function skip(){try{await api('/skip',{method:'POST',body:'{}'});stopCamera();$('#done h1').textContent='ข้ามวันนี้แล้ว';$('#done p').textContent='ไม่เป็นไร ไว้วันทำงานถัดไปค่อยขยับไปด้วยกัน';show('done');}catch(e){error(e.message);}}
 
-$('#cameraBtn').onclick=()=>openCamera();$('#startBtn').onclick=start;$('#skipBtn').onclick=skip;$('#prevBtn').onclick=()=>{if(step>0){step--;renderStep();}};$('#nextBtn').onclick=advance;$('#skipStepBtn').onclick=skipCurrentStep;$('#closeBtn').onclick=()=>{stopCamera();try{if(history.length>1){history.back();return;}window.close();}catch{}};window.addEventListener('pagehide',stopCamera);boot();
+$('#cameraBtn').onclick=()=>openCamera();$('#startBtn').onclick=start;$('#skipBtn').onclick=skip;$('#prevBtn').onclick=()=>{if(step>0){step--;renderStep();}};$('#nextBtn').onclick=advance;$('#skipStepBtn').onclick=skipCurrentStep;$('#openGuideBtn').onclick=openGuide;$('#demoTeaser').onclick=openGuide;$('#guideClose').onclick=closeGuide;$('#guideReady').onclick=closeGuide;document.querySelectorAll('[data-close-guide]').forEach(el=>el.onclick=closeGuide);document.addEventListener('keydown',e=>{if(e.key==='Escape'&&guideOpen)closeGuide();});$('#closeBtn').onclick=()=>{stopCamera();try{if(history.length>1){history.back();return;}window.close();}catch{}};window.addEventListener('pagehide',stopCamera);boot();

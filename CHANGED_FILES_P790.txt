@@ -1,0 +1,15 @@
+Nakna HR V1.0-P7.90 — Nakna Move Camera-First UX + Animated Coach
+
+Changed:
+- wellness.html
+- wellness.css
+- wellness.js
+- public/wellness.html
+- public/wellness.css
+- public/wellness.js
+- index.js
+- src/index.js
+- index.html
+- public/index.html
+- package.json
+- CHANGELOG.md
