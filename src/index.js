@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.90';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.90';
+const NAKNA_RUNTIME_RELEASE = 'P7.91';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.91';
 const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -3714,7 +3714,7 @@ async function handleApi(request, env, url, auth, ctx) {
     await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB);
     const settings=await getWellnessSettings(env.DB,clientId);
     const company=await env.DB.prepare('SELECT name FROM clients WHERE id=?1').bind(clientId).first();
-    return json({ok:true,preview_mode:true,employee:{id:0,name:'โหมดทดสอบหน้าเว็บ',company_name:company?.name||'บริษัทของคุณ'},settings:{enabled:false,duration_minutes:Number(settings.duration_minutes||3),camera_enabled:Boolean(Number(settings.camera_enabled)),pose_tracking_enabled:Boolean(Number(settings.pose_tracking_enabled)),points_reward:0},session:null,routine:wellnessRoutine(settings.duration_minutes),today:dateInBangkok()});
+    return json({ok:true,preview_mode:true,employee:{id:0,name:'พรีวิวสำหรับ HR',company_name:company?.name||'บริษัทของคุณ'},settings:{enabled:false,duration_minutes:Number(settings.duration_minutes||3),camera_enabled:Boolean(Number(settings.camera_enabled)),pose_tracking_enabled:Boolean(Number(settings.pose_tracking_enabled)),points_reward:0},session:null,routine:wellnessRoutine(settings.duration_minutes),today:dateInBangkok()});
   }
   if(path==='/api/wellness/overview' && method==='GET'){
     if(!canViewEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ดู Wellness'},403);
@@ -3743,18 +3743,18 @@ async function handleApi(request, env, url, auth, ctx) {
     return json({ok:true,...result});
   }
   if(path==='/api/wellness/test-reminder' && method==='POST'){
-    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ทดสอบ Wellness'},403);
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ตรวจสอบ Wellness'},403);
     await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB); const tester=await getWellnessTestEmployee(env.DB,clientId,auth.user); if(!tester)return json({error:'ไม่พบ Employee Profile ที่ใช้อีเมลเดียวกับบัญชีนี้'},409); if(!tester.line_user_id)return json({error:'Employee Profile ของคุณยังไม่ได้เชื่อม LINE'},409);
     const body=await safeJson(request),mode=String(body.mode||'now');
     if(mode==='now'){const result=await sendWellnessTestReminderToEmployee(env,clientId,Number(tester.id));return json({ok:true,...result});}
-    let scheduledFor=null;if(mode==='delay'){const mins=[1,5].includes(Number(body.delay_minutes))?Number(body.delay_minutes):1;scheduledFor=sqliteUtc(Date.now()+mins*60000);}else if(mode==='time'){scheduledFor=nextBangkokTimeSql(body.scheduled_time);if(!scheduledFor)return json({error:'กรุณาระบุเวลาทดสอบ'},400);}else return json({error:'รูปแบบเวลาทดสอบไม่ถูกต้อง'},400);
+    let scheduledFor=null;if(mode==='delay'){const mins=[1,5].includes(Number(body.delay_minutes))?Number(body.delay_minutes):1;scheduledFor=sqliteUtc(Date.now()+mins*60000);}else if(mode==='time'){scheduledFor=nextBangkokTimeSql(body.scheduled_time);if(!scheduledFor)return json({error:'กรุณาระบุเวลาส่งตรวจสอบ'},400);}else return json({error:'รูปแบบเวลาส่งตรวจสอบไม่ถูกต้อง'},400);
     await env.DB.prepare(`UPDATE wellness_test_schedules SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND requested_by_user_id=?2 AND status='scheduled'`).bind(clientId,Number(auth.user.id)).run();
     const r=await env.DB.prepare(`INSERT INTO wellness_test_schedules (client_id,requested_by_user_id,employee_id,scheduled_for,status) VALUES (?1,?2,?3,?4,'scheduled')`).bind(clientId,Number(auth.user.id),Number(tester.id),scheduledFor).run();
     return json({ok:true,scheduled:true,id:Number(r.meta.last_row_id),scheduled_for:scheduledFor});
   }
   const wellnessTestScheduleMatch=path.match(/^\/api\/wellness\/test-schedules\/(\d+)$/);
   if(wellnessTestScheduleMatch && method==='DELETE'){
-    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ยกเลิกการทดสอบ'},403); await ensureWellnessReady(env.DB); const id=Number(wellnessTestScheduleMatch[1]); await env.DB.prepare(`UPDATE wellness_test_schedules SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2 AND requested_by_user_id=?3 AND status='scheduled'`).bind(id,clientId,Number(auth.user.id)).run(); return json({ok:true});
+    if(!canManageEngagement(auth.role))return json({error:'ไม่มีสิทธิ์ยกเลิกการตรวจสอบ'},403); await ensureWellnessReady(env.DB); const id=Number(wellnessTestScheduleMatch[1]); await env.DB.prepare(`UPDATE wellness_test_schedules SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2 AND requested_by_user_id=?3 AND status='scheduled'`).bind(id,clientId,Number(auth.user.id)).run(); return json({ok:true});
   }
 
   if(path==='/api/analytics/overview' && method==='GET'){
@@ -6459,22 +6459,22 @@ async function pushWellnessCompleted(env,access,session){
 }
 function buildWellnessTestReminderFlex(emp,url,settings){
   const minutes=Number(settings.duration_minutes||3);
-  return {type:'flex',altText:`🧪 ทดสอบ Nakna Move ${minutes} นาที`,contents:lineBubble({eyebrow:'NAKNA · MOVE · TEST',title:'🧪 โหมดทดสอบ',subtitle:'ข้อความนี้ส่งเฉพาะคุณ ไม่ส่งให้ทีมงาน',status:'TEST MODE',statusTone:'warning',body:[lineInfoCard([lineInfoRow('ผู้ทดสอบ',emp.nickname||emp.first_name||'คุณ'),lineInfoRow('ใช้เวลา',`${minutes} นาที`),lineInfoRow('Activity','ไม่บันทึกสถานะจริง',LINE_CI.warning),lineInfoRow('แต้ม','ไม่ให้แต้มในการทดสอบ')],'teal'),lineText('ลองเปิดกล้อง ทำ Routine และ Flow ให้ครบได้เหมือนของจริง','xs',LINE_CI.muted)],footer:[linePrimaryButton(`เริ่มทดสอบ ${minutes} นาที`,{type:'uri',label:'เริ่มทดสอบ',uri:url})]})};
+  return {type:'flex',altText:`ตรวจสอบ Nakna Move ${minutes} นาที`,contents:lineBubble({eyebrow:'NAKNA · MOVE · HR CHECK',title:'ตรวจสอบก่อนเปิดใช้',subtitle:'ข้อความนี้ส่งเฉพาะคุณ ไม่ส่งให้ทีมงาน',status:'HR CHECK',statusTone:'warning',body:[lineInfoCard([lineInfoRow('ผู้ทดสอบ',emp.nickname||emp.first_name||'คุณ'),lineInfoRow('ใช้เวลา',`${minutes} นาที`),lineInfoRow('Activity','ไม่บันทึกสถานะจริง',LINE_CI.warning),lineInfoRow('แต้ม','ไม่ให้แต้มในการตรวจสอบ')],'teal'),lineText('เปิดกล้อง ทำ Routine และตรวจ Flow ให้ครบได้เหมือนของจริง','xs',LINE_CI.muted)],footer:[linePrimaryButton(`เริ่มตรวจสอบ ${minutes} นาที`,{type:'uri',label:'เริ่มตรวจสอบ',uri:url})]})};
 }
 async function sendWellnessTestReminderToEmployee(env,clientId,employeeId){
   await ensureWellnessReady(env.DB); const cid=Number(clientId),eid=Number(employeeId),settings=await getWellnessSettings(env.DB,cid);
   const emp=await env.DB.prepare(`SELECT e.*,c.name AS company_name FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.client_id=?2 AND e.status='active'`).bind(eid,cid).first();
-  if(!emp)throw httpError('ไม่พบ Employee Profile สำหรับทดสอบ',404); if(!emp.line_user_id)throw httpError('Employee Profile นี้ยังไม่ได้เชื่อม LINE',409);
-  const portalToken=await getEmployeePortalTokenForMenu(env.DB,cid,eid); if(!portalToken)throw httpError('สร้างลิงก์ทดสอบไม่สำเร็จ',500);
+  if(!emp)throw httpError('ไม่พบ Employee Profile สำหรับตรวจสอบ',404); if(!emp.line_user_id)throw httpError('Employee Profile นี้ยังไม่ได้เชื่อม LINE',409);
+  const portalToken=await getEmployeePortalTokenForMenu(env.DB,cid,eid); if(!portalToken)throw httpError('สร้างลิงก์ตรวจสอบไม่สำเร็จ',500);
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,''); const url=`${base}/wellness.html?token=${encodeURIComponent(portalToken)}&test=1`;
   const accessToken=await getAccessTokenForProviderScope(env,cid,emp.line_provider_scope); if(!accessToken)throw httpError('ไม่พบ LINE access token ของบริษัท',409);
-  const ok=await pushLineMessages(accessToken,emp.line_user_id,[buildWellnessTestReminderFlex(emp,url,settings)]); if(!ok)throw httpError('ส่ง LINE ทดสอบไม่สำเร็จ',502);
+  const ok=await pushLineMessages(accessToken,emp.line_user_id,[buildWellnessTestReminderFlex(emp,url,settings)]); if(!ok)throw httpError('ส่ง LINE ตรวจสอบไม่สำเร็จ',502);
   return {sent:true,employee_id:eid,employee_name:emp.nickname||emp.first_name};
 }
 async function pushWellnessTestCompleted(env,access){
   const employee=await env.DB.prepare(`SELECT line_user_id,line_provider_scope,nickname,first_name FROM employees WHERE id=?1 AND client_id=?2`).bind(Number(access.employee_id),Number(access.client_id)).first(); if(!employee?.line_user_id)return false;
   const token=await getAccessTokenForProviderScope(env,Number(access.client_id),employee.line_provider_scope); if(!token)return false;
-  return pushLineMessages(token,employee.line_user_id,[{type:'flex',altText:'🧪 ทดสอบ Nakna Move ครบแล้ว',contents:lineBubble({eyebrow:'NAKNA · MOVE · TEST',title:'ทดสอบครบแล้ว ✓',subtitle:'Flow ทำงานครบ โดยไม่บันทึก Activity จริง',status:'TEST MODE',statusTone:'warning',body:[lineText('ไม่มีการให้แต้ม และไม่กระทบสถานะ Wellness ของพนักงาน','sm',LINE_CI.muted)]})}]);
+  return pushLineMessages(token,employee.line_user_id,[{type:'flex',altText:'ตรวจสอบ Nakna Move ครบแล้ว',contents:lineBubble({eyebrow:'NAKNA · MOVE · HR CHECK',title:'ตรวจสอบครบแล้ว ✓',subtitle:'Flow ทำงานครบ โดยไม่บันทึก Activity จริง',status:'HR CHECK',statusTone:'warning',body:[lineText('ไม่มีการให้แต้ม และไม่กระทบสถานะ Wellness ของพนักงาน','sm',LINE_CI.muted)]})}]);
 }
 async function sendWellnessReminderForClient(env,clientId,{mode='normal',employeeIds=null}={}){
   await ensureV100P4Ready(env.DB); await ensureWellnessReady(env.DB); const cid=Number(clientId),settings=await getWellnessSettings(env.DB,cid),today=dateInBangkok(); if(mode!=='force'&&!Number(settings.enabled||0))return {eligible:0,sent:0,skipped:0,failed:0};
