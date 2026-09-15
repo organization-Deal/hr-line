@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.91" />
-  <link rel="modulepreload" href="/app.js?v=1.0-p7.91" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.92" />
+  <link rel="modulepreload" href="/app.js?v=1.0-p7.92" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -787,7 +787,7 @@
             <div class="settings-category-panel hidden" data-settings-category="attendance">
               <div class="work-location-section">
             <div class="page-intro compact">
-              <div><p class="kicker">ATTENDANCE LOCATION</p><h2>Work Location</h2><p>สร้างจุดที่อนุญาตให้เช็กอินได้ แล้วเลือกจุดให้พนักงานตั้งแต่ตอนส่งลิงก์เชิญ</p></div>
+              <div><p class="kicker">ATTENDANCE LOCATION</p><h2>Work Location</h2><p>ทุก Work Location ที่เปิดใช้งานใช้เช็กอินได้ ระบบจะเลือกจุดที่ใกล้ GPS ของพนักงานที่สุดอัตโนมัติ</p></div>
               <button id="addWorkLocationBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่ม Location</button>
             </div>
             <div class="attendance-policy-card"><div><strong>เช็กอิน / เช็กเอาต์นอกพื้นที่</strong><p>เปิดเมื่อบริษัทอนุญาตให้ลงเวลานอก Work Location ระบบยังบันทึกพิกัดและระยะห่างไว้เพื่อตรวจสอบย้อนหลัง</p><small id="attendancePolicyStatus" class="attendance-policy-status">กำลังตรวจสอบการตั้งค่า…</small></div><label class="switch"><input id="attendancePolicyToggle" type="checkbox"/><span></span></label></div>
@@ -1082,7 +1082,7 @@
   <dialog id="locationModal">
     <form method="dialog" id="locationForm">
       <div class="modal-head">
-        <div><p class="kicker">WORK LOCATION</p><h3>เพิ่มจุดเช็กอิน</h3><p>กำหนดพิกัดกลางและรัศมีที่อนุญาตให้พนักงานเช็กอินได้</p></div>
+        <div><p class="kicker">WORK LOCATION</p><h3 id="locationModalTitle">เพิ่มจุดเช็กอิน</h3><p id="locationModalSubtitle">กำหนดพิกัดกลางและรัศมีที่อนุญาต ทุก Work Location ที่เปิดใช้งานจะถูกนำมาตรวจ GPS อัตโนมัติ</p></div>
         <button type="button" class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
       <div class="modal-fields">
@@ -1343,7 +1343,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.91" type="module"></script>
+  <script src="/app.js?v=1.0-p7.92" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
