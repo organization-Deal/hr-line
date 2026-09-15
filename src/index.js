@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.91';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.91';
+const NAKNA_RUNTIME_RELEASE = 'P7.92';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.92';
 const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -2846,6 +2846,23 @@ async function handleApi(request, env, url, auth, ctx) {
     return json({ ok: true });
   }
 
+
+  if (locationMatch && method === 'DELETE') {
+    if (!canManagePeople(auth.role)) return json({ error: 'ไม่มีสิทธิ์จัดการ Work Location' }, 403);
+    const id = Number(locationMatch[1]);
+    const existing = await env.DB.prepare('SELECT * FROM work_locations WHERE id=?1 AND client_id=?2').bind(id, clientId).first();
+    if (!existing) return json({ error: 'ไม่พบ Work Location' }, 404);
+    const assigned = await env.DB.prepare('SELECT COUNT(*) AS n FROM employee_work_locations WHERE location_id=?1').bind(id).first();
+    const invites = await env.DB.prepare('SELECT COUNT(*) AS n FROM employee_invite_locations WHERE location_id=?1').bind(id).first();
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM employee_work_locations WHERE location_id=?1').bind(id),
+      env.DB.prepare('DELETE FROM employee_invite_locations WHERE location_id=?1').bind(id),
+      env.DB.prepare('DELETE FROM work_locations WHERE id=?1 AND client_id=?2').bind(id, clientId),
+    ]);
+    await safeAudit(env.DB, clientId, 'user', String(auth.user.id), 'work_location.delete', 'work_location', String(id), {name:existing.name,unassigned_count:Number(assigned?.n||0),invite_count:Number(invites?.n||0)});
+    return json({ ok:true, unassigned_count:Number(assigned?.n||0), invite_count:Number(invites?.n||0) });
+  }
+
   if (path === '/api/candidates' && method === 'GET') {
     const result = await env.DB.prepare(`
       SELECT * FROM candidates WHERE client_id = ?1
@@ -4557,18 +4574,19 @@ async function employeeNeedsLocation(db, employee) {
 }
 
 async function resolveAllowedWorkLocation(db, employee, lat, lng, {allowOutside=false} = {}) {
-  const assigned = await db.prepare(`
-    SELECT wl.* FROM employee_work_locations ewl
-    JOIN work_locations wl ON wl.id=ewl.location_id
-    WHERE ewl.employee_id=?1 AND wl.is_active=1
-    ORDER BY wl.name
-  `).bind(Number(employee.id)).all();
-  let locations = assigned.results || [];
-
-  if (!locations.length) {
-    const company = await db.prepare('SELECT * FROM work_locations WHERE client_id=?1 AND is_active=1 ORDER BY name').bind(Number(employee.client_id)).all();
-    locations = company.results || [];
-  }
+  // P7.92: an employee assignment is the employee's usual/preferred Work Location,
+  // not a permanent geofence whitelist. Every active Work Location of the company
+  // is considered so adding a new office/branch works immediately for existing staff.
+  const [assigned,company] = await Promise.all([
+    db.prepare(`
+      SELECT wl.id FROM employee_work_locations ewl
+      JOIN work_locations wl ON wl.id=ewl.location_id
+      WHERE ewl.employee_id=?1 AND wl.is_active=1
+    `).bind(Number(employee.id)).all(),
+    db.prepare('SELECT * FROM work_locations WHERE client_id=?1 AND is_active=1 ORDER BY name').bind(Number(employee.client_id)).all(),
+  ]);
+  const assignedIds=new Set((assigned.results||[]).map(row=>Number(row.id)));
+  let locations=(company.results||[]).map(location=>({...location,assigned_to_employee:assignedIds.has(Number(location.id))}));
 
   if (!locations.length && employee.geofence_lat != null && employee.geofence_lng != null) {
     locations = [{
@@ -4577,6 +4595,7 @@ async function resolveAllowedWorkLocation(db, employee, lat, lng, {allowOutside=
       latitude: Number(employee.geofence_lat),
       longitude: Number(employee.geofence_lng),
       radius_m: Number(employee.geofence_radius_m || 250),
+      assigned_to_employee:true,
     }];
   }
 
@@ -4586,13 +4605,16 @@ async function resolveAllowedWorkLocation(db, employee, lat, lng, {allowOutside=
   const ranked = locations.map(location => ({
     ...location,
     distance_m: haversineMeters(Number(location.latitude), Number(location.longitude), Number(lat), Number(lng)),
-  })).sort((a,b) => a.distance_m - b.distance_m);
+  })).sort((a,b) => a.distance_m - b.distance_m || Number(b.assigned_to_employee)-Number(a.assigned_to_employee));
+
+  // If GPS is inside ANY active company Work Location, accept that nearest valid point.
+  // This prevents a stale employee-location assignment from incorrectly returning "outside".
+  const inside = ranked.find(location => location.distance_m <= Number(location.radius_m || 150));
+  if (inside) return {...inside,outside:false};
+
   const nearest = ranked[0];
-  if (nearest.distance_m > Number(nearest.radius_m || 150)) {
-    if(allowOutside) return {...nearest,outside:true};
-    throw httpError(`อยู่นอกพื้นที่ ${nearest.name} · ห่าง ${Math.round(nearest.distance_m)} ม. (อนุญาต ${Number(nearest.radius_m || 150)} ม.)`, 403);
-  }
-  return {...nearest,outside:false};
+  if(allowOutside) return {...nearest,outside:true};
+  throw httpError(`อยู่นอกพื้นที่ ${nearest.name} · ห่าง ${Math.round(nearest.distance_m)} ม. (อนุญาต ${Number(nearest.radius_m || 150)} ม.)`, 403);
 }
 
 async function getPublicInvite(db, token) {
