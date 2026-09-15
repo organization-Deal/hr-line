@@ -2987,13 +2987,54 @@ function renderWorkLocations() {
   const list = $('#workLocationList');
   if (!list) return;
   const locations = state.workLocations || [];
-  list.innerHTML = locations.length ? locations.map(location => `
-    <article class="work-location-card ${Number(location.is_active) ? '' : 'inactive'}">
+  list.innerHTML = locations.length ? locations.map(location => {
+    const lat=Number(location.latitude),lng=Number(location.longitude),active=Number(location.is_active)!==0;
+    const coord=(Number.isFinite(lat)&&Number.isFinite(lng))?`${lat.toFixed(6)}, ${lng.toFixed(6)}`:'ไม่มีพิกัด';
+    return `
+    <article class="work-location-card ${active ? '' : 'inactive'}">
       <div class="work-location-pin">⌖</div>
-      <div><strong>${escapeHtml(location.name)}</strong><p>${escapeHtml(location.address || `${Number(location.latitude).toFixed(5)}, ${Number(location.longitude).toFixed(5)}`)}</p><small>อนุญาตภายใน ${Number(location.radius_m)} เมตร</small></div>
-      <span class="badge ${Number(location.is_active) ? 'badge-success' : 'badge-neutral'}">${Number(location.is_active) ? 'ใช้งาน' : 'ปิด'}</span>
-    </article>`).join('') : emptyState('ยังไม่มี Work Location', 'เพิ่มสำนักงานใหญ่ สาขา หรือหน้างาน แล้วเลือกให้พนักงานตอนส่งลิงก์เชิญ');
+      <div class="work-location-copy">
+        <div class="work-location-title"><strong>${escapeHtml(location.name)}</strong><span class="badge ${active ? 'badge-success' : 'badge-neutral'}">${active ? 'ใช้งาน' : 'ปิด'}</span></div>
+        <p>${escapeHtml(location.address || coord)}</p>
+        <small>รัศมี ${Number(location.radius_m)} ม. · ${escapeHtml(coord)}</small>
+      </div>
+      <div class="work-location-actions">
+        <button class="text-btn" type="button" onclick="window.editWorkLocation(${Number(location.id)})">แก้ไข</button>
+        <button class="text-btn danger-text" type="button" onclick="window.deleteWorkLocation(${Number(location.id)})">ลบ</button>
+      </div>
+    </article>`;
+  }).join('') : emptyState('ยังไม่มี Work Location', 'เพิ่มสำนักงานใหญ่ สาขา หรือหน้างาน ระบบจะใช้ทุก Location ที่เปิดใช้งานตรวจ GPS อัตโนมัติ');
 }
+
+window.editWorkLocation = id => {
+  const location=(state.workLocations||[]).find(item=>Number(item.id)===Number(id));
+  if(!location)return toast('ไม่พบ Work Location',true);
+  state.editingWorkLocationId=Number(location.id);
+  $('#locationForm').reset();
+  $('#locationName').value=location.name||'';
+  $('#locationAddress').value=location.address||'';
+  $('#locationLat').value=location.latitude??'';
+  $('#locationLng').value=location.longitude??'';
+  $('#locationRadius').value=String(location.radius_m||150);
+  if($('#locationModalTitle'))$('#locationModalTitle').textContent='แก้ไขจุดเช็กอิน';
+  if($('#locationModalSubtitle'))$('#locationModalSubtitle').textContent='แก้พิกัดหรือรัศมีได้ทันที ระบบจะใช้ค่าล่าสุดในการเช็กอินครั้งถัดไป';
+  if($('#locationSaveBtn'))$('#locationSaveBtn').textContent='บันทึกการแก้ไข';
+  $('#locationModal').showModal();
+};
+
+window.deleteWorkLocation = async id => {
+  const location=(state.workLocations||[]).find(item=>Number(item.id)===Number(id));
+  if(!location)return;
+  if(!confirm(`ลบ Work Location “${location.name}” ใช่ไหม?\n\nพนักงานจะไม่สามารถใช้จุดนี้เช็กอินได้อีก แต่ประวัติการลงเวลาเดิมยังคงอยู่`))return;
+  try{
+    const result=await api(`/api/work-locations/${Number(id)}`,{method:'DELETE'});
+    state.workLocations=(state.workLocations||[]).filter(item=>Number(item.id)!==Number(id));
+    if(state.lookups?.locations)state.lookups.locations=state.lookups.locations.filter(item=>Number(item.id)!==Number(id));
+    renderWorkLocations();
+    renderSettingsSidebar();
+    toast(result?.unassigned_count?`ลบ Work Location แล้ว · ยกเลิกการผูก ${Number(result.unassigned_count)} คน`:'ลบ Work Location แล้ว');
+  }catch(error){toast(error.message,true);}
+};
 
 window.openDepartmentAssignment = id => {
   const department=(state.peopleCore?.departments||[]).find(d=>Number(d.id)===Number(id));
@@ -3370,8 +3411,12 @@ async function saveAttendancePolicy(){
 }
 
 function openWorkLocationModal() {
+  state.editingWorkLocationId=0;
   $('#locationForm').reset();
   $('#locationRadius').value = '150';
+  if($('#locationModalTitle'))$('#locationModalTitle').textContent='เพิ่มจุดเช็กอิน';
+  if($('#locationModalSubtitle'))$('#locationModalSubtitle').textContent='กำหนดพิกัดกลางและรัศมีที่อนุญาต ทุก Work Location ที่เปิดใช้งานจะถูกนำมาตรวจ GPS อัตโนมัติ';
+  if($('#locationSaveBtn'))$('#locationSaveBtn').textContent='บันทึก Location';
   $('#locationModal').showModal();
 }
 
@@ -3400,12 +3445,15 @@ async function saveWorkLocation() {
   const radius_m = Number($('#locationRadius').value || 150);
   if (name.length < 2 || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return toast('กรุณาใส่ชื่อและพิกัดให้ครบ', true);
   const button = $('#locationSaveBtn');
+  const editingId=Number(state.editingWorkLocationId||0);
   button.disabled = true;
   try {
-    await api('/api/work-locations', { method: 'POST', body: JSON.stringify({ name, address: $('#locationAddress').value.trim(), latitude, longitude, radius_m }) });
+    const payload={ name, address: $('#locationAddress').value.trim(), latitude, longitude, radius_m };
+    await api(editingId?`/api/work-locations/${editingId}`:'/api/work-locations', { method: editingId?'PATCH':'POST', body: JSON.stringify(payload) });
+    state.editingWorkLocationId=0;
     $('#locationModal').close();
     await loadAll({ silent: true });
-    toast('เพิ่ม Work Location แล้ว');
+    toast(editingId?'แก้ไข Work Location แล้ว · ใช้พิกัดใหม่ทันที':'เพิ่ม Work Location แล้ว · พนักงานใช้จุดนี้เช็กอินได้ทันที');
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; }
 }
