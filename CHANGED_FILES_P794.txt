@@ -1,0 +1,13 @@
+P7.94 changed files
+- index.js
+- src/index.js
+- index.html
+- public/index.html
+- app.js
+- public/app.js
+- styles.css
+- public/styles.css
+- package.json
+- CHANGELOG.md
+- migrations/0020_p794_attendance_reminder_settings.sql
+- CHANGED_FILES_P794.txt

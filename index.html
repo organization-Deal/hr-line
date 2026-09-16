@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.92" />
-  <link rel="modulepreload" href="/app.js?v=1.0-p7.92" />
+  <link rel="stylesheet" href="/styles.css?v=1.0-p7.94" />
+  <link rel="modulepreload" href="/app.js?v=1.0-p7.94" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -791,6 +791,24 @@
               <button id="addWorkLocationBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่ม Location</button>
             </div>
             <div class="attendance-policy-card"><div><strong>เช็กอิน / เช็กเอาต์นอกพื้นที่</strong><p>เปิดเมื่อบริษัทอนุญาตให้ลงเวลานอก Work Location ระบบยังบันทึกพิกัดและระยะห่างไว้เพื่อตรวจสอบย้อนหลัง</p><small id="attendancePolicyStatus" class="attendance-policy-status">กำลังตรวจสอบการตั้งค่า…</small></div><label class="switch"><input id="attendancePolicyToggle" type="checkbox"/><span></span></label></div>
+            <div id="attendanceReminderCard" class="attendance-reminder-card">
+              <div class="attendance-reminder-head">
+                <div class="attendance-reminder-icon">◷</div>
+                <div class="attendance-reminder-copy"><strong>แจ้งเตือนคนที่ยังไม่เช็กอิน</strong><p>ทุกวันเวลา <b>12:30 น.</b> ระบบจะส่ง LINE เฉพาะพนักงานที่มีตารางงานและยังไม่มีเวลาเช็กอิน คนที่เช็กอินแล้วจะไม่เสียข้อความ</p><small id="attendanceReminderStatus">กำลังโหลดการตั้งค่า…</small></div>
+                <label class="switch"><input id="attendanceReminderToggle" type="checkbox"/><span></span></label>
+              </div>
+              <div class="attendance-reminder-editor">
+                <div class="field full attendance-reminder-message-field">
+                  <label for="attendanceReminderMessage">ข้อความที่บอทส่งให้พนักงาน</label>
+                  <textarea id="attendanceReminderMessage" rows="3" maxlength="300" placeholder="เช่น ตอนนี้ 12:30 น. หากเข้าทำงานแล้ว กรุณาเช็กอิน"></textarea>
+                  <div class="attendance-reminder-field-meta"><small><span id="attendanceReminderCharCount">0</span>/300 ตัวอักษร</small><button id="attendanceReminderResetBtn" class="text-btn" type="button">ใช้ข้อความแนะนำ</button></div>
+                </div>
+                <div class="attendance-reminder-preview">
+                  <span>ตัวอย่างข้อความ</span><strong>ยังไม่พบการเช็กอินวันนี้</strong><p id="attendanceReminderPreviewText">ตอนนี้ 12:30 น. หากเข้าทำงานแล้ว กรุณาเช็กอิน</p><em>ปุ่มใน LINE: เช็กอินตอนนี้</em>
+                </div>
+                <div class="attendance-reminder-actions"><button id="attendanceReminderSaveBtn" class="primary-btn" type="button">บันทึกการแจ้งเตือน</button></div>
+              </div>
+            </div>
             <div id="workLocationList" class="work-location-list"></div>
           </div>
             </div>
@@ -1343,7 +1361,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.92" type="module"></script>
+  <script src="/app.js?v=1.0-p7.94" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
