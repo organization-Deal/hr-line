@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.92';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.92';
-const NAKNA_RUNTIME_FEATURE = 'attendance-work-location-first-place-label';
+const NAKNA_RUNTIME_RELEASE = 'P7.95';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.95';
+const NAKNA_RUNTIME_FEATURE = 'attendance-reminder-settings-fix';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -14,6 +14,8 @@ const QUICK_ATTENDANCE_TOKEN_CACHE = new Map();
 const LINE_MENU_ACCESS_CACHE = new Map();
 const LINE_MENU_TOKEN_TTL_MS = 10 * 60 * 1000;
 const LINE_MENU_ACCESS_TTL_MS = 60 * 1000;
+const MISSING_CHECKIN_REMINDER_TIME = '12:30';
+const MISSING_CHECKIN_REMINDER_DEFAULT_MESSAGE = 'ตอนนี้ 12:30 น. หากเข้าทำงานแล้ว กรุณาเช็กอิน';
 
 const INIT_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1650,6 +1652,12 @@ export default {
         syncAllRecruitmentGmail(env).catch(error=>console.error(JSON.stringify({level:'error',event:'recruitment_gmail_daily_failed',message:String(error?.message||error)})))
       );
     }
+    // P7.93: once per day at 12:30 Asia/Bangkok, notify only employees who are
+    // scheduled to work and still have no check-in. Already checked-in staff,
+    // approved leave, holidays/non-workdays, later shifts, and duplicate sends are skipped.
+    if(clock.time===MISSING_CHECKIN_REMINDER_TIME){
+      jobs.push(runMissingCheckinReminderAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'missing_checkin_reminder_failed',message:String(error?.message||error)}))));
+    }
     await Promise.all(jobs);
   },
 };
@@ -2103,7 +2111,8 @@ async function handleApi(request, env, url, auth, ctx) {
     await ensureV100P1Ready(env.DB);
     // P7.58: positions are company-wide, not department-specific.
     await env.DB.prepare('UPDATE positions SET department_id=NULL WHERE client_id=?1 AND department_id IS NOT NULL').bind(clientId).run();
-    const [departments, positions, schedules, holidays, client] = await Promise.all([
+    await ensureMissingCheckinReminderReady(env.DB);
+    const [departments, positions, schedules, holidays, client, attendanceReminder] = await Promise.all([
       env.DB.prepare(`SELECT d.*,m.nickname AS manager_nickname,m.first_name AS manager_first_name,m.last_name AS manager_last_name,
         (SELECT COUNT(*) FROM employees e WHERE e.department_id=d.id AND e.client_id=d.client_id AND e.status='active') AS employee_count
         FROM departments d LEFT JOIN employees m ON m.id=d.manager_employee_id
@@ -2112,6 +2121,7 @@ async function handleApi(request, env, url, auth, ctx) {
       env.DB.prepare(`SELECT * FROM work_schedule_rules WHERE client_id=?1 ORDER BY CASE scope_type WHEN 'company' THEN 1 WHEN 'department' THEN 2 ELSE 3 END,scope_id,weekday`).bind(clientId).all(),
       env.DB.prepare(`SELECT * FROM company_holidays WHERE client_id=?1 ORDER BY holiday_date`).bind(clientId).all(),
       getClient(env.DB,clientId),
+      getMissingCheckinReminderSettings(env.DB,clientId),
     ]);
     return json({
       departments: departments.results||[],
@@ -2119,6 +2129,7 @@ async function handleApi(request, env, url, auth, ctx) {
       schedules: schedules.results||[],
       holidays: holidays.results||[],
       attendance_policy: { allow_attendance_outside_geofence: Boolean(Number(client?.allow_checkout_outside_geofence||0)), allow_checkout_outside_geofence: Boolean(Number(client?.allow_checkout_outside_geofence||0)) },
+      attendance_reminder: attendanceReminder,
     });
   }
 
@@ -2248,6 +2259,40 @@ async function handleApi(request, env, url, auth, ctx) {
   const holidayDeleteMatch=path.match(/^\/api\/company-holidays\/(\d+)$/);
   if(holidayDeleteMatch && method==='DELETE'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดการวันหยุด'},403); await env.DB.prepare('DELETE FROM company_holidays WHERE id=?1 AND client_id=?2').bind(Number(holidayDeleteMatch[1]),clientId).run(); return json({ok:true});
+  }
+
+  if(path==='/api/attendance-reminder-settings' && method==='GET'){
+    const settings=await getMissingCheckinReminderSettings(env.DB,clientId);
+    return json({ok:true,settings});
+  }
+
+  if(path==='/api/attendance-reminder-settings' && method==='PATCH'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์แก้การแจ้งเตือนเช็กอิน'},403);
+    try{
+      await ensureMissingCheckinReminderReady(env.DB);
+      const body=await safeJson(request);
+      const enabled=body.enabled===false||body.enabled===0||String(body.enabled).toLowerCase()==='false'||String(body.enabled)==='0'?0:1;
+      const messageText=normalizeMissingCheckinReminderMessage(body.message_text);
+      // P7.95: store the live setting on clients (a table every workspace already has).
+      // This avoids save failures caused by an older/partially-created reminder settings table.
+      const write=await env.DB.prepare(`UPDATE clients SET attendance_reminder_enabled=?1,attendance_reminder_message=?2 WHERE id=?3`)
+        .bind(enabled,messageText,clientId).run();
+      if(Number(write.meta?.changes||0)<1)return json({error:'ไม่พบบริษัทสำหรับบันทึกการตั้งค่า'},404);
+      // Keep the legacy table in sync when available for backward compatibility only.
+      try{
+        await env.DB.prepare(`DELETE FROM attendance_reminder_settings WHERE client_id=?1`).bind(clientId).run();
+        await env.DB.prepare(`INSERT INTO attendance_reminder_settings (client_id,enabled,message_text,updated_at) VALUES (?1,?2,?3,CURRENT_TIMESTAMP)`)
+          .bind(clientId,enabled,messageText).run();
+      }catch(error){
+        console.warn(JSON.stringify({level:'warn',event:'attendance_reminder_legacy_sync_failed',client_id:Number(clientId),message:String(error?.message||error)}));
+      }
+      const settings=await getMissingCheckinReminderSettings(env.DB,clientId);
+      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'attendance.reminder.update','client',String(clientId),settings);
+      return json({ok:true,settings});
+    }catch(error){
+      console.error(JSON.stringify({level:'error',event:'attendance_reminder_settings_save_failed',client_id:Number(clientId),message:String(error?.message||error)}));
+      return json({error:'บันทึกการแจ้งเตือนไม่สำเร็จ',detail:String(error?.message||error).slice(0,240)},500);
+    }
   }
 
   if(path==='/api/attendance-policy' && method==='GET'){
@@ -6522,6 +6567,202 @@ async function runWellnessReminderAutomation(env){
   const due=(await env.DB.prepare(`SELECT client_id,GROUP_CONCAT(employee_id) AS employee_ids FROM wellness_sessions WHERE status='reminded' AND snoozed_until IS NOT NULL AND datetime(snoozed_until)<=CURRENT_TIMESTAMP GROUP BY client_id`).all()).results||[];
   for(const row of due){const ids=String(row.employee_ids||'').split(',').map(Number).filter(Boolean);if(!ids.length)continue;const r=await sendWellnessReminderForClient(env,Number(row.client_id),{mode:'snooze',employeeIds:ids});sent+=Number(r.sent||0);}
   return {clients,sent,time:clock.time};
+}
+
+async function ensureMissingCheckinReminderReady(db){
+  if(SCHEMA_READY.has('missing_checkin_reminders'))return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_reminder_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    reminder_date TEXT NOT NULL,
+    reminder_time TEXT NOT NULL DEFAULT '12:30',
+    provider_scope TEXT,
+    status TEXT NOT NULL DEFAULT 'sent',
+    sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    error_text TEXT,
+    UNIQUE(client_id,employee_id,reminder_date)
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_attendance_reminder_date ON attendance_reminder_logs(reminder_date,client_id)`).run().catch(()=>{});
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_reminder_settings (
+    client_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    message_text TEXT NOT NULL DEFAULT 'ตอนนี้ 12:30 น. หากเข้าทำงานแล้ว กรุณาเช็กอิน',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+  // Repair older/partial P7.94 schemas instead of assuming CREATE TABLE was enough.
+  await ensureColumns(db,'attendance_reminder_settings',[
+    ['enabled','INTEGER NOT NULL DEFAULT 1'],
+    ['message_text',"TEXT NOT NULL DEFAULT 'ตอนนี้ 12:30 น. หากเข้าทำงานแล้ว กรุณาเช็กอิน'"],
+    ['updated_at','TEXT']
+  ]);
+  await ensureColumns(db,'clients',[
+    ['attendance_reminder_enabled','INTEGER NOT NULL DEFAULT 1'],
+    ['attendance_reminder_message','TEXT']
+  ]);
+  // Migrate a saved P7.94 value once (message NULL means clients has never been the source yet).
+  try{
+    await db.prepare(`UPDATE clients
+      SET attendance_reminder_enabled=COALESCE((SELECT ars.enabled FROM attendance_reminder_settings ars WHERE ars.client_id=clients.id LIMIT 1),attendance_reminder_enabled,1),
+          attendance_reminder_message=COALESCE((SELECT ars.message_text FROM attendance_reminder_settings ars WHERE ars.client_id=clients.id LIMIT 1),attendance_reminder_message)
+      WHERE attendance_reminder_message IS NULL
+        AND EXISTS (SELECT 1 FROM attendance_reminder_settings ars WHERE ars.client_id=clients.id)`).run();
+  }catch(error){
+    console.warn(JSON.stringify({level:'warn',event:'attendance_reminder_settings_migration_skipped',message:String(error?.message||error)}));
+  }
+  SCHEMA_READY.add('missing_checkin_reminders');
+}
+
+function normalizeMissingCheckinReminderMessage(value){
+  const message=String(value??'').replace(/\r\n/g,'\n').trim().slice(0,300);
+  return message||MISSING_CHECKIN_REMINDER_DEFAULT_MESSAGE;
+}
+
+async function getMissingCheckinReminderSettings(db,clientId){
+  await ensureMissingCheckinReminderReady(db);
+  const row=await db.prepare('SELECT attendance_reminder_enabled AS enabled,attendance_reminder_message AS message_text FROM clients WHERE id=?1 LIMIT 1').bind(Number(clientId)).first();
+  return {
+    enabled: row?Boolean(Number(row.enabled)):true,
+    reminder_time:MISSING_CHECKIN_REMINDER_TIME,
+    message_text:normalizeMissingCheckinReminderMessage(row?.message_text),
+    updated_at:null,
+  };
+}
+
+function buildMissingCheckinReminderFlex(customMessage=MISSING_CHECKIN_REMINDER_DEFAULT_MESSAGE){
+  const messageText=normalizeMissingCheckinReminderMessage(customMessage);
+  return {type:'flex',altText:'ยังไม่พบการเช็กอินวันนี้ · นากนะ',contents:lineBubble({
+    eyebrow:'ATTENDANCE · REMINDER',
+    title:'ยังไม่พบการเช็กอินวันนี้',
+    subtitle:messageText,
+    status:'รอเช็กอิน',statusTone:'warning',
+    body:[
+      lineInfoCard([
+        lineInfoRow('เวลาแจ้งเตือน','12:30 น.',LINE_CI.primaryDark),
+        lineInfoRow('สถานะ','ยังไม่มีเวลาเช็กอินวันนี้',LINE_CI.warning)
+      ],'teal'),
+      lineText('นากนะส่งข้อความนี้เฉพาะวันที่มีตารางงาน และจะไม่ส่งให้คนที่เช็กอินแล้ว','xs',LINE_CI.muted)
+    ],
+    footer:[linePrimaryButton('เช็กอินตอนนี้',{type:'postback',label:'เช็กอินตอนนี้',data:'action=checkin'})]
+  })};
+}
+
+async function multicastLineMessages(accessToken,to,messages){
+  const recipients=[...new Set((to||[]).map(String).filter(Boolean))];
+  if(!accessToken||!recipients.length)return false;
+  try{
+    const response=await fetch('https://api.line.me/v2/bot/message/multicast',{
+      method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`},
+      body:JSON.stringify({to:recipients,messages})
+    });
+    if(!response.ok){console.error(JSON.stringify({level:'error',event:'line_multicast_failed',status:response.status,count:recipients.length,body:await response.text()}));return false;}
+    return true;
+  }catch(error){console.error(JSON.stringify({level:'error',event:'line_multicast_failed',count:recipients.length,message:String(error?.message||error)}));return false;}
+}
+
+async function writeMissingCheckinReminderLogs(db,rows,today){
+  if(!rows.length)return;
+  const chunkSize=80;
+  for(let i=0;i<rows.length;i+=chunkSize){
+    const chunk=rows.slice(i,i+chunkSize);
+    await db.batch(chunk.map(row=>db.prepare(`INSERT OR IGNORE INTO attendance_reminder_logs (client_id,employee_id,reminder_date,reminder_time,provider_scope,status,sent_at) VALUES (?1,?2,?3,?4,?5,'sent',CURRENT_TIMESTAMP)`)
+      .bind(Number(row.client_id),Number(row.id),today,MISSING_CHECKIN_REMINDER_TIME,String(row.line_provider_scope||'default'))));
+  }
+}
+
+async function runMissingCheckinReminderAutomation(env){
+  await ensureMissingCheckinReminderReady(env.DB);
+  const clock=bangkokClock();
+  if(clock.time!==MISSING_CHECKIN_REMINDER_TIME)return {sent:0,eligible:0,skipped:true,time:clock.time};
+  const today=clock.date,weekday=Number(clock.weekday||7),fallbackWorkday=weekday<=5?1:0;
+  const tokenCache=new Map();
+  let lastEmployeeId=0,eligible=0,sent=0,failed=0,batches=0;
+  while(true){
+    // Resolve schedule precedence in SQL so this stays cheap even with many companies:
+    // employee rule > department rule > company rule > Mon-Fri company default.
+    const result=await env.DB.prepare(`
+      SELECT e.id,e.client_id,e.line_user_id,COALESCE(e.line_provider_scope,'default') AS line_provider_scope,
+        COALESCE(NULLIF(TRIM(c.attendance_reminder_message),''),?6) AS reminder_message
+      FROM employees e
+      JOIN clients c ON c.id=e.client_id
+      WHERE e.id>?1
+        AND COALESCE(c.attendance_reminder_enabled,1)=1
+        AND e.status='active'
+        AND COALESCE(e.people_status,'employee') IN ('probation','employee')
+        AND e.line_user_id IS NOT NULL AND trim(e.line_user_id)<>''
+        AND NOT EXISTS (
+          SELECT 1 FROM attendance a
+          WHERE a.client_id=e.client_id AND a.employee_id=e.id AND a.work_date=?2 AND a.check_in_at IS NOT NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM leave_requests lr
+          WHERE lr.client_id=e.client_id AND lr.employee_id=e.id AND lr.status='approved'
+            AND lr.start_date<=?2 AND lr.end_date>=?2
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM company_holidays h
+          WHERE h.client_id=e.client_id AND h.holiday_date=?2
+        )
+        AND COALESCE((
+          SELECT wr.is_workday FROM work_schedule_rules wr
+          WHERE wr.client_id=e.client_id AND wr.weekday=?3 AND (
+            (wr.scope_type='employee' AND wr.scope_id=e.id) OR
+            (wr.scope_type='department' AND wr.scope_id=COALESCE(e.department_id,0)) OR
+            (wr.scope_type='company' AND wr.scope_id=0)
+          )
+          ORDER BY CASE wr.scope_type WHEN 'employee' THEN 1 WHEN 'department' THEN 2 ELSE 3 END LIMIT 1
+        ),?4)=1
+        AND COALESCE((
+          SELECT wr.start_time FROM work_schedule_rules wr
+          WHERE wr.client_id=e.client_id AND wr.weekday=?3 AND (
+            (wr.scope_type='employee' AND wr.scope_id=e.id) OR
+            (wr.scope_type='department' AND wr.scope_id=COALESCE(e.department_id,0)) OR
+            (wr.scope_type='company' AND wr.scope_id=0)
+          )
+          ORDER BY CASE wr.scope_type WHEN 'employee' THEN 1 WHEN 'department' THEN 2 ELSE 3 END LIMIT 1
+        ),c.work_start,'09:00')<=?5
+        AND NOT EXISTS (
+          SELECT 1 FROM attendance_reminder_logs ar
+          WHERE ar.client_id=e.client_id AND ar.employee_id=e.id AND ar.reminder_date=?2
+        )
+      ORDER BY e.id
+      LIMIT 1000
+    `).bind(lastEmployeeId,today,weekday,fallbackWorkday,MISSING_CHECKIN_REMINDER_TIME,MISSING_CHECKIN_REMINDER_DEFAULT_MESSAGE).all();
+    const rows=result.results||[];
+    if(!rows.length)break;
+    lastEmployeeId=Number(rows[rows.length-1].id||lastEmployeeId);
+    eligible+=rows.length;
+
+    // Multicast keeps outbound requests small. Default Nakna OA recipients can be
+    // batched across companies; dedicated company OAs are grouped by integration scope.
+    const groups=new Map();
+    for(const row of rows){
+      const scope=String(row.line_provider_scope||'default');
+      const messageText=normalizeMissingCheckinReminderMessage(row.reminder_message);
+      const providerKey=scope==='default'?'default':`${Number(row.client_id)}|${scope}`;
+      const key=JSON.stringify([providerKey,messageText]);
+      if(!groups.has(key))groups.set(key,{client_id:Number(row.client_id),scope,messageText,rows:[]});
+      groups.get(key).rows.push(row);
+    }
+    for(const group of groups.values()){
+      const tokenKey=group.scope==='default'?'default':`${group.client_id}|${group.scope}`;
+      let accessToken=tokenCache.get(tokenKey);
+      if(accessToken===undefined){
+        accessToken=await getAccessTokenForProviderScope(env,group.client_id,group.scope).catch(()=>null);
+        tokenCache.set(tokenKey,accessToken||null);
+      }
+      if(!accessToken){failed+=group.rows.length;continue;}
+      const message=buildMissingCheckinReminderFlex(group.messageText);
+      for(let i=0;i<group.rows.length;i+=500){
+        const chunk=group.rows.slice(i,i+500),to=chunk.map(row=>row.line_user_id);
+        const ok=await multicastLineMessages(accessToken,to,[message]); batches++;
+        if(ok){sent+=chunk.length;await writeMissingCheckinReminderLogs(env.DB,chunk,today);}else failed+=chunk.length;
+      }
+    }
+    if(rows.length<1000)break;
+  }
+  console.log(JSON.stringify({level:'info',event:'missing_checkin_reminder_complete',date:today,time:clock.time,eligible,sent,failed,batches}));
+  return {date:today,time:clock.time,eligible,sent,failed,batches};
 }
 
 function safeJsonParse(value,fallback=null){try{return JSON.parse(value);}catch{return fallback;}}
