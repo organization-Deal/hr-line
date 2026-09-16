@@ -1,0 +1,10 @@
+P7.95 changed files
+- index.js
+- src/index.js
+- app.js
+- public/app.js
+- index.html
+- public/index.html
+- package.json
+- CHANGELOG.md
+- CHANGED_FILES_P795.txt

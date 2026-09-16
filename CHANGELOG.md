@@ -1,3 +1,11 @@
+# P7.95 — Attendance reminder save fix
+
+- แก้ปัญหาหน้าตั้งค่าแจ้งเตือนเช็กอินขึ้น “บันทึกไม่สำเร็จ” บนมือถือ
+- ย้าย source of truth ของสถานะเปิด/ปิดและข้อความแจ้งเตือนไปเก็บใน `clients` ซึ่งมีอยู่ทุก Workspace อยู่แล้ว ลดปัญหา schema ตารางใหม่ไม่ครบหลัง Deploy
+- Runtime ซ่อม schema P7.94 ที่สร้างค้าง/ไม่ครบให้อัตโนมัติ และ migrate ค่าที่เคยบันทึกไว้กลับมาให้
+- Automation 12:30 อ่านค่าจากบริษัทโดยตรง จึงใช้ค่าที่ HR บันทึกล่าสุดแน่นอน
+- การบันทึกการ์ดนี้ใช้สถานะ inline ไม่ขึ้น overlay error กลางจอ และ backend ส่งรายละเอียด error ที่ชัดเจนขึ้นเมื่อมีปัญหา
+
 # P7.93 — Missing Check-in Reminder 12:30
 
 ## P7.94 — Attendance reminder controls

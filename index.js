@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.94';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.94';
-const NAKNA_RUNTIME_FEATURE = 'attendance-reminder-controls';
+const NAKNA_RUNTIME_RELEASE = 'P7.95';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.95';
+const NAKNA_RUNTIME_FEATURE = 'attendance-reminder-settings-fix';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -2268,16 +2268,31 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if(path==='/api/attendance-reminder-settings' && method==='PATCH'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์แก้การแจ้งเตือนเช็กอิน'},403);
-    await ensureMissingCheckinReminderReady(env.DB);
-    const body=await safeJson(request);
-    const enabled=body.enabled===false||body.enabled===0||String(body.enabled).toLowerCase()==='false'||String(body.enabled)==='0'?0:1;
-    const messageText=normalizeMissingCheckinReminderMessage(body.message_text);
-    await env.DB.prepare(`INSERT INTO attendance_reminder_settings (client_id,enabled,message_text,updated_at) VALUES (?1,?2,?3,CURRENT_TIMESTAMP)
-      ON CONFLICT(client_id) DO UPDATE SET enabled=excluded.enabled,message_text=excluded.message_text,updated_at=CURRENT_TIMESTAMP`)
-      .bind(clientId,enabled,messageText).run();
-    const settings=await getMissingCheckinReminderSettings(env.DB,clientId);
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'attendance.reminder.update','client',String(clientId),settings);
-    return json({ok:true,settings});
+    try{
+      await ensureMissingCheckinReminderReady(env.DB);
+      const body=await safeJson(request);
+      const enabled=body.enabled===false||body.enabled===0||String(body.enabled).toLowerCase()==='false'||String(body.enabled)==='0'?0:1;
+      const messageText=normalizeMissingCheckinReminderMessage(body.message_text);
+      // P7.95: store the live setting on clients (a table every workspace already has).
+      // This avoids save failures caused by an older/partially-created reminder settings table.
+      const write=await env.DB.prepare(`UPDATE clients SET attendance_reminder_enabled=?1,attendance_reminder_message=?2 WHERE id=?3`)
+        .bind(enabled,messageText,clientId).run();
+      if(Number(write.meta?.changes||0)<1)return json({error:'ไม่พบบริษัทสำหรับบันทึกการตั้งค่า'},404);
+      // Keep the legacy table in sync when available for backward compatibility only.
+      try{
+        await env.DB.prepare(`DELETE FROM attendance_reminder_settings WHERE client_id=?1`).bind(clientId).run();
+        await env.DB.prepare(`INSERT INTO attendance_reminder_settings (client_id,enabled,message_text,updated_at) VALUES (?1,?2,?3,CURRENT_TIMESTAMP)`)
+          .bind(clientId,enabled,messageText).run();
+      }catch(error){
+        console.warn(JSON.stringify({level:'warn',event:'attendance_reminder_legacy_sync_failed',client_id:Number(clientId),message:String(error?.message||error)}));
+      }
+      const settings=await getMissingCheckinReminderSettings(env.DB,clientId);
+      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'attendance.reminder.update','client',String(clientId),settings);
+      return json({ok:true,settings});
+    }catch(error){
+      console.error(JSON.stringify({level:'error',event:'attendance_reminder_settings_save_failed',client_id:Number(clientId),message:String(error?.message||error)}));
+      return json({error:'บันทึกการแจ้งเตือนไม่สำเร็จ',detail:String(error?.message||error).slice(0,240)},500);
+    }
   }
 
   if(path==='/api/attendance-policy' && method==='GET'){
@@ -6575,6 +6590,26 @@ async function ensureMissingCheckinReminderReady(db){
     message_text TEXT NOT NULL DEFAULT 'ตอนนี้ 12:30 น. หากเข้าทำงานแล้ว กรุณาเช็กอิน',
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`).run();
+  // Repair older/partial P7.94 schemas instead of assuming CREATE TABLE was enough.
+  await ensureColumns(db,'attendance_reminder_settings',[
+    ['enabled','INTEGER NOT NULL DEFAULT 1'],
+    ['message_text',"TEXT NOT NULL DEFAULT 'ตอนนี้ 12:30 น. หากเข้าทำงานแล้ว กรุณาเช็กอิน'"],
+    ['updated_at','TEXT']
+  ]);
+  await ensureColumns(db,'clients',[
+    ['attendance_reminder_enabled','INTEGER NOT NULL DEFAULT 1'],
+    ['attendance_reminder_message','TEXT']
+  ]);
+  // Migrate a saved P7.94 value once (message NULL means clients has never been the source yet).
+  try{
+    await db.prepare(`UPDATE clients
+      SET attendance_reminder_enabled=COALESCE((SELECT ars.enabled FROM attendance_reminder_settings ars WHERE ars.client_id=clients.id LIMIT 1),attendance_reminder_enabled,1),
+          attendance_reminder_message=COALESCE((SELECT ars.message_text FROM attendance_reminder_settings ars WHERE ars.client_id=clients.id LIMIT 1),attendance_reminder_message)
+      WHERE attendance_reminder_message IS NULL
+        AND EXISTS (SELECT 1 FROM attendance_reminder_settings ars WHERE ars.client_id=clients.id)`).run();
+  }catch(error){
+    console.warn(JSON.stringify({level:'warn',event:'attendance_reminder_settings_migration_skipped',message:String(error?.message||error)}));
+  }
   SCHEMA_READY.add('missing_checkin_reminders');
 }
 
@@ -6585,12 +6620,12 @@ function normalizeMissingCheckinReminderMessage(value){
 
 async function getMissingCheckinReminderSettings(db,clientId){
   await ensureMissingCheckinReminderReady(db);
-  const row=await db.prepare('SELECT enabled,message_text,updated_at FROM attendance_reminder_settings WHERE client_id=?1 LIMIT 1').bind(Number(clientId)).first();
+  const row=await db.prepare('SELECT attendance_reminder_enabled AS enabled,attendance_reminder_message AS message_text FROM clients WHERE id=?1 LIMIT 1').bind(Number(clientId)).first();
   return {
     enabled: row?Boolean(Number(row.enabled)):true,
     reminder_time:MISSING_CHECKIN_REMINDER_TIME,
     message_text:normalizeMissingCheckinReminderMessage(row?.message_text),
-    updated_at:row?.updated_at||null,
+    updated_at:null,
   };
 }
 
@@ -6647,12 +6682,11 @@ async function runMissingCheckinReminderAutomation(env){
     // employee rule > department rule > company rule > Mon-Fri company default.
     const result=await env.DB.prepare(`
       SELECT e.id,e.client_id,e.line_user_id,COALESCE(e.line_provider_scope,'default') AS line_provider_scope,
-        COALESCE(NULLIF(TRIM(ars.message_text),''),?6) AS reminder_message
+        COALESCE(NULLIF(TRIM(c.attendance_reminder_message),''),?6) AS reminder_message
       FROM employees e
       JOIN clients c ON c.id=e.client_id
-      LEFT JOIN attendance_reminder_settings ars ON ars.client_id=e.client_id
       WHERE e.id>?1
-        AND COALESCE(ars.enabled,1)=1
+        AND COALESCE(c.attendance_reminder_enabled,1)=1
         AND e.status='active'
         AND COALESCE(e.people_status,'employee') IN ('probation','employee')
         AND e.line_user_id IS NOT NULL AND trim(e.line_user_id)<>''
