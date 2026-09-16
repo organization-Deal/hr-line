@@ -3417,7 +3417,7 @@ async function saveAttendanceReminderSettings({fromToggle=false}={}){
   if(button)button.disabled=true; toggle.disabled=true;
   const status=$('#attendanceReminderStatus'); if(status){status.textContent='กำลังบันทึก…';status.className='saving';}
   try{
-    const result=await api('/api/attendance-reminder-settings',{method:'PATCH',body:JSON.stringify(body)});
+    const result=await api('/api/attendance-reminder-settings',{method:'PATCH',body:JSON.stringify(body),silentStatus:true});
     state.peopleCore.attendance_reminder=result.settings||body;
     renderAttendanceReminderSettings();
     toast(body.enabled?(fromToggle?'เปิดระบบแจ้งเตือน 12:30 น. แล้ว':'บันทึกข้อความแจ้งเตือนแล้ว'):'ปิดระบบแจ้งเตือนคนยังไม่เช็กอินแล้ว');
