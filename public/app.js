@@ -41,7 +41,7 @@ const state = {
   approverAccess: [],
   approverPermissionCatalog: [],
   companyAccess: { members: [], eligible_employees: [], current_user_id: null },
-  peopleCore: { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} },
+  peopleCore: { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {}, attendance_reminder: {} },
   activeApproverEmployeeId: null,
   activeLeaveProfileEmployeeId: null,
   currentView: 'dashboard',
@@ -56,6 +56,7 @@ const state = {
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
+const DEFAULT_ATTENDANCE_REMINDER_MESSAGE = 'ตอนนี้ 12:30 น. หากเข้าทำงานแล้ว กรุณาเช็กอิน';
 
 let bootWatchdog = null;
 let onboardingRefreshInFlight = false;
@@ -859,6 +860,10 @@ function bindEvents() {
   $('#scheduleScopeType').onchange = refreshScheduleTarget;
   $('#holidaySaveBtn').onclick = saveHoliday;
   $('#attendancePolicyToggle').onchange = saveAttendancePolicy;
+  if ($('#attendanceReminderToggle')) $('#attendanceReminderToggle').onchange = () => { updateAttendanceReminderEditor(); saveAttendanceReminderSettings({fromToggle:true}); };
+  if ($('#attendanceReminderMessage')) $('#attendanceReminderMessage').oninput = updateAttendanceReminderEditor;
+  if ($('#attendanceReminderResetBtn')) $('#attendanceReminderResetBtn').onclick = () => { $('#attendanceReminderMessage').value=DEFAULT_ATTENDANCE_REMINDER_MESSAGE; updateAttendanceReminderEditor(); $('#attendanceReminderMessage').focus(); };
+  if ($('#attendanceReminderSaveBtn')) $('#attendanceReminderSaveBtn').onclick = () => saveAttendanceReminderSettings();
   $('#peopleProfileSaveBtn').onclick = savePeopleProfile;
   $('#addLeaveBtn').onclick = openLeaveRequestModal;
   if ($('#leaveReportMonth')) {
@@ -3322,6 +3327,7 @@ function renderPeopleCore(){
     holidayRoot.innerHTML=holidays.length?holidays.slice(0,30).map(h=>`<div class="holiday-row"><div class="holiday-date"><strong>${new Date(`${h.holiday_date}T12:00:00`).getDate()}</strong><span>${new Date(`${h.holiday_date}T12:00:00`).toLocaleDateString('th-TH',{month:'short'})}</span></div><div><strong>${escapeHtml(h.name)}</strong><small>${h.holiday_type==='traditional'?'วันหยุดตามประเพณี':escapeHtml(h.holiday_type)}${Number(h.is_paid)?' · จ่ายค่าจ้าง':' · ไม่จ่ายค่าจ้าง'}</small></div><button class="text-btn danger-text" onclick="window.deleteHoliday(${Number(h.id)})">ลบ</button></div>`).join(''):emptyState('ยังไม่ได้ตั้งวันหยุดบริษัท','เพิ่มวันหยุดประจำปีให้พนักงานตรวจสอบได้จากระบบ');
   }
   const toggle=$('#attendancePolicyToggle'); const outsideAllowed=Boolean(core.attendance_policy?.allow_attendance_outside_geofence ?? core.attendance_policy?.allow_checkout_outside_geofence); if(toggle && !state.attendancePolicySaving) toggle.checked=outsideAllowed; updateAttendancePolicyStatus(outsideAllowed,state.attendancePolicySaving?'saving':'ready');
+  renderAttendanceReminderSettings();
 }
 
 window.editDepartment=id=>openDepartmentModal((state.peopleCore.departments||[]).find(d=>Number(d.id)===Number(id)));
@@ -3382,6 +3388,44 @@ async function saveSchedule(){const weekdays=$$('#scheduleWeekdays input:checked
 function openHolidayModal(){ $('#holidayDate').value='';$('#holidayName').value='';$('#holidayType').value='traditional';$('#holidayPaid').checked=true;$('#holidayNotes').value='';$('#holidayModal').showModal(); }
 async function saveHoliday(){const body={holiday_date:$('#holidayDate').value,name:$('#holidayName').value.trim(),holiday_type:$('#holidayType').value,is_paid:$('#holidayPaid').checked,notes:$('#holidayNotes').value.trim()};const b=$('#holidaySaveBtn');b.disabled=true;try{await api('/api/company-holidays',{method:'POST',body:JSON.stringify(body)});$('#holidayModal').close();await loadAll({silent:true});toast('เพิ่มวันหยุดบริษัทแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
 window.deleteHoliday=async id=>{if(!confirm('ลบวันหยุดนี้ใช่ไหม?'))return;try{await api(`/api/company-holidays/${id}`,{method:'DELETE'});await loadAll({silent:true});toast('ลบวันหยุดแล้ว');}catch(e){toast(e.message,true);}};
+function renderAttendanceReminderSettings(){
+  const card=$('#attendanceReminderCard'),toggle=$('#attendanceReminderToggle'),message=$('#attendanceReminderMessage');
+  if(!card||!toggle||!message)return;
+  const settings=state.peopleCore?.attendance_reminder||{};
+  const enabled=settings.enabled!==false;
+  const text=String(settings.message_text||DEFAULT_ATTENDANCE_REMINDER_MESSAGE).trim()||DEFAULT_ATTENDANCE_REMINDER_MESSAGE;
+  toggle.checked=enabled;
+  if(document.activeElement!==message) message.value=text;
+  updateAttendanceReminderEditor();
+}
+function updateAttendanceReminderEditor(){
+  const card=$('#attendanceReminderCard'),toggle=$('#attendanceReminderToggle'),message=$('#attendanceReminderMessage');
+  if(!card||!toggle||!message)return;
+  const enabled=Boolean(toggle.checked),text=String(message.value||'').slice(0,300);
+  card.classList.toggle('is-disabled',!enabled);
+  const status=$('#attendanceReminderStatus');
+  if(status){status.textContent=enabled?'เปิดใช้งาน · ส่งเฉพาะคนที่ยังไม่เช็กอินเวลา 12:30 น.':'ปิดใช้งาน · วันนี้และวันถัดไปจะไม่ส่งข้อความเตือน';status.className=enabled?'is-on':'is-off';}
+  if($('#attendanceReminderCharCount')) $('#attendanceReminderCharCount').textContent=String(text.length);
+  if($('#attendanceReminderPreviewText')) $('#attendanceReminderPreviewText').textContent=text.trim()||DEFAULT_ATTENDANCE_REMINDER_MESSAGE;
+}
+async function saveAttendanceReminderSettings({fromToggle=false}={}){
+  const toggle=$('#attendanceReminderToggle'),message=$('#attendanceReminderMessage'),button=$('#attendanceReminderSaveBtn');
+  if(!toggle||!message)return;
+  const previous={...(state.peopleCore?.attendance_reminder||{})};
+  const body={enabled:Boolean(toggle.checked),message_text:String(message.value||'').trim()||DEFAULT_ATTENDANCE_REMINDER_MESSAGE};
+  if(body.message_text.length>300)return toast('ข้อความแจ้งเตือนยาวเกิน 300 ตัวอักษร',true);
+  if(button)button.disabled=true; toggle.disabled=true;
+  const status=$('#attendanceReminderStatus'); if(status){status.textContent='กำลังบันทึก…';status.className='saving';}
+  try{
+    const result=await api('/api/attendance-reminder-settings',{method:'PATCH',body:JSON.stringify(body)});
+    state.peopleCore.attendance_reminder=result.settings||body;
+    renderAttendanceReminderSettings();
+    toast(body.enabled?(fromToggle?'เปิดระบบแจ้งเตือน 12:30 น. แล้ว':'บันทึกข้อความแจ้งเตือนแล้ว'):'ปิดระบบแจ้งเตือนคนยังไม่เช็กอินแล้ว');
+  }catch(e){
+    state.peopleCore.attendance_reminder=previous; renderAttendanceReminderSettings(); toast(e.message,true);
+  }finally{if(button)button.disabled=false;toggle.disabled=false;}
+}
+
 function updateAttendancePolicyStatus(allowed,stateName='ready'){
   const status=$('#attendancePolicyStatus'); if(!status)return;
   status.classList.toggle('saving',stateName==='saving');
