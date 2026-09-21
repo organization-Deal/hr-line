@@ -2484,3 +2484,7 @@ button.worklog-day-card{width:100%;border:0;background:#fff;text-align:left;font
 .employee-row-actions .quick-leave-btn:hover{background:#e1f5ee;color:#096b59;text-decoration:none}
 .employee-row-actions .quick-leave-btn.is-enabled,.employee-row-actions .quick-leave-btn:disabled.is-enabled{border-color:#d5eee5!important;background:#f0faf6!important;color:#23856c!important;cursor:default;opacity:1}
 @media(max-width:720px){.employee-master-table .employee-row-actions .quick-leave-btn{border-color:#cfe9df!important;background:#eefaf6!important;color:#0d7f69!important}.employee-master-table .employee-row-actions .quick-leave-btn.is-enabled{background:#f0faf6!important;color:#23856c!important}}
+
+/* Nakna P8.01 — Document Foundation */
+.employee-document-row.is-archived{opacity:.58;background:#f7f7f5}.doc-version{display:inline-flex;margin-left:6px;padding:2px 7px;border-radius:999px;background:#eef7f5;color:var(--brand);font-size:10px;font-weight:700}.employee-doc-upload-grid{grid-template-columns:repeat(3,minmax(0,1fr))}@media(max-width:760px){.employee-doc-upload-grid{grid-template-columns:1fr 1fr}.employee-doc-file-field{grid-column:1/-1}.employee-document-row{grid-template-columns:38px minmax(0,1fr)}.employee-document-actions{grid-column:2;flex-wrap:wrap}}
+.document-system-toolbar{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px}.document-row small{line-height:1.5}.document-summary{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}

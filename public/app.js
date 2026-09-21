@@ -25,6 +25,7 @@ const state = {
   payroll: null,
   payrollDetail: null,
   documents: { data: [], payslips: [] },
+  documentSystem: {summary:{},templates:[],pending_approvals:[],pending_acknowledgements:[],open_cases:[],expiring:[]},
   learning: { courses: [], assignments: [], summary: {} },
   performance: { cycles: [], goals: [], one_on_ones: [], probation_reviews: [], probation_due: [], summary: {} },
   engagement: { rules: [], rewards: [], redemptions: [], leaderboard: [], recent_transactions: [], summary: {} },
@@ -313,7 +314,7 @@ async function loadViewData(name,{force=false}={}){
       }else if(name==='payroll'){
         if(canPayroll){ const [payroll,employees]=await Promise.all([load('/api/payroll/overview',state.payroll),load('/api/employees',{data:state.employees})]); state.payroll=payroll||state.payroll; state.employees=employees?.data||state.employees; }
       }else if(name==='documents'){
-        if(canPayroll){ const [documents,employees]=await Promise.all([load('/api/documents',state.documents),load('/api/employees',{data:state.employees})]); state.documents=documents||state.documents; state.employees=employees?.data||state.employees; }
+        if(canPayroll){ const [documents,employees,documentSystem]=await Promise.all([load('/api/documents',state.documents),load('/api/employees',{data:state.employees}),load('/api/document-system/overview',state.documentSystem)]); state.documents=documents||state.documents; state.employees=employees?.data||state.employees; state.documentSystem=documentSystem||state.documentSystem; }
       }else if(name==='performance'){
         if(canReadBroadcasts){ const [learning,performance]=await Promise.all([load('/api/learning/overview',state.learning),load('/api/performance/overview',state.performance)]); state.learning=learning||state.learning; state.performance=performance||state.performance; }
       }else if(name==='engagement'){
@@ -3659,9 +3660,11 @@ function ensureEmployeeDocumentsDialog(){
     <div class="modal-head"><div><p class="kicker">EMPLOYEE FILES</p><h3 id="employeeDocumentsTitle">เอกสารพนักงาน</h3><p>สัญญาจ้าง บัตรประชาชน สมุดบัญชี ประกันสังคม และเอกสารประกอบ Payroll</p></div><button type="button" class="icon-btn" data-close-employee-docs>×</button></div>
     <input type="hidden" id="employeeDocumentsEmployeeId" />
     <div class="employee-doc-upload-grid">
-      <label><span>ประเภทเอกสาร</span><select id="employeeDocumentType"><option value="employment_contract">สัญญาจ้างงาน</option><option value="id_card_copy">สำเนาบัตรประชาชน</option><option value="bank_book_copy">หน้าสมุดบัญชี</option><option value="social_security">เอกสารประกันสังคม</option><option value="tax_document">เอกสารภาษี</option><option value="education_certificate">วุฒิการศึกษา</option><option value="other">เอกสารอื่น</option></select></label>
+      <label><span>ประเภทเอกสาร</span><select id="employeeDocumentType"><optgroup label="การจ้างงาน"><option value="employment_contract">สัญญาจ้างงาน</option><option value="job_description">Job Description</option><option value="nda">ข้อตกลงรักษาความลับ</option><option value="probation">เอกสารทดลองงาน</option><option value="salary_adjustment">เอกสารปรับเงินเดือน</option></optgroup><optgroup label="ข้อมูลส่วนตัว"><option value="id_card_copy">สำเนาบัตรประชาชน</option><option value="house_registration">สำเนาทะเบียนบ้าน</option><option value="bank_book_copy">หน้าสมุดบัญชี</option><option value="education_certificate">วุฒิการศึกษา</option></optgroup><optgroup label="Payroll / ภาษี"><option value="social_security">เอกสารประกันสังคม</option><option value="tax_document">เอกสารภาษี</option><option value="salary_certificate">หนังสือรับรองเงินเดือน</option></optgroup><optgroup label="HR / สิ้นสุดการจ้าง"><option value="performance">เอกสารประเมินผลงาน</option><option value="warning">หนังสือเตือน</option><option value="resignation">เอกสารลาออก</option><option value="asset_return">เอกสารคืนทรัพย์สิน</option><option value="final_pay">Final Pay</option><option value="employment_certificate">หนังสือรับรองการทำงาน</option><option value="other">เอกสารอื่น</option></optgroup></select></label>
       <label><span>วันที่เอกสาร</span><input id="employeeDocumentDate" type="date" /></label>
       <label><span>วันหมดอายุ (ถ้ามี)</span><input id="employeeDocumentExpires" type="date" /></label>
+      <label><span>การมองเห็น</span><select id="employeeDocumentVisibility"><option value="hr_only">HR เท่านั้น</option><option value="employee">พนักงานเห็นได้</option><option value="manager">ผู้จัดการเห็นได้</option></select></label>
+      <label><span>ระดับความลับ</span><select id="employeeDocumentConfidentiality"><option value="confidential">Confidential</option><option value="internal">Internal</option><option value="restricted">Restricted</option></select></label>
       <label class="employee-doc-file-field"><span>ไฟล์</span><input id="employeeDocumentFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx" /></label>
     </div>
     <div class="employee-doc-upload-actions"><small>PDF / รูป / Word · สูงสุด 10 MB · เก็บใน Google Drive ของบริษัท</small><button id="employeeDocumentUploadBtn" class="btn primary" type="button">อัปโหลดไฟล์</button></div>
@@ -3673,16 +3676,16 @@ function ensureEmployeeDocumentsDialog(){
   return dialog;
 }
 
-const employeeDocumentTypeLabel = type => ({employment_contract:'สัญญาจ้างงาน',id_card_copy:'สำเนาบัตรประชาชน',bank_book_copy:'หน้าสมุดบัญชี',social_security:'เอกสารประกันสังคม',tax_document:'เอกสารภาษี',education_certificate:'วุฒิการศึกษา',other:'เอกสารอื่น'})[type] || 'เอกสาร';
+const employeeDocumentTypeLabel = type => ({employment_contract:'สัญญาจ้างงาน',job_description:'Job Description',nda:'ข้อตกลงรักษาความลับ',id_card_copy:'สำเนาบัตรประชาชน',house_registration:'สำเนาทะเบียนบ้าน',bank_book_copy:'หน้าสมุดบัญชี',social_security:'เอกสารประกันสังคม',tax_document:'เอกสารภาษี',education_certificate:'วุฒิการศึกษา',salary_certificate:'หนังสือรับรองเงินเดือน',employment_certificate:'หนังสือรับรองการทำงาน',probation:'เอกสารทดลองงาน',salary_adjustment:'เอกสารปรับเงินเดือน',performance:'เอกสารประเมินผลงาน',warning:'หนังสือเตือน',resignation:'เอกสารลาออก',asset_return:'เอกสารคืนทรัพย์สิน',final_pay:'Final Pay',other:'เอกสารอื่น'})[type] || 'เอกสาร';
 
 async function loadEmployeeDocuments(employeeId){
   const result = await api(`/api/employees/${employeeId}/documents`);
   const list = $('#employeeDocumentsList');
   const docs = result.data || [];
-  list.innerHTML = docs.length ? docs.map(doc => `<div class="employee-document-row">
+  list.innerHTML = docs.length ? docs.map(doc => `<div class="employee-document-row ${doc.status==='archived'?'is-archived':''}">
     <div class="employee-document-icon">${iconSvg('document')}</div>
-    <div class="employee-document-copy"><strong>${escapeHtml(doc.title || employeeDocumentTypeLabel(doc.document_type))}</strong><span>${escapeHtml(employeeDocumentTypeLabel(doc.document_type))} · ${doc.document_date ? formatDate(doc.document_date) : formatDate(String(doc.created_at||'').slice(0,10))}${doc.expires_at ? ` · หมดอายุ ${formatDate(doc.expires_at)}` : ''}</span><small>${escapeHtml(doc.file_name || '')}</small></div>
-    <div class="employee-document-actions">${doc.drive_url ? `<a class="text-btn" href="${escapeHtml(doc.drive_url)}" target="_blank" rel="noopener">เปิดไฟล์</a>` : ''}<button type="button" class="text-btn danger-text" onclick="window.deleteEmployeeDocument(${Number(doc.id)},${Number(employeeId)})">ลบ</button></div>
+    <div class="employee-document-copy"><strong>${escapeHtml(doc.title || employeeDocumentTypeLabel(doc.document_type))} <span class="doc-version">v${Number(doc.version||1)}</span></strong><span>${escapeHtml(employeeDocumentTypeLabel(doc.document_type))} · ${doc.document_date ? formatDate(doc.document_date) : formatDate(String(doc.created_at||'').slice(0,10))}${doc.expires_at ? ` · หมดอายุ ${formatDate(doc.expires_at)}` : ''}</span><small>${escapeHtml(doc.file_name || '')} · ${escapeHtml(doc.confidentiality||'internal')} ${doc.status==='archived'?'· เก็บถาวร':''}</small></div>
+    <div class="employee-document-actions">${doc.drive_url ? `<a class="text-btn" href="${escapeHtml(doc.drive_url)}" target="_blank" rel="noopener">เปิดไฟล์</a>` : ''}<button type="button" class="text-btn" onclick="window.openEmployeeDocumentHistory(${Number(doc.id)})">ประวัติ</button>${doc.status!=='archived'?`<button type="button" class="text-btn danger-text" onclick="window.deleteEmployeeDocument(${Number(doc.id)},${Number(employeeId)})">เก็บถาวร</button>`:''}</div>
   </div>`).join('') : emptyState('ยังไม่มีเอกสาร', 'อัปโหลดสัญญาจ้าง สำเนาบัตรประชาชน หน้าสมุดบัญชี หรือเอกสาร Payroll ได้จากด้านบน');
   return result;
 }
@@ -3711,7 +3714,7 @@ async function uploadEmployeeDocument(){
   const tracked = beginMutationStatus(`/api/employees/${employeeId}/documents`,'POST',false);
   try {
     const form = new FormData();
-    form.append('file',file); form.append('document_type',$('#employeeDocumentType').value); form.append('document_date',$('#employeeDocumentDate').value); form.append('expires_at',$('#employeeDocumentExpires').value); form.append('visibility','hr_only');
+    form.append('file',file); form.append('document_type',$('#employeeDocumentType').value); form.append('document_date',$('#employeeDocumentDate').value); form.append('expires_at',$('#employeeDocumentExpires').value); form.append('visibility',$('#employeeDocumentVisibility').value); form.append('confidentiality',$('#employeeDocumentConfidentiality').value);
     const res = await fetch(`/api/employees/${employeeId}/documents`,{method:'POST',credentials:'same-origin',body:form});
     let data={}; try{data=await res.json();}catch{}
     if (!res.ok) throw new Error(data.error || `HTTP_${res.status}`);
@@ -3724,9 +3727,18 @@ async function uploadEmployeeDocument(){
   finally { button.disabled=false; button.textContent='อัปโหลดไฟล์'; }
 }
 
+window.openEmployeeDocumentHistory = async documentId => {
+  try {
+    const result=await api(`/api/employee-documents/${documentId}/events`);
+    const events=result.data||[];
+    const lines=events.length?events.map(e=>`${formatDateTime(e.created_at)} — ${e.event_type==='uploaded'?'อัปโหลดเอกสาร':e.event_type==='archived'?'เก็บเข้าคลังถาวร':e.event_type}${e.actor_email?` · ${e.actor_email}`:''}`).join('\n'):'ยังไม่มีประวัติ';
+    window.alert(`ประวัติ · ${result.document?.title||'เอกสาร'}\nVersion ${result.document?.version||1} · ${result.document?.status||'active'}\n\n${lines}`);
+  } catch(error){ toast(error.message||'โหลดประวัติเอกสารไม่สำเร็จ',true); }
+};
+
 window.deleteEmployeeDocument = async (documentId,employeeId) => {
-  if (!window.confirm('ลบรายการเอกสารนี้ออกจาก Nakna HR?\nไฟล์ต้นฉบับใน Google Drive จะไม่ถูกลบอัตโนมัติ')) return;
-  try { await api(`/api/employee-documents/${documentId}`,{method:'DELETE',body:'{}'}); await loadEmployeeDocuments(employeeId); await loadAll({silent:true}); toast('ลบรายการเอกสารแล้ว'); }
+  if (!window.confirm('เก็บเอกสารนี้เข้าคลังถาวร?\nประวัติและไฟล์ต้นฉบับจะยังคงอยู่เพื่อการตรวจสอบย้อนหลัง')) return;
+  try { await api(`/api/employee-documents/${documentId}`,{method:'DELETE',body:'{}'}); await loadEmployeeDocuments(employeeId); await loadAll({silent:true}); toast('เก็บเอกสารเข้าคลังถาวรแล้ว'); }
   catch(error){ toast(error.message || 'ลบเอกสารไม่สำเร็จ',true); }
 };
 
@@ -4435,10 +4447,24 @@ window.publishPayroll=async id=>{if(!confirm('Publish แล้วระบบ�
 
 async function refreshPayroll(render=true){const role=String(activeCompanyRole()||'');if(!['owner','co_owner','hr_admin','hr','payroll_admin'].includes(role))return;state.payroll=await api('/api/payroll/overview');if(render)renderPayroll();}
 
-function renderDocuments(){const canHr=['owner','co_owner','hr_admin','hr','payroll_admin'].includes(String(activeCompanyRole()||''));$('#generateDocumentBtn').classList.toggle('hidden',!canHr);const d=state.documents||{data:[],payslips:[]};const pays=d.payslips||[],docs=d.data||[];const emailCount=pays.filter(x=>x.email_sent_at).length,lineCount=pays.filter(x=>x.line_notified_at).length;$('#documentSummary').innerHTML=`<div><span>Payslip</span><strong>${pays.length}</strong></div><div><span>ส่ง Email</span><strong>${emailCount}</strong></div><div><span>แจ้ง LINE</span><strong>${lineCount}</strong></div><div><span>เอกสาร HR</span><strong>${docs.length}</strong></div>`;$('#payslipDocumentList').innerHTML=pays.length?pays.map(p=>{const share=p.share_token_value?`${location.origin}/payslip/${p.share_token_value}`:p.drive_url;return `<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(p.nickname||p.first_name)} · ${escapeHtml(p.period_key)}</strong><p>${escapeHtml(p.file_name)}</p><small>${p.email_sent_at?'✓ Email ':''}${p.line_notified_at?'✓ LINE ':''}· ${formatDateTime(p.created_at)}</small></div>${share?`<a class="secondary-btn" href="${escapeHtml(share)}" target="_blank" rel="noopener">เปิด</a>`:''}</article>`}).join(''):emptyState('ยังไม่มี Payslip','เมื่อ Lock และ Publish Payroll เอกสารจะมาอยู่ตรงนี้อัตโนมัติ');$('#employeeDocumentList').innerHTML=docs.length?docs.map(x=>`<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'เอกสารบริษัท')} · ${formatDate(x.document_date||x.created_at)}</p><small>${escapeHtml(x.document_type)}</small></div>${x.drive_url?`<a class="secondary-btn" href="${escapeHtml(x.drive_url)}" target="_blank" rel="noopener">Drive</a>`:''}</article>`).join(''):emptyState('ยังไม่มีเอกสาร','ออกหนังสือรับรองการทำงานหรือหนังสือรับรองเงินเดือนได้จากปุ่มด้านบน');}
-async function refreshDocuments(){try{state.documents=await api('/api/documents');renderDocuments();}catch{}}
-function openDocumentGenerateModal(){const employees=state.employees.filter(e=>e.status==='active');$('#documentEmployee').innerHTML=employees.map(e=>`<option value="${e.id}">${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</option>`).join('');$('#documentType').value='employment_certificate';$('#documentNote').value='';$('#documentGenerateModal').showModal();}
-async function generateEmployeeDocument(){const button=$('#documentGenerateSaveBtn');button.disabled=true;button.textContent='กำลังสร้าง PDF…';try{const result=await api('/api/documents/generate',{method:'POST',body:JSON.stringify({employee_id:Number($('#documentEmployee').value),document_type:$('#documentType').value,note:$('#documentNote').value.trim()})});$('#documentGenerateModal').close();await refreshDocuments();toast('สร้างเอกสารลง Google Drive แล้ว');if(result.document?.drive_url)window.open(result.document.drive_url,'_blank','noopener');}catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='สร้าง PDF ลง Drive';}}
+function renderDocuments(){
+  const canHr=['owner','co_owner','hr_admin','hr','payroll_admin'].includes(String(activeCompanyRole()||''));
+  $('#generateDocumentBtn').classList.toggle('hidden',!canHr);
+  const d=state.documents||{data:[],payslips:[]},sys=state.documentSystem||{}; const pays=d.payslips||[],docs=d.data||[],sum=sys.summary||{};
+  const emailCount=pays.filter(x=>x.email_sent_at).length,lineCount=pays.filter(x=>x.line_notified_at).length;
+  $('#documentSummary').innerHTML=`<div><span>เอกสารทั้งหมด</span><strong>${Number(sum.total||docs.length)}</strong></div><div><span>Draft</span><strong>${Number(sum.drafts||0)}</strong></div><div><span>รออนุมัติ</span><strong>${Number(sum.pending_approvals||0)}</strong></div><div><span>รอรับทราบ</span><strong>${Number(sum.pending_ack||0)}</strong></div><div><span>Payslip</span><strong>${pays.length}</strong></div><div><span>แจ้ง LINE</span><strong>${lineCount}</strong></div>`;
+  const approvals=sys.pending_approvals||[],expiring=sys.expiring||[];
+  $('#documentActionList').innerHTML=(approvals.length||expiring.length)?[...approvals.map(x=>`<article class="document-row"><div class="document-file-icon">✓</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>รอ HR ตรวจและอนุมัติ</small></div><div class="document-row-actions"><button class="secondary-btn" onclick="rejectDocumentWorkflow(${Number(x.document_id)})">ส่งกลับ</button><button class="primary-btn" onclick="approveDocumentWorkflow(${Number(x.document_id)})">อนุมัติ</button></div></article>`),...expiring.map(x=>`<article class="document-row"><div class="document-file-icon">!</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')}</p><small>หมดอายุ ${formatDate(x.expires_at)}</small></div></article>`)].join(''):emptyState('ไม่มีงานค้าง','เอกสารที่รออนุมัติหรือใกล้หมดอายุจะแสดงที่นี่');
+  const templates=sys.templates||[]; $('#documentTemplateList').innerHTML=templates.length?templates.map(t=>`<article class="document-row"><div class="document-file-icon">T</div><div><strong>${escapeHtml(t.name)}</strong><p>${escapeHtml(t.code)} · ${escapeHtml(t.automation_mode)}</p><small>${t.approval_required?'ต้องอนุมัติ':'ไม่ต้องอนุมัติ'}${t.acknowledgement_required?' · ต้องรับทราบ':''}</small></div></article>`).join(''):emptyState('ยังไม่มี Template','กด “ติดตั้ง Template มาตรฐาน” เพื่อเริ่มใช้งาน');
+  $('#payslipDocumentList').innerHTML=pays.length?pays.map(p=>{const share=p.share_token_value?`${location.origin}/payslip/${p.share_token_value}`:p.drive_url;return `<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(p.nickname||p.first_name)} · ${escapeHtml(p.period_key)}</strong><p>${escapeHtml(p.file_name)}</p><small>${p.email_sent_at?'✓ Email ':''}${p.line_notified_at?'✓ LINE ':''}· ${formatDateTime(p.created_at)}</small></div>${share?`<a class="secondary-btn" href="${escapeHtml(share)}" target="_blank" rel="noopener">เปิด</a>`:''}</article>`}).join(''):emptyState('ยังไม่มี Payslip','เมื่อ Lock และ Publish Payroll เอกสารจะมาอยู่ตรงนี้อัตโนมัติ');
+  $('#employeeDocumentList').innerHTML=docs.length?docs.map(x=>`<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'เอกสารบริษัท')} · ${escapeHtml(x.document_number||'')} · ${formatDate(x.document_date||x.created_at)}</p><small>${escapeHtml(x.document_type)} · ${escapeHtml(x.workflow_status||'final')} · v${Number(x.version||1)}</small></div>${x.drive_url?`<a class="secondary-btn" href="${escapeHtml(x.drive_url)}" target="_blank" rel="noopener">Drive</a>`:''}</article>`).join(''):emptyState('ยังไม่มีเอกสาร','สร้างเอกสารจาก Template ได้จากปุ่มด้านบน');
+  const acks=sys.pending_acknowledgements||[]; $('#documentAckList').innerHTML=acks.length?acks.map(x=>`<article class="document-row"><div class="document-file-icon">ACK</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>${x.status==='viewed'?'เปิดอ่านแล้ว':'ยังไม่รับทราบ'}</small></div></article>`).join(''):emptyState('ไม่มีรายการรอรับทราบ','เมื่อเอกสารสำคัญถูกส่งให้พนักงาน สถานะจะแสดงตรงนี้');
+  const cases=sys.open_cases||[]; $('#documentCaseList').innerHTML=cases.length?cases.map(x=>`<article class="document-row"><div class="document-file-icon">CASE</div><div><strong>${escapeHtml(x.case_number)} · ${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.case_type)}</p><small>${escapeHtml(x.status)}</small></div></article>`).join(''):emptyState('ไม่มี Case เปิดอยู่','Case ใบเตือนและเหตุการณ์ HR จะอยู่ใน Timeline เดียวกัน');
+  const sel=$('#documentTemplate'); if(sel)sel.innerHTML='<option value="">เลือก Template</option>'+templates.map(t=>`<option value="${Number(t.id)}">${escapeHtml(t.name)}</option>`).join('');
+}
+async function refreshDocuments(){try{const [docs,sys]=await Promise.all([api('/api/documents'),api('/api/document-system/overview')]);state.documents=docs;state.documentSystem=sys;renderDocuments();}catch(e){console.warn(e)}}
+function openDocumentGenerateModal(){const employees=state.employees.filter(e=>e.status==='active');$('#documentEmployee').innerHTML=employees.map(e=>`<option value="${e.id}">${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</option>`).join('');$('#documentTemplate').value='';$('#documentNote').value='';$('#documentGenerateModal').showModal();}
+async function generateEmployeeDocument(){const button=$('#documentGenerateSaveBtn');button.disabled=true;button.textContent='กำลังสร้าง Draft…';try{const templateId=Number($('#documentTemplate').value);if(!templateId)throw new Error('กรุณาเลือก Template');const result=await api('/api/document-workflows/create',{method:'POST',body:JSON.stringify({employee_id:Number($('#documentEmployee').value),template_id:templateId,note:$('#documentNote').value.trim()})});$('#documentGenerateModal').close();await refreshDocuments();toast(`สร้าง Draft ${result.document_number} แล้ว`);}catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='สร้าง Draft';}}
 
 function renderGrowth(){
   const learning=state.learning||{courses:[],summary:{}}; const performance=state.performance||{goals:[],one_on_ones:[],probation_due:[],probation_reviews:[],summary:{}}; const canAdmin=['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));
@@ -4694,3 +4720,21 @@ boot();
     if(matches.length){show(matches[0].dataset.helpContent);search.value=q;}
   });
 })();
+
+async function approveDocumentWorkflow(id){try{const r=await api(`/api/document-workflows/${id}/approve`,{method:'POST',body:JSON.stringify({})});await refreshDocuments();toast(r.drive_url?'อนุมัติ · สร้าง PDF และเก็บเข้า Drive แล้ว':'อนุมัติและล็อกเอกสาร Final แล้ว');}catch(e){toast(e.message,true)}}
+async function rejectDocumentWorkflow(id){const note=prompt('เหตุผลที่ส่งกลับให้แก้ไข');if(note===null)return;try{await api(`/api/document-workflows/${id}/reject`,{method:'POST',body:JSON.stringify({note})});await refreshDocuments();toast('ส่งเอกสารกลับเป็น Draft แล้ว');}catch(e){toast(e.message,true)}}
+async function bulkApproveDocumentWorkflows(){const ids=(state.documentSystem?.pending_approvals||[]).map(x=>Number(x.document_id)).filter(Boolean);if(!ids.length)return toast('ไม่มีเอกสารรออนุมัติ');if(!confirm(`อนุมัติเอกสาร ${ids.length} ฉบับพร้อมกัน?`))return;try{const r=await api('/api/document-workflows/bulk-approve',{method:'POST',body:JSON.stringify({ids})});await refreshDocuments();toast(`อนุมัติแล้ว ${Number(r.approved||0)} ฉบับ`);}catch(e){toast(e.message,true)}}
+async function seedDocumentTemplates(){try{await api('/api/document-templates/seed',{method:'POST',body:'{}'});await refreshDocuments();toast('ติดตั้ง Template มาตรฐานแล้ว');}catch(e){toast(e.message,true)}}
+
+$('#seedDocumentTemplatesBtn')?.addEventListener('click',seedDocumentTemplates); $('#refreshDocumentSystemBtn')?.addEventListener('click',refreshDocuments); $('#bulkApproveDocumentsBtn')?.addEventListener('click',bulkApproveDocumentWorkflows);
+
+async function quickOpenDocumentCase(){
+  try{
+    const employeeId=Number(prompt('Employee ID ที่ต้องการเปิด Case')); if(!employeeId)return;
+    const title=prompt('หัวข้อ Case เช่น มาสายต่อเนื่อง / เหตุการณ์ที่ต้องตรวจสอบ'); if(!title)return;
+    const description=prompt('รายละเอียดเบื้องต้น (ถ้ามี)')||'';
+    const r=await api('/api/hr-document-cases',{method:'POST',body:JSON.stringify({employee_id:employeeId,title,description,case_type:'general'})});
+    await refreshDocuments(); toast(`เปิด Case ${r.case_number} แล้ว`);
+  }catch(e){toast(e.message,true)}
+}
+$('#openDocumentCaseBtn')?.addEventListener('click',quickOpenDocumentCase);
