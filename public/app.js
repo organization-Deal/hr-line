@@ -4451,18 +4451,49 @@ function renderDocuments(){
   const canHr=['owner','co_owner','hr_admin','hr','payroll_admin'].includes(String(activeCompanyRole()||''));
   $('#generateDocumentBtn').classList.toggle('hidden',!canHr);
   const d=state.documents||{data:[],payslips:[]},sys=state.documentSystem||{}; const pays=d.payslips||[],docs=d.data||[],sum=sys.summary||{};
-  const emailCount=pays.filter(x=>x.email_sent_at).length,lineCount=pays.filter(x=>x.line_notified_at).length;
-  $('#documentSummary').innerHTML=`<div><span>เอกสารทั้งหมด</span><strong>${Number(sum.total||docs.length)}</strong></div><div><span>Draft</span><strong>${Number(sum.drafts||0)}</strong></div><div><span>รออนุมัติ</span><strong>${Number(sum.pending_approvals||0)}</strong></div><div><span>รอรับทราบ</span><strong>${Number(sum.pending_ack||0)}</strong></div><div><span>Payslip</span><strong>${pays.length}</strong></div><div><span>แจ้ง LINE</span><strong>${lineCount}</strong></div>`;
-  const approvals=sys.pending_approvals||[],expiring=sys.expiring||[];
+  const computed={
+    total:docs.length,
+    drafts:docs.filter(x=>String(x.workflow_status||'')==='draft').length,
+    pending_approvals:docs.filter(x=>String(x.approval_status||'')==='pending').length,
+    pending_ack:docs.filter(x=>String(x.acknowledgement_status||'')==='pending').length
+  };
+  const summary={
+    total:Math.max(Number(sum.total||0),computed.total),
+    drafts:Math.max(Number(sum.drafts||0),computed.drafts),
+    pending_approvals:Math.max(Number(sum.pending_approvals||0),computed.pending_approvals),
+    pending_ack:Math.max(Number(sum.pending_ack||0),computed.pending_ack)
+  };
+  const lineCount=pays.filter(x=>x.line_notified_at).length;
+  $('#documentSummary').innerHTML=`<div><span>เอกสารทั้งหมด</span><strong>${summary.total}</strong></div><div><span>Draft</span><strong>${summary.drafts}</strong></div><div><span>รออนุมัติ</span><strong>${summary.pending_approvals}</strong></div><div><span>รอรับทราบ</span><strong>${summary.pending_ack}</strong></div><div><span>Payslip</span><strong>${pays.length}</strong></div><div><span>แจ้ง LINE</span><strong>${lineCount}</strong></div>`;
+  const apiApprovals=sys.pending_approvals||[];
+  const approvalIds=new Set(apiApprovals.map(x=>Number(x.document_id)));
+  const fallbackApprovals=docs.filter(x=>String(x.approval_status||'')==='pending'&&!approvalIds.has(Number(x.id))).map(x=>({...x,document_id:Number(x.id)}));
+  const approvals=[...apiApprovals,...fallbackApprovals],expiring=sys.expiring||[];
   $('#documentActionList').innerHTML=(approvals.length||expiring.length)?[...approvals.map(x=>`<article class="document-row"><div class="document-file-icon">✓</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>รอ HR ตรวจและอนุมัติ</small></div><div class="document-row-actions"><button class="secondary-btn" onclick="rejectDocumentWorkflow(${Number(x.document_id)})">ส่งกลับ</button><button class="primary-btn" onclick="approveDocumentWorkflow(${Number(x.document_id)})">อนุมัติ</button></div></article>`),...expiring.map(x=>`<article class="document-row"><div class="document-file-icon">!</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')}</p><small>หมดอายุ ${formatDate(x.expires_at)}</small></div></article>`)].join(''):emptyState('ไม่มีงานค้าง','เอกสารที่รออนุมัติหรือใกล้หมดอายุจะแสดงที่นี่');
-  const templates=sys.templates||[]; $('#documentTemplateList').innerHTML=templates.length?templates.map(t=>`<article class="document-row"><div class="document-file-icon">T</div><div><strong>${escapeHtml(t.name)}</strong><p>${escapeHtml(t.code)} · ${escapeHtml(t.automation_mode)}</p><small>${t.approval_required?'ต้องอนุมัติ':'ไม่ต้องอนุมัติ'}${t.acknowledgement_required?' · ต้องรับทราบ':''}</small></div></article>`).join(''):emptyState('กำลังเตรียม Template มาตรฐาน','นากนะจะติดตั้ง Template เริ่มต้นของบริษัทให้อัตโนมัติ');
+  const templates=sys.templates||[];
+  const templateRows=templates.length?templates:standardDocumentCatalog.map(t=>({...t,automation_mode:'assisted',approval_required:1,acknowledgement_required:['PROB_PASS','SAL_ADJ','ACK_NOTICE','WARNING'].includes(t.code)}));
+  $('#documentTemplateList').innerHTML=templateRows.map(t=>`<article class="document-row"><div class="document-file-icon">T</div><div><strong>${escapeHtml(t.name)}</strong><p>${escapeHtml(t.code)} · ${escapeHtml(t.automation_mode||'assisted')}</p><small>${t.approval_required?'ต้องอนุมัติ':'ไม่ต้องอนุมัติ'}${t.acknowledgement_required?' · ต้องรับทราบ':''}${templates.length?'':' · มาตรฐาน Nakna'}</small></div></article>`).join('');
   $('#payslipDocumentList').innerHTML=pays.length?pays.map(p=>{const share=p.share_token_value?`${location.origin}/payslip/${p.share_token_value}`:p.drive_url;return `<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(p.nickname||p.first_name)} · ${escapeHtml(p.period_key)}</strong><p>${escapeHtml(p.file_name)}</p><small>${p.email_sent_at?'✓ Email ':''}${p.line_notified_at?'✓ LINE ':''}· ${formatDateTime(p.created_at)}</small></div>${share?`<a class="secondary-btn" href="${escapeHtml(share)}" target="_blank" rel="noopener">เปิด</a>`:''}</article>`}).join(''):emptyState('ยังไม่มี Payslip','เมื่อ Lock และ Publish Payroll เอกสารจะมาอยู่ตรงนี้อัตโนมัติ');
-  $('#employeeDocumentList').innerHTML=docs.length?docs.map(x=>`<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'เอกสารบริษัท')} · ${escapeHtml(x.document_number||'')} · ${formatDate(x.document_date||x.created_at)}</p><small>${escapeHtml(x.document_type)} · ${escapeHtml(x.workflow_status||'final')} · v${Number(x.version||1)}</small></div>${x.drive_url?`<a class="secondary-btn" href="${escapeHtml(x.drive_url)}" target="_blank" rel="noopener">Drive</a>`:''}</article>`).join(''):emptyState('ยังไม่มีเอกสาร','สร้างเอกสารจาก Template ได้จากปุ่มด้านบน');
+  $('#employeeDocumentList').innerHTML=docs.length?docs.map(x=>`<article class="document-row"><div class="document-file-icon">${x.drive_url?'PDF':'DOC'}</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'เอกสารบริษัท')} · ${escapeHtml(x.document_number||'')} · ${formatDate(x.document_date||x.created_at)}</p><small>${escapeHtml(x.document_type)} · ${escapeHtml(x.workflow_status||'final')} · v${Number(x.version||1)}${x.drive_url?'':' · รออนุมัติก่อนสร้าง PDF'}</small></div>${x.drive_url?`<a class="secondary-btn" href="${escapeHtml(x.drive_url)}" target="_blank" rel="noopener">Drive</a>`:''}</article>`).join(''):emptyState('ยังไม่มีเอกสาร','สร้างเอกสารจาก Template ได้จากปุ่มด้านบน');
   const acks=sys.pending_acknowledgements||[]; $('#documentAckList').innerHTML=acks.length?acks.map(x=>`<article class="document-row"><div class="document-file-icon">ACK</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>${x.status==='viewed'?'เปิดอ่านแล้ว':'ยังไม่รับทราบ'}</small></div></article>`).join(''):emptyState('ไม่มีรายการรอรับทราบ','เมื่อเอกสารสำคัญถูกส่งให้พนักงาน สถานะจะแสดงตรงนี้');
   const cases=sys.open_cases||[]; $('#documentCaseList').innerHTML=cases.length?cases.map(x=>`<article class="document-row"><div class="document-file-icon">CASE</div><div><strong>${escapeHtml(x.case_number)} · ${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.case_type)}</p><small>${escapeHtml(x.status)}</small></div></article>`).join(''):emptyState('ไม่มี Case เปิดอยู่','Case ใบเตือนและเหตุการณ์ HR จะอยู่ใน Timeline เดียวกัน');
   const sel=$('#documentTemplate'); if(sel)sel.innerHTML='<option value="">เลือก Template</option>'+templates.map(t=>`<option value="${Number(t.id)}">${escapeHtml(t.name)}</option>`).join('');
 }
-async function refreshDocuments(){try{const [docs,sys]=await Promise.all([api('/api/documents'),api('/api/document-system/overview')]);state.documents=docs;state.documentSystem=sys;renderDocuments();}catch(e){console.warn(e);state.documentSystem={...(state.documentSystem||{}),templates:[],template_load_error:e.message||'โหลดประเภทเอกสารไม่สำเร็จ'};renderDocuments();}}
+async function refreshDocuments(options={}){
+  let docsError=null,overviewError=null;
+  const [docsResult,overviewResult]=await Promise.allSettled([api('/api/documents'),api('/api/document-system/overview')]);
+  if(docsResult.status==='fulfilled')state.documents=docsResult.value; else {docsError=docsResult.reason;console.warn('documents load failed',docsError);}
+  if(overviewResult.status==='fulfilled')state.documentSystem={...overviewResult.value,overview_ok:true,template_load_error:null};
+  else{
+    overviewError=overviewResult.reason;console.warn('document overview failed',overviewError);
+    let fallbackTemplates=[];
+    try{const r=await api('/api/document-templates');fallbackTemplates=r?.data||[];}catch(error){console.warn('template fallback failed',error);}
+    state.documentSystem={...(state.documentSystem||{}),templates:fallbackTemplates.length?fallbackTemplates:(state.documentSystem?.templates||[]),overview_ok:false,template_load_error:overviewError?.message||'โหลดศูนย์เอกสารบางส่วนไม่สำเร็จ'};
+  }
+  renderDocuments();
+  if(docsError&&!options.silent)toast(docsError.message||'โหลดรายการเอกสารไม่สำเร็จ',true);
+  return {documents_ok:!docsError,overview_ok:!overviewError};
+}
 const documentTypeMeta={
   EMP_CERT:['รับรองการทำงาน','ชื่อ · ตำแหน่ง · แผนก · วันเริ่มงาน','DOC'],
   SAL_CERT:['รับรองเงินเดือน','ชื่อ · ตำแหน่ง · เงินเดือนล่าสุด','฿'],
@@ -4577,7 +4608,14 @@ async function generateEmployeeDocument(){
   button.disabled=true;button.textContent='กำลังสร้าง Draft…';
   try{
     const result=await api('/api/document-workflows/create',{method:'POST',body:JSON.stringify({employee_id:employeeId,template_code:selectedDocumentCode,data})});
-    $('#documentGenerateModal').close(); await refreshDocuments(); toast(`สร้าง Draft ${result.document_number} แล้ว · กรุณาตรวจและอนุมัติก่อนส่ง`);
+    $('#documentGenerateModal').close();
+    if(result.document){
+      state.documents=state.documents||{data:[],payslips:[]}; state.documents.data=state.documents.data||[];
+      state.documents.data=[result.document,...state.documents.data.filter(x=>Number(x.id)!==Number(result.document.id))];
+      renderDocuments();
+    }
+    await refreshDocuments({silent:true});
+    toast(`สร้าง Draft ${result.document_number} แล้ว · อยู่ใน “งานที่ต้องดำเนินการ” เพื่อให้ HR ตรวจและอนุมัติ`);
   }catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='สร้าง Draft เพื่อตรวจสอบ';}
 }
 
