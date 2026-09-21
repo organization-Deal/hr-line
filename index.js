@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.96';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.96';
+const NAKNA_RUNTIME_RELEASE = 'P7.98';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.98';
 const NAKNA_RUNTIME_FEATURE = 'attendance-reminder-settings-fix';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -2007,8 +2007,8 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/integrations/google-workspace' && method === 'GET') {
     await ensureV063Ready(env.DB);
-    const row = await env.DB.prepare(`SELECT id,client_id,email,scopes,gmail_enabled,drive_enabled,sheets_enabled,drive_folder_id,leave_evidence_folder_id,spreadsheet_id,status,last_sync_at,last_error,connected_at,updated_at FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
-    return json({ connected: Boolean(row), integration: row ? publicGoogleWorkspaceIntegration(row) : null });
+    const row = await env.DB.prepare(`SELECT id,client_id,email,scopes,gmail_enabled,drive_enabled,sheets_enabled,drive_folder_id,leave_evidence_folder_id,spreadsheet_id,status,last_sync_at,last_error,connected_at,updated_at FROM google_workspace_integrations WHERE client_id=?1`).bind(clientId).first();
+    return json({ connected: Boolean(row&&String(row.status)==='connected'), integration: row ? publicGoogleWorkspaceIntegration(row) : null });
   }
 
   if (path === '/api/integrations/google-workspace' && method === 'DELETE') {
@@ -6263,27 +6263,35 @@ async function submitPublicLeaveForm(request,env,token){
   let row;
   try{
     row=await createLeaveRequest(env,{clientId:Number(access.client_id),employeeId:Number(access.employee_id),policyId,startDate,endDate,dayPart,reason,submittedVia:'line'});
+    let optionalEvidenceWarning=null;
     try{
       for(const file of rawFiles){
         await storeLeaveEvidenceBinary(env,{clientId:Number(access.client_id),requestId:Number(row.id),employeeId:Number(access.employee_id),bytes:await file.arrayBuffer(),fileName:String(file.name||`evidence-${Date.now()}`),contentType:String(file.type||'application/octet-stream'),fileSize:Number(file.size||0),source:'line_web'});
       }
     }catch(uploadError){
-      // Do not leave a half-created request that blocks the employee from retrying the same dates.
-      await env.DB.batch([
-        env.DB.prepare(`DELETE FROM leave_ledger WHERE reference_type='leave_request' AND reference_id=?1`).bind(Number(row.id)),
-        env.DB.prepare('DELETE FROM leave_requests WHERE id=?1 AND client_id=?2').bind(Number(row.id),Number(access.client_id)),
-      ]).catch(()=>{});
-      throw uploadError;
+      if(evidenceRequired){
+        // Required evidence must be durable. Roll back so the employee can retry.
+        await env.DB.batch([
+          env.DB.prepare(`DELETE FROM leave_ledger WHERE reference_type='leave_request' AND reference_id=?1`).bind(Number(row.id)),
+          env.DB.prepare('DELETE FROM leave_requests WHERE id=?1 AND client_id=?2').bind(Number(row.id),Number(access.client_id)),
+        ]).catch(()=>{});
+        throw uploadError;
+      }
+      // Optional attachment failure must not block the leave itself.
+      optionalEvidenceWarning='ส่งใบลาแล้ว แต่ไฟล์แนบยังไม่ถูกบันทึก กรุณาให้ HR ตรวจการเชื่อม Google Drive';
+      console.warn(JSON.stringify({level:'warn',event:'leave_optional_evidence_failed',request_id:Number(row.id),message:String(uploadError?.message||uploadError)}));
     }
-    if(rawFiles.length){
+    if(rawFiles.length&&!optionalEvidenceWarning){
       await env.DB.prepare("UPDATE leave_requests SET status=CASE WHEN status='awaiting_evidence' THEN 'pending' ELSE status END,evidence_count=(SELECT COUNT(*) FROM leave_request_evidence WHERE leave_request_id=?1),updated_at=CURRENT_TIMESTAMP WHERE id=?1").bind(Number(row.id)).run();
     }
     row=await hydrateLeaveBalance(env.DB,await getLeaveRequestDetail(env.DB,Number(row.id),Number(access.client_id)));
     await notifyLeaveApprover(env,Number(row.id)).catch(error=>console.error(JSON.stringify({level:'error',event:'leave_web_notify_approver_failed',request_id:Number(row.id),message:String(error?.message||error)})));
     await pushLeaveWebSubmittedConfirmation(env,row).catch(error=>console.error(JSON.stringify({level:'error',event:'leave_web_confirmation_failed',request_id:Number(row.id),message:String(error?.message||error)})));
-    return json({ok:true,request:{id:Number(row.id),code:`LV-${String(row.id).padStart(4,'0')}`,status:row.status,leave_type:row.leave_type_name||row.leave_type,start_date:row.start_date,end_date:row.end_date,duration_days:Number(row.duration_days||0),evidence_count:Number(row.evidence_count||0)}} ,201);
+    return json({ok:true,warning:optionalEvidenceWarning,request:{id:Number(row.id),code:`LV-${String(row.id).padStart(4,'0')}`,status:row.status,leave_type:row.leave_type_name||row.leave_type,start_date:row.start_date,end_date:row.end_date,duration_days:Number(row.duration_days||0),evidence_count:Number(row.evidence_count||0)}} ,201);
   }catch(e){
-    return json({error:e.message||'ส่งใบลาไม่สำเร็จ'},e.status||400);
+    const raw=String(e?.message||'');
+    const friendly=isGoogleReauthRequiredError(e)?'การเชื่อม Google Drive ของบริษัทหมดอายุ ระบบกำลังใช้พื้นที่สำรองไม่ได้ กรุณาแจ้ง HR ให้เชื่อม Google ใหม่แล้วลองอีกครั้ง':(raw||'ส่งใบลาไม่สำเร็จ');
+    return json({error:friendly},e.status||400);
   }
 }
 
@@ -7165,15 +7173,45 @@ function safeLineIntegrationError(error){
   return 'เชื่อม LINE Official Account ไม่สำเร็จ กรุณาตรวจข้อมูลแล้วลองใหม่';
 }
 
+async function ensureClientDataMigrations(db){
+  if(SCHEMA_READY.has('client_data_migrations')) return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS client_data_migrations (
+    client_id INTEGER NOT NULL,
+    migration_key TEXT NOT NULL,
+    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (client_id,migration_key),
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+  )`).run();
+  SCHEMA_READY.add('client_data_migrations');
+}
+
 async function ensureDefaultLeavePolicies(db,clientId){
   if(!clientId) return;
   const defaults=[
-    ['annual','ลาพักร้อน',6,0,1,null,1,0,10,0],
+    ['annual','ลาพักร้อน',6,0,1,null,0,0,10,0],
     ['sick','ลาป่วย',30,0,1,3,0,0,20,1],
     ['personal','ลากิจ',3,0,1,null,1,0,30,0],
     ['unpaid','ลาไม่รับค่าจ้าง',0,1,1,null,0,1,40,0],
   ];
   for(const d of defaults){await db.prepare(`INSERT OR IGNORE INTO leave_policies (client_id,code,name,default_entitlement_days,is_unlimited,requires_reason,evidence_required_after_days,notice_days,allow_negative,is_active,sort_order,available_during_probation) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,1,?10,?11)`).bind(clientId,...d).run();}
+  // Keep the P7.97 same-day annual-leave fix.
+  await db.prepare(`UPDATE leave_policies SET notice_days=0,updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND code='annual' AND notice_days=1 AND default_entitlement_days=6 AND updated_at=created_at`).bind(clientId).run();
+
+  // P7.98 correction: personal leave was incorrectly changed from the established
+  // 3-day default to 5 days in P7.97. Revert that stock P7.97 value once per client
+  // without continuously overriding future HR edits.
+  await ensureClientDataMigrations(db);
+  const correctionKey='P7.98_PERSONAL_LEAVE_DEFAULT_3';
+  const corrected=await db.prepare(`SELECT 1 AS ok FROM client_data_migrations WHERE client_id=?1 AND migration_key=?2`).bind(clientId,correctionKey).first();
+  if(!corrected){
+    await db.prepare(`UPDATE leave_policies
+      SET default_entitlement_days=3,updated_at=CURRENT_TIMESTAMP
+      WHERE client_id=?1 AND code='personal' AND name='ลากิจ'
+        AND default_entitlement_days=5 AND is_unlimited=0 AND requires_reason=1
+        AND evidence_required_after_days IS NULL AND notice_days=1
+        AND allow_negative=0 AND sort_order=30`).bind(clientId).run();
+    await db.prepare(`INSERT OR IGNORE INTO client_data_migrations (client_id,migration_key) VALUES (?1,?2)`).bind(clientId,correctionKey).run();
+  }
   await db.prepare(`UPDATE leave_policies SET available_during_probation=1 WHERE client_id=?1 AND code='sick'`).bind(clientId).run();
 }
 
@@ -8816,24 +8854,48 @@ function googleSheetHeaders() {
   };
 }
 
+function isGoogleReauthRequiredError(error){
+  const text=String(error?.message||error||'');
+  return /GOOGLE_REAUTH_REQUIRED|invalid_grant|token has been expired|token has been revoked|refresh token/i.test(text);
+}
+
+async function markGoogleWorkspaceNeedsReconnect(env,row,error){
+  if(!row?.id)return;
+  const message=String(error?.message||error||'Google authorization expired').slice(0,300);
+  await env.DB.prepare(`UPDATE google_workspace_integrations SET status='reauth_required',last_error=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2`).bind(message,Number(row.id)).run().catch(()=>{});
+}
+
 async function getWorkspaceGoogleAccessToken(env, row) {
   const key = integrationEncryptionKey(env);
   if (!key) throw new Error('Integration encryption key is not configured');
   const tokens = await decryptJson(row.encrypted_tokens, key);
   if (tokens.access_token && (!tokens.expires_at || new Date(tokens.expires_at).getTime() > Date.now() + 60000)) return tokens.access_token;
-  if (!tokens.refresh_token) throw new Error('Google refresh token missing');
-  const refreshed = await refreshGoogleAccessToken(tokens.refresh_token, env);
+  if (!tokens.refresh_token) {
+    const error=new Error('GOOGLE_REAUTH_REQUIRED: refresh token missing');
+    await markGoogleWorkspaceNeedsReconnect(env,row,error);
+    throw error;
+  }
+  let refreshed;
+  try{refreshed=await refreshGoogleAccessToken(tokens.refresh_token, env);}
+  catch(error){
+    if(isGoogleReauthRequiredError(error))await markGoogleWorkspaceNeedsReconnect(env,row,error);
+    throw error;
+  }
   const next = { ...tokens, access_token: refreshed.access_token, expires_at: new Date(Date.now() + Number(refreshed.expires_in || 3600) * 1000).toISOString() };
   const encrypted = await encryptJson(next, key);
-  await env.DB.prepare(`UPDATE google_workspace_integrations SET encrypted_tokens=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2`).bind(encrypted,Number(row.id)).run();
+  await env.DB.prepare(`UPDATE google_workspace_integrations SET encrypted_tokens=?1,status='connected',last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?2`).bind(encrypted,Number(row.id)).run();
   return next.access_token;
 }
 
 async function refreshGoogleAccessToken(refreshToken, env) {
   const body = new URLSearchParams({ client_id:env.GOOGLE_CLIENT_ID, client_secret:env.GOOGLE_CLIENT_SECRET, refresh_token:refreshToken, grant_type:'refresh_token' });
   const response = await fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body});
-  const data = await response.json();
-  if (!response.ok || !data.access_token) throw new Error(`Google token refresh failed: ${data.error || response.status}`);
+  const data = await response.json().catch(()=>({}));
+  if (!response.ok || !data.access_token) {
+    const code=String(data.error||response.status||'unknown');
+    if(code==='invalid_grant')throw new Error('GOOGLE_REAUTH_REQUIRED: invalid_grant');
+    throw new Error(`Google token refresh failed: ${code}`);
+  }
   return data;
 }
 
@@ -8860,14 +8922,21 @@ async function storeLeaveEvidenceBinary(env,{clientId,requestId,employeeId,bytes
   await ensureV063Ready(env.DB);
   const integration=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first();
   if(integration?.drive_folder_id){
-    const accessToken=await getWorkspaceGoogleAccessToken(env,integration);
-    const folderId=integration.leave_evidence_folder_id||integration.drive_folder_id;
-    const uploaded=await uploadGoogleDriveFile(accessToken,{folderId,fileName,contentType,bytes});
-    const r2Key=`drive:${uploaded.id}`;
-    const result=await env.DB.prepare(`INSERT INTO leave_request_evidence (client_id,leave_request_id,uploaded_by_employee_id,r2_key,file_name,content_type,file_size,source,drive_file_id,drive_url,storage_provider) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'google_drive')`).bind(Number(clientId),Number(requestId),employeeId?Number(employeeId):null,r2Key,fileName,contentType,fileSize||null,source||'line',uploaded.id,uploaded.webViewLink||null).run();
-    return Number(result.meta.last_row_id);
+    try{
+      const accessToken=await getWorkspaceGoogleAccessToken(env,integration);
+      const folderId=integration.leave_evidence_folder_id||integration.drive_folder_id;
+      const uploaded=await uploadGoogleDriveFile(accessToken,{folderId,fileName,contentType,bytes});
+      const r2Key=`drive:${uploaded.id}`;
+      const result=await env.DB.prepare(`INSERT INTO leave_request_evidence (client_id,leave_request_id,uploaded_by_employee_id,r2_key,file_name,content_type,file_size,source,drive_file_id,drive_url,storage_provider) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'google_drive')`).bind(Number(clientId),Number(requestId),employeeId?Number(employeeId):null,r2Key,fileName,contentType,fileSize||null,source||'line',uploaded.id,uploaded.webViewLink||null).run();
+      return Number(result.meta.last_row_id);
+    }catch(error){
+      if(!isGoogleReauthRequiredError(error) || !env.EVIDENCE_BUCKET)throw error;
+      console.warn(JSON.stringify({level:'warn',event:'leave_evidence_drive_fallback_r2',client_id:Number(clientId),request_id:Number(requestId),message:String(error?.message||error)}));
+      // Google can be revoked independently from LINE/leave. Continue with R2 so
+      // employees are not blocked from submitting a leave request.
+    }
   }
-  if(!env.EVIDENCE_BUCKET)throw httpError('ยังไม่ได้เชื่อม Google Drive และ R2 fallback ไม่พร้อม',503);
+  if(!env.EVIDENCE_BUCKET)throw httpError('ที่เก็บหลักฐานยังไม่พร้อม กรุณาให้ HR เชื่อม Google Drive ใหม่แล้วลองอีกครั้ง',503);
   const key=`client-${clientId}/leave-${requestId}/${crypto.randomUUID()}-${String(fileName||'evidence').replace(/[^A-Za-z0-9._-]/g,'_')}`;
   await env.EVIDENCE_BUCKET.put(key,bytes,{httpMetadata:{contentType:contentType||'application/octet-stream'}});
   const result=await env.DB.prepare(`INSERT INTO leave_request_evidence (client_id,leave_request_id,uploaded_by_employee_id,r2_key,file_name,content_type,file_size,source,storage_provider) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'r2')`).bind(Number(clientId),Number(requestId),employeeId?Number(employeeId):null,key,fileName,contentType,fileSize||null,source||'line').run();
@@ -8998,8 +9067,8 @@ async function syncWorkspaceSnapshotToSheet(env, clientId, integration, accessTo
 }
 
 function columnLetter(count){ let n=Number(count)||1,s=''; while(n>0){n--;s=String.fromCharCode(65+(n%26))+s;n=Math.floor(n/26);} return s; }
-function publicGoogleWorkspaceIntegration(row){return {email:row.email,scopes:row.scopes,gmail_enabled:Boolean(Number(row.gmail_enabled)),drive_enabled:Boolean(Number(row.drive_enabled)),sheets_enabled:Boolean(Number(row.sheets_enabled)),drive_folder_id:row.drive_folder_id,leave_evidence_folder_id:row.leave_evidence_folder_id,spreadsheet_id:row.spreadsheet_id,drive_url:row.drive_folder_id?`https://drive.google.com/drive/folders/${row.drive_folder_id}`:null,spreadsheet_url:row.spreadsheet_id?`https://docs.google.com/spreadsheets/d/${row.spreadsheet_id}/edit`:null,last_sync_at:row.last_sync_at,last_error:row.last_error,connected_at:row.connected_at,updated_at:row.updated_at};}
-function safeGoogleWorkspaceErrorCode(error){const t=String(error?.message||error);if(/access_denied/i.test(t))return'access_denied';if(/refresh token/i.test(t))return'refresh_token';if(/Drive API|drive\/v3/i.test(t))return'drive_api';if(/sheets.googleapis/i.test(t))return'sheets_api';if(/gmail/i.test(t))return'gmail_api';return'connection_failed';}
+function publicGoogleWorkspaceIntegration(row){return {email:row.email,status:row.status||'connected',scopes:row.scopes,gmail_enabled:Boolean(Number(row.gmail_enabled)),drive_enabled:Boolean(Number(row.drive_enabled)),sheets_enabled:Boolean(Number(row.sheets_enabled)),drive_folder_id:row.drive_folder_id,leave_evidence_folder_id:row.leave_evidence_folder_id,spreadsheet_id:row.spreadsheet_id,drive_url:row.drive_folder_id?`https://drive.google.com/drive/folders/${row.drive_folder_id}`:null,spreadsheet_url:row.spreadsheet_id?`https://docs.google.com/spreadsheets/d/${row.spreadsheet_id}/edit`:null,last_sync_at:row.last_sync_at,last_error:row.last_error,connected_at:row.connected_at,updated_at:row.updated_at};}
+function safeGoogleWorkspaceErrorCode(error){const t=String(error?.message||error);if(/access_denied/i.test(t))return'access_denied';if(/GOOGLE_REAUTH_REQUIRED|invalid_grant|refresh token/i.test(t))return'refresh_token';if(/Drive API|drive\/v3/i.test(t))return'drive_api';if(/sheets.googleapis/i.test(t))return'sheets_api';if(/gmail/i.test(t))return'gmail_api';return'connection_failed';}
 function safeGoogleWorkspaceError(error){const code=safeGoogleWorkspaceErrorCode(error);return ({drive_api:'เชื่อม Google Drive ไม่สำเร็จ กรุณาตรวจว่าเปิด Drive API แล้ว',sheets_api:'เชื่อม Google Sheets ไม่สำเร็จ กรุณาตรวจว่าเปิด Sheets API แล้ว',gmail_api:'เชื่อม Gmail ไม่สำเร็จ กรุณาตรวจว่าเปิด Gmail API แล้ว',refresh_token:'Google ไม่ได้ส่ง Refresh Token กรุณาเชื่อมใหม่',connection_failed:'เชื่อม Google ไม่สำเร็จ กรุณาลองใหม่'})[code]||'เชื่อม Google ไม่สำเร็จ';}
 function googleWorkspaceErrorRedirect(request,env,code){return redirectResponse(`${appOrigin(request,env)}/?google_workspace_error=${encodeURIComponent(code)}`,[clearCookie('nakna_google_workspace_state')]);}
 
