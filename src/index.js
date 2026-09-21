@@ -1451,6 +1451,18 @@ INSERT OR IGNORE INTO attendance (
   (3,1,5,'2026-08-20','2026-08-20T03:52:00.000Z','line','present',0);
 `;
 
+
+async function ensureStandardDocumentTemplates(db,clientId,userId,restore=false){
+  const defaults=[
+    ['EMP_CERT','หนังสือรับรองการทำงาน','employment_certificate','CERT',1,0,'หนังสือรับรองการทำงาน\n\nบริษัท {{company.name}} ขอรับรองว่า {{employee.full_name}} ปัจจุบันปฏิบัติงานในตำแหน่ง {{employee.position}} แผนก {{employee.department}} โดยเริ่มปฏิบัติงานตั้งแต่วันที่ {{employee.start_date}} จนถึงปัจจุบัน\n\nหนังสือฉบับนี้ออกให้เพื่อใช้เป็นหลักฐานตามที่พนักงานร้องขอ\n\nออกให้ ณ วันที่ {{document.date}}\nเลขที่เอกสาร {{document.number}}'],
+    ['SAL_CERT','หนังสือรับรองเงินเดือน','salary_certificate','SAL',1,0,'หนังสือรับรองเงินเดือน\n\nบริษัท {{company.name}} ขอรับรองว่า {{employee.full_name}} ปัจจุบันปฏิบัติงานในตำแหน่ง {{employee.position}} แผนก {{employee.department}} และได้รับเงินเดือนประจำ {{employee.salary}} บาทต่อเดือน\n\nหนังสือฉบับนี้ออกให้เพื่อใช้เป็นหลักฐานตามที่พนักงานร้องขอ\n\nออกให้ ณ วันที่ {{document.date}}\nเลขที่เอกสาร {{document.number}}'],
+    ['PROB_PASS','หนังสือแจ้งผ่านการทดลองงาน','probation_pass','PROB',1,1,'หนังสือแจ้งผ่านการทดลองงาน\n\nเรียน {{employee.full_name}}\n\nบริษัท {{company.name}} ขอแจ้งให้ทราบว่าท่านได้ผ่านการทดลองงานในตำแหน่ง {{employee.position}} แผนก {{employee.department}} โดยมีผลตั้งแต่วันที่ {{document.effective_date}} เป็นต้นไป\n\nขอขอบคุณสำหรับความตั้งใจและขอให้ร่วมงานกับบริษัทต่อไปด้วยดี\n\nเลขที่เอกสาร {{document.number}}'],
+    ['SAL_ADJ','หนังสือแจ้งปรับเงินเดือน','salary_adjustment','ADJ',1,1,'หนังสือแจ้งปรับเงินเดือน\n\nเรียน {{employee.full_name}}\n\nบริษัท {{company.name}} ขอแจ้งการปรับค่าตอบแทนของท่าน โดยมีผลตั้งแต่วันที่ {{document.effective_date}} เป็นต้นไป รายละเอียดค่าตอบแทนให้เป็นไปตามข้อมูลที่บริษัทรับรองในเอกสารฉบับนี้\n\nโปรดเก็บเอกสารฉบับนี้ไว้เป็นหลักฐาน\n\nเลขที่เอกสาร {{document.number}}'],
+    ['POLICY_ACK','หนังสือ/ประกาศให้พนักงานรับทราบ','policy_acknowledgement','POL',1,1,'ประกาศ / เอกสารให้รับทราบ\n\nเรื่อง {{document.note}}\n\nบริษัท {{company.name}} แจ้งเอกสารฉบับนี้ให้ {{employee.full_name}} รับทราบ โปรดอ่านรายละเอียดให้ครบถ้วนและกดรับทราบในระบบนากนะ\n\nการกดรับทราบหมายถึงได้รับและเห็นเอกสาร ไม่ได้ตัดสิทธิ์ในการชี้แจง\n\nเลขที่เอกสาร {{document.number}}'],
+    ['WARNING','หนังสือเตือน','warning','WRN',1,1,'หนังสือเตือน\n\nเรียน {{employee.full_name}}\n\nบริษัท {{company.name}} ขอแจ้งเหตุที่ต้องดำเนินการด้านวินัย/การทำงานตามรายละเอียดต่อไปนี้\n\n{{document.note}}\n\nพนักงานมีสิทธิ์อ่าน รับทราบ และส่งคำชี้แจงหรือหลักฐานผ่านระบบนากนะ โดยการรับทราบไม่ได้หมายถึงการยอมรับข้อกล่าวหา\n\nเลขที่เอกสาร {{document.number}}']
+  ];
+  for(const x of defaults){const conflict=restore?`DO UPDATE SET name=excluded.name,document_type=excluded.document_type,numbering_prefix=excluded.numbering_prefix,approval_required=excluded.approval_required,acknowledgement_required=excluded.acknowledgement_required,body_template=excluded.body_template,active=1,updated_at=CURRENT_TIMESTAMP`:`DO NOTHING`;await db.prepare(`INSERT INTO document_templates(client_id,code,name,document_type,numbering_prefix,approval_required,acknowledgement_required,body_template,automation_mode,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'assisted',?9) ON CONFLICT(client_id,code) ${conflict}`).bind(clientId,...x,Number(userId||0)).run();}
+}
 export default {
   async fetch(request, env, ctx) {
     try {
@@ -3330,6 +3342,9 @@ async function handleApi(request, env, url, auth, ctx) {
   // Nakna Document & Evidence System P8.02 — Phase 2-7
   if(path==='/api/document-system/overview' && method==='GET'){
     if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูศูนย์เอกสาร'},403);
+    // P8.14: standard templates are infrastructure, not a setup task for HR.
+    // Ensure them server-side before returning the document center so the UI never waits on a second seed request.
+    await ensureStandardDocumentTemplates(env.DB,clientId,Number(auth.user.id));
     const [summary,templates,pendingApprovals,pendingAck,cases,expiring]=await env.DB.batch([
       env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN workflow_status='draft' THEN 1 ELSE 0 END) drafts,SUM(CASE WHEN approval_status='pending' THEN 1 ELSE 0 END) pending_approvals,SUM(CASE WHEN acknowledgement_status='pending' THEN 1 ELSE 0 END) pending_ack FROM employee_documents WHERE client_id=?1 AND COALESCE(status,'active')!='archived'`).bind(clientId),
       env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 AND active=1 ORDER BY name`).bind(clientId),
@@ -3355,15 +3370,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if(path==='/api/document-templates/seed' && method==='POST'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์'},403);
-    const defaults=[
-      ['EMP_CERT','หนังสือรับรองการทำงาน','employment_certificate','CERT',1,0,'หนังสือรับรองการทำงาน\n\nบริษัท {{company.name}} ขอรับรองว่า {{employee.full_name}} ปัจจุบันปฏิบัติงานในตำแหน่ง {{employee.position}} แผนก {{employee.department}} โดยเริ่มปฏิบัติงานตั้งแต่วันที่ {{employee.start_date}} จนถึงปัจจุบัน\n\nหนังสือฉบับนี้ออกให้เพื่อใช้เป็นหลักฐานตามที่พนักงานร้องขอ\n\nออกให้ ณ วันที่ {{document.date}}\nเลขที่เอกสาร {{document.number}}'],
-      ['SAL_CERT','หนังสือรับรองเงินเดือน','salary_certificate','SAL',1,0,'หนังสือรับรองเงินเดือน\n\nบริษัท {{company.name}} ขอรับรองว่า {{employee.full_name}} ปัจจุบันปฏิบัติงานในตำแหน่ง {{employee.position}} แผนก {{employee.department}} และได้รับเงินเดือนประจำ {{employee.salary}} บาทต่อเดือน\n\nหนังสือฉบับนี้ออกให้เพื่อใช้เป็นหลักฐานตามที่พนักงานร้องขอ\n\nออกให้ ณ วันที่ {{document.date}}\nเลขที่เอกสาร {{document.number}}'],
-      ['PROB_PASS','หนังสือแจ้งผ่านการทดลองงาน','probation_pass','PROB',1,1,'หนังสือแจ้งผ่านการทดลองงาน\n\nเรียน {{employee.full_name}}\n\nบริษัท {{company.name}} ขอแจ้งให้ทราบว่าท่านได้ผ่านการทดลองงานในตำแหน่ง {{employee.position}} แผนก {{employee.department}} โดยมีผลตั้งแต่วันที่ {{document.effective_date}} เป็นต้นไป\n\nขอขอบคุณสำหรับความตั้งใจและขอให้ร่วมงานกับบริษัทต่อไปด้วยดี\n\nเลขที่เอกสาร {{document.number}}'],
-      ['SAL_ADJ','หนังสือแจ้งปรับเงินเดือน','salary_adjustment','ADJ',1,1,'หนังสือแจ้งปรับเงินเดือน\n\nเรียน {{employee.full_name}}\n\nบริษัท {{company.name}} ขอแจ้งการปรับค่าตอบแทนของท่าน โดยมีผลตั้งแต่วันที่ {{document.effective_date}} เป็นต้นไป รายละเอียดค่าตอบแทนให้เป็นไปตามข้อมูลที่บริษัทรับรองในเอกสารฉบับนี้\n\nโปรดเก็บเอกสารฉบับนี้ไว้เป็นหลักฐาน\n\nเลขที่เอกสาร {{document.number}}'],
-      ['POLICY_ACK','หนังสือ/ประกาศให้พนักงานรับทราบ','policy_acknowledgement','POL',1,1,'ประกาศ / เอกสารให้รับทราบ\n\nเรื่อง {{document.note}}\n\nบริษัท {{company.name}} แจ้งเอกสารฉบับนี้ให้ {{employee.full_name}} รับทราบ โปรดอ่านรายละเอียดให้ครบถ้วนและกดรับทราบในระบบนากนะ\n\nการกดรับทราบหมายถึงได้รับและเห็นเอกสาร ไม่ได้ตัดสิทธิ์ในการชี้แจง\n\nเลขที่เอกสาร {{document.number}}'],
-      ['WARNING','หนังสือเตือน','warning','WRN',1,1,'หนังสือเตือน\n\nเรียน {{employee.full_name}}\n\nบริษัท {{company.name}} ขอแจ้งเหตุที่ต้องดำเนินการด้านวินัย/การทำงานตามรายละเอียดต่อไปนี้\n\n{{document.note}}\n\nพนักงานมีสิทธิ์อ่าน รับทราบ และส่งคำชี้แจงหรือหลักฐานผ่านระบบนากนะ โดยการรับทราบไม่ได้หมายถึงการยอมรับข้อกล่าวหา\n\nเลขที่เอกสาร {{document.number}}']
-    ];
-    for(const x of defaults)await env.DB.prepare(`INSERT INTO document_templates(client_id,code,name,document_type,numbering_prefix,approval_required,acknowledgement_required,body_template,automation_mode,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'assisted',?9) ON CONFLICT(client_id,code) DO UPDATE SET name=excluded.name,document_type=excluded.document_type,numbering_prefix=excluded.numbering_prefix,approval_required=excluded.approval_required,acknowledgement_required=excluded.acknowledgement_required,body_template=excluded.body_template,active=1,updated_at=CURRENT_TIMESTAMP`).bind(clientId,...x,Number(auth.user.id)).run();
+    await ensureStandardDocumentTemplates(env.DB,clientId,Number(auth.user.id),true);
     return json({ok:true});
   }
 
