@@ -3325,6 +3325,7 @@ async function handleApi(request, env, url, auth, ctx) {
   // P8.15 — company-scoped template provisioning. Master definitions never contain tenant data;
   // each company's templates are provisioned with variables resolved from that company's profile at PDF time.
   async function ensureCompanyDocumentTemplates(actorUserId){
+    await ensureDocumentWorkflowReady(env.DB);
     const company=await env.DB.prepare(`SELECT c.id,c.name,o.legal_name,o.tax_id,o.phone,o.address FROM clients c LEFT JOIN company_onboarding o ON o.client_id=c.id WHERE c.id=?1`).bind(clientId).first();
     if(!company)throw httpError('ไม่พบบริษัท',404);
     await env.DB.prepare(`INSERT OR IGNORE INTO company_document_settings(client_id,legal_name,tax_id,address,phone) VALUES(?1,?2,?3,?4,?5)`).bind(clientId,company.legal_name||company.name,company.tax_id||null,company.address||null,company.phone||null).run();
@@ -3375,46 +3376,98 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if(path==='/api/document-workflows/create' && method==='POST'){
     if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ออกเอกสาร'},403);
-    const b=await safeJson(request); const employeeId=Number(b.employee_id); const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
-    await ensureCompanyDocumentTemplates(Number(auth.user.id));
-    const requestedCode=String(b.template_code||'').trim().toUpperCase()==='POLICY_ACK'?'ACK_NOTICE':String(b.template_code||'').trim().toUpperCase();
-    let tpl=null;
-    if(Number(b.template_id)>0)tpl=await env.DB.prepare('SELECT * FROM document_templates WHERE id=?1 AND client_id=?2 AND active=1').bind(Number(b.template_id),clientId).first();
-    if(!tpl&&requestedCode)tpl=await env.DB.prepare('SELECT * FROM document_templates WHERE code=?1 AND client_id=?2 AND active=1').bind(requestedCode,clientId).first();
-    if(!tpl)return json({error:'ไม่พบแบบฟอร์มเอกสารของบริษัท กรุณาตรวจ Migration 0025/0026 แล้วลองใหม่'},404);
-    if(String(tpl.code)==='WARNING')return json({error:'หนังสือเตือนต้องสร้างผ่าน HR Case เพื่อเก็บเหตุการณ์ หลักฐาน และคำชี้แจง'},409);
-    const data=(b.data&&typeof b.data==='object'&&!Array.isArray(b.data))?b.data:{};
-    if(String(tpl.code)==='SAL_ADJ'&&!(Number(data.new_salary)>0))return json({error:'กรุณาระบุเงินเดือนใหม่'},400);
-    if(String(tpl.code)==='ACK_NOTICE'&&!String(data.subject||'').trim())return json({error:'กรุณาระบุเรื่องของเอกสาร'},400);
-    if(String(tpl.code)==='ACK_NOTICE'&&!String(data.note||'').trim())return json({error:'กรุณาระบุรายละเอียดที่ต้องการให้พนักงานรับทราบ'},400);
-    const documentDate=String(data.issue_date||data.effective_date||dateInBangkok()).slice(0,10);
-    const note=String(data.note||data.purpose||data.subject||'').trim()||null;
-    const year=new Date(Date.now()+7*3600*1000).getUTCFullYear()+543;
-    await env.DB.prepare(`INSERT INTO document_number_sequences(client_id,template_id,buddhist_year,last_number) VALUES(?1,?2,?3,1) ON CONFLICT(client_id,template_id,buddhist_year) DO UPDATE SET last_number=last_number+1`).bind(clientId,Number(tpl.id),year).run();
-    const seq=await env.DB.prepare(`SELECT last_number FROM document_number_sequences WHERE client_id=?1 AND template_id=?2 AND buddhist_year=?3`).bind(clientId,Number(tpl.id),year).first(); const num=`${tpl.numbering_prefix}-${year}-${String(seq.last_number).padStart(4,'0')}`;
-    const workflow=tpl.automation_mode==='automatic'&&!tpl.approval_required?'final':'draft'; const approval=tpl.approval_required?'pending':'not_required';
-    let r;
+    let stage='request';
     try{
-      r=await env.DB.prepare(`INSERT INTO employee_documents(client_id,employee_id,document_type,title,document_date,visibility,note,data_json,created_by_user_id,status,version,source,confidentiality,document_number,template_id,workflow_status,approval_status,acknowledgement_required,acknowledgement_status,final_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,'active',1,'generated','internal',?10,?11,?12,?13,?14,?15,CASE WHEN ?12='final' THEN CURRENT_TIMESTAMP ELSE NULL END)`).bind(clientId,employeeId,tpl.document_type,tpl.name,documentDate,tpl.visibility,note,JSON.stringify(data),Number(auth.user.id),num,Number(tpl.id),workflow,approval,Number(tpl.acknowledgement_required),tpl.acknowledgement_required?'pending':'not_required').run();
-    }catch(error){
-      const msg=String(error?.message||error); if(/data_json|no column/i.test(msg))return json({error:'ฐานข้อมูลยังไม่อัปเดต กรุณารัน Migration 0026_document_form_data.sql ก่อน'},409); throw error;
-    }
-    const docId=Number(r.meta.last_row_id);
-    if(tpl.approval_required)await env.DB.prepare(`INSERT INTO document_approvals(client_id,document_id,step_no,approver_role,status) VALUES(?1,?2,1,'hr','pending')`).bind(clientId,docId).run();
-    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'draft_created',?5)`).bind(clientId,docId,employeeId,Number(auth.user.id),JSON.stringify({template_id:Number(tpl.id),template_code:tpl.code,document_number:num,data})).run();
-    if(workflow==='final'){
-      try{
-        const materialized=await materializeWorkflowDocument(env,clientId,docId);
-        if(Number(tpl.acknowledgement_required))await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version,delivered_at) VALUES(?1,?2,?3,'pending',1,CURRENT_TIMESTAMP)`).bind(clientId,docId,employeeId).run();
-        await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'system',NULL,'auto_finalized',?4)`).bind(clientId,docId,employeeId,JSON.stringify({drive_url:materialized?.drive_url||null})).run();
-        return json({ok:true,id:docId,document_number:num,status:'final',...materialized},201);
-      }catch(error){
-        await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(docId,clientId).run();
-        await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','auto_finalize_failed',?4)`).bind(clientId,docId,employeeId,JSON.stringify({message:String(error?.message||error)})).run();
-        return json({ok:true,id:docId,document_number:num,status:'draft',warning:'สร้าง PDF อัตโนมัติไม่สำเร็จ เอกสารถูกเก็บเป็น Draft เพื่อให้ HR ตรวจสอบ'},201);
+      const b=await safeJson(request);
+      const employeeId=Number(b.employee_id);
+      if(!employeeId)return json({error:'กรุณาเลือกพนักงาน'},400);
+      stage='employee';
+      const employee=await getEmployeeForClient(env.DB,employeeId,clientId);
+      if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+
+      stage='schema';
+      await ensureDocumentWorkflowReady(env.DB);
+      stage='templates';
+      await ensureCompanyDocumentTemplates(Number(auth.user.id));
+
+      const requestedCode=String(b.template_code||'').trim().toUpperCase()==='POLICY_ACK'?'ACK_NOTICE':String(b.template_code||'').trim().toUpperCase();
+      if(!requestedCode)return json({error:'กรุณาเลือกประเภทเอกสาร'},400);
+      stage='template_lookup';
+      let tpl=null;
+      if(Number(b.template_id)>0)tpl=await env.DB.prepare('SELECT * FROM document_templates WHERE id=?1 AND client_id=?2 AND active=1').bind(Number(b.template_id),clientId).first();
+      if(!tpl)tpl=await env.DB.prepare('SELECT * FROM document_templates WHERE code=?1 AND client_id=?2 AND active=1').bind(requestedCode,clientId).first();
+      if(!tpl)return json({error:'ไม่พบแบบฟอร์มเอกสารของบริษัท',detail:`template_code:${requestedCode}`},404);
+      if(String(tpl.code)==='WARNING')return json({error:'หนังสือเตือนต้องสร้างผ่าน HR Case เพื่อเก็บเหตุการณ์ หลักฐาน และคำชี้แจง'},409);
+
+      const data=(b.data&&typeof b.data==='object'&&!Array.isArray(b.data))?b.data:{};
+      if(String(tpl.code)==='SAL_ADJ'&&!(Number(data.new_salary)>0))return json({error:'กรุณาระบุเงินเดือนใหม่'},400);
+      if(String(tpl.code)==='ACK_NOTICE'&&!String(data.subject||'').trim())return json({error:'กรุณาระบุเรื่องของเอกสาร'},400);
+      if(String(tpl.code)==='ACK_NOTICE'&&!String(data.note||'').trim())return json({error:'กรุณาระบุรายละเอียดที่ต้องการให้พนักงานรับทราบ'},400);
+
+      const documentDate=String(data.issue_date||data.effective_date||dateInBangkok()).slice(0,10);
+      const note=String(data.note||data.purpose||data.subject||'').trim()||null;
+      const year=new Date(Date.now()+7*3600*1000).getUTCFullYear()+543;
+
+      stage='sequence';
+      await env.DB.prepare(`INSERT INTO document_number_sequences(client_id,template_id,buddhist_year,last_number)
+        VALUES(?1,?2,?3,1)
+        ON CONFLICT(client_id,template_id,buddhist_year)
+        DO UPDATE SET last_number=last_number+1`).bind(clientId,Number(tpl.id),year).run();
+      const seq=await env.DB.prepare(`SELECT last_number FROM document_number_sequences WHERE client_id=?1 AND template_id=?2 AND buddhist_year=?3`).bind(clientId,Number(tpl.id),year).first();
+      if(!seq?.last_number)throw new Error('DOCUMENT_SEQUENCE_NOT_CREATED');
+      const num=`${String(tpl.numbering_prefix||'DOC').toUpperCase()}-${year}-${String(seq.last_number).padStart(4,'0')}`;
+
+      const workflow=tpl.automation_mode==='automatic'&&!Number(tpl.approval_required)?'final':'draft';
+      const approval=Number(tpl.approval_required)?'pending':'not_required';
+      stage='document_insert';
+      const r=await env.DB.prepare(`INSERT INTO employee_documents(
+        client_id,employee_id,document_type,title,document_date,visibility,note,data_json,created_by_user_id,
+        status,version,source,confidentiality,document_number,template_id,workflow_status,approval_status,
+        acknowledgement_required,acknowledgement_status,final_at
+      ) VALUES(
+        ?1,?2,?3,?4,?5,?6,?7,?8,?9,
+        'active',1,'generated','internal',?10,?11,?12,?13,?14,?15,
+        CASE WHEN ?12='final' THEN CURRENT_TIMESTAMP ELSE NULL END
+      )`).bind(
+        clientId,employeeId,tpl.document_type,tpl.name,documentDate,tpl.visibility||'employee',note,
+        JSON.stringify(data),Number(auth.user.id),num,Number(tpl.id),workflow,approval,
+        Number(tpl.acknowledgement_required||0),Number(tpl.acknowledgement_required)?'pending':'not_required'
+      ).run();
+      const docId=Number(r?.meta?.last_row_id||0);
+      if(!docId)throw new Error('DOCUMENT_INSERT_NO_ID');
+
+      stage='workflow_records';
+      const statements=[];
+      if(Number(tpl.approval_required)) statements.push(
+        env.DB.prepare(`INSERT INTO document_approvals(client_id,document_id,step_no,approver_role,status) VALUES(?1,?2,1,'hr','pending')`).bind(clientId,docId)
+      );
+      statements.push(
+        env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json)
+          VALUES(?1,?2,?3,'user',?4,'draft_created',?5)`).bind(
+            clientId,docId,employeeId,Number(auth.user.id),JSON.stringify({template_id:Number(tpl.id),template_code:tpl.code,document_number:num,data})
+          )
+      );
+      await env.DB.batch(statements);
+
+      if(workflow==='final'){
+        stage='auto_finalize';
+        try{
+          const materialized=await materializeWorkflowDocument(env,clientId,docId);
+          if(Number(tpl.acknowledgement_required))await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version,delivered_at) VALUES(?1,?2,?3,'pending',1,CURRENT_TIMESTAMP)`).bind(clientId,docId,employeeId).run();
+          await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'system',NULL,'auto_finalized',?4)`).bind(clientId,docId,employeeId,JSON.stringify({drive_url:materialized?.drive_url||null})).run();
+          return json({ok:true,id:docId,document_number:num,status:'final',...materialized},201);
+        }catch(error){
+          await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(docId,clientId).run().catch(()=>{});
+          await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','auto_finalize_failed',?4)`).bind(clientId,docId,employeeId,JSON.stringify({message:String(error?.message||error)})).run().catch(()=>{});
+          return json({ok:true,id:docId,document_number:num,status:'draft',warning:'สร้าง PDF อัตโนมัติไม่สำเร็จ เอกสารถูกเก็บเป็น Draft เพื่อให้ HR ตรวจสอบ'},201);
+        }
       }
+      return json({ok:true,id:docId,document_number:num,status:workflow},201);
+    }catch(error){
+      const detail=safeDbErrorDetail(error);
+      console.error(JSON.stringify({level:'error',event:'document_draft_create_failed',stage,client_id:clientId,user_id:Number(auth.user?.id||0),message:String(error?.message||error),detail}));
+      return json({error:'สร้าง Draft ไม่สำเร็จ',detail:`${stage}:${detail}`},500);
     }
-    return json({ok:true,id:docId,document_number:num,status:workflow},201);
   }
 
   const docApprove=path.match(/^\/api\/document-workflows\/(\d+)\/approve$/);
@@ -7321,6 +7374,118 @@ async function ensureDocumentFoundationReady(db){
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_employee_document_events_doc ON employee_document_events(client_id,document_id,created_at)`).run().catch(()=>{});
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_employee_documents_status ON employee_documents(client_id,status,employee_id,created_at)`).run().catch(()=>{});
   SCHEMA_READY.add('doc-foundation');
+}
+
+
+// P8.18 — Runtime document workflow schema guard.
+// Document creation must not depend on an operator remembering to run 0022/0025/0026 manually.
+// Migrations remain the source of truth, but this guard makes the SaaS self-healing for existing tenants.
+async function ensureDocumentWorkflowReady(db){
+  if(SCHEMA_READY.has('doc-workflow')) return;
+  await ensureDocumentFoundationReady(db);
+
+  await ensureColumns(db,'employee_documents',[
+    ['document_number','TEXT'],
+    ['template_id','INTEGER'],
+    ['workflow_status',"TEXT NOT NULL DEFAULT 'final'"],
+    ['approval_status',"TEXT NOT NULL DEFAULT 'not_required'"],
+    ['acknowledgement_required','INTEGER NOT NULL DEFAULT 0'],
+    ['acknowledgement_status',"TEXT NOT NULL DEFAULT 'not_required'"],
+    ['final_at','TEXT'],
+    ['sent_at','TEXT'],
+    ['data_json','TEXT']
+  ]);
+
+  await db.prepare(`CREATE TABLE IF NOT EXISTS document_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    document_type TEXT NOT NULL,
+    description TEXT,
+    body_template TEXT NOT NULL DEFAULT '',
+    numbering_prefix TEXT NOT NULL DEFAULT 'DOC',
+    automation_mode TEXT NOT NULL DEFAULT 'assisted',
+    approval_required INTEGER NOT NULL DEFAULT 1,
+    acknowledgement_required INTEGER NOT NULL DEFAULT 0,
+    visibility TEXT NOT NULL DEFAULT 'employee',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by_user_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
+  )`).run();
+  await ensureColumns(db,'document_templates',[
+    ['description','TEXT'],['body_template',"TEXT NOT NULL DEFAULT ''"],
+    ['numbering_prefix',"TEXT NOT NULL DEFAULT 'DOC'"],
+    ['automation_mode',"TEXT NOT NULL DEFAULT 'assisted'"],
+    ['approval_required','INTEGER NOT NULL DEFAULT 1'],
+    ['acknowledgement_required','INTEGER NOT NULL DEFAULT 0'],
+    ['visibility',"TEXT NOT NULL DEFAULT 'employee'"],
+    ['active','INTEGER NOT NULL DEFAULT 1'],['created_by_user_id','INTEGER'],
+    ['created_at','TEXT'],['updated_at','TEXT']
+  ]);
+  await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS ux_document_templates_client_code ON document_templates(client_id,code)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_document_templates_client ON document_templates(client_id,active,document_type)`).run().catch(()=>{});
+
+  await db.prepare(`CREATE TABLE IF NOT EXISTS document_number_sequences (
+    client_id INTEGER NOT NULL,
+    template_id INTEGER NOT NULL,
+    buddhist_year INTEGER NOT NULL,
+    last_number INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(client_id,template_id,buddhist_year)
+  )`).run();
+
+  await db.prepare(`CREATE TABLE IF NOT EXISTS document_approvals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    document_id INTEGER NOT NULL,
+    step_no INTEGER NOT NULL DEFAULT 1,
+    approver_role TEXT,
+    approver_user_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending',
+    note TEXT,
+    acted_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_document_approvals_pending ON document_approvals(client_id,status,created_at)`).run().catch(()=>{});
+
+  await db.prepare(`CREATE TABLE IF NOT EXISTS document_acknowledgements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    document_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    delivered_at TEXT,
+    viewed_at TEXT,
+    acknowledged_at TEXT,
+    response_text TEXT,
+    response_file_url TEXT,
+    document_version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(document_id,employee_id,document_version),
+    FOREIGN KEY(document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_document_ack_pending ON document_acknowledgements(client_id,status,employee_id)`).run().catch(()=>{});
+
+  await db.prepare(`CREATE TABLE IF NOT EXISTS company_document_settings (
+    client_id INTEGER PRIMARY KEY,
+    legal_name TEXT,
+    tax_id TEXT,
+    address TEXT,
+    phone TEXT,
+    signer_name TEXT,
+    signer_position TEXT,
+    document_footer TEXT,
+    numbering_style TEXT NOT NULL DEFAULT 'PREFIX-BE-SEQ',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
+  )`).run();
+
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_employee_documents_template_workflow ON employee_documents(client_id,template_id,workflow_status,created_at)`).run().catch(()=>{});
+  SCHEMA_READY.add('doc-workflow');
 }
 
 async function ensureV100P4Ready(db){
