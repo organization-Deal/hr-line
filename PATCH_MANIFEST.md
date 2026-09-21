@@ -1,15 +1,15 @@
-# Nakna P8.16 — Real Document Forms
-Base: P8.15
+# Nakna P8.17 — Document Form Fix
 
 REPLACE
-- src/index.js
 - public/app.js
+- public/index.html
+- src/index.js
 
-No new migration. Migration 0025 from P8.15 must already be applied.
+ADD
+- migrations/0026_document_form_data.sql
 
-Fixes
-- Real master body templates for 6 document types.
-- Fallback catalog is selectable even when Company Template API initially returns empty.
-- On Create Draft, system provisions Company Templates server-side and resolves selected master code.
-- Company identity remains tenant-scoped at PDF materialization time.
-- Document preview describes actual fields and workflow.
+Deploy order
+1. Replace the 3 files above.
+2. Run migration 0026_document_form_data.sql.
+3. Deploy Worker / Pages.
+4. Hard refresh once. `public/index.html` now uses `app.js?v=P8.17.0`, so the browser must load the new frontend instead of the cached P8.15/P8.16 script.
