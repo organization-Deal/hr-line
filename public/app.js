@@ -4463,11 +4463,123 @@ function renderDocuments(){
   const sel=$('#documentTemplate'); if(sel)sel.innerHTML='<option value="">เลือก Template</option>'+templates.map(t=>`<option value="${Number(t.id)}">${escapeHtml(t.name)}</option>`).join('');
 }
 async function refreshDocuments(){try{const [docs,sys]=await Promise.all([api('/api/documents'),api('/api/document-system/overview')]);state.documents=docs;state.documentSystem=sys;renderDocuments();}catch(e){console.warn(e);state.documentSystem={...(state.documentSystem||{}),templates:[],template_load_error:e.message||'โหลดประเภทเอกสารไม่สำเร็จ'};renderDocuments();}}
-const documentTypeMeta={EMP_CERT:['รับรองการทำงาน','ชื่อ · ตำแหน่ง · แผนก · วันเริ่มงาน','DOC'],SAL_CERT:['รับรองเงินเดือน','ชื่อ · ตำแหน่ง · เงินเดือนล่าสุด','฿'],PROB_PASS:['ผ่านทดลองงาน','ข้อมูลการจ้างงาน · วันที่มีผล · ต้องรับทราบ','✓'],SAL_ADJ:['ปรับเงินเดือน','ข้อมูลพนักงาน · วันที่มีผล · ต้องรับทราบ','↗'],POLICY_ACK:['เอกสารให้รับทราบ','รายละเอียดประกาศ · รับทราบหรือชี้แจงได้','ACK'],WARNING:['หนังสือเตือน','สร้างผ่าน HR Case เพื่อเก็บเหตุการณ์และหลักฐาน','!']};
+const documentTypeMeta={
+  EMP_CERT:['รับรองการทำงาน','ชื่อ · ตำแหน่ง · แผนก · วันเริ่มงาน','DOC'],
+  SAL_CERT:['รับรองเงินเดือน','ชื่อ · ตำแหน่ง · เงินเดือนล่าสุด','฿'],
+  PROB_PASS:['ผ่านทดลองงาน','ข้อมูลการจ้างงาน · วันที่มีผล · ต้องรับทราบ','✓'],
+  SAL_ADJ:['ปรับเงินเดือน','เงินเดือนใหม่ · วันที่มีผล · ต้องรับทราบ','↗'],
+  ACK_NOTICE:['เอกสารให้รับทราบ','เรื่อง · รายละเอียดประกาศ · รับทราบหรือชี้แจงได้','ACK'],
+  WARNING:['หนังสือเตือน','สร้างผ่าน HR Case เพื่อเก็บเหตุการณ์และหลักฐาน','!']
+};
 const standardDocumentCatalog=Object.entries(documentTypeMeta).map(([code,m],i)=>({id:-(i+1),code,name:m[0],catalog_only:true}));
-function renderDocumentTypeCards(){const templates=state.documentSystem?.templates||[],root=$('#documentTypeCards');if(!root)return;const list=templates.length?templates:standardDocumentCatalog;root.innerHTML=list.map(t=>{const meta=documentTypeMeta[t.code]||[t.name,t.description||'เอกสารพนักงาน','DOC'];return `<button type="button" class="document-type-card" data-template-id="${Number(t.id)}" data-template-code="${escapeHtml(t.code)}" onclick="selectDocumentTemplate(${Number(t.id)},'${escapeHtml(t.code)}')"><span class="doc-symbol">${escapeHtml(meta[2])}</span><span><strong>${escapeHtml(t.name)}</strong><small>${escapeHtml(meta[1])}</small></span></button>`}).join('')+(templates.length?'':`<div class="document-template-error"><strong>กำลังใช้แบบฟอร์มมาตรฐานของ Nakna</strong><small>Server ยังไม่ส่ง Company Template มา ระบบจะติดตั้ง Template ของบริษัทให้อัตโนมัติเมื่อสร้าง Draft</small><button type="button" class="secondary-btn" onclick="refreshDocuments()">โหลด Company Template ใหม่</button></div>`);}
-window.selectDocumentTemplate=(id,code)=>{let t=(state.documentSystem?.templates||[]).find(x=>Number(x.id)===Number(id));if(!t)t=standardDocumentCatalog.find(x=>x.code===code);if(!t)return;$('#documentTemplate').value=Number(t.id)>0?String(t.id):'';$('#documentTemplate').dataset.code=t.code||code||'';document.querySelectorAll('.document-type-card').forEach(x=>x.classList.toggle('active',x.dataset.templateCode===(t.code||code)));const e=state.employees.find(x=>Number(x.id)===Number($('#documentEmployee').value));const employeeName=e?(e.nickname||`${e.first_name||''} ${e.last_name||''}`.trim()):'พนักงาน';const meta=documentTypeMeta[t.code]||[t.name,'ข้อมูลจากแฟ้มพนักงาน','DOC'];const fields={EMP_CERT:'ชื่อ · รหัสพนักงาน · ตำแหน่ง · แผนก · วันเริ่มงาน · วัตถุประสงค์',SAL_CERT:'ชื่อ · ตำแหน่ง · แผนก · วันเริ่มงาน · เงินเดือนล่าสุด · วัตถุประสงค์',PROB_PASS:'ชื่อ · ตำแหน่ง · แผนก · วันที่มีผล · หมายเหตุ',SAL_ADJ:'ชื่อ · ตำแหน่ง · เงินเดือนใหม่ · วันที่มีผล · หมายเหตุ',ACK_NOTICE:'ชื่อพนักงาน · เรื่อง · รายละเอียดประกาศ',WARNING:'HR Case · เหตุการณ์ · หลักฐาน · คำชี้แจง · ผลพิจารณา'};const warning=t.code==='WARNING'?'<br><b>เอกสารนี้ต้องเริ่มจาก HR Case</b> เพื่อรักษาหลักฐานและ Timeline':'';$('#documentDraftPreview').innerHTML=`<p class="kicker">DOCUMENT FORM</p><strong>${escapeHtml(t.name)} · ${escapeHtml(employeeName)}</strong><small><b>ข้อมูลในแบบฟอร์ม:</b> ${escapeHtml(fields[t.code]||meta[1])}<br><b>หัวเอกสาร:</b> ใช้ชื่อ/ที่อยู่/เลขผู้เสียภาษี/ผู้ลงนามของบริษัทที่กำลังใช้งาน<br><b>Workflow:</b> Draft → HR ตรวจ → อนุมัติ → PDF A4 Final${['PROB_PASS','SAL_ADJ','ACK_NOTICE','WARNING'].includes(t.code)?' → ส่งให้พนักงานรับทราบ/ชี้แจง':''}${warning}</small>`;$('#documentNote').placeholder=t.code==='ACK_NOTICE'?'ระบุเรื่องและรายละเอียดประกาศ':t.code==='SAL_ADJ'?'ระบุวันที่มีผล/รายละเอียดการปรับเงินเดือน':t.code==='PROB_PASS'?'ระบุวันที่มีผลหรือรายละเอียดเพิ่มเติม':'ระบุวัตถุประสงค์ เช่น ใช้ประกอบการขอสินเชื่อ';};
-async function generateEmployeeDocument(){const button=$('#documentGenerateSaveBtn');button.disabled=true;button.textContent='กำลังสร้าง Draft…';try{let templateId=Number($('#documentTemplate').value);const code=$('#documentTemplate').dataset.code||'';if(!templateId&&code){const seeded=await api('/api/document-templates/seed',{method:'POST'});const rows=seeded?.data||[];state.documentSystem.templates=rows;const found=rows.find(x=>x.code===code);templateId=Number(found?.id||0);renderDocumentTypeCards();}if(!templateId)throw new Error('ยังสร้าง Company Template ไม่สำเร็จ กรุณาตรวจ Migration 0025 แล้วลองใหม่');const result=await api('/api/document-workflows/create',{method:'POST',body:JSON.stringify({employee_id:Number($('#documentEmployee').value),template_id:templateId,note:$('#documentNote').value.trim()})});$('#documentGenerateModal').close();await refreshDocuments();toast(`สร้าง Draft ${result.document_number} แล้ว · กรุณาตรวจและอนุมัติก่อนส่ง`);}catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='สร้าง Draft เพื่อตรวจสอบ';}}
+let selectedDocumentCode='';
+
+function thaiToday(){return new Date(Date.now()+7*60*60*1000).toISOString().slice(0,10);}
+function getDocumentEmployee(){return (state.employees||[]).find(x=>Number(x.id)===Number($('#documentEmployee')?.value));}
+function getDocumentCompany(){return state.companyProfile||state.dashboard?.client||activeCompany()||{};}
+function employeeDisplayName(e){return e?`${e.first_name||''} ${e.last_name||''}`.trim()||e.nickname||e.employee_code||'พนักงาน':'พนักงาน';}
+function escapeAttr(v){return escapeHtml(String(v??'')).replace(/"/g,'&quot;');}
+
+function documentFormHtml(code){
+  const today=thaiToday();
+  if(code==='EMP_CERT'||code==='SAL_CERT')return `<div class="field full"><label>3. วัตถุประสงค์ในการออกเอกสาร</label><input id="docPurpose" value="ใช้เป็นหลักฐานตามคำขอของพนักงาน" placeholder="เช่น ใช้ประกอบการขอสินเชื่อ"></div><div class="field"><label>วันที่ออกเอกสาร</label><input id="docIssueDate" type="date" value="${today}"></div><div class="field"><label>เรียน / ผู้รับเอกสาร</label><input id="docRecipient" value="ผู้เกี่ยวข้อง" placeholder="ผู้เกี่ยวข้อง"></div>`;
+  if(code==='PROB_PASS')return `<div class="field"><label>3. วันที่มีผล</label><input id="docEffectiveDate" type="date" value="${today}"></div><div class="field full"><label>รายละเอียดเพิ่มเติม</label><textarea id="docDetail" rows="3" placeholder="เช่น ผ่านการประเมินทดลองงานตามเกณฑ์ของบริษัท"></textarea></div>`;
+  if(code==='SAL_ADJ')return `<div class="field"><label>3. เงินเดือนใหม่ (บาท/เดือน)</label><input id="docNewSalary" type="number" min="0" step="0.01" placeholder="เช่น 45000"></div><div class="field"><label>วันที่มีผล</label><input id="docEffectiveDate" type="date" value="${today}"></div><div class="field full"><label>รายละเอียดเพิ่มเติม</label><textarea id="docDetail" rows="3" placeholder="เช่น ปรับตามผลการประเมินประจำปี"></textarea></div>`;
+  if(code==='ACK_NOTICE')return `<div class="field full"><label>3. เรื่อง</label><input id="docSubject" placeholder="เช่น แจ้งนโยบายการทำงานฉบับใหม่"></div><div class="field full"><label>รายละเอียดประกาศ / เนื้อหาที่ต้องการให้รับทราบ</label><textarea id="docDetail" rows="5" placeholder="ระบุรายละเอียดที่พนักงานต้องอ่านและรับทราบ"></textarea></div><div class="field"><label>วันที่ออกเอกสาร</label><input id="docIssueDate" type="date" value="${today}"></div>`;
+  if(code==='WARNING')return `<div class="document-template-error"><strong>หนังสือเตือนต้องสร้างจาก HR Case</strong><small>เพื่อให้มีเหตุการณ์ หลักฐาน คำชี้แจง และ Timeline ที่ตรวจสอบย้อนหลังได้</small><button type="button" class="primary-btn" onclick="quickOpenDocumentCase()">+ เปิด HR Case</button></div>`;
+  return '';
+}
+
+function collectDocumentForm(){
+  const code=selectedDocumentCode;
+  const data={};
+  if(code==='EMP_CERT'||code==='SAL_CERT'){
+    data.purpose=$('#docPurpose')?.value.trim()||'ใช้เป็นหลักฐานตามคำขอของพนักงาน';
+    data.issue_date=$('#docIssueDate')?.value||thaiToday();
+    data.recipient=$('#docRecipient')?.value.trim()||'ผู้เกี่ยวข้อง';
+  }else if(code==='PROB_PASS'){
+    data.effective_date=$('#docEffectiveDate')?.value||thaiToday();
+    data.note=$('#docDetail')?.value.trim()||'';
+  }else if(code==='SAL_ADJ'){
+    data.new_salary=Number($('#docNewSalary')?.value||0);
+    data.effective_date=$('#docEffectiveDate')?.value||thaiToday();
+    data.note=$('#docDetail')?.value.trim()||'';
+  }else if(code==='ACK_NOTICE'){
+    data.subject=$('#docSubject')?.value.trim()||'';
+    data.note=$('#docDetail')?.value.trim()||'';
+    data.issue_date=$('#docIssueDate')?.value||thaiToday();
+  }
+  return data;
+}
+
+function renderDocumentA4Preview(){
+  const root=$('#documentDraftPreview'); if(!root)return;
+  const code=selectedDocumentCode;
+  if(!code){root.innerHTML='<p class="kicker">DOCUMENT PREVIEW</p><strong>เลือกประเภทเอกสารเพื่อกรอกแบบฟอร์ม</strong><small>ระบบจะสร้าง Preview จากข้อมูลบริษัทและแฟ้มพนักงานก่อนสร้าง Draft</small>';return;}
+  if(code==='WARNING'){root.innerHTML='<p class="kicker">HR CASE WORKFLOW</p><strong>หนังสือเตือนสร้างจาก Case เท่านั้น</strong><small>เหตุการณ์ → หลักฐาน → ขอคำชี้แจง → HR พิจารณา → หนังสือเตือน → รับทราบ/ชี้แจง</small>';return;}
+  const e=getDocumentEmployee(), c=getDocumentCompany(), d=collectDocumentForm(), meta=documentTypeMeta[code]||['เอกสารพนักงาน','','DOC'];
+  const name=employeeDisplayName(e), company=String(c.legal_name||c.name||activeCompany()?.name||'ชื่อบริษัท'), position=e?.position_name||e?.position||'-', department=e?.department_name||e?.department||'-', start=e?.start_date||'-';
+  let body='';
+  if(code==='EMP_CERT') body=`${company} ขอรับรองว่า ${name} รหัสพนักงาน ${e?.employee_code||'-'} เป็นพนักงานของบริษัท ปัจจุบันดำรงตำแหน่ง ${position} สังกัด ${department} และเริ่มปฏิบัติงานตั้งแต่วันที่ ${start} จนถึงปัจจุบัน<br><br>วัตถุประสงค์: ${escapeHtml(d.purpose||'')}`;
+  if(code==='SAL_CERT') body=`${company} ขอรับรองว่า ${name} ตำแหน่ง ${position} สังกัด ${department} เริ่มงานวันที่ ${start} โดยระบบจะดึงเงินเดือนล่าสุดจาก Payroll Profile ตอนสร้างเอกสาร Final<br><br>วัตถุประสงค์: ${escapeHtml(d.purpose||'')}`;
+  if(code==='PROB_PASS') body=`เรียน ${escapeHtml(name)}<br><br>${escapeHtml(company)} ขอแจ้งให้ทราบว่าท่านผ่านการทดลองงานในตำแหน่ง ${escapeHtml(position)} สังกัด ${escapeHtml(department)} โดยมีผลตั้งแต่วันที่ ${escapeHtml(d.effective_date||'-')} เป็นต้นไป${d.note?`<br><br>${escapeHtml(d.note)}`:''}`;
+  if(code==='SAL_ADJ') body=`เรียน ${escapeHtml(name)}<br><br>${escapeHtml(company)} ขอแจ้งการปรับเงินเดือนของท่านเป็น <b>${Number(d.new_salary||0).toLocaleString('th-TH')} บาท/เดือน</b> มีผลตั้งแต่วันที่ ${escapeHtml(d.effective_date||'-')} เป็นต้นไป${d.note?`<br><br>${escapeHtml(d.note)}`:''}`;
+  if(code==='ACK_NOTICE') body=`เรียน ${escapeHtml(name)}<br><b>เรื่อง ${escapeHtml(d.subject||'—')}</b><br><br>${escapeHtml(d.note||'กรอกรายละเอียดประกาศด้านบน')}`;
+  root.innerHTML=`<p class="kicker">A4 DOCUMENT PREVIEW</p><div style="background:#fff;border:1px solid #dfe8e6;border-radius:16px;padding:24px;box-shadow:0 8px 28px rgba(18,60,74,.06);"><div style="font-size:12px;color:#04878a;font-weight:700;letter-spacing:.08em;">${escapeHtml(company)}</div><h3 style="margin:12px 0 18px;">${escapeHtml(meta[0])}</h3><div style="font-size:14px;line-height:1.85;color:#243b40;">${body}</div><div style="margin-top:28px;padding-top:16px;border-top:1px solid #edf1f0;font-size:12px;color:#738286;">ข้อมูลบริษัท ผู้ลงนาม เลขเอกสาร และ Logo จะใช้ของบริษัทที่กำลังใช้งาน</div></div>`;
+}
+
+function renderDocumentDynamicForm(){
+  const root=$('#documentDynamicFields'); if(!root)return;
+  root.innerHTML=documentFormHtml(selectedDocumentCode);
+  root.querySelectorAll('input,textarea,select').forEach(el=>{el.addEventListener('input',renderDocumentA4Preview);el.addEventListener('change',renderDocumentA4Preview);});
+  renderDocumentA4Preview();
+}
+
+function renderDocumentTypeCards(){
+  const templates=state.documentSystem?.templates||[],root=$('#documentTypeCards');if(!root)return;
+  const byCode=new Map(templates.map(t=>[t.code,t]));
+  root.innerHTML=standardDocumentCatalog.map(cat=>{const t=byCode.get(cat.code)||cat;const meta=documentTypeMeta[cat.code];return `<button type="button" class="document-type-card ${selectedDocumentCode===cat.code?'active':''}" data-template-code="${escapeAttr(cat.code)}"><span class="doc-symbol">${escapeHtml(meta[2])}</span><span><strong>${escapeHtml(meta[0])}</strong><small>${escapeHtml(meta[1])}</small></span></button>`}).join('');
+  root.querySelectorAll('.document-type-card').forEach(btn=>btn.addEventListener('click',()=>selectDocumentTemplateByCode(btn.dataset.templateCode)));
+}
+
+function selectDocumentTemplateByCode(code){
+  if(!documentTypeMeta[code])return;
+  selectedDocumentCode=code;
+  const hidden=$('#documentTemplate'); if(hidden){hidden.dataset.code=code; const t=(state.documentSystem?.templates||[]).find(x=>x.code===code);hidden.value=t?.id?String(t.id):'';}
+  renderDocumentTypeCards();
+  renderDocumentDynamicForm();
+  const save=$('#documentGenerateSaveBtn'); if(save){save.disabled=code==='WARNING'; save.textContent=code==='WARNING'?'สร้างผ่าน HR Case':'สร้าง Draft เพื่อตรวจสอบ';}
+}
+window.selectDocumentTemplate=(id,code)=>selectDocumentTemplateByCode(code);
+window.selectDocumentTemplateByCode=selectDocumentTemplateByCode;
+
+function openDocumentGenerateModal(){
+  selectedDocumentCode='';
+  const employee=$('#documentEmployee');
+  if(employee){employee.innerHTML=(state.employees||[]).map(e=>`<option value="${Number(e.id)}">${escapeHtml(e.nickname||employeeDisplayName(e))} · ${escapeHtml(e.employee_code||'')}</option>`).join(''); employee.onchange=renderDocumentA4Preview;}
+  const hidden=$('#documentTemplate'); if(hidden){hidden.value=''; hidden.dataset.code='';}
+  const fields=$('#documentDynamicFields'); if(fields)fields.innerHTML='';
+  const save=$('#documentGenerateSaveBtn'); if(save){save.disabled=false;save.textContent='สร้าง Draft เพื่อตรวจสอบ';}
+  renderDocumentTypeCards(); renderDocumentA4Preview();
+  $('#documentGenerateModal')?.showModal();
+}
+window.openDocumentGenerateModal=openDocumentGenerateModal;
+
+async function generateEmployeeDocument(){
+  const button=$('#documentGenerateSaveBtn');
+  if(!selectedDocumentCode)return toast('กรุณาเลือกประเภทเอกสาร',true);
+  if(selectedDocumentCode==='WARNING')return toast('หนังสือเตือนต้องสร้างผ่าน HR Case',true);
+  const employeeId=Number($('#documentEmployee')?.value||0); if(!employeeId)return toast('กรุณาเลือกพนักงาน',true);
+  const data=collectDocumentForm();
+  if(selectedDocumentCode==='SAL_ADJ'&&!(Number(data.new_salary)>0))return toast('กรุณาระบุเงินเดือนใหม่',true);
+  if(selectedDocumentCode==='ACK_NOTICE'&&!data.subject)return toast('กรุณาระบุเรื่องของเอกสาร',true);
+  if(selectedDocumentCode==='ACK_NOTICE'&&!data.note)return toast('กรุณาระบุรายละเอียดที่ต้องการให้พนักงานรับทราบ',true);
+  button.disabled=true;button.textContent='กำลังสร้าง Draft…';
+  try{
+    const result=await api('/api/document-workflows/create',{method:'POST',body:JSON.stringify({employee_id:employeeId,template_code:selectedDocumentCode,data})});
+    $('#documentGenerateModal').close(); await refreshDocuments(); toast(`สร้าง Draft ${result.document_number} แล้ว · กรุณาตรวจและอนุมัติก่อนส่ง`);
+  }catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='สร้าง Draft เพื่อตรวจสอบ';}
+}
 
 function renderGrowth(){
   const learning=state.learning||{courses:[],summary:{}}; const performance=state.performance||{goals:[],one_on_ones:[],probation_due:[],probation_reviews:[],summary:{}}; const canAdmin=['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));
