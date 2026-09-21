@@ -1,15 +1,17 @@
-# Nakna P8.17 — Document Form Fix
+# Nakna P8.18 — Draft Save Fix
 
-REPLACE
-- public/app.js
-- public/index.html
-- src/index.js
+Apply on top of P8.17.
 
-ADD
-- migrations/0026_document_form_data.sql
+## REPLACE
+- `src/index.js`
+- `public/index.html`
 
-Deploy order
-1. Replace the 3 files above.
-2. Run migration 0026_document_form_data.sql.
-3. Deploy Worker / Pages.
-4. Hard refresh once. `public/index.html` now uses `app.js?v=P8.17.0`, so the browser must load the new frontend instead of the cached P8.15/P8.16 script.
+## Migration
+- No new migration.
+- P8.18 adds a runtime schema guard for Document Workflow tables/columns so missing 0022/0025/0026 pieces are repaired automatically when the feature is used.
+
+## Main fixes
+- Self-heal Document Workflow DB schema before template provisioning / Draft creation.
+- Draft creation is split into explicit stages: employee → schema → templates → template_lookup → sequence → document_insert → workflow_records.
+- Server now returns a useful stage/detail instead of only `Internal server error`.
+- Frontend cache key updated to P8.18.0.

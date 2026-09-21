@@ -1,8 +1,9 @@
-# P8.17 Test Result
+# P8.18 test result
 
-- public/app.js: `node --check` PASS
-- src/index.js: `node --check` PASS
-- migration 0026: SQLite syntax/apply PASS
-- cache-busting: app.js query updated to P8.17.0
-- document selection no longer depends on Company Template API to render its form
-- create flow submits `template_code` + structured form data; server provisions/finds tenant template by code
+- Full project assembled from base + P8.12 → P8.17 + P8.18: PASS
+- `npm run check`: PASS
+- `npm run audit`: PASS
+- Fresh migration chain 0001 → 0026: PASS
+- No new migration in P8.18
+
+Production validation still required for the actual deployed D1/Google/LINE environment.
