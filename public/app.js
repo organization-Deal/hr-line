@@ -4469,7 +4469,7 @@ function renderDocuments(){
   const approvalIds=new Set(apiApprovals.map(x=>Number(x.document_id)));
   const fallbackApprovals=docs.filter(x=>String(x.approval_status||'')==='pending'&&!approvalIds.has(Number(x.id))).map(x=>({...x,document_id:Number(x.id)}));
   const approvals=[...apiApprovals,...fallbackApprovals],expiring=sys.expiring||[];
-  $('#documentActionList').innerHTML=(approvals.length||expiring.length)?[...approvals.map(x=>`<article class="document-row"><div class="document-file-icon">✓</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>รอ HR ตรวจและอนุมัติ</small></div><div class="document-row-actions"><button class="secondary-btn" onclick="rejectDocumentWorkflow(${Number(x.document_id)})">ส่งกลับ</button><button class="primary-btn" onclick="approveDocumentWorkflow(${Number(x.document_id)})">อนุมัติ</button></div></article>`),...expiring.map(x=>`<article class="document-row"><div class="document-file-icon">!</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')}</p><small>หมดอายุ ${formatDate(x.expires_at)}</small></div></article>`)].join(''):emptyState('ไม่มีงานค้าง','เอกสารที่รออนุมัติหรือใกล้หมดอายุจะแสดงที่นี่');
+  $('#documentActionList').innerHTML=(approvals.length||expiring.length)?[...approvals.map(x=>`<article class="document-row"><div class="document-file-icon">✓</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>รอ HR ตรวจและอนุมัติ</small></div><div class="document-row-actions"><button class="secondary-btn" onclick="window.rejectDocumentWorkflow(${Number(x.document_id)},this)">ส่งกลับ</button><button class="primary-btn" onclick="window.approveDocumentWorkflow(${Number(x.document_id)},this)">อนุมัติ</button></div></article>`),...expiring.map(x=>`<article class="document-row"><div class="document-file-icon">!</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')}</p><small>หมดอายุ ${formatDate(x.expires_at)}</small></div></article>`)].join(''):emptyState('ไม่มีงานค้าง','เอกสารที่รออนุมัติหรือใกล้หมดอายุจะแสดงที่นี่');
   const templates=sys.templates||[];
   const templateRows=templates.length?templates:standardDocumentCatalog.map(t=>({...t,automation_mode:'assisted',approval_required:1,acknowledgement_required:['PROB_PASS','SAL_ADJ','ACK_NOTICE','WARNING'].includes(t.code)}));
   $('#documentTemplateList').innerHTML=templateRows.map(t=>`<article class="document-row"><div class="document-file-icon">T</div><div><strong>${escapeHtml(t.name)}</strong><p>${escapeHtml(t.code)} · ${escapeHtml(t.automation_mode||'assisted')}</p><small>${t.approval_required?'ต้องอนุมัติ':'ไม่ต้องอนุมัติ'}${t.acknowledgement_required?' · ต้องรับทราบ':''}${templates.length?'':' · มาตรฐาน Nakna'}</small></div></article>`).join('');
@@ -4517,7 +4517,7 @@ function documentFormHtml(code){
   if(code==='PROB_PASS')return `<div class="field"><label>3. วันที่มีผล</label><input id="docEffectiveDate" type="date" value="${today}"></div><div class="field full"><label>รายละเอียดเพิ่มเติม</label><textarea id="docDetail" rows="3" placeholder="เช่น ผ่านการประเมินทดลองงานตามเกณฑ์ของบริษัท"></textarea></div>`;
   if(code==='SAL_ADJ')return `<div class="field"><label>3. เงินเดือนใหม่ (บาท/เดือน)</label><input id="docNewSalary" type="number" min="0" step="0.01" placeholder="เช่น 45000"></div><div class="field"><label>วันที่มีผล</label><input id="docEffectiveDate" type="date" value="${today}"></div><div class="field full"><label>รายละเอียดเพิ่มเติม</label><textarea id="docDetail" rows="3" placeholder="เช่น ปรับตามผลการประเมินประจำปี"></textarea></div>`;
   if(code==='ACK_NOTICE')return `<div class="field full"><label>3. เรื่อง</label><input id="docSubject" placeholder="เช่น แจ้งนโยบายการทำงานฉบับใหม่"></div><div class="field full"><label>รายละเอียดประกาศ / เนื้อหาที่ต้องการให้รับทราบ</label><textarea id="docDetail" rows="5" placeholder="ระบุรายละเอียดที่พนักงานต้องอ่านและรับทราบ"></textarea></div><div class="field"><label>วันที่ออกเอกสาร</label><input id="docIssueDate" type="date" value="${today}"></div>`;
-  if(code==='WARNING')return `<div class="document-template-error"><strong>หนังสือเตือนต้องสร้างจาก HR Case</strong><small>เพื่อให้มีเหตุการณ์ หลักฐาน คำชี้แจง และ Timeline ที่ตรวจสอบย้อนหลังได้</small><button type="button" class="primary-btn" onclick="quickOpenDocumentCase()">+ เปิด HR Case</button></div>`;
+  if(code==='WARNING')return `<div class="document-template-error"><strong>หนังสือเตือนต้องสร้างจาก HR Case</strong><small>เพื่อให้มีเหตุการณ์ หลักฐาน คำชี้แจง และ Timeline ที่ตรวจสอบย้อนหลังได้</small><button type="button" class="primary-btn" onclick="window.quickOpenDocumentCase()">+ เปิด HR Case</button></div>`;
   return '';
 }
 
@@ -4874,14 +4874,40 @@ boot();
   });
 })();
 
-async function approveDocumentWorkflow(id){try{const r=await api(`/api/document-workflows/${id}/approve`,{method:'POST',body:JSON.stringify({})});await refreshDocuments();toast(r.drive_url?'อนุมัติ · สร้าง PDF และเก็บเข้า Drive แล้ว':'อนุมัติและล็อกเอกสาร Final แล้ว');}catch(e){toast(e.message,true)}}
-async function rejectDocumentWorkflow(id){const note=prompt('เหตุผลที่ส่งกลับให้แก้ไข');if(note===null)return;try{await api(`/api/document-workflows/${id}/reject`,{method:'POST',body:JSON.stringify({note})});await refreshDocuments();toast('ส่งเอกสารกลับเป็น Draft แล้ว');}catch(e){toast(e.message,true)}}
-async function bulkApproveDocumentWorkflows(){const ids=(state.documentSystem?.pending_approvals||[]).map(x=>Number(x.document_id)).filter(Boolean);if(!ids.length)return toast('ไม่มีเอกสารรออนุมัติ');if(!confirm(`อนุมัติเอกสาร ${ids.length} ฉบับพร้อมกัน?`))return;try{const r=await api('/api/document-workflows/bulk-approve',{method:'POST',body:JSON.stringify({ids})});await refreshDocuments();toast(`อนุมัติแล้ว ${Number(r.approved||0)} ฉบับ`);}catch(e){toast(e.message,true)}}
+window.approveDocumentWorkflow=async function approveDocumentWorkflow(id,button=null){
+  const original=button?.textContent||'อนุมัติ';
+  if(button){button.disabled=true;button.textContent='กำลังสร้าง PDF…';}
+  try{
+    const r=await api(`/api/document-workflows/${id}/approve`,{method:'POST',body:JSON.stringify({}),timeoutMs:45000});
+    await refreshDocuments({silent:true});
+    toast(r.drive_url?'อนุมัติแล้ว · สร้าง PDF และเก็บเข้า Google Drive แล้ว':'อนุมัติและล็อกเอกสาร Final แล้ว');
+  }catch(e){
+    console.error('[Nakna] document approve failed',id,e);
+    toast(`อนุมัติเอกสารไม่สำเร็จ · ${e.message}`,true);
+  }finally{
+    if(button && button.isConnected){button.disabled=false;button.textContent=original;}
+  }
+};
+window.rejectDocumentWorkflow=async function rejectDocumentWorkflow(id,button=null){
+  const note=prompt('เหตุผลที่ส่งกลับให้แก้ไข');if(note===null)return;
+  const original=button?.textContent||'ส่งกลับ';
+  if(button){button.disabled=true;button.textContent='กำลังส่งกลับ…';}
+  try{
+    await api(`/api/document-workflows/${id}/reject`,{method:'POST',body:JSON.stringify({note}),timeoutMs:30000});
+    await refreshDocuments({silent:true});toast('ส่งเอกสารกลับเป็น Draft แล้ว');
+  }catch(e){
+    console.error('[Nakna] document reject failed',id,e);
+    toast(`ส่งกลับไม่สำเร็จ · ${e.message}`,true);
+  }finally{
+    if(button && button.isConnected){button.disabled=false;button.textContent=original;}
+  }
+};
+async function bulkApproveDocumentWorkflows(){const ids=(state.documentSystem?.pending_approvals||[]).map(x=>Number(x.document_id)).filter(Boolean);if(!ids.length)return toast('ไม่มีเอกสารรออนุมัติ');if(!confirm(`อนุมัติเอกสาร ${ids.length} ฉบับพร้อมกัน?`))return;try{const r=await api('/api/document-workflows/bulk-approve',{method:'POST',body:JSON.stringify({ids}),timeoutMs:90000});await refreshDocuments({silent:true});toast(`อนุมัติแล้ว ${Number(r.approved||0)} ฉบับ`);}catch(e){toast(`อนุมัติหลายเอกสารไม่สำเร็จ · ${e.message}`,true)}}
 async function seedDocumentTemplates(){try{await api('/api/document-templates/seed',{method:'POST',body:'{}'});await refreshDocuments();toast('ติดตั้ง Template มาตรฐานแล้ว');}catch(e){toast(e.message,true)}}
 
 $('#seedDocumentTemplatesBtn')?.addEventListener('click',seedDocumentTemplates); $('#refreshDocumentSystemBtn')?.addEventListener('click',refreshDocuments); $('#bulkApproveDocumentsBtn')?.addEventListener('click',bulkApproveDocumentWorkflows);
 
-async function quickOpenDocumentCase(){
+window.quickOpenDocumentCase=async function quickOpenDocumentCase(){
   try{
     const employeeId=Number(prompt('Employee ID ที่ต้องการเปิด Case')); if(!employeeId)return;
     const title=prompt('หัวข้อ Case เช่น มาสายต่อเนื่อง / เหตุการณ์ที่ต้องตรวจสอบ'); if(!title)return;
