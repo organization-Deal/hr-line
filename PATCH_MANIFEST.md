@@ -1,17 +1,22 @@
-# Nakna P8.18 — Draft Save Fix
+# Nakna P8.19 — Document Refresh & Draft Visibility Fix
 
-Apply on top of P8.17.
+ฐานที่ใช้: P8.18
 
 ## REPLACE
-- `src/index.js`
+- `public/app.js`
 - `public/index.html`
+- `src/index.js`
 
 ## Migration
-- No new migration.
-- P8.18 adds a runtime schema guard for Document Workflow tables/columns so missing 0022/0025/0026 pieces are repaired automatically when the feature is used.
+- ไม่มี Migration ใหม่
+- ฐานข้อมูลควรมี migrations ถึง `0026_document_form_data.sql` จากเวอร์ชันก่อนหน้า
 
-## Main fixes
-- Self-heal Document Workflow DB schema before template provisioning / Draft creation.
-- Draft creation is split into explicit stages: employee → schema → templates → template_lookup → sequence → document_insert → workflow_records.
-- Server now returns a useful stage/detail instead of only `Internal server error`.
-- Frontend cache key updated to P8.18.0.
+## แก้ไขหลัก
+1. สร้าง Draft แล้วแสดงในหน้าเอกสารทันที ไม่รอ Overview API
+2. `/api/documents` และ `/api/document-system/overview` โหลดแยกกัน ถ้า Overview บางส่วนพัง รายการเอกสารยังแสดงได้
+3. Dashboard นับ Draft/รออนุมัติจากรายการเอกสารเป็น fallback
+4. Action Center แสดง Draft ที่รออนุมัติจาก `/api/documents` ได้ แม้ Overview บาง section ล้มเหลว
+5. Template section มี Standard Catalog fallback ไม่ค้าง “กำลังเตรียม Template”
+6. Create API ส่งข้อมูลเอกสารที่เพิ่งสร้างกลับให้ Frontend เพื่อ optimistic render
+7. Cache bust เป็น `P8.19.0`
+8. Restore Employee HR Case response flow ที่หลุดจาก branch ภายหลัง P8.12
