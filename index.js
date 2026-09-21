@@ -2742,8 +2742,9 @@ async function handleApi(request, env, url, auth, ctx) {
     const id = Number(employeeDocumentDeleteMatch[1]);
     const row = await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
     if (!row) return json({ error:'ไม่พบเอกสาร' },404);
-    await env.DB.prepare('DELETE FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.delete','employee_document',String(id),{employee_id:row.employee_id,file_name:row.file_name});
+    await env.DB.prepare("UPDATE employee_documents SET status='archived',archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2").bind(id,clientId).run();
+    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'archived',?5)`).bind(clientId,id,row.employee_id||null,Number(auth.user.id),JSON.stringify({file_name:row.file_name})).run().catch(()=>{});
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.archive','employee_document',String(id),{employee_id:row.employee_id,file_name:row.file_name});
     return json({ok:true});
   }
 
@@ -3277,6 +3278,97 @@ async function handleApi(request, env, url, auth, ctx) {
     if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ออกเอกสาร'},403); await ensureV100P3Ready(env.DB); const body=await safeJson(request); const employeeId=Number(body.employee_id); const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
     const type=['salary_certificate','employment_certificate'].includes(String(body.document_type))?String(body.document_type):'employment_certificate';
     const document=await generateEmployeeCertificate(env,clientId,employeeId,type,Number(auth.user.id),body.note||null); return json({ok:true,document},201);
+  }
+
+  // Nakna Document & Evidence System P8.02 — Phase 2-7
+  if(path==='/api/document-system/overview' && method==='GET'){
+    if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูศูนย์เอกสาร'},403);
+    const [summary,templates,pendingApprovals,pendingAck,cases,expiring]=await env.DB.batch([
+      env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN workflow_status='draft' THEN 1 ELSE 0 END) drafts,SUM(CASE WHEN approval_status='pending' THEN 1 ELSE 0 END) pending_approvals,SUM(CASE WHEN acknowledgement_status='pending' THEN 1 ELSE 0 END) pending_ack FROM employee_documents WHERE client_id=?1 AND COALESCE(status,'active')!='archived'`).bind(clientId),
+      env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 AND active=1 ORDER BY name`).bind(clientId),
+      env.DB.prepare(`SELECT da.*,d.title,d.document_number,e.first_name,e.last_name,e.nickname FROM document_approvals da JOIN employee_documents d ON d.id=da.document_id LEFT JOIN employees e ON e.id=d.employee_id WHERE da.client_id=?1 AND da.status='pending' ORDER BY da.created_at`).bind(clientId),
+      env.DB.prepare(`SELECT a.*,d.title,d.document_number,e.first_name,e.last_name,e.nickname FROM document_acknowledgements a JOIN employee_documents d ON d.id=a.document_id JOIN employees e ON e.id=a.employee_id WHERE a.client_id=?1 AND a.status IN ('pending','viewed') ORDER BY a.created_at`).bind(clientId),
+      env.DB.prepare(`SELECT c.*,e.first_name,e.last_name,e.nickname FROM hr_document_cases c JOIN employees e ON e.id=c.employee_id WHERE c.client_id=?1 AND c.status!='closed' ORDER BY c.created_at DESC LIMIT 50`).bind(clientId),
+      env.DB.prepare(`SELECT d.id,d.title,d.expires_at,e.first_name,e.last_name,e.nickname FROM employee_documents d LEFT JOIN employees e ON e.id=d.employee_id WHERE d.client_id=?1 AND d.expires_at IS NOT NULL AND date(d.expires_at)<=date('now','+30 day') AND COALESCE(d.status,'active')!='archived' ORDER BY d.expires_at`).bind(clientId)
+    ]);
+    return json({summary:summary.results?.[0]||{},templates:templates.results||[],pending_approvals:pendingApprovals.results||[],pending_acknowledgements:pendingAck.results||[],open_cases:cases.results||[],expiring:expiring.results||[]});
+  }
+
+  if(path==='/api/document-templates' && method==='GET'){
+    if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดู Template'},403);
+    const rows=await env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 ORDER BY active DESC,name`).bind(clientId).all(); return json({data:rows.results||[]});
+  }
+  if(path==='/api/document-templates' && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์สร้าง Template'},403); const b=await safeJson(request);
+    const name=String(b.name||'').trim(); if(!name)return json({error:'กรุณาระบุชื่อ Template'},400);
+    const code=String(b.code||name).toUpperCase().replace(/[^A-Z0-9_-]/g,'_').slice(0,40); const mode=['manual','assisted','automatic'].includes(b.automation_mode)?b.automation_mode:'assisted';
+    const r=await env.DB.prepare(`INSERT INTO document_templates(client_id,code,name,document_type,description,body_template,numbering_prefix,automation_mode,approval_required,acknowledgement_required,visibility,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`).bind(clientId,code,name,String(b.document_type||'other'),b.description||null,String(b.body_template||''),String(b.numbering_prefix||'DOC').toUpperCase().slice(0,12),mode,b.approval_required===false?0:1,b.acknowledgement_required?1:0,['employee','hr_only','manager'].includes(b.visibility)?b.visibility:'employee',Number(auth.user.id)).run();
+    return json({ok:true,id:Number(r.meta.last_row_id)},201);
+  }
+
+  if(path==='/api/document-templates/seed' && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์'},403);
+    const defaults=[
+      ['EMP_CERT','หนังสือรับรองการทำงาน','employment_certificate','CERT',1,0,'ขอรับรองว่า {{employee.full_name}} ปฏิบัติงานในตำแหน่ง {{employee.position}} แผนก {{employee.department}} ตั้งแต่ {{employee.start_date}}'],
+      ['SAL_CERT','หนังสือรับรองเงินเดือน','salary_certificate','SAL',1,0,'ขอรับรองว่า {{employee.full_name}} ปฏิบัติงานในตำแหน่ง {{employee.position}} และมีเงินเดือนประจำ {{employee.salary}} บาทต่อเดือน'],
+      ['PROB_PASS','หนังสือผ่านทดลองงาน','probation_pass','PROB',1,1,'บริษัทขอแจ้งว่า {{employee.full_name}} ผ่านการทดลองงาน โดยมีผลวันที่ {{document.effective_date}}'],
+      ['SAL_ADJ','หนังสือปรับเงินเดือน','salary_adjustment','ADJ',1,1,'บริษัทขอแจ้งการปรับเงินเดือนของ {{employee.full_name}} โดยมีผลวันที่ {{document.effective_date}}'],
+      ['WARNING','หนังสือเตือน','warning','WRN',1,1,'หนังสือเตือนสำหรับ {{employee.full_name}}\nรายละเอียด: {{document.note}}']
+    ];
+    for(const x of defaults)await env.DB.prepare(`INSERT OR IGNORE INTO document_templates(client_id,code,name,document_type,numbering_prefix,approval_required,acknowledgement_required,body_template,automation_mode,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'assisted',?9)`).bind(clientId,...x,Number(auth.user.id)).run();
+    return json({ok:true});
+  }
+
+  if(path==='/api/document-workflows/create' && method==='POST'){
+    if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ออกเอกสาร'},403); const b=await safeJson(request); const employeeId=Number(b.employee_id),templateId=Number(b.template_id);
+    const [employee,tpl]=await Promise.all([getEmployeeForClient(env.DB,employeeId,clientId),env.DB.prepare('SELECT * FROM document_templates WHERE id=?1 AND client_id=?2 AND active=1').bind(templateId,clientId).first()]); if(!employee||!tpl)return json({error:'ไม่พบพนักงานหรือ Template'},404);
+    const year=new Date(Date.now()+7*3600*1000).getUTCFullYear()+543; await env.DB.prepare(`INSERT INTO document_number_sequences(client_id,template_id,buddhist_year,last_number) VALUES(?1,?2,?3,1) ON CONFLICT(client_id,template_id,buddhist_year) DO UPDATE SET last_number=last_number+1`).bind(clientId,templateId,year).run(); const seq=await env.DB.prepare(`SELECT last_number FROM document_number_sequences WHERE client_id=?1 AND template_id=?2 AND buddhist_year=?3`).bind(clientId,templateId,year).first(); const num=`${tpl.numbering_prefix}-${year}-${String(seq.last_number).padStart(4,'0')}`;
+    const workflow=tpl.automation_mode==='automatic'&&!tpl.approval_required?'final':'draft'; const approval=tpl.approval_required?'pending':'not_required';
+    const r=await env.DB.prepare(`INSERT INTO employee_documents(client_id,employee_id,document_type,title,document_date,visibility,note,created_by_user_id,status,version,source,confidentiality,document_number,template_id,workflow_status,approval_status,acknowledgement_required,acknowledgement_status,final_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'active',1,'generated','internal',?9,?10,?11,?12,?13,?14,CASE WHEN ?11='final' THEN CURRENT_TIMESTAMP ELSE NULL END)`).bind(clientId,employeeId,tpl.document_type,tpl.name,dateInBangkok(),tpl.visibility,b.note||null,Number(auth.user.id),num,templateId,workflow,approval,Number(tpl.acknowledgement_required),tpl.acknowledgement_required?'pending':'not_required').run(); const docId=Number(r.meta.last_row_id);
+    if(tpl.approval_required)await env.DB.prepare(`INSERT INTO document_approvals(client_id,document_id,step_no,approver_role,status) VALUES(?1,?2,1,'hr','pending')`).bind(clientId,docId).run();
+    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'draft_created',?5)`).bind(clientId,docId,employeeId,Number(auth.user.id),JSON.stringify({template_id:templateId,document_number:num})).run(); return json({ok:true,id:docId,document_number:num,status:workflow},201);
+  }
+
+  const docApprove=path.match(/^\/api\/document-workflows\/(\d+)\/approve$/);
+  if(docApprove && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์อนุมัติ'},403); const id=Number(docApprove[1]); const b=await safeJson(request); const d=await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!d)return json({error:'ไม่พบเอกสาร'},404);
+    await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run();
+    await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
+    if(Number(d.acknowledgement_required))await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version,delivered_at) VALUES(?1,?2,?3,'pending',?4,CURRENT_TIMESTAMP)`).bind(clientId,id,d.employee_id,d.version||1).run();
+    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'approved',?5)`).bind(clientId,id,d.employee_id,Number(auth.user.id),JSON.stringify({note:b.note||null})).run(); return json({ok:true});
+  }
+
+  const docReject=path.match(/^\/api\/document-workflows\/(\d+)\/reject$/);
+  if(docReject && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const id=Number(docReject[1]); const b=await safeJson(request); await env.DB.prepare(`UPDATE document_approvals SET status='rejected',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='rejected',updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run(); return json({ok:true});
+  }
+
+  if(path==='/api/document-workflows/bulk-approve' && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const b=await safeJson(request); const ids=(Array.isArray(b.ids)?b.ids:[]).map(Number).filter(Boolean).slice(0,200); let approved=0; for(const id of ids){const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND approval_status='pending'`).bind(id,clientId).first(); if(!d)continue; await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,acted_at=CURRENT_TIMESTAMP WHERE document_id=?2 AND client_id=?3 AND status='pending'`).bind(Number(auth.user.id),id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(id).run(); if(Number(d.acknowledgement_required))await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version,delivered_at) VALUES(?1,?2,?3,'pending',?4,CURRENT_TIMESTAMP)`).bind(clientId,id,d.employee_id,d.version||1).run(); approved++;} return json({ok:true,approved});
+  }
+
+  const docAck=path.match(/^\/api\/document-workflows\/(\d+)\/acknowledge$/);
+  if(docAck && method==='POST'){
+    const id=Number(docAck[1]),b=await safeJson(request); const d=await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!d)return json({error:'ไม่พบเอกสาร'},404); const response=String(b.response_text||'').trim(); const status=response?'responded':'acknowledged'; await env.DB.prepare(`UPDATE document_acknowledgements SET status=?1,viewed_at=COALESCE(viewed_at,CURRENT_TIMESTAMP),acknowledged_at=CURRENT_TIMESTAMP,response_text=?2,updated_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4`).bind(status,response||null,id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET acknowledgement_status=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(status,id,clientId).run(); await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,?5,?6)`).bind(clientId,id,d.employee_id,Number(auth.user.id),status,JSON.stringify({response_text:response||null})).run(); return json({ok:true,status});
+  }
+
+  if(path==='/api/hr-document-cases' && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์เปิด Case'},403); const b=await safeJson(request); const employeeId=Number(b.employee_id); if(!await getEmployeeForClient(env.DB,employeeId,clientId))return json({error:'ไม่พบพนักงาน'},404); const y=new Date(Date.now()+7*3600*1000).getUTCFullYear(); const c=await env.DB.prepare(`SELECT COUNT(*) n FROM hr_document_cases WHERE client_id=?1 AND case_number LIKE ?2`).bind(clientId,`NK-${y}-%`).first(); const caseNo=`NK-${y}-${String(Number(c?.n||0)+1).padStart(4,'0')}`; const r=await env.DB.prepare(`INSERT INTO hr_document_cases(client_id,case_number,employee_id,case_type,title,incident_date,description,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)`).bind(clientId,caseNo,employeeId,String(b.case_type||'general'),String(b.title||'HR Case'),b.incident_date||dateInBangkok(),b.description||null,Number(auth.user.id)).run(); await env.DB.prepare(`INSERT INTO hr_document_case_events(client_id,case_id,actor_user_id,event_type,detail) VALUES(?1,?2,?3,'case_created',?4)`).bind(clientId,Number(r.meta.last_row_id),Number(auth.user.id),b.description||null).run(); return json({ok:true,id:Number(r.meta.last_row_id),case_number:caseNo},201);
+  }
+  const caseEvent=path.match(/^\/api\/hr-document-cases\/(\d+)\/events$/);
+  if(caseEvent && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const b=await safeJson(request),id=Number(caseEvent[1]); const c=await env.DB.prepare('SELECT id FROM hr_document_cases WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!c)return json({error:'ไม่พบ Case'},404); await env.DB.prepare(`INSERT INTO hr_document_case_events(client_id,case_id,actor_user_id,event_type,detail,attachment_url) VALUES(?1,?2,?3,?4,?5,?6)`).bind(clientId,id,Number(auth.user.id),String(b.event_type||'note'),b.detail||null,b.attachment_url||null).run(); return json({ok:true});
+  }
+  const caseClose=path.match(/^\/api\/hr-document-cases\/(\d+)\/close$/);
+  if(caseClose && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const b=await safeJson(request),id=Number(caseClose[1]); await env.DB.prepare(`UPDATE hr_document_cases SET status='closed',outcome=?1,closed_by_user_id=?2,closed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?3 AND client_id=?4`).bind(b.outcome||null,Number(auth.user.id),id,clientId).run(); await env.DB.prepare(`INSERT INTO hr_document_case_events(client_id,case_id,actor_user_id,event_type,detail) VALUES(?1,?2,?3,'case_closed',?4)`).bind(clientId,id,Number(auth.user.id),b.outcome||null).run(); return json({ok:true});
+  }
+
+  if(path==='/api/document-automation/settings' && method==='GET'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const row=await env.DB.prepare('SELECT * FROM document_automation_settings WHERE client_id=?1').bind(clientId).first(); return json({data:row||{enabled:1,remind_pending_ack:1,ack_reminder_days:3,remind_expiry:1,expiry_reminder_days:30}});
+  }
+  if(path==='/api/document-automation/settings' && method==='PUT'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const b=await safeJson(request); await env.DB.prepare(`INSERT INTO document_automation_settings(client_id,enabled,remind_pending_ack,ack_reminder_days,remind_expiry,expiry_reminder_days,updated_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(client_id) DO UPDATE SET enabled=excluded.enabled,remind_pending_ack=excluded.remind_pending_ack,ack_reminder_days=excluded.ack_reminder_days,remind_expiry=excluded.remind_expiry,expiry_reminder_days=excluded.expiry_reminder_days,updated_by_user_id=excluded.updated_by_user_id,updated_at=CURRENT_TIMESTAMP`).bind(clientId,b.enabled===false?0:1,b.remind_pending_ack===false?0:1,Math.max(1,Number(b.ack_reminder_days||3)),b.remind_expiry===false?0:1,Math.max(1,Number(b.expiry_reminder_days||30)),Number(auth.user.id)).run(); return json({ok:true});
   }
 
   // Phase 4 — Learning / Onboarding
