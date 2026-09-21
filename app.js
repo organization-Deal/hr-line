@@ -2186,12 +2186,28 @@ function renderEmployees(query = '') {
         <td data-label="LINE">${employee.line_user_id
           ? `<div class="line-connected"><span class="badge badge-success"><span class="status-dot"></span> เชื่อมแล้ว</span><small>${escapeHtml(employee.line_display_name || 'LINE account')}</small></div>`
           : '<span class="badge badge-neutral">ยังไม่เชื่อม</span>'}</td>
-        <td data-label="จัดการ" class="employee-sticky-actions"><div class="employee-row-actions"><button class="text-btn" onclick="window.openEmployeeEdit(${Number(employee.id)})">แก้ไข</button><button class="text-btn" onclick="window.openPeopleProfile(${Number(employee.id)})">โปรไฟล์</button><button class="text-btn" onclick="window.openLeaveProfile(${Number(employee.id)})">สิทธิ์ลา</button><button class="text-btn" onclick="window.openEmployeeDocuments(${Number(employee.id)})">เอกสาร</button><button class="text-btn danger-text" onclick="window.deleteEmployee(${Number(employee.id)})">ลบ</button></div></td>
+        <td data-label="จัดการ" class="employee-sticky-actions"><div class="employee-row-actions"><button class="text-btn" onclick="window.openEmployeeEdit(${Number(employee.id)})">แก้ไข</button><button class="text-btn" onclick="window.openPeopleProfile(${Number(employee.id)})">โปรไฟล์</button>${Number(employee.leave_access_override)===1?`<button class="text-btn quick-leave-btn is-enabled" type="button" disabled title="พนักงานคนนี้ถูกเปิดสิทธิ์ลาแบบรายคนแล้ว">✓ ลาได้แล้ว</button>`:`<button class="text-btn quick-leave-btn" type="button" onclick="window.quickEnableEmployeeLeave(${Number(employee.id)}, this)">เปิดสิทธิ์ลา</button>`}<button class="text-btn" onclick="window.openLeaveProfile(${Number(employee.id)})">ตั้งสิทธิ์ลา</button><button class="text-btn" onclick="window.openEmployeeDocuments(${Number(employee.id)})">เอกสาร</button><button class="text-btn danger-text" onclick="window.deleteEmployee(${Number(employee.id)})">ลบ</button></div></td>
       </tr>`).join('')
     : `<tr><td colspan="22">${emptyState('ไม่พบพนักงาน', 'ลองค้นหาด้วยชื่อ รหัสพนักงาน แผนก เบอร์โทร บัญชีธนาคาร หรือ LINE อีกครั้ง')}</td></tr>`;
 }
 function peopleStatusLabel(status){return ({candidate:'Candidate',interview:'รอสัมภาษณ์',offer:'Offer',probation:'ทดลองงาน',employee:'พนักงาน',leave_of_absence:'พักงาน',resigned:'ลาออก',terminated:'เลิกจ้าง',alumni:'อดีตพนักงาน',inactive:'Inactive'})[status]||'พนักงาน';}
 function peopleStatusTone(status){return ['employee'].includes(status)?'ok':['probation','offer','interview'].includes(status)?'wait':['resigned','terminated','alumni','inactive'].includes(status)?'off':'info';}
+
+window.quickEnableEmployeeLeave = async (id, button) => {
+  const employee=state.employees.find(e=>Number(e.id)===Number(id));
+  if(!employee)return;
+  const original=button?.textContent||'เปิดสิทธิ์ลา';
+  if(button){button.disabled=true;button.textContent='กำลังเปิด…';}
+  try{
+    const result=await api(`/api/employees/${Number(id)}/leave-access`,{method:'PATCH',body:JSON.stringify({mode:'enabled'}),silentStatus:true});
+    employee.leave_access_override=Number(result.leave_access_override ?? 1);
+    renderEmployees($('#employeeSearch')?.value||'');
+    toast(`เปิดสิทธิ์ลาให้ ${employee.nickname||employee.first_name} แล้ว`);
+  }catch(error){
+    if(button){button.disabled=false;button.textContent=original;}
+    toast(error.message||'เปิดสิทธิ์ลาไม่สำเร็จ',true);
+  }
+};
 
 window.openPeopleProfile = id => {
   const employee=state.employees.find(e=>Number(e.id)===Number(id)); if(!employee)return;

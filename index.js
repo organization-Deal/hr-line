@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.95';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.95';
+const NAKNA_RUNTIME_RELEASE = 'P7.96';
+const NAKNA_RUNTIME_VERSION = '1.0-P7.96';
 const NAKNA_RUNTIME_FEATURE = 'attendance-reminder-settings-fix';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -3017,6 +3017,20 @@ async function handleApi(request, env, url, auth, ctx) {
     await env.DB.prepare(`UPDATE leave_policies SET name=?1,default_entitlement_days=?2,is_unlimited=?3,requires_reason=?4,evidence_required_after_days=?5,notice_days=?6,allow_negative=?7,is_active=?8,sort_order=?9,available_during_probation=?10,updated_at=CURRENT_TIMESTAMP WHERE id=?11 AND client_id=?12`)
       .bind(String(body.name ?? existing.name).trim(),num(body.default_entitlement_days,existing.default_entitlement_days),body.is_unlimited==null?Number(existing.is_unlimited):(body.is_unlimited?1:0),body.requires_reason==null?Number(existing.requires_reason):(body.requires_reason?1:0),body.evidence_required_after_days===undefined?existing.evidence_required_after_days:nullableNum(body.evidence_required_after_days),Math.max(0,Math.floor(num(body.notice_days,existing.notice_days))),body.allow_negative==null?Number(existing.allow_negative):(body.allow_negative?1:0),body.is_active==null?Number(existing.is_active):(body.is_active?1:0),Math.floor(num(body.sort_order,existing.sort_order)),body.available_during_probation==null?Number(existing.available_during_probation||0):(body.available_during_probation?1:0),id,clientId).run();
     return json({ok:true});
+  }
+
+  const employeeLeaveAccessMatch = path.match(/^\/api\/employees\/(\d+)\/leave-access$/);
+  if (employeeLeaveAccessMatch && method === 'PATCH') {
+    if (!canManagePeople(auth.role)) return json({ error: 'ไม่มีสิทธิ์จัดการสิทธิ์ลา' }, 403);
+    const employeeId=Number(employeeLeaveAccessMatch[1]);
+    const employee=await getEmployeeForClient(env.DB,employeeId,clientId);
+    if(!employee) return json({error:'ไม่พบพนักงาน'},404);
+    const body=await safeJson(request);
+    const mode=String(body.mode||'enabled').toLowerCase();
+    const override=mode==='policy'||mode==='inherit'?null:(mode==='disabled'||mode==='locked'?0:1);
+    await env.DB.prepare('UPDATE employees SET leave_access_override=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3').bind(override,employeeId,clientId).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'leave.access.quick_update','employee',String(employeeId),{mode,leave_access_override:override});
+    return json({ok:true,employee_id:employeeId,leave_access_override:override});
   }
 
   const employeeLeaveProfileMatch = path.match(/^\/api\/employees\/(\d+)\/leave-profile$/);

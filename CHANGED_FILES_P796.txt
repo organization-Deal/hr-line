@@ -1,0 +1,12 @@
+P7.96 changed files
+- app.js
+- public/app.js
+- index.js
+- src/index.js
+- styles.css
+- public/styles.css
+- index.html
+- public/index.html
+- package.json
+- CHANGELOG.md
+- CHANGED_FILES_P796.txt
