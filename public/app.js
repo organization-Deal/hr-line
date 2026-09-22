@@ -4981,6 +4981,21 @@ function documentHrSignPoint(ev){
   const canvas=documentHrSignCanvas(),r=canvas.getBoundingClientRect();
   return{x:ev.clientX-r.left,y:ev.clientY-r.top};
 }
+
+function updateDocumentHrSignSubmitState(){
+  const btn=$('#documentHrSignSubmitBtn'); if(!btn)return;
+  const useSaved=Boolean($('#documentHrUseSavedSignature')?.checked);
+  const canSubmit=useSaved||Boolean(documentHrSignHasInk);
+  const label=btn.dataset.readyLabel||btn.dataset.originalLabel||'ลงนามและส่งต่อให้พนักงาน';
+  btn.disabled=!canSubmit;
+  btn.setAttribute('aria-disabled',canSubmit?'false':'true');
+  btn.classList.toggle('is-disabled',!canSubmit);
+  if(canSubmit){
+    btn.textContent=label;
+  }else{
+    btn.textContent='กรุณาเลือกลายเซ็นหรือเซ็นก่อน';
+  }
+}
 function bindDocumentHrSignPad(){
   const canvas=documentHrSignCanvas(); if(!canvas||documentHrSignPadBound)return;
   documentHrSignPadBound=true;
@@ -4988,15 +5003,17 @@ function bindDocumentHrSignPad(){
     ev.preventDefault();documentHrSignDrawing=true;documentHrSignHasInk=true;documentHrSignLastPoint=documentHrSignPoint(ev);
     canvas.setPointerCapture?.(ev.pointerId);
     const saved=$('#documentHrUseSavedSignature');if(saved)saved.checked=false;
-  });
+    updateDocumentHrSignSubmitState();
+  },{passive:false});
   canvas.addEventListener('pointermove',ev=>{
     if(!documentHrSignDrawing||!documentHrSignLastPoint)return;ev.preventDefault();
     const p=documentHrSignPoint(ev),ctx=canvas.getContext('2d');ctx.beginPath();ctx.moveTo(documentHrSignLastPoint.x,documentHrSignLastPoint.y);ctx.lineTo(p.x,p.y);ctx.stroke();documentHrSignLastPoint=p;
-  });
-  const end=ev=>{if(!documentHrSignDrawing)return;ev.preventDefault();documentHrSignDrawing=false;documentHrSignLastPoint=null;};
-  canvas.addEventListener('pointerup',end);canvas.addEventListener('pointercancel',end);canvas.addEventListener('pointerleave',ev=>{if(ev.buttons===0)end(ev)});canvas.addEventListener('contextmenu',ev=>ev.preventDefault());
-  $('#clearDocumentHrSignature')?.addEventListener('click',clearDocumentHrSignPad);
-  $('#documentHrUseSavedSignature')?.addEventListener('change',ev=>{if(ev.target.checked)clearDocumentHrSignPad();});
+    updateDocumentHrSignSubmitState();
+  },{passive:false});
+  const end=ev=>{if(!documentHrSignDrawing)return;ev.preventDefault();documentHrSignDrawing=false;documentHrSignLastPoint=null;updateDocumentHrSignSubmitState();};
+  canvas.addEventListener('pointerup',end,{passive:false});canvas.addEventListener('pointercancel',end,{passive:false});canvas.addEventListener('pointerleave',ev=>{if(ev.buttons===0)end(ev)});canvas.addEventListener('contextmenu',ev=>ev.preventDefault());
+  $('#clearDocumentHrSignature')?.addEventListener('click',()=>{clearDocumentHrSignPad();updateDocumentHrSignSubmitState();});
+  $('#documentHrUseSavedSignature')?.addEventListener('change',ev=>{if(ev.target.checked)clearDocumentHrSignPad();updateDocumentHrSignSubmitState();});
 }
 
 window.openDocumentHrSignModal=async function openDocumentHrSignModal(id){
@@ -5012,7 +5029,13 @@ window.openDocumentHrSignModal=async function openDocumentHrSignModal(id){
   $('#documentHrSignNextStep').textContent=requiresEmployee
     ? 'ระบบจะสร้าง PDF ที่มีลายเซ็น HR แล้วส่ง LINE ให้พนักงานตรวจและลงลายเซ็นต่อ เมื่อพนักงานเซ็นครบ ระบบจะสร้าง Final PDF อัตโนมัติ'
     : 'เอกสารประเภทนี้ใช้ลายเซ็นฝ่ายบริษัทเพียงฝ่ายเดียว ระบบจะสร้าง Final PDF และส่งให้พนักงานเปิดดูทันที';
-  $('#documentHrSignSubmitBtn').textContent=requiresEmployee?'ลงนามและส่งให้พนักงานเซ็นต่อ':'ลงนามและออก Final PDF';
+  const signBtn=$('#documentHrSignSubmitBtn');
+  if(signBtn){
+    signBtn.dataset.readyLabel=requiresEmployee?'ลงนามและส่งให้พนักงานเซ็นต่อ':'ลงนามและออก Final PDF';
+    signBtn.dataset.originalLabel=signBtn.dataset.readyLabel;
+    signBtn.textContent=signBtn.dataset.readyLabel;
+  }
+  documentHrSignHasInk=false;documentHrSignDrawing=false;documentHrSignLastPoint=null;
   try{
     const settings=await ensureDocumentSettingsForSigning();
     const saved=String(settings?.signer_signature_data_url||'');
@@ -5024,7 +5047,7 @@ window.openDocumentHrSignModal=async function openDocumentHrSignModal(id){
     $('#documentHrUseSavedSignature').checked=false;$('#documentHrUseSavedSignature').disabled=true;
   }
   dlg.showModal();
-  requestAnimationFrame(()=>{bindDocumentHrSignPad();resizeDocumentHrSignPad();});
+  requestAnimationFrame(()=>{bindDocumentHrSignPad();resizeDocumentHrSignPad();updateDocumentHrSignSubmitState();});
 };
 
 async function submitDocumentHrSignature(){
@@ -5041,7 +5064,7 @@ async function submitDocumentHrSignature(){
     await refreshDocuments({silent:true});
     if(r.workflow_status==='awaiting_employee_signature'){
       const delivery=r.delivery?.ok?' · ส่ง LINE ให้พนักงานแล้ว':r.delivery?.reason==='line_not_connected'?' · พนักงานยังไม่เชื่อม LINE สามารถกดส่งภายหลังได้':' · HR ลงนามแล้ว แต่ LINE ยังส่งไม่สำเร็จ';
-      toast(`HR ลงนามแล้ว · รอพนักงานลงนามต่อ${delivery}`);
+      toast(`HR ลงนามแล้ว · ส่งต่อให้พนักงานเซ็นเรียบร้อย${delivery}`);
     }else{
       toast('HR ลงนามแล้ว · Final PDF พร้อมใช้งาน');
     }
