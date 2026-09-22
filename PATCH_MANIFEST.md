@@ -1,30 +1,30 @@
-# Nakna P8.24 — Document Signature & Branding Patch
+# Nakna HR P8.25 — Two-signature Document Composition
 
-## REPLACE
-- `src/index.js`
-- `public/app.js`
-- `public/index.html`
-- `public/styles.css`
-- `public/documents.js`
-- `public/documents.html`
-- `public/documents.css`
+Base: P8.24 Document Signatures (and P8.23 GPS patch already applied)
 
-## ADD
-- `migrations/0028_document_signatures.sql`
+## Files
+- REPLACE `src/index.js`
+- ADD `migrations/0029_two_party_document_signatures.sql`
 
-## Deployment order
-1. Backup D1.
-2. Replace the 7 files above.
-3. Add migration `0028_document_signatures.sql`.
-4. Run remote D1 migrations.
-5. Deploy Worker/static assets.
-6. Hard refresh HR dashboard and reopen Employee Documents from LINE.
+## What changed
+- Standard employee documents now use a two-party signature composition by default.
+- Employment certificate and salary certificate now require employee receipt/signature evidence too.
+- New PDF layout reserves two balanced signature cards:
+  - HR / authorized signer
+  - Employee recipient / acknowledgement signer
+- Employee signature from LINE / Employee Portal is embedded into the right-hand card on the `-ACK.pdf` copy.
+- HR signature, signer name/position and company branding remain tenant-scoped.
+- Warning / acknowledgement documents include the fairness note that acknowledgement is evidence of receipt, not admission of an allegation or waiver of the right to explain.
+- Signature timestamps shown in the PDF use Asia/Bangkok time.
+- Older V1 PDFs remain compatible with the acknowledgement renderer.
 
-## New behavior
-- Company logo is embedded into generated HR PDFs when it is PNG/JPG-compatible; otherwise company name is used as fallback.
-- HR can configure signer name, position and a PNG/JPG signature from **Documents → ตั้งค่าเอกสาร & ลายเซ็น**.
-- Final documents include an HR signature block.
-- Documents requiring acknowledgement include an employee acknowledgement signature block.
-- Employee acknowledgement now requires a drawn signature in the LINE/Nakna employee portal.
-- The original final PDF is preserved. After acknowledgement the system creates a separate `-ACK.pdf` signed copy and stores signature/evidence hashes.
-- Existing old PDFs are handled safely: acknowledgement evidence is added on a new page rather than overwriting their layout.
+## Deploy
+1. Back up D1.
+2. Replace `src/index.js`.
+3. Add and run migration `0029_two_party_document_signatures.sql`.
+4. Deploy Worker.
+5. Generate a NEW test document. Existing PDFs are immutable and will not be visually rewritten.
+6. Approve → send to employee → employee signs → open the generated `-ACK.pdf` and verify both signatures.
+
+## Important
+The migration changes only the standard `EMP_CERT` and `SAL_CERT` acknowledgement flag. Custom template body text is not overwritten.

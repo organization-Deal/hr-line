@@ -1,14 +1,17 @@
-# P8.24 Test Result
+# P8.25 Test Result
 
-- `npm run check` — PASS
-- `npm run audit` — PASS
-- `npm run migration:smoke` — PASS
-- Fresh migration chain `0001 → 0028` — PASS
-- GPS P8.23 backend changes are preserved in `src/index.js`.
+- Full project reconstructed from P8.11 + patches P8.12–P8.24 + P8.25: PASS
+- `npm run check`: PASS
+- `npm run audit`: PASS
+- `npm run migration:smoke`: PASS
+- Fresh migration chain `0001 -> 0029`: PASS
+- P8.25 migration data test: PASS
+- V2 signature layout marker: PASS
+- Backward-compatible V1 acknowledgement rendering retained: PASS
 
-## Runtime smoke tests still required after deploy
-1. Documents → ตั้งค่าเอกสาร & ลายเซ็น → upload HR signature → save.
-2. Generate a new acknowledgement-required document (e.g. probation pass / salary adjustment).
-3. Approve → PDF should show company branding + HR signature + employee acknowledgement slot.
-4. Send to employee → open from LINE → draw signature → acknowledge.
-5. Reopen document → system should serve signed `-ACK.pdf` and HR dashboard should show acknowledged status.
+Runtime verification still required after deploy:
+1. Generate a NEW salary/employment certificate.
+2. Confirm HR signature appears in the left card.
+3. Confirm employee placeholder appears in the right card.
+4. Send via LINE and sign as employee.
+5. Confirm `-ACK.pdf` contains both signatures and Bangkok timestamp.
