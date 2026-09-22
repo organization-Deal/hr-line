@@ -1,10 +1,14 @@
-# P8.20 Test Result
+# P8.21 Test Result
 
-- Frontend JS syntax: PASS
-- Module-scope regression assertion: PASS
 - npm run check: PASS
 - npm run audit: PASS
-- migration smoke 0001 → 0026: PASS
+- npm run migration:smoke: PASS
+- Fresh migration chain 0001 → 0026: PASS
+- No new migration required
 
-Root cause confirmed:
-`public/index.html` loads `app.js` with `type="module"`; inline HTML handlers cannot access module-local function declarations unless exposed on `window`.
+Runtime-only items that must be verified after deploy:
+1. Google Workspace connection exists for the selected company
+2. Google token can refresh/decrypt
+3. PDF font can be fetched by Worker
+4. Employee Documents folder can be created in Drive
+5. PDF upload returns a Drive file ID
