@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P8.11-RC1';
-const NAKNA_RUNTIME_VERSION = '1.0-P8.11-RC1';
-const NAKNA_RUNTIME_FEATURE = 'document-evidence-release-candidate';
+const NAKNA_RUNTIME_RELEASE = 'P8.21';
+const NAKNA_RUNTIME_VERSION = '1.0-P8.21';
+const NAKNA_RUNTIME_FEATURE = 'document-approval-storage-diagnostics';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -1649,14 +1649,22 @@ export default {
     } catch (error) {
       let pathname = 'unknown';
       try { pathname = new URL(request.url).pathname; } catch {}
+      const status = Number(error?.status || 0);
+      const safeStatus = status >= 400 && status <= 599 ? status : 500;
+      const publicMessage = safeStatus < 500
+        ? String(error?.message || 'Request failed')
+        : (String(error?.message || '').startsWith('GOOGLE_REAUTH_REQUIRED')
+            ? 'Google Drive ต้องเชื่อมใหม่ กรุณาไปที่ การเชื่อมต่อ แล้วเชื่อม Google อีกครั้ง'
+            : 'Internal server error');
       console.error(JSON.stringify({
         level: 'error',
         event: 'unhandled',
         pathname,
+        status: safeStatus,
         message: String(error?.message || error),
         stack: String(error?.stack || '').slice(0, 2000),
       }));
-      return json({ error: 'Internal server error', request_path: pathname }, 500);
+      return json({ error: publicMessage, request_path: pathname }, safeStatus);
     }
   },
 
@@ -3486,12 +3494,43 @@ async function handleApi(request, env, url, auth, ctx) {
 
   const docApprove=path.match(/^\/api\/document-workflows\/(\d+)\/approve$/);
   if(docApprove && method==='POST'){
-    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์อนุมัติ'},403); const id=Number(docApprove[1]); const b=await safeJson(request); const d=await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!d)return json({error:'ไม่พบเอกสาร'},404);
-    await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run();
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์อนุมัติ'},403);
+    await ensureDocumentWorkflowReady(env.DB);
+    const id=Number(docApprove[1]);
+    const b=await safeJson(request);
+    const d=await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if(!d)return json({error:'ไม่พบเอกสาร'},404);
+    if(String(d.approval_status||'')==='approved' && String(d.workflow_status||'')==='final'){
+      return json({ok:true,already_approved:true,drive_url:d.drive_url||null,file_name:d.file_name||null});
+    }
+    if(String(d.approval_status||'')!=='pending')return json({error:'เอกสารนี้ไม่ได้อยู่ในสถานะรออนุมัติ'},409);
+
+    // P8.21: materialize first. Do not mark the record Final until the PDF is really created
+    // and stored successfully. This avoids fake-approved documents and rollback races.
+    let materialized=null;
+    try{
+      materialized=await materializeWorkflowDocument(env,clientId,id);
+    }catch(error){
+      const raw=String(error?.message||error||'').trim();
+      let message=raw || 'สร้าง PDF ไม่สำเร็จ';
+      let status=Number(error?.status||0);
+      if(raw.includes('GOOGLE_REAUTH_REQUIRED')){message='Google Drive หมดอายุหรือสิทธิ์ถูกยกเลิก กรุณาไปที่ การเชื่อมต่อ แล้วเชื่อม Google ใหม่';status=409;}
+      else if(raw.includes('Integration encryption key is not configured')){message='ระบบยังตั้งค่ากุญแจสำหรับ Google Integration ไม่ครบ กรุณาตรวจ Worker Secret';status=503;}
+      else if(/font fetch failed/i.test(raw)){message='ระบบโหลดฟอนต์สำหรับสร้าง PDF ไม่สำเร็จ กรุณาลองอีกครั้ง';status=502;}
+      else if(/Google Drive upload failed/i.test(raw)){message=`อัปโหลด PDF ไป Google Drive ไม่สำเร็จ · ${raw}`;status=502;}
+      else if(!status && /Google/.test(raw)){status=502;}
+      console.error(JSON.stringify({level:'error',event:'document_approve_materialize_failed',client_id:clientId,document_id:id,user_id:Number(auth.user.id),message:raw}));
+      return json({error:message,stage:'pdf_storage',document_id:id},status>=400&&status<=599?status:500);
+    }
+
+    const approvalResult=await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run();
     await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
-    let materialized=null; try{ materialized=await materializeWorkflowDocument(env,clientId,id); }catch(error){ await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='pending',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run(); await env.DB.prepare(`UPDATE document_approvals SET status='pending',approver_user_id=NULL,acted_at=NULL WHERE document_id=?1 AND client_id=?2 AND status='approved'`).bind(id,clientId).run(); throw error; }
-    if(Number(d.acknowledgement_required)){await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version,delivered_at) VALUES(?1,?2,?3,'pending',?4,CURRENT_TIMESTAMP)`).bind(clientId,id,d.employee_id,d.version||1).run(); await notifyEmployeeDocumentReady(env,clientId,id).catch(()=>{});}
-    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'approved',?5)`).bind(clientId,id,d.employee_id,Number(auth.user.id),JSON.stringify({note:b.note||null,drive_url:materialized?.drive_url||null})).run(); return json({ok:true,...materialized});
+    if(Number(d.acknowledgement_required)){
+      await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version,delivered_at) VALUES(?1,?2,?3,'pending',?4,CURRENT_TIMESTAMP)`).bind(clientId,id,d.employee_id,d.version||1).run();
+      await notifyEmployeeDocumentReady(env,clientId,id).catch(error=>console.warn(JSON.stringify({level:'warn',event:'document_ready_notify_failed',document_id:id,message:String(error?.message||error)})));
+    }
+    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'approved',?5)`).bind(clientId,id,d.employee_id,Number(auth.user.id),JSON.stringify({note:b.note||null,drive_url:materialized?.drive_url||null,file_name:materialized?.file_name||null,approval_changes:Number(approvalResult?.meta?.changes||0)})).run();
+    return json({ok:true,...materialized});
   }
 
   const docReject=path.match(/^\/api\/document-workflows\/(\d+)\/reject$/);
@@ -6141,8 +6180,15 @@ async function materializeWorkflowDocument(env,clientId,documentId){
   const row=await db.prepare(`SELECT d.*,t.body_template,t.name AS template_name,t.code AS template_code,e.employee_code,e.first_name,e.last_name,e.nickname,e.start_date,dep.name AS department_name,pos.name AS position_name FROM employee_documents d JOIN document_templates t ON t.id=d.template_id JOIN employees e ON e.id=d.employee_id LEFT JOIN departments dep ON dep.id=e.department_id LEFT JOIN positions pos ON pos.id=e.position_id WHERE d.id=?1 AND d.client_id=?2`).bind(Number(documentId),Number(clientId)).first();
   if(!row)throw httpError('ไม่พบข้อมูลเอกสารสำหรับสร้าง PDF',404);
   if(row.drive_file_id&&row.file_name)return {drive_url:row.drive_url||null,file_name:row.file_name};
-  const [client,profile,workspace,docSettings,onboarding,asset]=await Promise.all([getClient(db,clientId),db.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1').bind(Number(row.employee_id)).first(),db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(),db.prepare('SELECT * FROM company_document_settings WHERE client_id=?1').bind(Number(clientId)).first(),db.prepare('SELECT legal_name,tax_id,address,phone FROM company_onboarding WHERE client_id=?1').bind(Number(clientId)).first(),db.prepare('SELECT logo_data_url FROM company_assets WHERE client_id=?1').bind(Number(clientId)).first()]);
-  if(!workspace?.drive_folder_id)throw httpError('กรุณาเชื่อม Google Drive ก่อนอนุมัติเอกสาร',409);
+  const [client,profile,workspace,docSettings,onboarding]=await Promise.all([
+    getClient(db,clientId),
+    db.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1').bind(Number(row.employee_id)).first(),
+    db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(),
+    db.prepare('SELECT * FROM company_document_settings WHERE client_id=?1').bind(Number(clientId)).first(),
+    db.prepare('SELECT legal_name,tax_id,address,phone FROM company_onboarding WHERE client_id=?1').bind(Number(clientId)).first()
+  ]);
+  if(!workspace)throw httpError('บริษัทนี้ยังไม่ได้เชื่อม Google Drive กรุณาไปที่ การเชื่อมต่อ → Google Workspace ก่อนอนุมัติเอกสาร',409);
+  if(!workspace.drive_folder_id)throw httpError('เชื่อม Google แล้ว แต่ยังไม่พบโฟลเดอร์ Drive ของบริษัท กรุณา Sync/เชื่อม Google ใหม่',409);
   const fullName=`${row.first_name||''} ${row.last_name||''}`.trim();
   let docData={}; try{docData=JSON.parse(row.data_json||'{}')||{};}catch{docData={};}
   const vars={
@@ -6154,7 +6200,21 @@ async function materializeWorkflowDocument(env,clientId,documentId){
   page.drawText(String(docSettings?.legal_name||onboarding?.legal_name||client?.name||''),{x:48,y:790,size:11,font,color:teal}); page.drawText(String(row.title||row.template_name||'เอกสารพนักงาน'),{x:48,y:750,size:20,font,color:dark}); const companyMeta=[docSettings?.address||onboarding?.address,docSettings?.tax_id||onboarding?.tax_id?`เลขประจำตัวผู้เสียภาษี ${docSettings?.tax_id||onboarding?.tax_id}`:null].filter(Boolean).join(' · '); if(companyMeta)page.drawText(companyMeta.slice(0,90),{x:48,y:725,size:8,font,color:muted}); if(row.document_number)page.drawText(`เลขที่ ${row.document_number}`,{x:400,y:790,size:9,font,color:muted});
   let y=665; for(const paragraph of String(body).split(/\n+/)){for(const line of wrapTextSimple(paragraph||' ',74)){page.drawText(line,{x:58,y,size:11,font,color:dark});y-=23;if(y<170)break;}y-=8;if(y<170)break;}
   page.drawText(`ออกเอกสารวันที่ ${row.document_date||dateInBangkok()}`,{x:58,y:135,size:9,font,color:muted}); page.drawText(`Document ID ${row.id} · Version ${row.version||1}`,{x:58,y:116,size:8,font,color:muted}); if(docSettings?.signer_name){page.drawText(String(docSettings.signer_name),{x:390,y:140,size:10,font,color:dark}); if(docSettings?.signer_position)page.drawText(String(docSettings.signer_position),{x:390,y:122,size:9,font,color:muted});} page.drawText(String(docSettings?.document_footer||'เอกสารฉบับนี้จัดทำและเก็บประวัติผ่านระบบ Nakna HR'),{x:58,y:98,size:8,font,color:muted});
-  const bytes=new Uint8Array(await pdf.save()); const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const docsRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Employee Documents'); const empFolder=await ensureDriveChildFolder(accessToken,docsRoot,`${row.employee_code} - ${row.nickname||row.first_name}`); const safeNo=String(row.document_number||`DOC-${row.id}`).replace(/[^A-Za-z0-9ก-๙_-]/g,'_'); const fileName=`${safeNo}-${row.employee_code}.pdf`; const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:empFolder,fileName,contentType:'application/pdf',bytes}); const digest=await crypto.subtle.digest('SHA-256',bytes); const sha=[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
+  const bytes=new Uint8Array(await pdf.save());
+  let accessToken;
+  try{accessToken=await getWorkspaceGoogleAccessToken(env,workspace);}
+  catch(error){
+    const raw=String(error?.message||error||'');
+    if(raw.includes('GOOGLE_REAUTH_REQUIRED'))throw httpError('Google Drive หมดอายุหรือสิทธิ์ถูกยกเลิก กรุณาเชื่อม Google ใหม่',409);
+    if(raw.includes('Integration encryption key is not configured'))throw httpError('Worker ยังไม่ได้ตั้งค่า Integration encryption key',503);
+    throw error;
+  }
+  const docsRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Employee Documents');
+  const empFolder=await ensureDriveChildFolder(accessToken,docsRoot,`${row.employee_code} - ${row.nickname||row.first_name}`);
+  const safeNo=String(row.document_number||`DOC-${row.id}`).replace(/[^A-Za-z0-9ก-๙_-]/g,'_');
+  const fileName=`${safeNo}-${row.employee_code}.pdf`;
+  const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:empFolder,fileName,contentType:'application/pdf',bytes});
+  const digest=await crypto.subtle.digest('SHA-256',bytes); const sha=[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
   await db.prepare(`UPDATE employee_documents SET file_name=?1,storage_provider='google_drive',drive_file_id=?2,drive_url=?3,content_type='application/pdf',sha256=?4,updated_at=CURRENT_TIMESTAMP WHERE id=?5 AND client_id=?6`).bind(fileName,uploaded.id,uploaded.webViewLink||null,sha,Number(documentId),Number(clientId)).run();
   await db.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','pdf_materialized',?4)`).bind(Number(clientId),Number(documentId),Number(row.employee_id),JSON.stringify({file_name:fileName,sha256:sha,drive_file_id:uploaded.id})).run();
   return {drive_url:uploaded.webViewLink||null,file_name:fileName,sha256:sha};
