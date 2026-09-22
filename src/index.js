@@ -2767,7 +2767,9 @@ async function handleApi(request, env, url, auth, ctx) {
     const documentId=Number(result.meta.last_row_id);
     await env.DB.prepare(`INSERT INTO employee_document_events (client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES (?1,?2,?3,'user',?4,'uploaded',?5)`).bind(clientId,documentId,employeeId,Number(auth.user.id),JSON.stringify({document_type:documentType,file_name:file.name,sha256})).run();
     await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.upload','employee_document',String(documentId),{employee_id:employeeId,document_type:documentType,file_name:file.name,sha256});
-    return json({ ok:true, id:documentId, drive_url:uploaded.webViewLink || null, sha256 },201);
+    let delivery=null;
+    if(visibility==='employee')delivery=await notifyEmployeeDocumentReady(env,clientId,documentId).catch(error=>({ok:false,reason:'push_failed',message:String(error?.message||error)}));
+    return json({ ok:true, id:documentId, drive_url:uploaded.webViewLink || null, sha256, delivery },201);
   }
 
   const employeeDocumentEventsMatch = path.match(/^\/api\/employee-documents\/(\d+)\/events$/);
@@ -2779,6 +2781,26 @@ async function handleApi(request, env, url, auth, ctx) {
     if(!doc)return json({error:'ไม่พบเอกสาร'},404);
     const events=await env.DB.prepare(`SELECT e.*,u.email AS actor_email FROM employee_document_events e LEFT JOIN users u ON u.id=e.actor_user_id WHERE e.client_id=?1 AND e.document_id=?2 ORDER BY e.created_at DESC`).bind(clientId,id).all();
     return json({document:doc,data:events.results||[]});
+  }
+
+  const employeeDocumentSendMatch = path.match(/^\/api\/employee-documents\/(\d+)\/send$/);
+  if (employeeDocumentSendMatch && method === 'POST') {
+    if (!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role)) return json({ error:'ไม่มีสิทธิ์ส่งเอกสาร' },403);
+    await ensureDocumentWorkflowReady(env.DB);
+    const id=Number(employeeDocumentSendMatch[1]);
+    const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2`).bind(id,clientId).first();
+    if(!d)return json({error:'ไม่พบเอกสาร'},404);
+    if(String(d.workflow_status||'')!=='final')return json({error:'ต้องอนุมัติเอกสารให้เป็น Final ก่อนส่งให้พนักงาน'},409);
+    if(String(d.visibility||'')!=='employee')return json({error:'เอกสารนี้ไม่ได้ตั้งให้พนักงานมองเห็น'},409);
+    if(Number(d.acknowledgement_required)){
+      await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();
+    }
+    const delivery=await notifyEmployeeDocumentReady(env,clientId,id);
+    if(!delivery?.ok){
+      const messages={line_not_connected:'พนักงานยังไม่ได้เชื่อม LINE กับบริษัท',line_access_unavailable:'LINE ของบริษัทไม่พร้อมส่งข้อความ',push_failed:'ส่ง LINE ไม่สำเร็จ'};
+      return json({error:messages[delivery?.reason]||delivery?.message||'ส่งเอกสารไม่สำเร็จ',delivery},409);
+    }
+    return json({ok:true,delivery});
   }
 
   const employeeDocumentDeleteMatch = path.match(/^\/api\/employee-documents\/(\d+)$/);
@@ -3325,7 +3347,12 @@ async function handleApi(request, env, url, auth, ctx) {
   if(path==='/api/documents' && method==='GET'){
     if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ดูเอกสารพนักงาน'},403);
     await ensureDocumentWorkflowReady(env.DB);
-    const rows=await env.DB.prepare(`SELECT d.*,e.employee_code,e.first_name,e.last_name,e.nickname FROM employee_documents d LEFT JOIN employees e ON e.id=d.employee_id WHERE d.client_id=?1 ORDER BY d.created_at DESC LIMIT 200`).bind(clientId).all();
+    const rows=await env.DB.prepare(`SELECT d.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.line_user_id,
+      (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='line_sent') AS line_sent_at,
+      (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='viewed') AS employee_viewed_at,
+      (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='delivery_failed') AS delivery_failed_at,
+      (SELECT ev.detail_json FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='delivery_failed' ORDER BY ev.id DESC LIMIT 1) AS delivery_error_json
+      FROM employee_documents d LEFT JOIN employees e ON e.id=d.employee_id WHERE d.client_id=?1 ORDER BY d.created_at DESC LIMIT 200`).bind(clientId).all();
     const payslips=await env.DB.prepare(`SELECT pd.*,e.employee_code,e.first_name,e.last_name,e.nickname,pp.period_key FROM payroll_documents pd JOIN employees e ON e.id=pd.employee_id JOIN payroll_periods pp ON pp.id=pd.period_id WHERE pd.client_id=?1 ORDER BY pd.created_at DESC LIMIT 200`).bind(clientId).all();
     return json({data:rows.results||[],payslips:payslips.results||[]});
   }
@@ -3472,10 +3499,12 @@ async function handleApi(request, env, url, auth, ctx) {
         stage='auto_finalize';
         try{
           const materialized=await materializeWorkflowDocument(env,clientId,docId);
-          if(Number(tpl.acknowledgement_required))await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version,delivered_at) VALUES(?1,?2,?3,'pending',1,CURRENT_TIMESTAMP)`).bind(clientId,docId,employeeId).run();
-          await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'system',NULL,'auto_finalized',?4)`).bind(clientId,docId,employeeId,JSON.stringify({drive_url:materialized?.drive_url||null})).run();
+          if(Number(tpl.acknowledgement_required))await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',1)`).bind(clientId,docId,employeeId).run();
+          let delivery=null;
+          if(String(tpl.visibility||'employee')==='employee')delivery=await notifyEmployeeDocumentReady(env,clientId,docId).catch(error=>({ok:false,reason:'push_failed',message:String(error?.message||error)}));
+          await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'system',NULL,'auto_finalized',?4)`).bind(clientId,docId,employeeId,JSON.stringify({drive_url:materialized?.drive_url||null,delivery})).run();
           const createdDocument=await loadCreatedDocument();
-          return json({ok:true,id:docId,document_number:num,status:'final',document:createdDocument,...materialized},201);
+          return json({ok:true,id:docId,document_number:num,status:'final',document:createdDocument,...materialized,delivery},201);
         }catch(error){
           await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(docId,clientId).run().catch(()=>{});
           await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','auto_finalize_failed',?4)`).bind(clientId,docId,employeeId,JSON.stringify({message:String(error?.message||error)})).run().catch(()=>{});
@@ -3526,11 +3555,14 @@ async function handleApi(request, env, url, auth, ctx) {
     const approvalResult=await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run();
     await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
     if(Number(d.acknowledgement_required)){
-      await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version,delivered_at) VALUES(?1,?2,?3,'pending',?4,CURRENT_TIMESTAMP)`).bind(clientId,id,d.employee_id,d.version||1).run();
-      await notifyEmployeeDocumentReady(env,clientId,id).catch(error=>console.warn(JSON.stringify({level:'warn',event:'document_ready_notify_failed',document_id:id,message:String(error?.message||error)})));
+      await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();
     }
-    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'approved',?5)`).bind(clientId,id,d.employee_id,Number(auth.user.id),JSON.stringify({note:b.note||null,drive_url:materialized?.drive_url||null,file_name:materialized?.file_name||null,approval_changes:Number(approvalResult?.meta?.changes||0)})).run();
-    return json({ok:true,...materialized});
+    let delivery=null;
+    if(String(d.visibility||'')==='employee'){
+      delivery=await notifyEmployeeDocumentReady(env,clientId,id).catch(error=>({ok:false,reason:'push_failed',message:String(error?.message||error)}));
+    }
+    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'approved',?5)`).bind(clientId,id,d.employee_id,Number(auth.user.id),JSON.stringify({note:b.note||null,drive_url:materialized?.drive_url||null,file_name:materialized?.file_name||null,approval_changes:Number(approvalResult?.meta?.changes||0),delivery})).run();
+    return json({ok:true,...materialized,delivery});
   }
 
   const docReject=path.match(/^\/api\/document-workflows\/(\d+)\/reject$/);
@@ -3539,7 +3571,7 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if(path==='/api/document-workflows/bulk-approve' && method==='POST'){
-    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const b=await safeJson(request); const ids=(Array.isArray(b.ids)?b.ids:[]).map(Number).filter(Boolean).slice(0,200); let approved=0; for(const id of ids){const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND approval_status='pending'`).bind(id,clientId).first(); if(!d)continue; await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,acted_at=CURRENT_TIMESTAMP WHERE document_id=?2 AND client_id=?3 AND status='pending'`).bind(Number(auth.user.id),id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(id).run(); try{await materializeWorkflowDocument(env,clientId,id);}catch(error){await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='pending',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();await env.DB.prepare(`UPDATE document_approvals SET status='pending',approver_user_id=NULL,acted_at=NULL WHERE document_id=?1 AND client_id=?2 AND status='approved'`).bind(id,clientId).run();continue;} if(Number(d.acknowledgement_required)){await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version,delivered_at) VALUES(?1,?2,?3,'pending',?4,CURRENT_TIMESTAMP)`).bind(clientId,id,d.employee_id,d.version||1).run(); await notifyEmployeeDocumentReady(env,clientId,id).catch(()=>{});} approved++;} return json({ok:true,approved});
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const b=await safeJson(request); const ids=(Array.isArray(b.ids)?b.ids:[]).map(Number).filter(Boolean).slice(0,200); let approved=0; for(const id of ids){const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND approval_status='pending'`).bind(id,clientId).first(); if(!d)continue; await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,acted_at=CURRENT_TIMESTAMP WHERE document_id=?2 AND client_id=?3 AND status='pending'`).bind(Number(auth.user.id),id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(id).run(); try{await materializeWorkflowDocument(env,clientId,id);}catch(error){await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='pending',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();await env.DB.prepare(`UPDATE document_approvals SET status='pending',approver_user_id=NULL,acted_at=NULL WHERE document_id=?1 AND client_id=?2 AND status='approved'`).bind(id,clientId).run();continue;} if(Number(d.acknowledgement_required)){await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();} if(String(d.visibility||'')==='employee'){await notifyEmployeeDocumentReady(env,clientId,id).catch(()=>({ok:false}));} approved++;} return json({ok:true,approved});
   }
 
   const docAck=path.match(/^\/api\/document-workflows\/(\d+)\/acknowledge$/);
@@ -6715,7 +6747,9 @@ async function getEmployeePortalAccess(db,token){
 async function getPublicEmployeeDocuments(env,token){
   const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดเมนูจาก LINE ใหม่'},401);
   const rows=(await env.DB.prepare(`SELECT d.id,d.document_type,d.title,d.document_number,d.document_date,d.final_at,d.version,d.acknowledgement_required,d.acknowledgement_status,d.file_name,d.drive_url,
-      a.status AS ack_status,a.delivered_at,a.viewed_at,a.acknowledged_at,a.response_text
+      a.status AS ack_status,a.delivered_at,a.viewed_at,a.acknowledged_at,a.response_text,
+      (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='line_sent') AS line_sent_at,
+      (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='viewed') AS employee_viewed_at
     FROM employee_documents d
     LEFT JOIN document_acknowledgements a ON a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version
     WHERE d.client_id=?1 AND d.employee_id=?2 AND d.visibility='employee' AND d.workflow_status='final' AND COALESCE(d.status,'active')!='archived'
@@ -8455,13 +8489,26 @@ async function notifyEmployeeCaseResponseRequested(env,clientId,caseId,detail){
 
 async function notifyEmployeeDocumentReady(env,clientId,documentId,{reminder=false}={}){
   const row=await env.DB.prepare(`SELECT d.*,e.first_name,e.nickname,e.line_user_id,e.line_provider_scope FROM employee_documents d JOIN employees e ON e.id=d.employee_id WHERE d.id=?1 AND d.client_id=?2 AND d.visibility='employee' AND d.workflow_status='final'`).bind(Number(documentId),Number(clientId)).first();
-  if(!row?.line_user_id)return false;
-  const accessToken=await getAccessTokenForProviderScope(env,Number(clientId),row.line_provider_scope); if(!accessToken)return false;
+  if(!row)return {ok:false,reason:'not_eligible'};
+  const record=async(eventType,detail={})=>env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system',?4,?5)`).bind(Number(clientId),Number(documentId),Number(row.employee_id),eventType,JSON.stringify({version:Number(row.version||1),reminder:Boolean(reminder),...detail})).run().catch(()=>{});
+  if(!row.line_user_id){await record('delivery_failed',{reason:'line_not_connected'});return {ok:false,reason:'line_not_connected'};}
+  const accessToken=await getAccessTokenForProviderScope(env,Number(clientId),row.line_provider_scope);
+  if(!accessToken){await record('delivery_failed',{reason:'line_access_unavailable'});return {ok:false,reason:'line_access_unavailable'};}
   const url=await buildEmployeeDocumentsUrl(env,clientId,Number(row.employee_id));
-  const title=reminder?'มีเอกสารรอรับทราบ':'มีเอกสารใหม่';
-  const text=reminder?'เอกสารนี้ยังรอการรับทราบจากคุณ':'HR ออกเอกสารให้คุณแล้ว';
-  await pushLineMessages(accessToken,row.line_user_id,[{type:'flex',altText:`${title}: ${row.title}`,contents:lineBubble({eyebrow:reminder?'REMINDER':'DOCUMENT',title,subtitle:row.nickname||row.first_name,body:[lineInfoCard([lineInfoRow('เอกสาร',row.title),row.document_number?lineInfoRow('เลขที่',row.document_number):null].filter(Boolean)),lineText(text,'xs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดเอกสาร',{type:'uri',label:'เปิดเอกสาร',uri:url})]})}]);
-  return true;
+  const title=reminder?'มีเอกสารรอรับทราบ':'มีเอกสารใหม่จากบริษัท';
+  const text=reminder?'เอกสารนี้ยังรอการรับทราบจากคุณ':Number(row.acknowledgement_required)?'กรุณาเปิดอ่านและกดรับทราบในระบบ':'HR ออกเอกสารให้คุณแล้ว สามารถเปิดดูได้ทันที';
+  try{
+    await pushLineMessages(accessToken,row.line_user_id,[{type:'flex',altText:`${title}: ${row.title}`,contents:lineBubble({eyebrow:reminder?'REMINDER':'DOCUMENT',title,subtitle:row.nickname||row.first_name,status:Number(row.acknowledgement_required)?'รอรับทราบ':'พร้อมเปิดดู',statusTone:Number(row.acknowledgement_required)?'warning':'success',body:[lineInfoCard([lineInfoRow('เอกสาร',row.title),row.document_number?lineInfoRow('เลขที่',row.document_number):null].filter(Boolean)),lineText(text,'xs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดเอกสารของฉัน',{type:'uri',label:'เปิดเอกสารของฉัน',uri:url})]})}]);
+    if(Number(row.acknowledgement_required)){
+      await env.DB.prepare(`UPDATE document_acknowledgements SET delivered_at=COALESCE(delivered_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE document_id=?1 AND employee_id=?2 AND document_version=?3`).bind(Number(documentId),Number(row.employee_id),Number(row.version||1)).run().catch(()=>{});
+    }
+    const sentAt=new Date().toISOString(); await record(reminder?'reminder_sent':'line_sent',{sent_at:sentAt});
+    return {ok:true,reason:'sent',sent_at:sentAt};
+  }catch(error){
+    const message=String(error?.message||error||'ส่ง LINE ไม่สำเร็จ'); await record('delivery_failed',{reason:'push_failed',message});
+    console.warn(JSON.stringify({level:'warn',event:'employee_document_delivery_failed',client_id:Number(clientId),document_id:Number(documentId),message}));
+    return {ok:false,reason:'push_failed',message};
+  }
 }
 async function runDocumentEvidenceAutomation(env){
   // Runs once daily from the existing 08:00 Bangkok cron branch.
@@ -8471,8 +8518,8 @@ async function runDocumentEvidenceAutomation(env){
     const days=Math.max(1,Number(st.ack_reminder_days||3));
     const rows=(await env.DB.prepare(`SELECT a.id,a.document_id,a.employee_id,a.last_reminded_at,a.reminder_count FROM document_acknowledgements a JOIN employee_documents d ON d.id=a.document_id WHERE a.client_id=?1 AND a.status IN ('pending','viewed') AND d.workflow_status='final' AND d.visibility='employee' AND datetime(COALESCE(a.delivered_at,a.created_at))<=datetime('now',?2) AND (a.last_reminded_at IS NULL OR datetime(a.last_reminded_at)<=datetime('now',?2)) LIMIT 200`).bind(Number(st.client_id),`-${days} days`).all()).results||[];
     for(const a of rows){
-      const ok=await notifyEmployeeDocumentReady(env,Number(st.client_id),Number(a.document_id),{reminder:true}).catch(()=>false);
-      if(ok){await env.DB.prepare(`UPDATE document_acknowledgements SET last_reminded_at=CURRENT_TIMESTAMP,reminder_count=COALESCE(reminder_count,0)+1,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(a.id)).run(); await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','reminder_sent',?4)`).bind(Number(st.client_id),Number(a.document_id),Number(a.employee_id),JSON.stringify({reminder_count:Number(a.reminder_count||0)+1})).run().catch(()=>{}); sent++;}
+      const delivery=await notifyEmployeeDocumentReady(env,Number(st.client_id),Number(a.document_id),{reminder:true}).catch(()=>({ok:false}));
+      if(delivery?.ok){await env.DB.prepare(`UPDATE document_acknowledgements SET last_reminded_at=CURRENT_TIMESTAMP,reminder_count=COALESCE(reminder_count,0)+1,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(a.id)).run(); sent++;}
     }
   }
   return {sent};
