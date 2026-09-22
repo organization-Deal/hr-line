@@ -1,22 +1,23 @@
-# Nakna P8.21 — Approval / PDF Storage Fix
+# Nakna HR P8.22 — Employee Document Delivery
 
-Base: P8.20
+Base: P8.21
 
 ## REPLACE
-- src/index.js
-- public/app.js
-- public/index.html
+- `src/index.js`
+- `public/app.js`
+- `public/index.html`
 
 ## Migration
-- ไม่มี migration ใหม่
+- ไม่มี Migration ใหม่
 
-## Fix
-- อนุมัติเอกสารจะสร้าง PDF/เก็บไฟล์ให้สำเร็จก่อน แล้วจึงเปลี่ยนสถานะเป็น Final/Approved
-- ไม่เกิดสถานะอนุมัติปลอมแล้ว rollback ภายหลัง
-- แก้ API error handling ให้คืนข้อความจาก httpError จริง แทน Internal server error ทุกกรณี
-- แยกข้อความ Google Drive ยังไม่เชื่อม / ต้องเชื่อมใหม่ / Worker Secret ไม่ครบ / upload fail / font fail
-- ตัด query company_assets ที่ไม่ถูกใช้จากขั้นสร้าง PDF เพื่อลดจุดพังจาก schema เก่า
-- Approval button ใช้ silent mutation status เพื่อไม่ให้ toast ทั่วไป "บันทึกไม่สำเร็จ" บัง error จริง
-- timeout การสร้าง PDF เป็น 60 วินาที
-- cache bust app.js เป็น P8.21.0
-- runtime version เป็น 1.0-P8.21
+## สิ่งที่เพิ่ม
+- เอกสาร Final ที่ `visibility=employee` จะ Push LINE ให้พนักงานอัตโนมัติหลัง HR อนุมัติ ไม่จำกัดเฉพาะเอกสารที่ต้องกดรับทราบ
+- พนักงานกดจาก LINE เข้า `เอกสารของฉัน` และเปิด PDF ได้
+- เอกสารที่ต้องรับทราบยังคงมีปุ่ม `รับทราบ / ชี้แจง`
+- HR เห็นสถานะ `ส่ง LINE แล้ว / พนักงานเปิดแล้ว / ยังไม่เชื่อม LINE / ส่งไม่สำเร็จ`
+- เพิ่มปุ่ม `ส่งให้พนักงาน` / `ส่งอีกครั้ง` ในรายการเอกสาร
+- เพิ่ม API `POST /api/employee-documents/:id/send` สำหรับส่ง/ส่งซ้ำ
+- เก็บ Evidence Event `line_sent`, `delivery_failed`, `viewed`
+- ถ้าพนักงานยังไม่เชื่อม LINE การอนุมัติ PDF ยังสำเร็จ และ HR สามารถส่งใหม่ภายหลังได้
+- เอกสาร Upload ที่ตั้ง Visibility เป็น Employee จะพยายามส่ง LINE อัตโนมัติด้วย
+- Cache bust: `P8.22.0`

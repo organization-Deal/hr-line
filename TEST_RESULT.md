@@ -1,14 +1,17 @@
-# P8.21 Test Result
+# P8.22 Test Result
 
-- npm run check: PASS
-- npm run audit: PASS
-- npm run migration:smoke: PASS
-- Fresh migration chain 0001 → 0026: PASS
-- No new migration required
+- `npm run check` — PASS
+- `npm run audit` — PASS
+- `npm run migration:smoke` — PASS
+- Migration chain `0001 → 0026` — PASS
+- Approval → Final → LINE delivery path — static gate PASS
+- Manual resend endpoint — static gate PASS
+- Employee portal keyword (`เอกสาร`, `เอกสารของฉัน`) — present
+- Delivery evidence events (`line_sent`, `delivery_failed`, `viewed`) — present
 
-Runtime-only items that must be verified after deploy:
-1. Google Workspace connection exists for the selected company
-2. Google token can refresh/decrypt
-3. PDF font can be fetched by Worker
-4. Employee Documents folder can be created in Drive
-5. PDF upload returns a Drive file ID
+Production test ที่ต้องทำหลัง Deploy:
+1. กด `ส่งให้พนักงาน` กับเอกสาร Final ใบเดิม
+2. ตรวจ LINE ของพนักงานได้รับ Card
+3. กดเปิด `เอกสารของฉัน`
+4. เปิด PDF แล้วตรวจว่า HR เห็น `พนักงานเปิดแล้ว`
+5. ทดสอบเอกสารที่ต้องรับทราบ และกด `รับทราบ / ชี้แจง`
