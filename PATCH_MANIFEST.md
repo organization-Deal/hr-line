@@ -1,23 +1,23 @@
-# Nakna HR P8.22 — Employee Document Delivery
+# Nakna P8.23-GPS1 — Quick Attendance GPS Reliability Patch
 
-Base: P8.21
+Patch นี้ต่อจาก P8.22 และมีเฉพาะไฟล์ที่แก้/เพิ่ม
 
 ## REPLACE
 - `src/index.js`
-- `public/app.js`
-- `public/index.html`
+- `public/attendance.js`
+- `public/attendance.html`
 
-## Migration
-- ไม่มี Migration ใหม่
+## ADD
+- `migrations/0027_attendance_gps_diagnostics.sql`
 
-## สิ่งที่เพิ่ม
-- เอกสาร Final ที่ `visibility=employee` จะ Push LINE ให้พนักงานอัตโนมัติหลัง HR อนุมัติ ไม่จำกัดเฉพาะเอกสารที่ต้องกดรับทราบ
-- พนักงานกดจาก LINE เข้า `เอกสารของฉัน` และเปิด PDF ได้
-- เอกสารที่ต้องรับทราบยังคงมีปุ่ม `รับทราบ / ชี้แจง`
-- HR เห็นสถานะ `ส่ง LINE แล้ว / พนักงานเปิดแล้ว / ยังไม่เชื่อม LINE / ส่งไม่สำเร็จ`
-- เพิ่มปุ่ม `ส่งให้พนักงาน` / `ส่งอีกครั้ง` ในรายการเอกสาร
-- เพิ่ม API `POST /api/employee-documents/:id/send` สำหรับส่ง/ส่งซ้ำ
-- เก็บ Evidence Event `line_sent`, `delivery_failed`, `viewed`
-- ถ้าพนักงานยังไม่เชื่อม LINE การอนุมัติ PDF ยังสำเร็จ และ HR สามารถส่งใหม่ภายหลังได้
-- เอกสาร Upload ที่ตั้ง Visibility เป็น Employee จะพยายามส่ง LINE อัตโนมัติด้วย
-- Cache bust: `P8.22.0`
+## ต้องทำตอน Deploy
+1. Replace 3 ไฟล์ข้างต้น
+2. รัน migration `0027_attendance_gps_diagnostics.sql`
+3. Deploy Worker + static assets
+4. ปิดหน้า Check-in เดิมใน LINE แล้วเปิดจากเมนูใหม่ เพื่อให้ URL/cache version `P8.23-GPS1` ถูกโหลด
+
+## ไม่ได้แก้
+- Geofence rule
+- เวลาเข้างาน
+- LINE binding
+- Document System
