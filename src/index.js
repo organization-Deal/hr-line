@@ -2812,7 +2812,7 @@ async function handleApi(request, env, url, auth, ctx) {
     const id=Number(employeeDocumentSendMatch[1]);
     const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2`).bind(id,clientId).first();
     if(!d)return json({error:'ไม่พบเอกสาร'},404);
-    if(String(d.workflow_status||'')!=='final')return json({error:'ต้องอนุมัติเอกสารให้เป็น Final ก่อนส่งให้พนักงาน'},409);
+    if(!['awaiting_employee_signature','final'].includes(String(d.workflow_status||'')))return json({error:'เอกสารต้องผ่านการตรวจและลงนามจาก HR ก่อนส่งให้พนักงาน'},409);
     if(String(d.visibility||'')!=='employee')return json({error:'เอกสารนี้ไม่ได้ตั้งให้พนักงานมองเห็น'},409);
     if(Number(d.acknowledgement_required)){
       await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();
@@ -3373,7 +3373,9 @@ async function handleApi(request, env, url, auth, ctx) {
       (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='line_sent') AS line_sent_at,
       (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='viewed') AS employee_viewed_at,
       (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='delivery_failed') AS delivery_failed_at,
-      (SELECT ev.detail_json FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='delivery_failed' ORDER BY ev.id DESC LIMIT 1) AS delivery_error_json
+      (SELECT ev.detail_json FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='delivery_failed' ORDER BY ev.id DESC LIMIT 1) AS delivery_error_json,
+      (SELECT a.acknowledged_pdf_url FROM document_acknowledgements a WHERE a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version LIMIT 1) AS final_signed_url,
+      (SELECT a.signed_at FROM document_acknowledgements a WHERE a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version LIMIT 1) AS final_signed_at
       FROM employee_documents d LEFT JOIN employees e ON e.id=d.employee_id WHERE d.client_id=?1 ORDER BY d.created_at DESC LIMIT 200`).bind(clientId).all();
     const payslips=await env.DB.prepare(`SELECT pd.*,e.employee_code,e.first_name,e.last_name,e.nickname,pp.period_key FROM payroll_documents pd JOIN employees e ON e.id=pd.employee_id JOIN payroll_periods pp ON pp.id=pd.period_id WHERE pd.client_id=?1 ORDER BY pd.created_at DESC LIMIT 200`).bind(clientId).all();
     return json({data:rows.results||[],payslips:payslips.results||[]});
@@ -3446,7 +3448,12 @@ async function handleApi(request, env, url, auth, ctx) {
     const safeAll=async(label,statement)=>{try{return await statement.all();}catch(error){warnings.push({section:label,message:safeDbErrorDetail(error)});console.warn(JSON.stringify({level:'warn',event:'document_overview_section_failed',section:label,client_id:clientId,message:String(error?.message||error)}));return {results:[]};}};
     const safeFirst=async(label,statement)=>{try{return await statement.first();}catch(error){warnings.push({section:label,message:safeDbErrorDetail(error)});console.warn(JSON.stringify({level:'warn',event:'document_overview_section_failed',section:label,client_id:clientId,message:String(error?.message||error)}));return {};}};
     const [summary,templates,pendingApprovals,pendingAck,cases,expiring]=await Promise.all([
-      safeFirst('summary',env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN workflow_status='draft' THEN 1 ELSE 0 END) drafts,SUM(CASE WHEN approval_status='pending' THEN 1 ELSE 0 END) pending_approvals,SUM(CASE WHEN acknowledgement_status='pending' THEN 1 ELSE 0 END) pending_ack FROM employee_documents WHERE client_id=?1 AND COALESCE(status,'active')!='archived'`).bind(clientId)),
+      safeFirst('summary',env.DB.prepare(`SELECT COUNT(*) total,
+        SUM(CASE WHEN workflow_status='draft' THEN 1 ELSE 0 END) drafts,
+        SUM(CASE WHEN approval_status='pending' THEN 1 ELSE 0 END) pending_approvals,
+        SUM(CASE WHEN workflow_status='awaiting_employee_signature' THEN 1 ELSE 0 END) pending_employee_signatures,
+        SUM(CASE WHEN acknowledgement_status IN ('pending','viewed') THEN 1 ELSE 0 END) pending_ack
+        FROM employee_documents WHERE client_id=?1 AND COALESCE(status,'active')!='archived'`).bind(clientId)),
       safeAll('templates',env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 AND active=1 ORDER BY name`).bind(clientId)),
       safeAll('approvals',env.DB.prepare(`SELECT da.*,d.title,d.document_number,e.first_name,e.last_name,e.nickname FROM document_approvals da JOIN employee_documents d ON d.id=da.document_id LEFT JOIN employees e ON e.id=d.employee_id WHERE da.client_id=?1 AND da.status='pending' ORDER BY da.created_at`).bind(clientId)),
       safeAll('acknowledgements',env.DB.prepare(`SELECT a.*,d.title,d.document_number,e.first_name,e.last_name,e.nickname FROM document_acknowledgements a JOIN employee_documents d ON d.id=a.document_id JOIN employees e ON e.id=a.employee_id WHERE a.client_id=?1 AND a.status IN ('pending','viewed') ORDER BY a.created_at`).bind(clientId)),
@@ -3523,15 +3530,16 @@ async function handleApi(request, env, url, auth, ctx) {
       const r=await env.DB.prepare(`INSERT INTO employee_documents(
         client_id,employee_id,document_type,title,document_date,visibility,note,data_json,created_by_user_id,
         status,version,source,confidentiality,document_number,template_id,workflow_status,approval_status,
-        acknowledgement_required,acknowledgement_status,final_at
+        acknowledgement_required,acknowledgement_status,final_at,hr_signature_status,employee_signature_status
       ) VALUES(
         ?1,?2,?3,?4,?5,?6,?7,?8,?9,
         'active',1,'generated','internal',?10,?11,?12,?13,?14,?15,
-        CASE WHEN ?12='final' THEN CURRENT_TIMESTAMP ELSE NULL END
+        CASE WHEN ?12='final' THEN CURRENT_TIMESTAMP ELSE NULL END,'pending',?16
       )`).bind(
         clientId,employeeId,tpl.document_type,tpl.name,documentDate,tpl.visibility||'employee',note,
         JSON.stringify(data),Number(auth.user.id),num,Number(tpl.id),workflow,approval,
-        Number(tpl.acknowledgement_required||0),Number(tpl.acknowledgement_required)?'pending':'not_required'
+        Number(tpl.acknowledgement_required||0),Number(tpl.acknowledgement_required)?'pending':'not_required',
+        Number(tpl.acknowledgement_required)?'pending':'not_required'
       ).run();
       const docId=Number(r?.meta?.last_row_id||0);
       if(!docId)throw new Error('DOCUMENT_INSERT_NO_ID');
@@ -3553,18 +3561,29 @@ async function handleApi(request, env, url, auth, ctx) {
       if(workflow==='final'){
         stage='auto_finalize';
         try{
-          const materialized=await materializeWorkflowDocument(env,clientId,docId);
-          if(Number(tpl.acknowledgement_required))await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',1)`).bind(clientId,docId,employeeId).run();
+          const settings=await env.DB.prepare(`SELECT * FROM company_document_settings WHERE client_id=?1`).bind(clientId).first();
+          const signatureDataUrl=String(settings?.signer_signature_data_url||'').trim();
+          const parsed=signatureDataUrl?parsePdfImageDataUrl(signatureDataUrl):null;
+          if(!parsed)throw httpError('Automatic document ต้องตั้งค่าลายเซ็น HR ที่บันทึกไว้ก่อน',409);
+          const signerName=String(settings?.signer_name||auth.user?.name||auth.user?.email||'HR / ผู้มีอำนาจ').trim();
+          const signerPosition=String(settings?.signer_position||auth.role||'ฝ่ายทรัพยากรบุคคล').trim();
+          const signedAt=new Date().toISOString();
+          const signatureSha256=await sha256BytesHex(parsed.bytes);
+          const materialized=await materializeWorkflowDocument(env,clientId,docId,{approver_name:signerName,approver_role:signerPosition,signature_data_url:signatureDataUrl,hr_signed_at:signedAt});
+          const requiresEmployeeSignature=Number(tpl.acknowledgement_required)===1;
+          const nextWorkflow=requiresEmployeeSignature?'awaiting_employee_signature':'final';
+          await env.DB.prepare(`UPDATE employee_documents SET workflow_status=?1,approval_status='approved',hr_signature_status='signed',hr_signed_at=?2,hr_signer_user_id=?3,hr_signer_name=?4,hr_signer_position=?5,hr_signature_method='saved_signature',hr_signature_sha256=?6,employee_signature_status=?7,final_at=CASE WHEN ?1='final' THEN CURRENT_TIMESTAMP ELSE NULL END,updated_at=CURRENT_TIMESTAMP WHERE id=?8 AND client_id=?9`).bind(nextWorkflow,signedAt,Number(auth.user.id),signerName,signerPosition,signatureSha256,requiresEmployeeSignature?'pending':'not_required',docId,clientId).run();
+          if(requiresEmployeeSignature)await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',1)`).bind(clientId,docId,employeeId).run();
           let delivery=null;
           if(String(tpl.visibility||'employee')==='employee')delivery=await notifyEmployeeDocumentReady(env,clientId,docId).catch(error=>({ok:false,reason:'push_failed',message:String(error?.message||error)}));
-          await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'system',NULL,'auto_finalized',?4)`).bind(clientId,docId,employeeId,JSON.stringify({drive_url:materialized?.drive_url||null,delivery})).run();
+          await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'system',NULL,'auto_hr_signed',?4)`).bind(clientId,docId,employeeId,JSON.stringify({drive_url:materialized?.drive_url||null,delivery,next_workflow:nextWorkflow,signature_sha256:signatureSha256})).run();
           const createdDocument=await loadCreatedDocument();
-          return json({ok:true,id:docId,document_number:num,status:'final',document:createdDocument,...materialized,delivery},201);
+          return json({ok:true,id:docId,document_number:num,status:nextWorkflow,document:createdDocument,...materialized,delivery},201);
         }catch(error){
-          await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(docId,clientId).run().catch(()=>{});
+          await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='pending',hr_signature_status='pending',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(docId,clientId).run().catch(()=>{});
           await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','auto_finalize_failed',?4)`).bind(clientId,docId,employeeId,JSON.stringify({message:String(error?.message||error)})).run().catch(()=>{});
           const createdDocument=await loadCreatedDocument();
-          return json({ok:true,id:docId,document_number:num,status:'draft',document:createdDocument,warning:'สร้าง PDF อัตโนมัติไม่สำเร็จ เอกสารถูกเก็บเป็น Draft เพื่อให้ HR ตรวจสอบ'},201);
+          return json({ok:true,id:docId,document_number:num,status:'draft',document:createdDocument,warning:'Automatic signature ยังไม่พร้อม เอกสารถูกเก็บเป็น Draft เพื่อให้ HR ตรวจและลงนาม'},201);
         }
       }
       const createdDocument=await loadCreatedDocument();
@@ -3578,22 +3597,41 @@ async function handleApi(request, env, url, auth, ctx) {
 
   const docApprove=path.match(/^\/api\/document-workflows\/(\d+)\/approve$/);
   if(docApprove && method==='POST'){
-    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์อนุมัติ'},403);
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ตรวจและลงนามเอกสาร'},403);
     await ensureDocumentWorkflowReady(env.DB);
     const id=Number(docApprove[1]);
     const b=await safeJson(request);
     const d=await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
     if(!d)return json({error:'ไม่พบเอกสาร'},404);
-    if(String(d.approval_status||'')==='approved' && String(d.workflow_status||'')==='final'){
-      return json({ok:true,already_approved:true,drive_url:d.drive_url||null,file_name:d.file_name||null});
+    if(String(d.approval_status||'')==='approved' && ['awaiting_employee_signature','final'].includes(String(d.workflow_status||''))){
+      return json({ok:true,already_approved:true,workflow_status:d.workflow_status,drive_url:d.drive_url||null,file_name:d.file_name||null});
     }
-    if(String(d.approval_status||'')!=='pending')return json({error:'เอกสารนี้ไม่ได้อยู่ในสถานะรออนุมัติ'},409);
+    if(String(d.approval_status||'')!=='pending')return json({error:'เอกสารนี้ไม่ได้อยู่ในสถานะรอ HR ตรวจและลงนาม'},409);
 
-    // P8.21: materialize first. Do not mark the record Final until the PDF is really created
-    // and stored successfully. This avoids fake-approved documents and rollback races.
+    const docSettings=await env.DB.prepare(`SELECT * FROM company_document_settings WHERE client_id=?1`).bind(clientId).first();
+    const submittedSignature=String(b.signature_data_url||'').trim();
+    const savedSignature=String(docSettings?.signer_signature_data_url||'').trim();
+    const useSaved=Boolean(b.use_saved_signature);
+    const signatureDataUrl=submittedSignature || (useSaved?savedSignature:'');
+    if(!signatureDataUrl)return json({error:'กรุณาลงลายเซ็น HR หรือเลือกใช้ลายเซ็นที่บันทึกไว้ก่อน'},400);
+    if(signatureDataUrl.length>750000)return json({error:'ลายเซ็น HR มีขนาดใหญ่เกินไป กรุณาลงลายเซ็นใหม่'},413);
+    const parsedSignature=parsePdfImageDataUrl(signatureDataUrl);
+    if(!parsedSignature)return json({error:'รูปแบบลายเซ็น HR ไม่ถูกต้อง กรุณาใช้ PNG/JPG หรือลงลายเซ็นใหม่'},400);
+
+    const signerName=String(docSettings?.signer_name||auth.user?.name||auth.user?.email||'HR / ผู้มีอำนาจ').trim();
+    const signerPosition=String(docSettings?.signer_position||auth.role||'ฝ่ายทรัพยากรบุคคล').trim();
+    const signatureMethod=submittedSignature?'drawn_signature':'saved_signature';
+    const signatureSha256=await sha256BytesHex(parsedSignature.bytes);
+    const signedAt=new Date().toISOString();
+
     let materialized=null;
     try{
-      materialized=await materializeWorkflowDocument(env,clientId,id,{approver_name:auth.user?.name||auth.user?.email||'HR',approver_role:auth.role||'HR'});
+      materialized=await materializeWorkflowDocument(env,clientId,id,{
+        approver_name:signerName,
+        approver_role:signerPosition,
+        signature_data_url:signatureDataUrl,
+        hr_signed_at:signedAt
+      });
     }catch(error){
       const raw=String(error?.message||error||'').trim();
       let message=raw || 'สร้าง PDF ไม่สำเร็จ';
@@ -3603,30 +3641,100 @@ async function handleApi(request, env, url, auth, ctx) {
       else if(/font fetch failed/i.test(raw)){message='ระบบโหลดฟอนต์สำหรับสร้าง PDF ไม่สำเร็จ กรุณาลองอีกครั้ง';status=502;}
       else if(/Google Drive upload failed/i.test(raw)){message=`อัปโหลด PDF ไป Google Drive ไม่สำเร็จ · ${raw}`;status=502;}
       else if(!status && /Google/.test(raw)){status=502;}
-      console.error(JSON.stringify({level:'error',event:'document_approve_materialize_failed',client_id:clientId,document_id:id,user_id:Number(auth.user.id),message:raw}));
-      return json({error:message,stage:'pdf_storage',document_id:id},status>=400&&status<=599?status:500);
+      console.error(JSON.stringify({level:'error',event:'document_hr_sign_materialize_failed',client_id:clientId,document_id:id,user_id:Number(auth.user.id),message:raw}));
+      return json({error:message,stage:'hr_signature_pdf',document_id:id},status>=400&&status<=599?status:500);
     }
 
+    const requiresEmployeeSignature=Number(d.acknowledgement_required)===1;
+    const nextWorkflow=requiresEmployeeSignature?'awaiting_employee_signature':'final';
     const approvalResult=await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run();
-    await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
-    if(Number(d.acknowledgement_required)){
+    await env.DB.prepare(`UPDATE employee_documents
+      SET workflow_status=?1,
+          approval_status='approved',
+          hr_signature_status='signed',
+          hr_signed_at=?2,
+          hr_signer_user_id=?3,
+          hr_signer_name=?4,
+          hr_signer_position=?5,
+          hr_signature_method=?6,
+          hr_signature_sha256=?7,
+          employee_signature_status=?8,
+          final_at=CASE WHEN ?1='final' THEN CURRENT_TIMESTAMP ELSE NULL END,
+          updated_at=CURRENT_TIMESTAMP
+      WHERE id=?9 AND client_id=?10`)
+      .bind(nextWorkflow,signedAt,Number(auth.user.id),signerName,signerPosition,signatureMethod,signatureSha256,requiresEmployeeSignature?'pending':'not_required',id,clientId).run();
+
+    if(requiresEmployeeSignature){
       await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();
     }
+
+    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json)
+      VALUES(?1,?2,?3,'user',?4,'hr_signed',?5)`)
+      .bind(clientId,id,d.employee_id,Number(auth.user.id),JSON.stringify({
+        note:b.note||null,
+        signer_name:signerName,
+        signer_position:signerPosition,
+        signature_method:signatureMethod,
+        signature_sha256:signatureSha256,
+        signed_at:signedAt,
+        drive_url:materialized?.drive_url||null,
+        file_name:materialized?.file_name||null,
+        approval_changes:Number(approvalResult?.meta?.changes||0),
+        next_workflow:nextWorkflow
+      })).run();
+
     let delivery=null;
     if(String(d.visibility||'')==='employee'){
       delivery=await notifyEmployeeDocumentReady(env,clientId,id).catch(error=>({ok:false,reason:'push_failed',message:String(error?.message||error)}));
     }
-    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'approved',?5)`).bind(clientId,id,d.employee_id,Number(auth.user.id),JSON.stringify({note:b.note||null,drive_url:materialized?.drive_url||null,file_name:materialized?.file_name||null,approval_changes:Number(approvalResult?.meta?.changes||0),delivery})).run();
-    return json({ok:true,...materialized,delivery});
+    if(requiresEmployeeSignature){
+      await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json)
+        VALUES(?1,?2,?3,'system','employee_signature_requested',?4)`)
+        .bind(clientId,id,d.employee_id,JSON.stringify({delivery,document_version:Number(d.version||1)})).run().catch(()=>{});
+    }
+    return json({ok:true,...materialized,delivery,workflow_status:nextWorkflow,hr_signed_at:signedAt,requires_employee_signature:requiresEmployeeSignature});
   }
 
   const docReject=path.match(/^\/api\/document-workflows\/(\d+)\/reject$/);
   if(docReject && method==='POST'){
-    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const id=Number(docReject[1]); const b=await safeJson(request); await env.DB.prepare(`UPDATE document_approvals SET status='rejected',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='rejected',updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run(); return json({ok:true});
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403);
+    const id=Number(docReject[1]); const b=await safeJson(request);
+    await env.DB.prepare(`UPDATE document_approvals SET status='rejected',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run();
+    await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='rejected',hr_signature_status='pending',hr_signed_at=NULL,hr_signer_user_id=NULL,hr_signer_name=NULL,hr_signer_position=NULL,hr_signature_method=NULL,hr_signature_sha256=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
+    return json({ok:true});
   }
 
   if(path==='/api/document-workflows/bulk-approve' && method==='POST'){
-    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const b=await safeJson(request); const ids=(Array.isArray(b.ids)?b.ids:[]).map(Number).filter(Boolean).slice(0,200); let approved=0; for(const id of ids){const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND approval_status='pending'`).bind(id,clientId).first(); if(!d)continue; await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,acted_at=CURRENT_TIMESTAMP WHERE document_id=?2 AND client_id=?3 AND status='pending'`).bind(Number(auth.user.id),id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(id).run(); try{await materializeWorkflowDocument(env,clientId,id,{approver_name:auth.user?.name||auth.user?.email||'HR',approver_role:auth.role||'HR'});}catch(error){await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='pending',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();await env.DB.prepare(`UPDATE document_approvals SET status='pending',approver_user_id=NULL,acted_at=NULL WHERE document_id=?1 AND client_id=?2 AND status='approved'`).bind(id,clientId).run();continue;} if(Number(d.acknowledgement_required)){await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();} if(String(d.visibility||'')==='employee'){await notifyEmployeeDocumentReady(env,clientId,id).catch(()=>({ok:false}));} approved++;} return json({ok:true,approved});
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403);
+    const b=await safeJson(request);
+    const ids=(Array.isArray(b.ids)?b.ids:[]).map(Number).filter(Boolean).slice(0,200);
+    const settings=await env.DB.prepare(`SELECT * FROM company_document_settings WHERE client_id=?1`).bind(clientId).first();
+    const signatureDataUrl=String(settings?.signer_signature_data_url||'').trim();
+    const parsed=signatureDataUrl?parsePdfImageDataUrl(signatureDataUrl):null;
+    if(!parsed)return json({error:'การลงนามหลายเอกสารต้องตั้งค่าลายเซ็น HR ที่บันทึกไว้ก่อน'},409);
+    const signerName=String(settings?.signer_name||auth.user?.name||auth.user?.email||'HR / ผู้มีอำนาจ').trim();
+    const signerPosition=String(settings?.signer_position||auth.role||'ฝ่ายทรัพยากรบุคคล').trim();
+    const signatureSha256=await sha256BytesHex(parsed.bytes);
+    let approved=0,failed=0;
+    for(const id of ids){
+      const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND approval_status='pending'`).bind(id,clientId).first();
+      if(!d)continue;
+      const signedAt=new Date().toISOString();
+      let materialized;
+      try{
+        materialized=await materializeWorkflowDocument(env,clientId,id,{approver_name:signerName,approver_role:signerPosition,signature_data_url:signatureDataUrl,hr_signed_at:signedAt});
+      }catch(error){failed++;continue;}
+      const requiresEmployeeSignature=Number(d.acknowledgement_required)===1;
+      const nextWorkflow=requiresEmployeeSignature?'awaiting_employee_signature':'final';
+      await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,acted_at=CURRENT_TIMESTAMP WHERE document_id=?2 AND client_id=?3 AND status='pending'`).bind(Number(auth.user.id),id,clientId).run();
+      await env.DB.prepare(`UPDATE employee_documents SET workflow_status=?1,approval_status='approved',hr_signature_status='signed',hr_signed_at=?2,hr_signer_user_id=?3,hr_signer_name=?4,hr_signer_position=?5,hr_signature_method='saved_signature',hr_signature_sha256=?6,employee_signature_status=?7,final_at=CASE WHEN ?1='final' THEN CURRENT_TIMESTAMP ELSE NULL END,updated_at=CURRENT_TIMESTAMP WHERE id=?8 AND client_id=?9`)
+        .bind(nextWorkflow,signedAt,Number(auth.user.id),signerName,signerPosition,signatureSha256,requiresEmployeeSignature?'pending':'not_required',id,clientId).run();
+      if(requiresEmployeeSignature)await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();
+      await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'hr_signed',?5)`).bind(clientId,id,d.employee_id,Number(auth.user.id),JSON.stringify({signature_method:'saved_signature',signature_sha256:signatureSha256,signed_at:signedAt,next_workflow:nextWorkflow,drive_url:materialized?.drive_url||null})).run().catch(()=>{});
+      if(String(d.visibility||'')==='employee')await notifyEmployeeDocumentReady(env,clientId,id).catch(()=>({ok:false}));
+      approved++;
+    }
+    return json({ok:true,approved,failed});
   }
 
   const docAck=path.match(/^\/api\/document-workflows\/(\d+)\/acknowledge$/);
@@ -3664,7 +3772,7 @@ async function handleApi(request, env, url, auth, ctx) {
     const c=await env.DB.prepare('SELECT * FROM hr_document_cases WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!c)return json({error:'ไม่พบ Case'},404); if(c.warning_document_id)return json({error:'Case นี้มีใบเตือนแล้ว'},409);
     let tpl=await env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 AND code='WARNING' AND active=1`).bind(clientId).first(); if(!tpl)return json({error:'กรุณาติดตั้ง Template มาตรฐานก่อนออกใบเตือน'},409);
     const year=new Date(Date.now()+7*3600*1000).getUTCFullYear()+543; await env.DB.prepare(`INSERT INTO document_number_sequences(client_id,template_id,buddhist_year,last_number) VALUES(?1,?2,?3,1) ON CONFLICT(client_id,template_id,buddhist_year) DO UPDATE SET last_number=last_number+1`).bind(clientId,tpl.id,year).run(); const seq=await env.DB.prepare(`SELECT last_number FROM document_number_sequences WHERE client_id=?1 AND template_id=?2 AND buddhist_year=?3`).bind(clientId,tpl.id,year).first(); const num=`${tpl.numbering_prefix}-${year}-${String(seq.last_number).padStart(4,'0')}`;
-    const note=String(b.note||c.description||c.title||'').trim(); const r=await env.DB.prepare(`INSERT INTO employee_documents(client_id,employee_id,document_type,title,document_date,visibility,note,created_by_user_id,status,version,source,confidentiality,document_number,template_id,workflow_status,approval_status,acknowledgement_required,acknowledgement_status) VALUES(?1,?2,'warning',?3,?4,'employee',?5,?6,'active',1,'generated','confidential',?7,?8,'draft','pending',1,'pending')`).bind(clientId,c.employee_id,`หนังสือเตือน · ${c.title}`,dateInBangkok(),note,Number(auth.user.id),num,tpl.id).run(); const docId=Number(r.meta.last_row_id);
+    const note=String(b.note||c.description||c.title||'').trim(); const r=await env.DB.prepare(`INSERT INTO employee_documents(client_id,employee_id,document_type,title,document_date,visibility,note,created_by_user_id,status,version,source,confidentiality,document_number,template_id,workflow_status,approval_status,acknowledgement_required,acknowledgement_status,hr_signature_status,employee_signature_status) VALUES(?1,?2,'warning',?3,?4,'employee',?5,?6,'active',1,'generated','confidential',?7,?8,'draft','pending',1,'pending','pending','pending')`).bind(clientId,c.employee_id,`หนังสือเตือน · ${c.title}`,dateInBangkok(),note,Number(auth.user.id),num,tpl.id).run(); const docId=Number(r.meta.last_row_id);
     await env.DB.batch([env.DB.prepare(`INSERT INTO document_approvals(client_id,document_id,step_no,approver_role,status) VALUES(?1,?2,1,'hr','pending')`).bind(clientId,docId),env.DB.prepare(`INSERT INTO hr_document_case_documents(case_id,document_id) VALUES(?1,?2)`).bind(id,docId),env.DB.prepare(`UPDATE hr_document_cases SET warning_document_id=?1,status='in_review',updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(docId,id,clientId),env.DB.prepare(`INSERT INTO hr_document_case_events(client_id,case_id,actor_user_id,event_type,detail) VALUES(?1,?2,?3,'warning_drafted',?4)`).bind(clientId,id,Number(auth.user.id),num),env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'draft_created',?5)`).bind(clientId,docId,c.employee_id,Number(auth.user.id),JSON.stringify({case_id:id,document_number:num}))]);
     return json({ok:true,document_id:docId,document_number:num},201);
   }
@@ -6425,14 +6533,18 @@ async function materializeWorkflowDocument(env,clientId,documentId,approvalConte
   };
   let body=String(row.body_template||row.note||''); for(const [key,value] of Object.entries(vars))body=body.split(key).join(String(value));
 
-  const fontBytes=await fetchNaknaPdfFont(env); const pdf=await PDFDocument.create(); pdf.setProducer('Nakna HR'); pdf.setSubject('NAKNA_SIGNATURE_LAYOUT_V2'); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(fontBytes,{subset:true});
+  const fontBytes=await fetchNaknaPdfFont(env); const pdf=await PDFDocument.create(); pdf.setProducer('Nakna HR'); pdf.setSubject('NAKNA_SIGNATURE_LAYOUT_V3'); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(fontBytes,{subset:true});
   const dark=rgb(18/255,60/255,74/255),teal=rgb(4/255,135/255,138/255),muted=rgb(107/255,120/255,122/255),line=rgb(224/255,232/255,230/255),soft=rgb(247/255,250/255,249/255);
   const logo=await embedPdfImageDataUrl(pdf,asset?.logo_data_url||'');
-  const hrSignature=await embedPdfImageDataUrl(pdf,docSettings?.signer_signature_data_url||'');
+  const hrSignatureDataUrl=String(approvalContext?.signature_data_url||docSettings?.signer_signature_data_url||'').trim();
+  if(!hrSignatureDataUrl)throw httpError('กรุณาลงลายเซ็น HR ก่อนสร้างเอกสารฉบับลงนาม',400);
+  const hrSignature=await embedPdfImageDataUrl(pdf,hrSignatureDataUrl);
+  if(!hrSignature)throw httpError('ลายเซ็น HR ไม่สามารถใช้สร้าง PDF ได้ กรุณาลงลายเซ็นใหม่',400);
   const companyName=String(docSettings?.legal_name||onboarding?.legal_name||client?.name||'');
   const issueDate=docData.issue_date||row.document_date||dateInBangkok();
+  const hrSignedAt=String(approvalContext?.hr_signed_at||new Date().toISOString());
   const signerName=String(docSettings?.signer_name||approvalContext?.approver_name||'HR / ผู้มีอำนาจ').trim();
-  const signerPosition=String(docSettings?.signer_position||'ฝ่ายทรัพยากรบุคคล / ผู้มีอำนาจลงนาม').trim();
+  const signerPosition=String(docSettings?.signer_position||approvalContext?.approver_role||'ฝ่ายทรัพยากรบุคคล / ผู้มีอำนาจลงนาม').trim();
   const pageSize=[595.28,841.89];
   let page=null,y=0;
   const addPage=()=>{
@@ -6465,7 +6577,7 @@ async function materializeWorkflowDocument(env,clientId,documentId,approvalConte
   page.drawLine({start:{x:48,y:414},end:{x:547,y:414},thickness:.8,color:line});
   page.drawText('การลงนามและหลักฐานการรับเอกสาร',{x:48,y:394,size:10,font,color:dark});
   page.drawText(acknowledgementCopy,{x:48,y:378,size:6.9,font,color:muted,maxWidth:499});
-  drawSignatureCard(page,{x:48,y:226,width:238,height:132,label:'ฝ่าย HR / ผู้มีอำนาจลงนาม',name:signerName,position:signerPosition,dateText:`ลงนาม / อนุมัติ ${thaiDocumentDate(issueDate)}`,font,dark,muted,teal,line,soft,signatureImage:hrSignature,statusText:hrSignature?'':'อนุมัติด้วยบัญชีผู้มีสิทธิ์ใน Nakna HR'});
+  drawSignatureCard(page,{x:48,y:226,width:238,height:132,label:'ฝ่าย HR / ผู้มีอำนาจลงนาม',name:signerName,position:signerPosition,dateText:`ลงนาม ${thaiDocumentDateTime(hrSignedAt)}`,font,dark,muted,teal,line,soft,signatureImage:hrSignature,statusText:'ลงนามโดยผู้มีสิทธิ์ใน Nakna HR'});
   drawSignatureCard(page,{x:309,y:226,width:238,height:132,label:employeeSignatureLabel,name:fullName,position:row.position_name||'พนักงาน',dateText:'รอลงลายเซ็นผ่าน LINE / Employee Portal',font,dark,muted,teal,line,soft,statusText:'รอลายเซ็นพนักงาน'});
   page.drawText(`Document ID ${row.id} · Version ${row.version||1} · ออกเอกสาร ${thaiDocumentDate(issueDate)}`,{x:48,y:52,size:7.1,font,color:muted});
   page.drawText(String(docSettings?.document_footer||'เอกสารฉบับนี้จัดทำและเก็บประวัติผ่านระบบ Nakna HR'),{x:48,y:37,size:7.1,font,color:muted,maxWidth:499});
@@ -6505,7 +6617,7 @@ async function materializeAcknowledgedDocumentCopy(env,{document,ack,access,sign
   const signedName=`${access.first_name||''} ${access.last_name||''}`.trim()||access.nickname||access.employee_code||'พนักงาน';
   const signedAt=new Date().toISOString();
   const subject=String(pdf.getSubject?.()||'');
-  const layoutV2=subject.includes('NAKNA_SIGNATURE_LAYOUT_V2');
+  const layoutV2=subject.includes('NAKNA_SIGNATURE_LAYOUT_V2')||subject.includes('NAKNA_SIGNATURE_LAYOUT_V3');
   const layoutV1=subject.includes('NAKNA_SIGNATURE_LAYOUT_V1');
   if(layoutV2){
     const employeeSignatureLabel=['employment_certificate','salary_certificate'].includes(String(document.document_type||''))?'พนักงานผู้รับเอกสาร':'พนักงานผู้รับทราบ';
@@ -6537,7 +6649,7 @@ async function materializeAcknowledgedDocumentCopy(env,{document,ack,access,sign
   const sigName=`signature-${document.document_number||document.id}-v${document.version||1}.png`.replace(/[^A-Za-z0-9ก-๙._-]/g,'_');
   const signatureUpload=await uploadGoogleDriveFile(accessToken,{folderId,fileName:sigName,contentType:parsed.type==='png'?'image/png':'image/jpeg',bytes:parsed.bytes});
   const originalName=String(document.file_name||`document-${document.id}.pdf`).replace(/\.pdf$/i,'');
-  const signedFileName=`${originalName}-ACK.pdf`;
+  const signedFileName=`${originalName}-FINAL.pdf`;
   const signedUpload=await uploadGoogleDriveFile(accessToken,{folderId,fileName:signedFileName,contentType:'application/pdf',bytes:signedBytes});
   return {signedAt,signerName:signedName,signatureDriveFileId:signatureUpload.id,signatureUrl:signatureUpload.webViewLink||null,signatureSha256:await sha256BytesHex(parsed.bytes),signedPdfDriveFileId:signedUpload.id,signedPdfUrl:signedUpload.webViewLink||null,signedPdfSha256:await sha256BytesHex(signedBytes)};
 }
@@ -7036,15 +7148,19 @@ async function getEmployeePortalAccess(db,token){
 
 async function getPublicEmployeeDocuments(env,token){
   const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดเมนูจาก LINE ใหม่'},401);
-  const rows=(await env.DB.prepare(`SELECT d.id,d.document_type,d.title,d.document_number,d.document_date,d.final_at,d.version,d.acknowledgement_required,d.acknowledgement_status,d.file_name,d.drive_url,
+  const rows=(await env.DB.prepare(`SELECT d.id,d.document_type,d.title,d.document_number,d.document_date,d.final_at,d.version,d.workflow_status,d.approval_status,
+      d.hr_signature_status,d.hr_signed_at,d.hr_signer_name,d.hr_signer_position,d.employee_signature_status,d.employee_signed_at,
+      d.acknowledgement_required,d.acknowledgement_status,d.file_name,d.drive_url,
       a.status AS ack_status,a.delivered_at,a.viewed_at,a.acknowledged_at,a.response_text,a.signer_name,a.signature_method,a.signed_at,a.acknowledged_pdf_url,
       CASE WHEN a.acknowledged_pdf_drive_file_id IS NOT NULL THEN 1 ELSE 0 END AS has_signed_copy,
       (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='line_sent') AS line_sent_at,
       (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='viewed') AS employee_viewed_at
     FROM employee_documents d
     LEFT JOIN document_acknowledgements a ON a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version
-    WHERE d.client_id=?1 AND d.employee_id=?2 AND d.visibility='employee' AND d.workflow_status='final' AND COALESCE(d.status,'active')!='archived'
-    ORDER BY COALESCE(d.final_at,d.created_at) DESC,d.id DESC LIMIT 200`).bind(Number(access.client_id),Number(access.employee_id)).all()).results||[];
+    WHERE d.client_id=?1 AND d.employee_id=?2 AND d.visibility='employee'
+      AND d.workflow_status IN ('awaiting_employee_signature','final')
+      AND COALESCE(d.status,'active')!='archived'
+    ORDER BY COALESCE(d.final_at,d.hr_signed_at,d.created_at) DESC,d.id DESC LIMIT 200`).bind(Number(access.client_id),Number(access.employee_id)).all()).results||[];
   let cases=[];
   try{cases=(await env.DB.prepare(`SELECT id,case_number,case_type,title,incident_date,description,status,employee_response_status,employee_response_text,employee_responded_at,created_at FROM hr_document_cases WHERE client_id=?1 AND employee_id=?2 AND employee_response_status IN ('requested','responded') ORDER BY updated_at DESC,id DESC LIMIT 50`).bind(Number(access.client_id),Number(access.employee_id)).all()).results||[];}catch(error){console.warn(JSON.stringify({level:'warn',event:'public_document_cases_unavailable',client_id:Number(access.client_id),message:String(error?.message||error)}));}
   return json({employee:{id:access.employee_id,name:access.nickname||access.first_name,full_name:`${access.first_name||''} ${access.last_name||''}`.trim(),company_name:access.company_name},documents:rows,cases});
@@ -7064,34 +7180,73 @@ async function respondPublicHrDocumentCase(request,env,token,caseId){
 
 async function getPublicEmployeeDocumentFile(env,token,documentId){
   const access=await getEmployeePortalAccess(env.DB,token); if(!access)return new Response('Link expired',{status:401});
-  const d=await env.DB.prepare(`SELECT d.*,a.status AS ack_status,a.acknowledged_pdf_drive_file_id,a.acknowledged_pdf_url FROM employee_documents d LEFT JOIN document_acknowledgements a ON a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version WHERE d.id=?1 AND d.client_id=?2 AND d.employee_id=?3 AND d.visibility='employee' AND d.workflow_status='final' AND COALESCE(d.status,'active')!='archived'`).bind(Number(documentId),Number(access.client_id),Number(access.employee_id)).first();
+  const d=await env.DB.prepare(`SELECT d.*,a.status AS ack_status,a.acknowledged_pdf_drive_file_id,a.acknowledged_pdf_url FROM employee_documents d LEFT JOIN document_acknowledgements a ON a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version WHERE d.id=?1 AND d.client_id=?2 AND d.employee_id=?3 AND d.visibility='employee' AND d.workflow_status IN ('awaiting_employee_signature','final') AND COALESCE(d.status,'active')!='archived'`).bind(Number(documentId),Number(access.client_id),Number(access.employee_id)).first();
   if(!d?.drive_file_id)return new Response('Document not found',{status:404});
   await env.DB.prepare(`UPDATE document_acknowledgements SET status=CASE WHEN status='pending' THEN 'viewed' ELSE status END,viewed_at=COALESCE(viewed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE document_id=?1 AND employee_id=?2 AND document_version=?3`).bind(Number(d.id),Number(access.employee_id),Number(d.version||1)).run();
   await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'employee',NULL,'viewed',?4)`).bind(Number(access.client_id),Number(d.id),Number(access.employee_id),JSON.stringify({version:Number(d.version||1)})).run().catch(()=>{});
   const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(access.client_id)).first(); if(!workspace)return new Response('Storage unavailable',{status:503});
   const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const fileId=d.acknowledged_pdf_drive_file_id||d.drive_file_id; const signed=Boolean(d.acknowledged_pdf_drive_file_id);
   const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}}); if(!r.ok)return new Response('Document unavailable',{status:r.status});
-  const baseName=String(d.file_name||'document.pdf').replace(/\.pdf$/i,''); const fileName=signed?`${baseName}-ACK.pdf`:d.file_name||'document.pdf';
+  const baseName=String(d.file_name||'document.pdf').replace(/\.pdf$/i,''); const fileName=signed?`${baseName}-FINAL.pdf`:d.file_name||'document.pdf';
   const headers=new Headers({'content-type':'application/pdf','cache-control':'private, no-store','content-disposition':`inline; filename*=UTF-8''${encodeURIComponent(fileName)}`,'x-robots-tag':'noindex,nofollow'}); return new Response(r.body,{headers});
 }
 
 async function acknowledgePublicEmployeeDocument(request,env,token,documentId){
   const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดเมนูจาก LINE ใหม่'},401);
-  const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND employee_id=?3 AND visibility='employee' AND workflow_status='final' AND acknowledgement_required=1 AND COALESCE(status,'active')!='archived'`).bind(Number(documentId),Number(access.client_id),Number(access.employee_id)).first(); if(!d)return json({error:'ไม่พบเอกสารที่ต้องรับทราบ'},404);
+  const d=await env.DB.prepare(`SELECT * FROM employee_documents
+    WHERE id=?1 AND client_id=?2 AND employee_id=?3 AND visibility='employee'
+      AND workflow_status IN ('awaiting_employee_signature','final')
+      AND acknowledgement_required=1
+      AND COALESCE(status,'active')!='archived'`)
+    .bind(Number(documentId),Number(access.client_id),Number(access.employee_id)).first();
+  if(!d)return json({error:'ไม่พบเอกสารที่ต้องลงนาม/รับทราบ'},404);
+  if(String(d.hr_signature_status||'signed')!=='signed')return json({error:'เอกสารนี้ยังรอลายเซ็นจาก HR'},409);
+
   const body=await safeJson(request),response=String(body.response_text||'').trim().slice(0,5000),signatureDataUrl=String(body.signature_data_url||'').trim();
-  if(!/^data:image\/(png|jpeg);base64,/i.test(signatureDataUrl))return json({error:'กรุณาลงลายเซ็นรับทราบก่อนยืนยัน'},400);
+  if(!/^data:image\/(png|jpeg);base64,/i.test(signatureDataUrl))return json({error:'กรุณาลงลายเซ็นก่อนยืนยัน'},400);
   if(signatureDataUrl.length>750000)return json({error:'ลายเซ็นมีขนาดใหญ่เกินไป กรุณาลงลายเซ็นใหม่'},413);
   const status=response?'responded':'acknowledged';
-  const ack=await env.DB.prepare(`SELECT * FROM document_acknowledgements WHERE document_id=?1 AND employee_id=?2 AND document_version=?3`).bind(Number(d.id),Number(access.employee_id),Number(d.version||1)).first(); if(!ack)return json({error:'เอกสารนี้ยังไม่ได้ถูกส่งให้รับทราบ'},409);
+  const ack=await env.DB.prepare(`SELECT * FROM document_acknowledgements WHERE document_id=?1 AND employee_id=?2 AND document_version=?3`).bind(Number(d.id),Number(access.employee_id),Number(d.version||1)).first();
+  if(!ack)return json({error:'เอกสารนี้ยังไม่ได้ถูกส่งให้ลงนาม'},409);
   if(['acknowledged','responded'].includes(String(ack.status)))return json({ok:true,status:ack.status,already:true,signed_copy_url:ack.acknowledged_pdf_url||null});
+
   let evidence;
   try{evidence=await materializeAcknowledgedDocumentCopy(env,{document:d,ack,access,signatureDataUrl,responseText:response});}
-  catch(error){console.error(JSON.stringify({level:'error',event:'document_ack_signature_failed',client_id:Number(access.client_id),document_id:Number(d.id),employee_id:Number(access.employee_id),message:String(error?.message||error)}));return json({error:error?.message||'บันทึกลายเซ็นรับทราบไม่สำเร็จ'},Number(error?.status||500));}
+  catch(error){
+    console.error(JSON.stringify({level:'error',event:'document_employee_signature_failed',client_id:Number(access.client_id),document_id:Number(d.id),employee_id:Number(access.employee_id),message:String(error?.message||error)}));
+    return json({error:error?.message||'บันทึกลายเซ็นพนักงานไม่สำเร็จ'},Number(error?.status||500));
+  }
+
   await env.DB.prepare(`UPDATE document_acknowledgements SET status=?1,viewed_at=COALESCE(viewed_at,CURRENT_TIMESTAMP),acknowledged_at=CURRENT_TIMESTAMP,response_text=?2,signer_name=?3,signature_method='drawn_signature',signature_sha256=?4,signature_drive_file_id=?5,signature_url=?6,signature_user_agent=?7,signed_at=?8,acknowledged_pdf_drive_file_id=?9,acknowledged_pdf_url=?10,acknowledged_pdf_sha256=?11,updated_at=CURRENT_TIMESTAMP WHERE id=?12`)
     .bind(status,response||null,evidence.signerName,evidence.signatureSha256,evidence.signatureDriveFileId,evidence.signatureUrl,String(request.headers.get('user-agent')||'').slice(0,500),evidence.signedAt,evidence.signedPdfDriveFileId,evidence.signedPdfUrl,evidence.signedPdfSha256,Number(ack.id)).run();
-  await env.DB.prepare(`UPDATE employee_documents SET acknowledgement_status=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(status,Number(d.id),Number(access.client_id)).run();
-  await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'employee',NULL,?4,?5)`).bind(Number(access.client_id),Number(d.id),Number(access.employee_id),status,JSON.stringify({version:Number(d.version||1),response_text:response||null,signature_method:'drawn_signature',signature_sha256:evidence.signatureSha256,signed_pdf_sha256:evidence.signedPdfSha256})).run();
-  return json({ok:true,status,signed_copy_url:evidence.signedPdfUrl});
+
+  await env.DB.prepare(`UPDATE employee_documents
+    SET acknowledgement_status=?1,
+        employee_signature_status='signed',
+        employee_signed_at=?2,
+        workflow_status='final',
+        final_at=COALESCE(final_at,CURRENT_TIMESTAMP),
+        updated_at=CURRENT_TIMESTAMP
+    WHERE id=?3 AND client_id=?4`)
+    .bind(status,evidence.signedAt,Number(d.id),Number(access.client_id)).run();
+
+  await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json)
+    VALUES(?1,?2,?3,'employee',NULL,'employee_signed',?4)`)
+    .bind(Number(access.client_id),Number(d.id),Number(access.employee_id),JSON.stringify({
+      version:Number(d.version||1),
+      acknowledgement_status:status,
+      response_text:response||null,
+      signature_method:'drawn_signature',
+      signature_sha256:evidence.signatureSha256,
+      signed_pdf_sha256:evidence.signedPdfSha256,
+      signed_at:evidence.signedAt
+    })).run();
+  await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json)
+    VALUES(?1,?2,?3,'system','finalized',?4)`)
+    .bind(Number(access.client_id),Number(d.id),Number(access.employee_id),JSON.stringify({version:Number(d.version||1),signed_pdf_url:evidence.signedPdfUrl||null})).run().catch(()=>{});
+
+  const delivery=await notifyEmployeeDocumentFinalized(env,Number(access.client_id),Number(d.id)).catch(error=>({ok:false,message:String(error?.message||error)}));
+  return json({ok:true,status,workflow_status:'final',signed_copy_url:evidence.signedPdfUrl,delivery});
 }
 
 async function getPublicLearningPortal(env,token){
@@ -7817,7 +7972,16 @@ async function ensureDocumentWorkflowReady(db){
     ['acknowledgement_status',"TEXT NOT NULL DEFAULT 'not_required'"],
     ['final_at','TEXT'],
     ['sent_at','TEXT'],
-    ['data_json','TEXT']
+    ['data_json','TEXT'],
+    ['hr_signature_status',"TEXT NOT NULL DEFAULT 'not_required'"],
+    ['hr_signed_at','TEXT'],
+    ['hr_signer_user_id','INTEGER'],
+    ['hr_signer_name','TEXT'],
+    ['hr_signer_position','TEXT'],
+    ['hr_signature_method','TEXT'],
+    ['hr_signature_sha256','TEXT'],
+    ['employee_signature_status',"TEXT NOT NULL DEFAULT 'not_required'"],
+    ['employee_signed_at','TEXT']
   ]);
 
   await db.prepare(`CREATE TABLE IF NOT EXISTS document_templates (
@@ -8781,8 +8945,8 @@ async function buildEmployeeDocumentsUrl(env,clientId,employeeId){
 }
 async function sendEmployeeDocumentsPortal(env,replyToken,emp,accessToken){
   const url=await buildEmployeeDocumentsUrl(env,Number(emp.client_id),Number(emp.id));
-  const counts=await env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN acknowledgement_status IN ('pending','viewed') THEN 1 ELSE 0 END) pending FROM employee_documents WHERE client_id=?1 AND employee_id=?2 AND visibility='employee' AND workflow_status='final' AND COALESCE(status,'active')!='archived'`).bind(Number(emp.client_id),Number(emp.id)).first();
-  return replyLineMessages(accessToken,replyToken,[{type:'flex',altText:'เอกสารของฉัน',contents:lineBubble({eyebrow:'MY DOCUMENTS',title:'เอกสารของฉัน',subtitle:emp.nickname||emp.first_name,body:[lineInfoCard([lineInfoRow('เอกสาร',`${Number(counts?.total||0)} ฉบับ`),lineInfoRow('รอรับทราบ',`${Number(counts?.pending||0)} ฉบับ`,Number(counts?.pending||0)?LINE_CI.warning:LINE_CI.success)]),lineText('ดูเอกสาร สลิป และหลักฐานการรับทราบของคุณได้จากที่นี่','xs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดเอกสารของฉัน',{type:'uri',label:'เปิดเอกสารของฉัน',uri:url})]})}]);
+  const counts=await env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN acknowledgement_status IN ('pending','viewed') THEN 1 ELSE 0 END) pending FROM employee_documents WHERE client_id=?1 AND employee_id=?2 AND visibility='employee' AND workflow_status IN ('awaiting_employee_signature','final') AND COALESCE(status,'active')!='archived'`).bind(Number(emp.client_id),Number(emp.id)).first();
+  return replyLineMessages(accessToken,replyToken,[{type:'flex',altText:'เอกสารของฉัน',contents:lineBubble({eyebrow:'MY DOCUMENTS',title:'เอกสารของฉัน',subtitle:emp.nickname||emp.first_name,body:[lineInfoCard([lineInfoRow('เอกสาร',`${Number(counts?.total||0)} ฉบับ`),lineInfoRow('รอลงนาม / รับทราบ',`${Number(counts?.pending||0)} ฉบับ`,Number(counts?.pending||0)?LINE_CI.warning:LINE_CI.success)]),lineText('ดูเอกสาร สลิป ลายเซ็น และหลักฐานการรับทราบของคุณได้จากที่นี่','xs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดเอกสารของฉัน',{type:'uri',label:'เปิดเอกสารของฉัน',uri:url})]})}]);
 }
 async function notifyEmployeeCaseResponseRequested(env,clientId,caseId,detail){
   const row=await env.DB.prepare(`SELECT c.id,c.case_number,c.title,c.employee_id,e.first_name,e.nickname,e.line_user_id,e.line_provider_scope FROM hr_document_cases c JOIN employees e ON e.id=c.employee_id WHERE c.id=?1 AND c.client_id=?2`).bind(Number(caseId),Number(clientId)).first();
@@ -8795,21 +8959,47 @@ async function notifyEmployeeCaseResponseRequested(env,clientId,caseId,detail){
 }
 
 async function notifyEmployeeDocumentReady(env,clientId,documentId,{reminder=false}={}){
-  const row=await env.DB.prepare(`SELECT d.*,e.first_name,e.nickname,e.line_user_id,e.line_provider_scope FROM employee_documents d JOIN employees e ON e.id=d.employee_id WHERE d.id=?1 AND d.client_id=?2 AND d.visibility='employee' AND d.workflow_status='final'`).bind(Number(documentId),Number(clientId)).first();
+  const row=await env.DB.prepare(`SELECT d.*,e.first_name,e.nickname,e.line_user_id,e.line_provider_scope
+    FROM employee_documents d JOIN employees e ON e.id=d.employee_id
+    WHERE d.id=?1 AND d.client_id=?2 AND d.visibility='employee'
+      AND d.workflow_status IN ('awaiting_employee_signature','final')`)
+    .bind(Number(documentId),Number(clientId)).first();
   if(!row)return {ok:false,reason:'not_eligible'};
   const record=async(eventType,detail={})=>env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system',?4,?5)`).bind(Number(clientId),Number(documentId),Number(row.employee_id),eventType,JSON.stringify({version:Number(row.version||1),reminder:Boolean(reminder),...detail})).run().catch(()=>{});
   if(!row.line_user_id){await record('delivery_failed',{reason:'line_not_connected'});return {ok:false,reason:'line_not_connected'};}
   const accessToken=await getAccessTokenForProviderScope(env,Number(clientId),row.line_provider_scope);
   if(!accessToken){await record('delivery_failed',{reason:'line_access_unavailable'});return {ok:false,reason:'line_access_unavailable'};}
   const url=await buildEmployeeDocumentsUrl(env,clientId,Number(row.employee_id));
-  const title=reminder?'มีเอกสารรอรับทราบ':'มีเอกสารใหม่จากบริษัท';
-  const text=reminder?'เอกสารนี้ยังรอการรับทราบจากคุณ':Number(row.acknowledgement_required)?'กรุณาเปิดอ่านและกดรับทราบในระบบ':'HR ออกเอกสารให้คุณแล้ว สามารถเปิดดูได้ทันที';
+  const awaitingSignature=String(row.workflow_status||'')==='awaiting_employee_signature';
+  const completed=String(row.workflow_status||'')==='final' && ['acknowledged','responded'].includes(String(row.acknowledgement_status||''));
+  const title=reminder
+    ? (awaitingSignature?'เตือน: เอกสารรอลายเซ็น':'เตือน: มีเอกสารรอดำเนินการ')
+    : awaitingSignature
+      ? 'HR ลงนามแล้ว · รอลายเซ็นคุณ'
+      : completed
+        ? 'เอกสาร Final พร้อมใช้งาน'
+        : 'มีเอกสารใหม่จากบริษัท';
+  const text=awaitingSignature
+    ? 'กรุณาตรวจสอบเอกสารที่ HR ลงนามแล้ว จากนั้นลงลายเซ็นของคุณเพื่อให้เอกสารสมบูรณ์'
+    : completed
+      ? 'เอกสารฉบับนี้ลงนามครบแล้ว คุณสามารถเปิดดูฉบับ Final ได้ตลอดเวลา'
+      : Number(row.acknowledgement_required)
+        ? 'กรุณาเปิดอ่านและดำเนินการตามที่ระบุในระบบ'
+        : 'HR ออกเอกสารให้คุณแล้ว สามารถเปิดดูได้ทันที';
+  const status=awaitingSignature?'รอลายเซ็นคุณ':completed?'Final':'พร้อมเปิดดู';
+  const statusTone=awaitingSignature?'warning':'success';
+  const buttonLabel=awaitingSignature?'ตรวจสอบและลงนาม':'เปิดเอกสารของฉัน';
   try{
-    await pushLineMessages(accessToken,row.line_user_id,[{type:'flex',altText:`${title}: ${row.title}`,contents:lineBubble({eyebrow:reminder?'REMINDER':'DOCUMENT',title,subtitle:row.nickname||row.first_name,status:Number(row.acknowledgement_required)?'รอรับทราบ':'พร้อมเปิดดู',statusTone:Number(row.acknowledgement_required)?'warning':'success',body:[lineInfoCard([lineInfoRow('เอกสาร',row.title),row.document_number?lineInfoRow('เลขที่',row.document_number):null].filter(Boolean)),lineText(text,'xs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดเอกสารของฉัน',{type:'uri',label:'เปิดเอกสารของฉัน',uri:url})]})}]);
+    await pushLineMessages(accessToken,row.line_user_id,[{type:'flex',altText:`${title}: ${row.title}`,contents:lineBubble({
+      eyebrow:awaitingSignature?'SIGNATURE REQUIRED':(reminder?'REMINDER':'DOCUMENT'),
+      title,subtitle:row.nickname||row.first_name,status,statusTone,
+      body:[lineInfoCard([lineInfoRow('เอกสาร',row.title),row.document_number?lineInfoRow('เลขที่',row.document_number):null,row.hr_signed_at?lineInfoRow('HR ลงนาม',formatBangkokTime(row.hr_signed_at)):null].filter(Boolean)),lineText(text,'xs',LINE_CI.muted)],
+      footer:[linePrimaryButton(buttonLabel,{type:'uri',label:buttonLabel,uri:url})]
+    })}]);
     if(Number(row.acknowledgement_required)){
       await env.DB.prepare(`UPDATE document_acknowledgements SET delivered_at=COALESCE(delivered_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE document_id=?1 AND employee_id=?2 AND document_version=?3`).bind(Number(documentId),Number(row.employee_id),Number(row.version||1)).run().catch(()=>{});
     }
-    const sentAt=new Date().toISOString(); await record(reminder?'reminder_sent':'line_sent',{sent_at:sentAt});
+    const sentAt=new Date().toISOString(); await record(reminder?'reminder_sent':'line_sent',{sent_at:sentAt,workflow_status:row.workflow_status});
     return {ok:true,reason:'sent',sent_at:sentAt};
   }catch(error){
     const message=String(error?.message||error||'ส่ง LINE ไม่สำเร็จ'); await record('delivery_failed',{reason:'push_failed',message});
@@ -8817,13 +9007,46 @@ async function notifyEmployeeDocumentReady(env,clientId,documentId,{reminder=fal
     return {ok:false,reason:'push_failed',message};
   }
 }
+
+async function notifyEmployeeDocumentFinalized(env,clientId,documentId){
+  const row=await env.DB.prepare(`SELECT d.*,e.first_name,e.nickname,e.line_user_id,e.line_provider_scope,
+      a.acknowledged_pdf_url,a.signed_at
+    FROM employee_documents d
+    JOIN employees e ON e.id=d.employee_id
+    LEFT JOIN document_acknowledgements a ON a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version
+    WHERE d.id=?1 AND d.client_id=?2 AND d.visibility='employee' AND d.workflow_status='final'`)
+    .bind(Number(documentId),Number(clientId)).first();
+  if(!row?.line_user_id)return {ok:false,reason:'line_not_connected'};
+  const accessToken=await getAccessTokenForProviderScope(env,Number(clientId),row.line_provider_scope);
+  if(!accessToken)return {ok:false,reason:'line_access_unavailable'};
+  const url=await buildEmployeeDocumentsUrl(env,clientId,Number(row.employee_id));
+  try{
+    await pushLineMessages(accessToken,row.line_user_id,[{type:'flex',altText:`ลงนามครบแล้ว: ${row.title}`,contents:lineBubble({
+      eyebrow:'DOCUMENT FINAL',
+      title:'ลงนามครบแล้ว',
+      subtitle:row.nickname||row.first_name,
+      status:'Final',statusTone:'success',
+      body:[
+        lineInfoCard([lineInfoRow('เอกสาร',row.title),row.document_number?lineInfoRow('เลขที่',row.document_number):null,row.signed_at?lineInfoRow('พนักงานลงนาม',formatBangkokTime(row.signed_at)):null].filter(Boolean)),
+        lineText('เอกสารฉบับ Final ที่มีหลักฐานการลงนามครบถูกเก็บไว้ในแฟ้มเอกสารของคุณแล้ว','xs',LINE_CI.muted)
+      ],
+      footer:[linePrimaryButton('เปิดฉบับ Final',{type:'uri',label:'เปิดฉบับ Final',uri:url})]
+    })}]);
+    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','final_line_sent',?4)`)
+      .bind(Number(clientId),Number(documentId),Number(row.employee_id),JSON.stringify({sent_at:new Date().toISOString(),final_pdf_url:row.acknowledged_pdf_url||null})).run().catch(()=>{});
+    return {ok:true};
+  }catch(error){
+    return {ok:false,reason:'push_failed',message:String(error?.message||error)};
+  }
+}
+
 async function runDocumentEvidenceAutomation(env){
   // Runs once daily from the existing 08:00 Bangkok cron branch.
   const settings=(await env.DB.prepare(`SELECT * FROM document_automation_settings WHERE enabled=1 AND remind_pending_ack=1`).all()).results||[];
   let sent=0;
   for(const st of settings){
     const days=Math.max(1,Number(st.ack_reminder_days||3));
-    const rows=(await env.DB.prepare(`SELECT a.id,a.document_id,a.employee_id,a.last_reminded_at,a.reminder_count FROM document_acknowledgements a JOIN employee_documents d ON d.id=a.document_id WHERE a.client_id=?1 AND a.status IN ('pending','viewed') AND d.workflow_status='final' AND d.visibility='employee' AND datetime(COALESCE(a.delivered_at,a.created_at))<=datetime('now',?2) AND (a.last_reminded_at IS NULL OR datetime(a.last_reminded_at)<=datetime('now',?2)) LIMIT 200`).bind(Number(st.client_id),`-${days} days`).all()).results||[];
+    const rows=(await env.DB.prepare(`SELECT a.id,a.document_id,a.employee_id,a.last_reminded_at,a.reminder_count FROM document_acknowledgements a JOIN employee_documents d ON d.id=a.document_id WHERE a.client_id=?1 AND a.status IN ('pending','viewed') AND d.workflow_status IN ('awaiting_employee_signature','final') AND d.visibility='employee' AND datetime(COALESCE(a.delivered_at,a.created_at))<=datetime('now',?2) AND (a.last_reminded_at IS NULL OR datetime(a.last_reminded_at)<=datetime('now',?2)) LIMIT 200`).bind(Number(st.client_id),`-${days} days`).all()).results||[];
     for(const a of rows){
       const delivery=await notifyEmployeeDocumentReady(env,Number(st.client_id),Number(a.document_id),{reminder:true}).catch(()=>({ok:false}));
       if(delivery?.ok){await env.DB.prepare(`UPDATE document_acknowledgements SET last_reminded_at=CURRENT_TIMESTAMP,reminder_count=COALESCE(reminder_count,0)+1,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(a.id)).run(); sent++;}
