@@ -4456,30 +4456,71 @@ function renderDocuments(){
     total:docs.length,
     drafts:docs.filter(x=>String(x.workflow_status||'')==='draft').length,
     pending_approvals:docs.filter(x=>String(x.approval_status||'')==='pending').length,
-    pending_ack:docs.filter(x=>String(x.acknowledgement_status||'')==='pending').length
+    pending_employee_signatures:docs.filter(x=>String(x.workflow_status||'')==='awaiting_employee_signature').length
   };
   const summary={
     total:Math.max(Number(sum.total||0),computed.total),
     drafts:Math.max(Number(sum.drafts||0),computed.drafts),
     pending_approvals:Math.max(Number(sum.pending_approvals||0),computed.pending_approvals),
-    pending_ack:Math.max(Number(sum.pending_ack||0),computed.pending_ack)
+    pending_employee_signatures:Math.max(Number(sum.pending_employee_signatures||0),computed.pending_employee_signatures)
   };
   const lineCount=pays.filter(x=>x.line_notified_at).length+docs.filter(x=>x.line_sent_at).length;
-  $('#documentSummary').innerHTML=`<div><span>เอกสารทั้งหมด</span><strong>${summary.total}</strong></div><div><span>Draft</span><strong>${summary.drafts}</strong></div><div><span>รออนุมัติ</span><strong>${summary.pending_approvals}</strong></div><div><span>รอรับทราบ</span><strong>${summary.pending_ack}</strong></div><div><span>Payslip</span><strong>${pays.length}</strong></div><div><span>แจ้ง LINE</span><strong>${lineCount}</strong></div>`;
+  $('#documentSummary').innerHTML=`<div><span>เอกสารทั้งหมด</span><strong>${summary.total}</strong></div><div><span>Draft</span><strong>${summary.drafts}</strong></div><div><span>รอ HR เซ็น</span><strong>${summary.pending_approvals}</strong></div><div><span>รอพนักงานเซ็น</span><strong>${summary.pending_employee_signatures}</strong></div><div><span>Payslip</span><strong>${pays.length}</strong></div><div><span>แจ้ง LINE</span><strong>${lineCount}</strong></div>`;
+
   const apiApprovals=sys.pending_approvals||[];
   const approvalIds=new Set(apiApprovals.map(x=>Number(x.document_id)));
   const fallbackApprovals=docs.filter(x=>String(x.approval_status||'')==='pending'&&!approvalIds.has(Number(x.id))).map(x=>({...x,document_id:Number(x.id)}));
   const approvals=[...apiApprovals,...fallbackApprovals],expiring=sys.expiring||[];
-  $('#documentActionList').innerHTML=(approvals.length||expiring.length)?[...approvals.map(x=>`<article class="document-row"><div class="document-file-icon">✓</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>รอ HR ตรวจและอนุมัติ</small></div><div class="document-row-actions"><button class="secondary-btn" onclick="window.rejectDocumentWorkflow(${Number(x.document_id)},this)">ส่งกลับ</button><button class="primary-btn" onclick="window.approveDocumentWorkflow(${Number(x.document_id)},this)">อนุมัติ</button></div></article>`),...expiring.map(x=>`<article class="document-row"><div class="document-file-icon">!</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')}</p><small>หมดอายุ ${formatDate(x.expires_at)}</small></div></article>`)].join(''):emptyState('ไม่มีงานค้าง','เอกสารที่รออนุมัติหรือใกล้หมดอายุจะแสดงที่นี่');
+  $('#documentActionList').innerHTML=(approvals.length||expiring.length)?[
+    ...approvals.map(x=>`<article class="document-row"><div class="document-file-icon">SIGN</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>รอ HR ตรวจข้อมูลและลงลายเซ็น</small></div><div class="document-row-actions"><button class="secondary-btn" onclick="window.rejectDocumentWorkflow(${Number(x.document_id)},this)">ส่งกลับ</button><button class="primary-btn" onclick="window.openDocumentHrSignModal(${Number(x.document_id)})">ตรวจและลงนาม</button></div></article>`),
+    ...expiring.map(x=>`<article class="document-row"><div class="document-file-icon">!</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')}</p><small>หมดอายุ ${formatDate(x.expires_at)}</small></div></article>`)
+  ].join(''):emptyState('ไม่มีงานค้าง','เอกสารที่รอ HR ลงนามหรือใกล้หมดอายุจะแสดงที่นี่');
+
   const templates=sys.templates||[];
-  const templateRows=templates.length?templates:standardDocumentCatalog.map(t=>({...t,automation_mode:'assisted',approval_required:1,acknowledgement_required:['PROB_PASS','SAL_ADJ','ACK_NOTICE','WARNING'].includes(t.code)}));
-  $('#documentTemplateList').innerHTML=templateRows.map(t=>`<article class="document-row"><div class="document-file-icon">T</div><div><strong>${escapeHtml(t.name)}</strong><p>${escapeHtml(t.code)} · ${escapeHtml(t.automation_mode||'assisted')}</p><small>${t.approval_required?'ต้องอนุมัติ':'ไม่ต้องอนุมัติ'}${t.acknowledgement_required?' · ต้องรับทราบ':''}${templates.length?'':' · มาตรฐาน Nakna'}</small></div></article>`).join('');
+  const templateRows=templates.length?templates:standardDocumentCatalog.map(t=>({...t,automation_mode:'assisted',approval_required:1,acknowledgement_required:['EMP_CERT','SAL_CERT','PROB_PASS','SAL_ADJ','ACK_NOTICE','WARNING'].includes(t.code)}));
+  $('#documentTemplateList').innerHTML=templateRows.map(t=>`<article class="document-row"><div class="document-file-icon">T</div><div><strong>${escapeHtml(t.name)}</strong><p>${escapeHtml(t.code)} · ${escapeHtml(t.automation_mode||'assisted')}</p><small>${t.approval_required?'HR ต้องตรวจและลงนาม':'ไม่ต้อง HR อนุมัติ'}${t.acknowledgement_required?' · พนักงานต้องลงนาม':''}${templates.length?'':' · มาตรฐาน Nakna'}</small></div></article>`).join('');
+
   $('#payslipDocumentList').innerHTML=pays.length?pays.map(p=>{const share=p.share_token_value?`${location.origin}/payslip/${p.share_token_value}`:p.drive_url;return `<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(p.nickname||p.first_name)} · ${escapeHtml(p.period_key)}</strong><p>${escapeHtml(p.file_name)}</p><small>${p.email_sent_at?'✓ Email ':''}${p.line_notified_at?'✓ LINE ':''}· ${formatDateTime(p.created_at)}</small></div>${share?`<a class="secondary-btn" href="${escapeHtml(share)}" target="_blank" rel="noopener">เปิด</a>`:''}</article>`}).join(''):emptyState('ยังไม่มี Payslip','เมื่อ Lock และ Publish Payroll เอกสารจะมาอยู่ตรงนี้อัตโนมัติ');
-  $('#employeeDocumentList').innerHTML=docs.length?docs.map(x=>{const final=String(x.workflow_status||'')==='final',employeeVisible=String(x.visibility||'')==='employee';let delivery='';if(final&&employeeVisible){if(x.employee_viewed_at)delivery='✓ พนักงานเปิดแล้ว';else if(x.line_sent_at)delivery='✓ ส่ง LINE แล้ว';else if(!x.line_user_id)delivery='ยังไม่เชื่อม LINE';else if(x.delivery_failed_at)delivery='ส่ง LINE ไม่สำเร็จ';else delivery='ยังไม่ส่ง LINE';}const sendBtn=final&&employeeVisible?`<button class="secondary-btn" type="button" onclick="window.sendEmployeeDocument(${Number(x.id)},this)">${x.line_sent_at?'ส่งอีกครั้ง':'ส่งให้พนักงาน'}</button>`:'';return `<article class="document-row"><div class="document-file-icon">${x.drive_url?'PDF':'DOC'}</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'เอกสารบริษัท')} · ${escapeHtml(x.document_number||'')} · ${formatDate(x.document_date||x.created_at)}</p><small>${escapeHtml(x.document_type)} · ${escapeHtml(x.workflow_status||'final')} · v${Number(x.version||1)}${x.drive_url?'':' · รออนุมัติก่อนสร้าง PDF'}${delivery?` · ${escapeHtml(delivery)}`:''}</small></div><div class="document-row-actions">${x.drive_url?`<a class="secondary-btn" href="${escapeHtml(x.drive_url)}" target="_blank" rel="noopener">Drive</a>`:''}${sendBtn}</div></article>`}).join(''):emptyState('ยังไม่มีเอกสาร','สร้างเอกสารจาก Template ได้จากปุ่มด้านบน');
-  const acks=sys.pending_acknowledgements||[]; $('#documentAckList').innerHTML=acks.length?acks.map(x=>`<article class="document-row"><div class="document-file-icon">ACK</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>${x.status==='viewed'?'เปิดอ่านแล้ว':'ยังไม่รับทราบ'}</small></div></article>`).join(''):emptyState('ไม่มีรายการรอรับทราบ','เมื่อเอกสารสำคัญถูกส่งให้พนักงาน สถานะจะแสดงตรงนี้');
+
+  $('#employeeDocumentList').innerHTML=docs.length?docs.map(x=>{
+    const workflow=String(x.workflow_status||'final');
+    const awaiting=workflow==='awaiting_employee_signature';
+    const final=workflow==='final';
+    const employeeVisible=String(x.visibility||'')==='employee';
+    const fullySigned=String(x.employee_signature_status||'')==='signed'||Boolean(x.final_signed_url);
+    let statusText='Draft';
+    let statusClass='';
+    if(String(x.approval_status||'')==='pending'){statusText='รอ HR ตรวจและลงนาม';statusClass='hr';}
+    else if(awaiting){statusText='HR ลงนามแล้ว · รอพนักงานเซ็น';statusClass='wait';}
+    else if(final&&fullySigned){statusText='Final · ลงนามครบ 2 ฝ่าย';statusClass='done';}
+    else if(final){statusText='Final · HR ลงนามแล้ว';statusClass='done';}
+
+    let delivery='';
+    if((awaiting||final)&&employeeVisible){
+      if(x.employee_viewed_at)delivery='พนักงานเปิดแล้ว';
+      else if(x.line_sent_at)delivery='ส่ง LINE แล้ว';
+      else if(!x.line_user_id)delivery='ยังไม่เชื่อม LINE';
+      else if(x.delivery_failed_at)delivery='LINE ส่งไม่สำเร็จ';
+      else delivery='ยังไม่ส่ง LINE';
+    }
+
+    let sendBtn='';
+    if((awaiting||final)&&employeeVisible){
+      const label=awaiting?(x.line_sent_at?'เตือนให้เซ็น':'ส่งให้เซ็น'):(fullySigned?'ส่ง Final อีกครั้ง':(x.line_sent_at?'ส่งอีกครั้ง':'ส่งให้พนักงาน'));
+      sendBtn=`<button class="secondary-btn" type="button" onclick="window.sendEmployeeDocument(${Number(x.id)},this)">${label}</button>`;
+    }
+    const pdfUrl=x.final_signed_url||x.drive_url||'';
+    const pdfLabel=x.final_signed_url?'Final PDF':awaiting?'PDF ที่ HR เซ็น':'PDF';
+    return `<article class="document-row"><div class="document-file-icon">${pdfUrl?'PDF':'DOC'}</div><div><strong>${escapeHtml(x.title)} <span class="document-status-pill ${statusClass}">${escapeHtml(statusText)}</span></strong><p>${escapeHtml(x.nickname||x.first_name||'เอกสารบริษัท')} · ${escapeHtml(x.document_number||'')} · ${formatDate(x.document_date||x.created_at)}</p><small>${escapeHtml(x.document_type)} · v${Number(x.version||1)}${x.hr_signed_at?` · HR เซ็น ${escapeHtml(formatDateTime(x.hr_signed_at))}`:''}${x.employee_signed_at?` · พนักงานเซ็น ${escapeHtml(formatDateTime(x.employee_signed_at))}`:''}${delivery?` · ${escapeHtml(delivery)}`:''}</small></div><div class="document-row-actions">${pdfUrl?`<a class="secondary-btn" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noopener">${pdfLabel}</a>`:''}${sendBtn}</div></article>`;
+  }).join(''):emptyState('ยังไม่มีเอกสาร','สร้างเอกสารจาก Template ได้จากปุ่มด้านบน');
+
+  const acks=sys.pending_acknowledgements||[];
+  $('#documentAckList').innerHTML=acks.length?acks.map(x=>`<article class="document-row"><div class="document-file-icon">SIGN</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>${x.status==='viewed'?'พนักงานเปิดแล้ว · รอลงลายเซ็น':'ส่งแล้ว · รอลงลายเซ็นพนักงาน'}</small></div></article>`).join(''):emptyState('ไม่มีรายการรอลายเซ็น','เมื่อ HR ลงนามแล้วและส่งให้พนักงาน รายการที่รอลายเซ็นจะแสดงตรงนี้');
+
   const cases=sys.open_cases||[]; $('#documentCaseList').innerHTML=cases.length?cases.map(x=>`<article class="document-row"><div class="document-file-icon">CASE</div><div><strong>${escapeHtml(x.case_number)} · ${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.case_type)}</p><small>${escapeHtml(x.status)}</small></div></article>`).join(''):emptyState('ไม่มี Case เปิดอยู่','Case ใบเตือนและเหตุการณ์ HR จะอยู่ใน Timeline เดียวกัน');
   const sel=$('#documentTemplate'); if(sel)sel.innerHTML='<option value="">เลือก Template</option>'+templates.map(t=>`<option value="${Number(t.id)}">${escapeHtml(t.name)}</option>`).join('');
 }
+
 async function refreshDocuments(options={}){
   let docsError=null,overviewError=null;
   const [docsResult,overviewResult]=await Promise.allSettled([api('/api/documents'),api('/api/document-system/overview')]);
@@ -4905,26 +4946,116 @@ boot();
   });
 })();
 
-window.approveDocumentWorkflow=async function approveDocumentWorkflow(id,button=null){
-  const original=button?.textContent||'อนุมัติ';
-  if(button){button.disabled=true;button.textContent='กำลังสร้าง PDF…';}
+let documentHrSignDrawing=false;
+let documentHrSignHasInk=false;
+let documentHrSignLastPoint=null;
+let documentHrSignPadBound=false;
+
+async function ensureDocumentSettingsForSigning(){
+  if(state.documentSettings)return state.documentSettings;
+  const r=await api('/api/document-settings',{silentStatus:true});
+  state.documentSettings=r?.data||{};
+  return state.documentSettings;
+}
+
+function documentHrSignCanvas(){return $('#documentHrSignaturePad');}
+function resizeDocumentHrSignPad(){
+  const canvas=documentHrSignCanvas(); if(!canvas)return;
+  const rect=canvas.getBoundingClientRect(); if(!rect.width)return;
+  const ratio=Math.max(1,Math.min(3,window.devicePixelRatio||1));
+  canvas.width=Math.max(1,Math.round(rect.width*ratio));
+  canvas.height=Math.max(1,Math.round(112*ratio));
+  const ctx=canvas.getContext('2d');
+  ctx.setTransform(ratio,0,0,ratio,0,0);
+  ctx.lineWidth=2.2; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#173c43';
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,rect.width,112);
+  documentHrSignHasInk=false; documentHrSignLastPoint=null;
+}
+function clearDocumentHrSignPad(){
+  const canvas=documentHrSignCanvas(); if(!canvas)return;
+  const rect=canvas.getBoundingClientRect(),ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,rect.width,112);ctx.fillStyle='#fff';ctx.fillRect(0,0,rect.width,112);
+  documentHrSignHasInk=false;documentHrSignLastPoint=null;
+}
+function documentHrSignPoint(ev){
+  const canvas=documentHrSignCanvas(),r=canvas.getBoundingClientRect();
+  return{x:ev.clientX-r.left,y:ev.clientY-r.top};
+}
+function bindDocumentHrSignPad(){
+  const canvas=documentHrSignCanvas(); if(!canvas||documentHrSignPadBound)return;
+  documentHrSignPadBound=true;
+  canvas.addEventListener('pointerdown',ev=>{
+    ev.preventDefault();documentHrSignDrawing=true;documentHrSignHasInk=true;documentHrSignLastPoint=documentHrSignPoint(ev);
+    canvas.setPointerCapture?.(ev.pointerId);
+    const saved=$('#documentHrUseSavedSignature');if(saved)saved.checked=false;
+  });
+  canvas.addEventListener('pointermove',ev=>{
+    if(!documentHrSignDrawing||!documentHrSignLastPoint)return;ev.preventDefault();
+    const p=documentHrSignPoint(ev),ctx=canvas.getContext('2d');ctx.beginPath();ctx.moveTo(documentHrSignLastPoint.x,documentHrSignLastPoint.y);ctx.lineTo(p.x,p.y);ctx.stroke();documentHrSignLastPoint=p;
+  });
+  const end=ev=>{if(!documentHrSignDrawing)return;ev.preventDefault();documentHrSignDrawing=false;documentHrSignLastPoint=null;};
+  canvas.addEventListener('pointerup',end);canvas.addEventListener('pointercancel',end);canvas.addEventListener('pointerleave',ev=>{if(ev.buttons===0)end(ev)});canvas.addEventListener('contextmenu',ev=>ev.preventDefault());
+  $('#clearDocumentHrSignature')?.addEventListener('click',clearDocumentHrSignPad);
+  $('#documentHrUseSavedSignature')?.addEventListener('change',ev=>{if(ev.target.checked)clearDocumentHrSignPad();});
+}
+
+window.openDocumentHrSignModal=async function openDocumentHrSignModal(id){
+  const dlg=$('#documentHrSignModal'); if(!dlg)return;
+  const doc=(state.documents?.data||[]).find(x=>Number(x.id)===Number(id))||(state.documentSystem?.pending_approvals||[]).find(x=>Number(x.document_id)===Number(id))||{};
+  $('#documentHrSignId').value=String(id);
+  $('#documentHrSignTitle').textContent=doc.title||'เอกสารพนักงาน';
+  const employee=doc.nickname||doc.first_name||doc.employee_name||'พนักงาน';
+  $('#documentHrSignMeta').textContent=[doc.document_number,employee,doc.document_date?formatDate(doc.document_date):''].filter(Boolean).join(' · ')||`Document ID ${id}`;
+  $('#documentHrSignNote').value='';
+  $('#documentHrSignError').textContent='';
+  const requiresEmployee=Number(doc.acknowledgement_required)===1;
+  $('#documentHrSignNextStep').textContent=requiresEmployee
+    ? 'ระบบจะสร้าง PDF ที่มีลายเซ็น HR แล้วส่ง LINE ให้พนักงานตรวจและลงลายเซ็นต่อ เมื่อพนักงานเซ็นครบ ระบบจะสร้าง Final PDF อัตโนมัติ'
+    : 'เอกสารประเภทนี้ใช้ลายเซ็นฝ่ายบริษัทเพียงฝ่ายเดียว ระบบจะสร้าง Final PDF และส่งให้พนักงานเปิดดูทันที';
+  $('#documentHrSignSubmitBtn').textContent=requiresEmployee?'ลงนามและส่งให้พนักงานเซ็นต่อ':'ลงนามและออก Final PDF';
   try{
-    const r=await api(`/api/document-workflows/${id}/approve`,{method:'POST',body:JSON.stringify({}),timeoutMs:60000,silentStatus:true});
-    await refreshDocuments({silent:true});
-    const deliveryText=r.delivery?.ok?' · ส่ง LINE ให้พนักงานแล้ว':r.delivery?.reason==='line_not_connected'?' · เอกสาร Final แล้ว แต่พนักงานยังไม่เชื่อม LINE':r.delivery?.reason?' · เอกสาร Final แล้ว แต่ LINE ยังส่งไม่สำเร็จ':'';
-    toast(r.already_approved?'เอกสารนี้อนุมัติแล้ว':((r.drive_url?'อนุมัติแล้ว · สร้าง PDF และเก็บเข้า Google Drive แล้ว':'อนุมัติและล็อกเอกสาร Final แล้ว')+deliveryText));
+    const settings=await ensureDocumentSettingsForSigning();
+    const saved=String(settings?.signer_signature_data_url||'');
+    const preview=$('#documentHrSavedSignature');
+    preview.innerHTML=saved?`<img src="${escapeAttr(saved)}" alt="ลายเซ็นที่บันทึกไว้"><span>${escapeHtml(settings?.signer_name||'ผู้มีอำนาจลงนาม')} · ${escapeHtml(settings?.signer_position||'')}</span>`:'<span>ยังไม่มีลายเซ็นที่บันทึกไว้ · สามารถเซ็นใหม่ทางด้านขวาได้</span>';
+    const useSaved=$('#documentHrUseSavedSignature'); useSaved.checked=Boolean(saved); useSaved.disabled=!saved;
   }catch(e){
-    console.error('[Nakna] document approve failed',id,e);
-    const raw=String(e?.message||e||'');
-    let message=raw;
-    if(raw.includes('Google Drive')||raw.includes('Google Workspace'))message=raw;
-    else if(raw.includes('GOOGLE_REAUTH_REQUIRED'))message='Google Drive ต้องเชื่อมใหม่ กรุณาไปที่ การเชื่อมต่อ แล้วเชื่อม Google อีกครั้ง';
-    else if(raw.includes('API_TIMEOUT'))message='สร้าง PDF ใช้เวลานานเกินไป กรุณาลองอีกครั้ง';
-    toast(`อนุมัติเอกสารไม่สำเร็จ · ${message}`,true);
-  }finally{
-    if(button && button.isConnected){button.disabled=false;button.textContent=original;}
+    $('#documentHrSavedSignature').innerHTML='<span>โหลดลายเซ็นที่บันทึกไว้ไม่สำเร็จ · กรุณาเซ็นใหม่ทางด้านขวา</span>';
+    $('#documentHrUseSavedSignature').checked=false;$('#documentHrUseSavedSignature').disabled=true;
   }
+  dlg.showModal();
+  requestAnimationFrame(()=>{bindDocumentHrSignPad();resizeDocumentHrSignPad();});
 };
+
+async function submitDocumentHrSignature(){
+  const id=Number($('#documentHrSignId')?.value||0),btn=$('#documentHrSignSubmitBtn'),err=$('#documentHrSignError'); if(!id||!btn)return;
+  err.textContent='';
+  const useSaved=Boolean($('#documentHrUseSavedSignature')?.checked);
+  const canvas=documentHrSignCanvas();
+  const signatureDataUrl=!useSaved&&documentHrSignHasInk&&canvas?canvas.toDataURL('image/png'):'';
+  if(!useSaved&&!signatureDataUrl){err.textContent='กรุณาเลือกลายเซ็นที่บันทึกไว้ หรือเซ็นในกรอบก่อนดำเนินการ';return;}
+  const old=btn.textContent;btn.disabled=true;btn.textContent='กำลังลงนามและสร้าง PDF…';
+  try{
+    const r=await api(`/api/document-workflows/${id}/approve`,{method:'POST',body:JSON.stringify({signature_data_url:signatureDataUrl,use_saved_signature:useSaved,note:$('#documentHrSignNote')?.value.trim()||''}),timeoutMs:60000,silentStatus:true});
+    $('#documentHrSignModal')?.close();
+    await refreshDocuments({silent:true});
+    if(r.workflow_status==='awaiting_employee_signature'){
+      const delivery=r.delivery?.ok?' · ส่ง LINE ให้พนักงานแล้ว':r.delivery?.reason==='line_not_connected'?' · พนักงานยังไม่เชื่อม LINE สามารถกดส่งภายหลังได้':' · HR ลงนามแล้ว แต่ LINE ยังส่งไม่สำเร็จ';
+      toast(`HR ลงนามแล้ว · รอพนักงานลงนามต่อ${delivery}`);
+    }else{
+      toast('HR ลงนามแล้ว · Final PDF พร้อมใช้งาน');
+    }
+  }catch(e){
+    console.error('[Nakna] HR document signing failed',id,e);
+    const raw=String(e?.message||e||'');
+    if(raw.includes('Google Drive')||raw.includes('Google Workspace'))err.textContent=raw;
+    else if(raw.includes('GOOGLE_REAUTH_REQUIRED'))err.textContent='Google Drive ต้องเชื่อมใหม่ กรุณาไปที่ การเชื่อมต่อ แล้วเชื่อม Google อีกครั้ง';
+    else if(raw.includes('API_TIMEOUT'))err.textContent='สร้าง PDF ใช้เวลานานเกินไป กรุณาลองอีกครั้ง';
+    else err.textContent=`ลงนามไม่สำเร็จ · ${raw||'กรุณาลองอีกครั้ง'}`;
+  }finally{btn.disabled=false;btn.textContent=old;}
+}
+
+window.approveDocumentWorkflow=(id)=>window.openDocumentHrSignModal(id);
 window.rejectDocumentWorkflow=async function rejectDocumentWorkflow(id,button=null){
   const note=prompt('เหตุผลที่ส่งกลับให้แก้ไข');if(note===null)return;
   const original=button?.textContent||'ส่งกลับ';
@@ -4951,10 +5082,10 @@ window.sendEmployeeDocument=async function sendEmployeeDocument(id,button=null){
   }finally{if(button&&button.isConnected){button.disabled=false;button.textContent=original;}}
 };
 
-async function bulkApproveDocumentWorkflows(){const ids=(state.documentSystem?.pending_approvals||[]).map(x=>Number(x.document_id)).filter(Boolean);if(!ids.length)return toast('ไม่มีเอกสารรออนุมัติ');if(!confirm(`อนุมัติเอกสาร ${ids.length} ฉบับพร้อมกัน?`))return;try{const r=await api('/api/document-workflows/bulk-approve',{method:'POST',body:JSON.stringify({ids}),timeoutMs:90000});await refreshDocuments({silent:true});toast(`อนุมัติแล้ว ${Number(r.approved||0)} ฉบับ`);}catch(e){toast(`อนุมัติหลายเอกสารไม่สำเร็จ · ${e.message}`,true)}}
+async function bulkApproveDocumentWorkflows(){const ids=(state.documentSystem?.pending_approvals||[]).map(x=>Number(x.document_id)).filter(Boolean);if(!ids.length)return toast('ไม่มีเอกสารรอ HR ลงนาม');const settings=await ensureDocumentSettingsForSigning().catch(()=>null);if(!settings?.signer_signature_data_url)return toast('การลงนามหลายเอกสารต้องบันทึกลายเซ็น HR ใน “ตั้งค่าเอกสาร & ลายเซ็น” ก่อน',true);if(!confirm(`ลงนามเอกสาร ${ids.length} ฉบับด้วยลายเซ็น HR ที่บันทึกไว้ และส่งเอกสารที่ต้องลงนามต่อให้พนักงาน?`))return;try{const r=await api('/api/document-workflows/bulk-approve',{method:'POST',body:JSON.stringify({ids}),timeoutMs:90000});await refreshDocuments({silent:true});toast(`ลงนามแล้ว ${Number(r.approved||0)} ฉบับ${Number(r.failed||0)?` · ไม่สำเร็จ ${Number(r.failed)} ฉบับ`:''}`);}catch(e){toast(`ลงนามหลายเอกสารไม่สำเร็จ · ${e.message}`,true)}}
 async function seedDocumentTemplates(){try{await api('/api/document-templates/seed',{method:'POST',body:'{}'});await refreshDocuments();toast('ติดตั้ง Template มาตรฐานแล้ว');}catch(e){toast(e.message,true)}}
 
-$('#seedDocumentTemplatesBtn')?.addEventListener('click',seedDocumentTemplates); $('#refreshDocumentSystemBtn')?.addEventListener('click',refreshDocuments); $('#bulkApproveDocumentsBtn')?.addEventListener('click',bulkApproveDocumentWorkflows); $('#documentSettingsBtn')?.addEventListener('click',()=>{bindDocumentSignatureUpload();openDocumentSettings();}); $('#saveDocumentSettingsBtn')?.addEventListener('click',saveDocumentSettings);
+$('#seedDocumentTemplatesBtn')?.addEventListener('click',seedDocumentTemplates); $('#refreshDocumentSystemBtn')?.addEventListener('click',refreshDocuments); $('#bulkApproveDocumentsBtn')?.addEventListener('click',bulkApproveDocumentWorkflows); $('#documentSettingsBtn')?.addEventListener('click',()=>{bindDocumentSignatureUpload();openDocumentSettings();}); $('#saveDocumentSettingsBtn')?.addEventListener('click',saveDocumentSettings); $('#documentHrSignSubmitBtn')?.addEventListener('click',submitDocumentHrSignature);
 
 window.quickOpenDocumentCase=async function quickOpenDocumentCase(){
   try{

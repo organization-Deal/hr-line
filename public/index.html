@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css?v=P8.24.0" />
-  <link rel="modulepreload" href="/app.js?v=P8.24.0" />
+  <link rel="modulepreload" href="/app.js?v=P8.26.0" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -618,7 +618,7 @@
       <section id="view-documents" class="view">
         <div class="page-intro"><div><p class="kicker">EMPLOYEE DOCUMENTS</p><h1>เอกสาร HR</h1><p>แฟ้มเอกสารพนักงานแบบตรวจสอบย้อนหลังได้ · Version · สิทธิ์การมองเห็น · ประวัติหลักฐาน และ Payslip</p></div><button id="generateDocumentBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>ออกเอกสาร</button></div>
         <div id="documentSummary" class="document-summary"></div>
-        <div class="document-system-toolbar"><button id="documentSettingsBtn" class="secondary-btn" type="button">ตั้งค่าเอกสาร & ลายเซ็น</button><button id="seedDocumentTemplatesBtn" class="secondary-btn" type="button">คืนค่า Template มาตรฐาน</button><button id="openDocumentCaseBtn" class="secondary-btn" type="button">+ เปิด HR Case</button><button id="bulkApproveDocumentsBtn" class="secondary-btn" type="button">อนุมัติที่รอทั้งหมด</button><button id="refreshDocumentSystemBtn" class="secondary-btn" type="button">รีเฟรช</button></div>
+        <div class="document-system-toolbar"><button id="documentSettingsBtn" class="secondary-btn" type="button">ตั้งค่าเอกสาร & ลายเซ็น</button><button id="seedDocumentTemplatesBtn" class="secondary-btn" type="button">คืนค่า Template มาตรฐาน</button><button id="openDocumentCaseBtn" class="secondary-btn" type="button">+ เปิด HR Case</button><button id="bulkApproveDocumentsBtn" class="secondary-btn" type="button">ลงนามที่รอทั้งหมด</button><button id="refreshDocumentSystemBtn" class="secondary-btn" type="button">รีเฟรช</button></div>
         <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">ACTION CENTER</p><h3>งานที่ต้องดำเนินการ</h3></div></div><div id="documentActionList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">TEMPLATES</p><h3>Template เอกสาร</h3></div></div><div id="documentTemplateList" class="document-list"></div></article></div>
         <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">MONTHLY PAYSLIPS</p><h3>สลิปเงินเดือน</h3></div></div><div id="payslipDocumentList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">HR DOCUMENTS</p><h3>เอกสารพนักงาน</h3></div></div><div id="employeeDocumentList" class="document-list"></div></article></div>
         <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">EVIDENCE</p><h3>รอพนักงานรับทราบ</h3></div></div><div id="documentAckList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">HR CASES</p><h3>Case ที่กำลังดำเนินการ</h3></div></div><div id="documentCaseList" class="document-list"></div></article></div>
@@ -1183,7 +1183,62 @@
 
   <dialog id="payrollAdjustmentModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PAYROLL ADJUSTMENT</p><h3>เพิ่มเงิน / รายการหัก</h3><p>เพิ่ม/หักเงินรายคน รวม Commission, KPI, Incentive และปรับภาษีของรอบนี้ได้</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><input id="payrollAdjustmentPeriodId" type="hidden" /><div class="modal-fields"><div class="field full"><label>พนักงาน</label><select id="payrollAdjustmentEmployee"></select></div><div class="field"><label>ประเภท</label><select id="payrollAdjustmentType"><option value="earning">เงินเพิ่ม</option><option value="deduction">รายการหัก</option></select></div><div class="field"><label>หมวด</label><select id="payrollAdjustmentCategory"><optgroup label="เงินเพิ่ม"><option value="overtime">OT</option><option value="commission">Commission</option><option value="kpi">KPI</option><option value="incentive">Incentive</option><option value="allowance">Allowance</option><option value="bonus">Bonus</option><option value="other">เงินเพิ่มอื่น</option></optgroup><optgroup label="รายการหัก"><option value="other_deduction">หักอื่น ๆ</option></optgroup><optgroup label="ภาษี"><option value="tax_add">เพิ่มภาษีหัก ณ ที่จ่าย</option><option value="tax_reduce">ลดภาษีหัก ณ ที่จ่าย</option></optgroup></select></div><div class="field"><label>จำนวนเงิน</label><input id="payrollAdjustmentAmount" type="number" min="0" step="0.01" /></div><div class="field full"><label>รายละเอียด</label><input id="payrollAdjustmentNote" /></div><label class="toggle-line"><input id="payrollAdjustmentTaxable" type="checkbox" checked /> นับเป็นรายได้ที่ใช้ประมาณการภาษี</label><label class="toggle-line"><input id="payrollAdjustmentSso" type="checkbox" /> นับเป็นฐานประกันสังคม</label></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollAdjustmentSaveBtn" type="button" class="primary-btn">เพิ่มและคำนวณใหม่</button></div></form></dialog>
 
-  <dialog id="documentSettingsModal" class="document-settings-dialog"><form method="dialog"><div class="modal-head"><div><p class="kicker">DOCUMENT BRANDING & SIGNATURE</p><h3>ตั้งค่าเอกสารและลายเซ็น</h3><p>ใช้กับเอกสารของบริษัทนี้เท่านั้น · Logo จะดึงจากข้อมูลบริษัทอัตโนมัติ</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="document-settings-grid"><section class="document-brand-card"><span class="settings-label">Logo บริษัท</span><div id="docCompanyLogoPreview" class="document-logo-preview"><span>กำลังโหลด…</span></div><small>เปลี่ยน Logo ได้จากหน้าข้อมูลบริษัท</small></section><section class="document-brand-card"><span class="settings-label">ลายเซ็น HR / ผู้มีอำนาจ</span><div id="docSignaturePreview" class="document-signature-preview"><span>ยังไม่มีลายเซ็น</span></div><div class="document-signature-actions"><label class="secondary-btn file-button">อัปโหลด PNG / JPG<input id="docSignerSignatureFile" type="file" accept="image/png,image/jpeg" hidden></label><button id="clearDocSignerSignatureBtn" type="button" class="text-btn danger-text">ลบลายเซ็น</button></div><input id="docSignatureDataUrl" type="hidden"></section><div class="field"><label>ชื่อผู้ลงนาม</label><input id="docSignerName" placeholder="เช่น นางสาว..." /></div><div class="field"><label>ตำแหน่งผู้ลงนาม</label><input id="docSignerPosition" placeholder="เช่น HR Manager / กรรมการผู้มีอำนาจ" /></div><div class="field full"><label>ข้อความท้ายเอกสาร</label><input id="docFooterText" placeholder="เอกสารฉบับนี้จัดทำผ่านระบบ Nakna HR" /></div><div class="document-signature-note full"><strong>ลายเซ็นรับทราบของพนักงาน</strong><p>เอกสารที่ต้องรับทราบจะให้พนักงานลงลายเซ็นด้วยนิ้วผ่าน LINE / Nakna HR แล้วระบบจะสร้าง “ฉบับรับทราบ” แยกจาก PDF ต้นฉบับ เพื่อรักษาหลักฐานทั้งสองฉบับ</p></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="saveDocumentSettingsBtn" type="button" class="primary-btn">บันทึกการตั้งค่า</button></div></form></dialog>
+  <dialog id="documentSettingsModal" class="document-settings-dialog"><form method="dialog"><div class="modal-head"><div><p class="kicker">DOCUMENT BRANDING & SIGNATURE</p><h3>ตั้งค่าเอกสารและลายเซ็น</h3><p>ใช้กับเอกสารของบริษัทนี้เท่านั้น · Logo จะดึงจากข้อมูลบริษัทอัตโนมัติ</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="document-settings-grid"><section class="document-brand-card"><span class="settings-label">Logo บริษัท</span><div id="docCompanyLogoPreview" class="document-logo-preview"><span>กำลังโหลด…</span></div><small>เปลี่ยน Logo ได้จากหน้าข้อมูลบริษัท</small></section><section class="document-brand-card"><span class="settings-label">ลายเซ็น HR / ผู้มีอำนาจ</span><div id="docSignaturePreview" class="document-signature-preview"><span>ยังไม่มีลายเซ็น</span></div><div class="document-signature-actions"><label class="secondary-btn file-button">อัปโหลด PNG / JPG<input id="docSignerSignatureFile" type="file" accept="image/png,image/jpeg" hidden></label><button id="clearDocSignerSignatureBtn" type="button" class="text-btn danger-text">ลบลายเซ็น</button></div><input id="docSignatureDataUrl" type="hidden"></section><div class="field"><label>ชื่อผู้ลงนาม</label><input id="docSignerName" placeholder="เช่น นางสาว..." /></div><div class="field"><label>ตำแหน่งผู้ลงนาม</label><input id="docSignerPosition" placeholder="เช่น HR Manager / กรรมการผู้มีอำนาจ" /></div><div class="field full"><label>ข้อความท้ายเอกสาร</label><input id="docFooterText" placeholder="เอกสารฉบับนี้จัดทำผ่านระบบ Nakna HR" /></div><div class="document-signature-note full"><strong>ลายเซ็นรับทราบของพนักงาน</strong><p>Workflow ลายเซ็น: HR ตรวจและลงนามก่อน → ระบบส่งให้พนักงานทาง LINE → พนักงานลงลายเซ็นต่อ → ระบบสร้าง Final PDF ที่มีลายเซ็นครบตามประเภทเอกสาร พร้อมเก็บหลักฐานเวลาและ Version</p></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="saveDocumentSettingsBtn" type="button" class="primary-btn">บันทึกการตั้งค่า</button></div></form></dialog>
+
+  <dialog id="documentHrSignModal" class="document-hr-sign-dialog">
+    <form method="dialog">
+      <div class="modal-head">
+        <div>
+          <p class="kicker">HR SIGNATURE WORKFLOW</p>
+          <h3>ตรวจและลงนามเอกสาร</h3>
+          <p>HR ลงนามก่อน จากนั้นระบบจะส่งให้พนักงานลงนามต่อ และสร้าง PDF Final เมื่อครบทั้งสองฝ่าย</p>
+        </div>
+        <button type="button" class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <input id="documentHrSignId" type="hidden" />
+      <div class="document-sign-flow">
+        <span class="active"><b>1</b> HR ตรวจ</span>
+        <span class="active"><b>2</b> HR เซ็น</span>
+        <span><b>3</b> พนักงานเซ็น</span>
+        <span><b>4</b> Final PDF</span>
+      </div>
+      <section class="hr-sign-document-card">
+        <small>เอกสารที่กำลังลงนาม</small>
+        <strong id="documentHrSignTitle">—</strong>
+        <span id="documentHrSignMeta">—</span>
+      </section>
+      <div class="hr-sign-grid">
+        <section class="hr-sign-panel">
+          <div class="hr-sign-panel-head">
+            <div><small>SAVED SIGNATURE</small><strong>ลายเซ็นที่บริษัทบันทึกไว้</strong></div>
+          </div>
+          <div id="documentHrSavedSignature" class="hr-sign-saved-preview"><span>กำลังโหลด…</span></div>
+          <label class="ack-confirm hr-sign-use-saved"><input id="documentHrUseSavedSignature" type="checkbox"> <span>ใช้ลายเซ็นที่บันทึกไว้กับเอกสารฉบับนี้</span></label>
+        </section>
+        <section class="hr-sign-panel">
+          <div class="hr-sign-panel-head">
+            <div><small>DRAW SIGNATURE</small><strong>หรือเซ็นใหม่สำหรับเอกสารฉบับนี้</strong></div>
+            <button id="clearDocumentHrSignature" type="button" class="text-btn">ล้าง</button>
+          </div>
+          <canvas id="documentHrSignaturePad" class="document-hr-signature-pad" aria-label="พื้นที่ลงลายเซ็น HR"></canvas>
+          <small>ใช้เมาส์หรือนิ้วลงลายเซ็น · ลายเซ็นที่เซ็นใหม่จะใช้เฉพาะเอกสารฉบับนี้</small>
+        </section>
+      </div>
+      <div class="field full">
+        <label>หมายเหตุการอนุมัติ <small>(ไม่บังคับ)</small></label>
+        <textarea id="documentHrSignNote" rows="2" placeholder="เช่น ตรวจสอบข้อมูลแล้ว ถูกต้อง"></textarea>
+      </div>
+      <div class="document-sign-workflow-note">
+        <strong>หลัง HR ลงนาม</strong>
+        <span id="documentHrSignNextStep">ระบบจะส่ง LINE ให้พนักงานตรวจเอกสารและลงลายเซ็นต่อ เมื่อพนักงานลงนามครบ ระบบจะสร้าง PDF Final อัตโนมัติ</span>
+      </div>
+      <p id="documentHrSignError" class="inline-error" role="alert"></p>
+      <div class="modal-actions">
+        <button type="button" value="cancel" class="secondary-btn">ยกเลิก</button>
+        <button id="documentHrSignSubmitBtn" type="button" class="primary-btn">ลงนามและส่งต่อให้พนักงาน</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="documentGenerateModal" class="document-generate-dialog"><form method="dialog"><div class="modal-head"><div><p class="kicker">NEW EMPLOYEE DOCUMENT</p><h3>ออกเอกสารให้พนักงาน</h3><p>เลือกประเภทเอกสารก่อน นากนะจะเตรียม Draft จากข้อมูลพนักงานให้ HR ตรวจ</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="modal-fields"><div class="field full"><label>1. ต้องการออกเอกสารอะไร</label><div id="documentTypeCards" class="document-type-cards"></div><select id="documentTemplate" class="hidden"><option value="">เลือกประเภทเอกสาร</option></select></div><div class="field full"><label>2. ออกให้พนักงาน</label><select id="documentEmployee"></select></div><div id="documentDynamicFields" class="full"></div><div id="documentDraftPreview" class="document-draft-preview full"><p class="kicker">DOCUMENT PREVIEW</p><strong>เลือกประเภทเอกสารเพื่อกรอกแบบฟอร์ม</strong><small>ระบบจะสร้าง Preview จากข้อมูลบริษัทและแฟ้มพนักงานก่อนสร้าง Draft</small></div><div class="field full"><small>เอกสารสำคัญจะยังไม่ส่งให้พนักงานจนกว่า HR จะตรวจและอนุมัติ</small></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="documentGenerateSaveBtn" type="button" class="primary-btn">สร้าง Draft เพื่อตรวจสอบ</button></div></form></dialog>
 
@@ -1367,7 +1422,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=P8.24.0" type="module"></script>
+  <script src="/app.js?v=P8.26.0" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
