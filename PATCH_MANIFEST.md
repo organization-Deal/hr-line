@@ -1,23 +1,30 @@
-# Nakna P8.23-GPS1 — Quick Attendance GPS Reliability Patch
-
-Patch นี้ต่อจาก P8.22 และมีเฉพาะไฟล์ที่แก้/เพิ่ม
+# Nakna P8.24 — Document Signature & Branding Patch
 
 ## REPLACE
 - `src/index.js`
-- `public/attendance.js`
-- `public/attendance.html`
+- `public/app.js`
+- `public/index.html`
+- `public/styles.css`
+- `public/documents.js`
+- `public/documents.html`
+- `public/documents.css`
 
 ## ADD
-- `migrations/0027_attendance_gps_diagnostics.sql`
+- `migrations/0028_document_signatures.sql`
 
-## ต้องทำตอน Deploy
-1. Replace 3 ไฟล์ข้างต้น
-2. รัน migration `0027_attendance_gps_diagnostics.sql`
-3. Deploy Worker + static assets
-4. ปิดหน้า Check-in เดิมใน LINE แล้วเปิดจากเมนูใหม่ เพื่อให้ URL/cache version `P8.23-GPS1` ถูกโหลด
+## Deployment order
+1. Backup D1.
+2. Replace the 7 files above.
+3. Add migration `0028_document_signatures.sql`.
+4. Run remote D1 migrations.
+5. Deploy Worker/static assets.
+6. Hard refresh HR dashboard and reopen Employee Documents from LINE.
 
-## ไม่ได้แก้
-- Geofence rule
-- เวลาเข้างาน
-- LINE binding
-- Document System
+## New behavior
+- Company logo is embedded into generated HR PDFs when it is PNG/JPG-compatible; otherwise company name is used as fallback.
+- HR can configure signer name, position and a PNG/JPG signature from **Documents → ตั้งค่าเอกสาร & ลายเซ็น**.
+- Final documents include an HR signature block.
+- Documents requiring acknowledgement include an employee acknowledgement signature block.
+- Employee acknowledgement now requires a drawn signature in the LINE/Nakna employee portal.
+- The original final PDF is preserved. After acknowledgement the system creates a separate `-ACK.pdf` signed copy and stores signature/evidence hashes.
+- Existing old PDFs are handled safely: acknowledgement evidence is added on a new page rather than overwriting their layout.
