@@ -4878,12 +4878,17 @@ window.approveDocumentWorkflow=async function approveDocumentWorkflow(id,button=
   const original=button?.textContent||'อนุมัติ';
   if(button){button.disabled=true;button.textContent='กำลังสร้าง PDF…';}
   try{
-    const r=await api(`/api/document-workflows/${id}/approve`,{method:'POST',body:JSON.stringify({}),timeoutMs:45000});
+    const r=await api(`/api/document-workflows/${id}/approve`,{method:'POST',body:JSON.stringify({}),timeoutMs:60000,silentStatus:true});
     await refreshDocuments({silent:true});
-    toast(r.drive_url?'อนุมัติแล้ว · สร้าง PDF และเก็บเข้า Google Drive แล้ว':'อนุมัติและล็อกเอกสาร Final แล้ว');
+    toast(r.already_approved?'เอกสารนี้อนุมัติแล้ว':(r.drive_url?'อนุมัติแล้ว · สร้าง PDF และเก็บเข้า Google Drive แล้ว':'อนุมัติและล็อกเอกสาร Final แล้ว'));
   }catch(e){
     console.error('[Nakna] document approve failed',id,e);
-    toast(`อนุมัติเอกสารไม่สำเร็จ · ${e.message}`,true);
+    const raw=String(e?.message||e||'');
+    let message=raw;
+    if(raw.includes('Google Drive')||raw.includes('Google Workspace'))message=raw;
+    else if(raw.includes('GOOGLE_REAUTH_REQUIRED'))message='Google Drive ต้องเชื่อมใหม่ กรุณาไปที่ การเชื่อมต่อ แล้วเชื่อม Google อีกครั้ง';
+    else if(raw.includes('API_TIMEOUT'))message='สร้าง PDF ใช้เวลานานเกินไป กรุณาลองอีกครั้ง';
+    toast(`อนุมัติเอกสารไม่สำเร็จ · ${message}`,true);
   }finally{
     if(button && button.isConnected){button.disabled=false;button.textContent=original;}
   }
