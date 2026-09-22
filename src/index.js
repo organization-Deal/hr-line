@@ -3393,8 +3393,8 @@ async function handleApi(request, env, url, auth, ctx) {
     if(!company)throw httpError('ไม่พบบริษัท',404);
     await env.DB.prepare(`INSERT OR IGNORE INTO company_document_settings(client_id,legal_name,tax_id,address,phone) VALUES(?1,?2,?3,?4,?5)`).bind(clientId,company.legal_name||company.name,company.tax_id||null,company.address||null,company.phone||null).run();
     const defaults=[
-      ['EMP_CERT','หนังสือรับรองการทำงาน','employment_certificate','CERT',1,0,`เรียน {{document.recipient}}\n\n{{company.legal_name}} ขอรับรองว่า {{employee.full_name}} รหัสพนักงาน {{employee.employee_code}} เป็นพนักงานของบริษัท ปัจจุบันดำรงตำแหน่ง {{employee.position}} สังกัด {{employee.department}} โดยเริ่มปฏิบัติงานตั้งแต่วันที่ {{employee.start_date}} จนถึงปัจจุบัน\n\nวัตถุประสงค์ในการออกเอกสาร: {{document.purpose}}\n\nจึงออกหนังสือฉบับนี้ไว้เป็นหลักฐาน`],
-      ['SAL_CERT','หนังสือรับรองเงินเดือน','salary_certificate','SAL',1,0,`เรียน {{document.recipient}}\n\n{{company.legal_name}} ขอรับรองว่า {{employee.full_name}} รหัสพนักงาน {{employee.employee_code}} เป็นพนักงานของบริษัท ตำแหน่ง {{employee.position}} สังกัด {{employee.department}} เริ่มงานวันที่ {{employee.start_date}} และปัจจุบันได้รับเงินเดือนประจำ {{employee.salary}} บาทต่อเดือน\n\nวัตถุประสงค์ในการออกเอกสาร: {{document.purpose}}\n\nจึงออกหนังสือฉบับนี้ไว้เป็นหลักฐาน`],
+      ['EMP_CERT','หนังสือรับรองการทำงาน','employment_certificate','CERT',1,1,`เรียน {{document.recipient}}\n\n{{company.legal_name}} ขอรับรองว่า {{employee.full_name}} รหัสพนักงาน {{employee.employee_code}} เป็นพนักงานของบริษัท ปัจจุบันดำรงตำแหน่ง {{employee.position}} สังกัด {{employee.department}} โดยเริ่มปฏิบัติงานตั้งแต่วันที่ {{employee.start_date}} จนถึงปัจจุบัน\n\nวัตถุประสงค์ในการออกเอกสาร: {{document.purpose}}\n\nจึงออกหนังสือฉบับนี้ไว้เป็นหลักฐาน`],
+      ['SAL_CERT','หนังสือรับรองเงินเดือน','salary_certificate','SAL',1,1,`เรียน {{document.recipient}}\n\n{{company.legal_name}} ขอรับรองว่า {{employee.full_name}} รหัสพนักงาน {{employee.employee_code}} เป็นพนักงานของบริษัท ตำแหน่ง {{employee.position}} สังกัด {{employee.department}} เริ่มงานวันที่ {{employee.start_date}} และปัจจุบันได้รับเงินเดือนประจำ {{employee.salary}} บาทต่อเดือน\n\nวัตถุประสงค์ในการออกเอกสาร: {{document.purpose}}\n\nจึงออกหนังสือฉบับนี้ไว้เป็นหลักฐาน`],
       ['PROB_PASS','หนังสือแจ้งผ่านทดลองงาน','probation_pass','PROB',1,1,`เรียน {{employee.full_name}}\nเรื่อง แจ้งผลการผ่านทดลองงาน\n\n{{company.legal_name}} ขอแจ้งให้ทราบว่าท่านผ่านการทดลองงานในตำแหน่ง {{employee.position}} สังกัด {{employee.department}} โดยมีผลตั้งแต่วันที่ {{document.effective_date}} เป็นต้นไป\n\nรายละเอียดเพิ่มเติม: {{document.note}}\n\nโปรดกดรับทราบเอกสารฉบับนี้ในระบบ Nakna HR`],
       ['SAL_ADJ','หนังสือแจ้งปรับเงินเดือน','salary_adjustment','ADJ',1,1,`เรียน {{employee.full_name}}\nเรื่อง แจ้งปรับเงินเดือน\n\n{{company.legal_name}} ขอแจ้งการปรับเงินเดือนของท่านในตำแหน่ง {{employee.position}} โดยเงินเดือนใหม่เป็น {{document.new_salary}} บาทต่อเดือน มีผลตั้งแต่วันที่ {{document.effective_date}} เป็นต้นไป\n\nรายละเอียดเพิ่มเติม: {{document.note}}\n\nโปรดกดรับทราบเอกสารฉบับนี้ในระบบ Nakna HR`],
       ['ACK_NOTICE','หนังสือ/ประกาศให้รับทราบ','acknowledgement','ACK',1,1,`เรียน {{employee.full_name}}\nเรื่อง {{document.subject}}\n\n{{document.note}}\n\n{{company.legal_name}} ขอให้ท่านอ่านรายละเอียดข้างต้นและกดรับทราบในระบบ Nakna HR การกดรับทราบหมายถึงได้รับและเห็นเอกสาร ไม่ได้หมายถึงการสละสิทธิ์ในการชี้แจง`],
@@ -6375,17 +6375,31 @@ function thaiDocumentDate(value){
   return `${parts[2]} ${months[parts[1]-1]||''} ${parts[0]+543}`;
 }
 
-function drawSignatureLine(page,{x,y,width,label,name,position,font,dark,muted,teal,signatureImage=null,statusText=''}){
-  page.drawText(label,{x,y:y+76,size:8.5,font,color:teal});
+function drawSignatureCard(page,{x,y,width=238,height=126,label,name,position,dateText='',font,dark,muted,teal,line,soft,signatureImage=null,statusText='',helperText=''}){
+  page.drawRectangle({x,y,width,height,color:rgb(1,1,1),borderColor:line,borderWidth:.8});
+  page.drawRectangle({x,y:y+height-31,width,height:31,color:soft});
+  page.drawText(label,{x:x+14,y:y+height-20,size:8.6,font,color:teal,maxWidth:width-28});
+  const signatureAreaY=y+53;
   if(signatureImage){
-    const fit=fitPdfImage(signatureImage,Math.min(width-36,126),44);
-    page.drawImage(signatureImage,{x:x+(width-fit.width)/2,y:y+27,width:fit.width,height:fit.height});
+    const fit=fitPdfImage(signatureImage,Math.min(width-54,138),48);
+    page.drawImage(signatureImage,{x:x+(width-fit.width)/2,y:signatureAreaY,width:fit.width,height:fit.height});
   }else if(statusText){
-    page.drawText(statusText,{x:x+12,y:y+44,size:8,font,color:muted,maxWidth:width-24});
+    const safeStatus=String(statusText).slice(0,90);
+    const statusWidth=Math.min(font.widthOfTextAtSize(safeStatus,7.6),width-36);
+    page.drawText(safeStatus,{x:x+(width-statusWidth)/2,y:signatureAreaY+17,size:7.6,font,color:muted,maxWidth:width-36});
   }
-  page.drawLine({start:{x:x+12,y:y+23},end:{x:x+width-12,y:y+23},thickness:.7,color:muted,opacity:.55});
-  if(name)page.drawText(String(name).slice(0,55),{x:x+12,y:y+7,size:8.5,font,color:dark,maxWidth:width-24});
-  if(position)page.drawText(String(position).slice(0,55),{x:x+12,y:y-7,size:7.5,font,color:muted,maxWidth:width-24});
+  page.drawLine({start:{x:x+22,y:y+48},end:{x:x+width-22,y:y+48},thickness:.75,color:muted,opacity:.55});
+  if(name)page.drawText(String(name).slice(0,62),{x:x+14,y:y+32,size:8.5,font,color:dark,maxWidth:width-28});
+  if(position)page.drawText(String(position).slice(0,68),{x:x+14,y:y+19,size:7.2,font,color:muted,maxWidth:width-28});
+  if(dateText)page.drawText(String(dateText).slice(0,80),{x:x+14,y:y+7,size:6.8,font,color:muted,maxWidth:width-28});
+  if(helperText)page.drawText(String(helperText).slice(0,100),{x:x+14,y:y-13,size:6.6,font,color:muted,maxWidth:width-28});
+}
+
+function thaiDocumentDateTime(value){
+  try{
+    const d=new Date(value); if(Number.isNaN(d.getTime()))return String(value||'');
+    return d.toLocaleString('th-TH',{timeZone:'Asia/Bangkok',day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+  }catch{return String(value||'');}
 }
 
 async function materializeWorkflowDocument(env,clientId,documentId,approvalContext={}){
@@ -6411,14 +6425,14 @@ async function materializeWorkflowDocument(env,clientId,documentId,approvalConte
   };
   let body=String(row.body_template||row.note||''); for(const [key,value] of Object.entries(vars))body=body.split(key).join(String(value));
 
-  const fontBytes=await fetchNaknaPdfFont(env); const pdf=await PDFDocument.create(); pdf.setProducer('Nakna HR'); pdf.setSubject('NAKNA_SIGNATURE_LAYOUT_V1'); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(fontBytes,{subset:true});
+  const fontBytes=await fetchNaknaPdfFont(env); const pdf=await PDFDocument.create(); pdf.setProducer('Nakna HR'); pdf.setSubject('NAKNA_SIGNATURE_LAYOUT_V2'); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(fontBytes,{subset:true});
   const dark=rgb(18/255,60/255,74/255),teal=rgb(4/255,135/255,138/255),muted=rgb(107/255,120/255,122/255),line=rgb(224/255,232/255,230/255),soft=rgb(247/255,250/255,249/255);
   const logo=await embedPdfImageDataUrl(pdf,asset?.logo_data_url||'');
   const hrSignature=await embedPdfImageDataUrl(pdf,docSettings?.signer_signature_data_url||'');
   const companyName=String(docSettings?.legal_name||onboarding?.legal_name||client?.name||'');
   const issueDate=docData.issue_date||row.document_date||dateInBangkok();
   const signerName=String(docSettings?.signer_name||approvalContext?.approver_name||'HR / ผู้มีอำนาจ').trim();
-  const signerPosition=String(docSettings?.signer_position||approvalContext?.approver_role||'ฝ่ายทรัพยากรบุคคล').trim();
+  const signerPosition=String(docSettings?.signer_position||'ฝ่ายทรัพยากรบุคคล / ผู้มีอำนาจลงนาม').trim();
   const pageSize=[595.28,841.89];
   let page=null,y=0;
   const addPage=()=>{
@@ -6442,17 +6456,19 @@ async function materializeWorkflowDocument(env,clientId,documentId,approvalConte
     if(lineTextValue)page.drawText(lineTextValue,{x:58,y,size:10.5,font,color:dark,maxWidth:480});
     y-=lineTextValue?21:10;
   }
-  if(y<220)addPage();
-  page.drawLine({start:{x:48,y:205},end:{x:547,y:205},thickness:.8,color:line});
-  page.drawText('การลงนามและการรับทราบ',{x:48,y:190,size:9.5,font,color:dark});
-  if(Number(row.acknowledgement_required)){
-    drawSignatureLine(page,{x:48,y:96,width:225,label:'ฝ่าย HR / ผู้มีอำนาจลงนาม',name:signerName,position:signerPosition,font,dark,muted,teal,signatureImage:hrSignature,statusText:hrSignature?'':'อนุมัติผ่านระบบ Nakna HR'});
-    drawSignatureLine(page,{x:322,y:96,width:225,label:'พนักงานผู้รับทราบ',name:fullName,position:'รอลงชื่อรับทราบผ่าน LINE / Nakna HR',font,dark,muted,teal,statusText:'รอลายเซ็นรับทราบ'});
-  }else{
-    drawSignatureLine(page,{x:185,y:96,width:225,label:'ฝ่าย HR / ผู้มีอำนาจลงนาม',name:signerName,position:signerPosition,font,dark,muted,teal,signatureImage:hrSignature,statusText:hrSignature?'':'อนุมัติผ่านระบบ Nakna HR'});
-  }
-  page.drawText(`Document ID ${row.id} · Version ${row.version||1} · ออกเอกสาร ${thaiDocumentDate(issueDate)}`,{x:48,y:45,size:7.2,font,color:muted});
-  page.drawText(String(docSettings?.document_footer||'เอกสารฉบับนี้จัดทำและเก็บประวัติผ่านระบบ Nakna HR'),{x:48,y:31,size:7.2,font,color:muted,maxWidth:499});
+  // P8.25 — Two-party signature composition. Reserve a balanced signature zone on every standard employee document.
+  if(y<430)addPage();
+  const employeeSignatureLabel=['EMP_CERT','SAL_CERT'].includes(String(row.template_code||''))?'พนักงานผู้รับเอกสาร':'พนักงานผู้รับทราบ';
+  const acknowledgementCopy=['WARNING','ACK_NOTICE'].includes(String(row.template_code||''))
+    ?'การลงชื่อรับทราบเป็นหลักฐานว่าได้รับและเห็นเอกสาร ไม่ถือเป็นการยอมรับข้อกล่าวหาหรือสละสิทธิ์ในการชี้แจง'
+    :'ลายเซ็นทั้งสองฝ่ายใช้ยืนยันการออกเอกสารและการได้รับเอกสาร โดยเก็บวัน เวลา และ Version ไว้ใน Evidence Timeline';
+  page.drawLine({start:{x:48,y:414},end:{x:547,y:414},thickness:.8,color:line});
+  page.drawText('การลงนามและหลักฐานการรับเอกสาร',{x:48,y:394,size:10,font,color:dark});
+  page.drawText(acknowledgementCopy,{x:48,y:378,size:6.9,font,color:muted,maxWidth:499});
+  drawSignatureCard(page,{x:48,y:226,width:238,height:132,label:'ฝ่าย HR / ผู้มีอำนาจลงนาม',name:signerName,position:signerPosition,dateText:`ลงนาม / อนุมัติ ${thaiDocumentDate(issueDate)}`,font,dark,muted,teal,line,soft,signatureImage:hrSignature,statusText:hrSignature?'':'อนุมัติด้วยบัญชีผู้มีสิทธิ์ใน Nakna HR'});
+  drawSignatureCard(page,{x:309,y:226,width:238,height:132,label:employeeSignatureLabel,name:fullName,position:row.position_name||'พนักงาน',dateText:'รอลงลายเซ็นผ่าน LINE / Employee Portal',font,dark,muted,teal,line,soft,statusText:'รอลายเซ็นพนักงาน'});
+  page.drawText(`Document ID ${row.id} · Version ${row.version||1} · ออกเอกสาร ${thaiDocumentDate(issueDate)}`,{x:48,y:52,size:7.1,font,color:muted});
+  page.drawText(String(docSettings?.document_footer||'เอกสารฉบับนี้จัดทำและเก็บประวัติผ่านระบบ Nakna HR'),{x:48,y:37,size:7.1,font,color:muted,maxWidth:499});
 
   const bytes=new Uint8Array(await pdf.save());
   let accessToken;
@@ -6488,14 +6504,19 @@ async function materializeAcknowledgedDocumentCopy(env,{document,ack,access,sign
   const pages=pdf.getPages(); let page=pages[pages.length-1]; const dark=rgb(18/255,60/255,74/255),teal=rgb(4/255,135/255,138/255),muted=rgb(107/255,120/255,122/255),white=rgb(1,1,1),line=rgb(224/255,232/255,230/255);
   const signedName=`${access.first_name||''} ${access.last_name||''}`.trim()||access.nickname||access.employee_code||'พนักงาน';
   const signedAt=new Date().toISOString();
-  const layoutReady=String(pdf.getSubject?.()||'').includes('NAKNA_SIGNATURE_LAYOUT_V1');
-  if(layoutReady){
+  const subject=String(pdf.getSubject?.()||'');
+  const layoutV2=subject.includes('NAKNA_SIGNATURE_LAYOUT_V2');
+  const layoutV1=subject.includes('NAKNA_SIGNATURE_LAYOUT_V1');
+  if(layoutV2){
+    const employeeSignatureLabel=['employment_certificate','salary_certificate'].includes(String(document.document_type||''))?'พนักงานผู้รับเอกสาร':'พนักงานผู้รับทราบ';
+    drawSignatureCard(page,{x:309,y:226,width:238,height:132,label:employeeSignatureLabel,name:signedName,position:access.employee_code?`รหัสพนักงาน ${access.employee_code}`:'พนักงาน',dateText:`ลงลายเซ็น ${thaiDocumentDateTime(signedAt)}`,font,dark,muted,teal,line,soft:rgb(247/255,250/255,249/255),signatureImage,statusText:'',helperText:responseText?'มีคำชี้แจงแนบใน Evidence Timeline':''});
+  }else if(layoutV1){
     page.drawRectangle({x:322,y:82,width:225,height:113,color:white});
     page.drawText('พนักงานผู้รับทราบ',{x:322,y:172,size:8.5,font,color:teal});
     const fit=fitPdfImage(signatureImage,130,47); page.drawImage(signatureImage,{x:322+(225-fit.width)/2,y:118,width:fit.width,height:fit.height});
     page.drawLine({start:{x:334,y:113},end:{x:535,y:113},thickness:.7,color:muted,opacity:.55});
     page.drawText(signedName,{x:334,y:97,size:8.5,font,color:dark,maxWidth:201});
-    page.drawText(`ลงชื่อรับทราบ ${signedAt.replace('T',' ').slice(0,19)} UTC`,{x:334,y:83,size:6.8,font,color:muted,maxWidth:201});
+    page.drawText(`ลงชื่อรับทราบ ${thaiDocumentDateTime(signedAt)}`,{x:334,y:83,size:6.8,font,color:muted,maxWidth:201});
     if(responseText)page.drawText('มีคำชี้แจงแนบใน Evidence Timeline',{x:334,y:70,size:6.6,font,color:muted,maxWidth:201});
   }else{
     page=pdf.addPage([595.28,841.89]);
@@ -6506,7 +6527,7 @@ async function materializeAcknowledgedDocumentCopy(env,{document,ack,access,sign
     const fit=fitPdfImage(signatureImage,180,70); page.drawImage(signatureImage,{x:48,y:585,width:fit.width,height:fit.height});
     page.drawLine({start:{x:48,y:574},end:{x:270,y:574},thickness:.8,color:muted});
     page.drawText(signedName,{x:48,y:555,size:10,font,color:dark});
-    page.drawText(`ลงชื่อรับทราบ ${signedAt.replace('T',' ').slice(0,19)} UTC`,{x:48,y:536,size:8,font,color:muted});
+    page.drawText(`ลงชื่อรับทราบ ${thaiDocumentDateTime(signedAt)}`,{x:48,y:536,size:8,font,color:muted});
     if(responseText){page.drawText('มีคำชี้แจงแนบใน Evidence Timeline',{x:48,y:508,size:8,font,color:muted});}
     page.drawText('เอกสารต้นฉบับยังถูกเก็บแยกจากฉบับรับทราบเพื่อรักษาประวัติหลักฐาน',{x:48,y:64,size:7.5,font,color:muted});
   }
