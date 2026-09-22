@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P8.21';
-const NAKNA_RUNTIME_VERSION = '1.0-P8.21';
+const NAKNA_RUNTIME_RELEASE = 'P8.24-SIGN';
+const NAKNA_RUNTIME_VERSION = '1.0-P8.24-SIGN';
 const NAKNA_RUNTIME_FEATURE = 'document-approval-storage-diagnostics';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -3404,6 +3404,39 @@ async function handleApi(request, env, url, auth, ctx) {
     return env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 AND active=1 ORDER BY name`).bind(clientId).all();
   }
 
+  // P8.24 — Company document signature / branding settings.
+  if(path==='/api/document-settings' && method==='GET'){
+    if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูการตั้งค่าเอกสาร'},403);
+    await ensureDocumentWorkflowReady(env.DB);
+    await ensureCompanyDocumentTemplates(Number(auth.user.id));
+    const [settings,asset,company]=await Promise.all([
+      env.DB.prepare(`SELECT * FROM company_document_settings WHERE client_id=?1`).bind(clientId).first(),
+      env.DB.prepare(`SELECT logo_data_url FROM company_assets WHERE client_id=?1`).bind(clientId).first(),
+      env.DB.prepare(`SELECT c.name,o.legal_name,o.tax_id,o.address,o.phone FROM clients c LEFT JOIN company_onboarding o ON o.client_id=c.id WHERE c.id=?1`).bind(clientId).first()
+    ]);
+    return json({data:{...(settings||{}),company_name:company?.legal_name||company?.name||'',logo_data_url:asset?.logo_data_url||''}});
+  }
+
+  if(path==='/api/document-settings' && method==='PUT'){
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์แก้การตั้งค่าเอกสาร'},403);
+    await ensureDocumentWorkflowReady(env.DB);
+    const b=await safeJson(request);
+    const signerName=String(b.signer_name||'').trim().slice(0,180);
+    const signerPosition=String(b.signer_position||'').trim().slice(0,180);
+    const footer=String(b.document_footer||'').trim().slice(0,500);
+    const signature=String(b.signer_signature_data_url||'').trim();
+    if(signature && !/^data:image\/(png|jpeg);base64,/i.test(signature))return json({error:'ลายเซ็น HR รองรับเฉพาะ PNG หรือ JPG'},400);
+    if(signature.length>750000)return json({error:'ไฟล์ลายเซ็น HR มีขนาดใหญ่เกินไป กรุณาใช้ไฟล์ไม่เกินประมาณ 500 KB'},413);
+    const company=await env.DB.prepare(`SELECT c.name,o.legal_name,o.tax_id,o.address,o.phone FROM clients c LEFT JOIN company_onboarding o ON o.client_id=c.id WHERE c.id=?1`).bind(clientId).first();
+    await env.DB.prepare(`INSERT INTO company_document_settings(client_id,legal_name,tax_id,address,phone,signer_name,signer_position,signer_signature_data_url,document_footer,updated_at)
+      VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,CURRENT_TIMESTAMP)
+      ON CONFLICT(client_id) DO UPDATE SET signer_name=excluded.signer_name,signer_position=excluded.signer_position,signer_signature_data_url=excluded.signer_signature_data_url,document_footer=excluded.document_footer,updated_at=CURRENT_TIMESTAMP`)
+      .bind(clientId,company?.legal_name||company?.name||null,company?.tax_id||null,company?.address||null,company?.phone||null,signerName||null,signerPosition||null,signature||null,footer||null).run();
+    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json)
+      SELECT ?1,0,NULL,'user',?2,'document_settings_updated',?3 WHERE 1=1`).bind(clientId,Number(auth.user.id),JSON.stringify({signer_name:signerName||null,signer_position:signerPosition||null,has_signature:Boolean(signature)})).run().catch(()=>{});
+    return json({ok:true});
+  }
+
   // Nakna Document & Evidence System P8.02 — Phase 2-7
   if(path==='/api/document-system/overview' && method==='GET'){
     if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูศูนย์เอกสาร'},403);
@@ -3560,7 +3593,7 @@ async function handleApi(request, env, url, auth, ctx) {
     // and stored successfully. This avoids fake-approved documents and rollback races.
     let materialized=null;
     try{
-      materialized=await materializeWorkflowDocument(env,clientId,id);
+      materialized=await materializeWorkflowDocument(env,clientId,id,{approver_name:auth.user?.name||auth.user?.email||'HR',approver_role:auth.role||'HR'});
     }catch(error){
       const raw=String(error?.message||error||'').trim();
       let message=raw || 'สร้าง PDF ไม่สำเร็จ';
@@ -3593,7 +3626,7 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if(path==='/api/document-workflows/bulk-approve' && method==='POST'){
-    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const b=await safeJson(request); const ids=(Array.isArray(b.ids)?b.ids:[]).map(Number).filter(Boolean).slice(0,200); let approved=0; for(const id of ids){const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND approval_status='pending'`).bind(id,clientId).first(); if(!d)continue; await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,acted_at=CURRENT_TIMESTAMP WHERE document_id=?2 AND client_id=?3 AND status='pending'`).bind(Number(auth.user.id),id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(id).run(); try{await materializeWorkflowDocument(env,clientId,id);}catch(error){await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='pending',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();await env.DB.prepare(`UPDATE document_approvals SET status='pending',approver_user_id=NULL,acted_at=NULL WHERE document_id=?1 AND client_id=?2 AND status='approved'`).bind(id,clientId).run();continue;} if(Number(d.acknowledgement_required)){await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();} if(String(d.visibility||'')==='employee'){await notifyEmployeeDocumentReady(env,clientId,id).catch(()=>({ok:false}));} approved++;} return json({ok:true,approved});
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const b=await safeJson(request); const ids=(Array.isArray(b.ids)?b.ids:[]).map(Number).filter(Boolean).slice(0,200); let approved=0; for(const id of ids){const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND approval_status='pending'`).bind(id,clientId).first(); if(!d)continue; await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,acted_at=CURRENT_TIMESTAMP WHERE document_id=?2 AND client_id=?3 AND status='pending'`).bind(Number(auth.user.id),id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(id).run(); try{await materializeWorkflowDocument(env,clientId,id,{approver_name:auth.user?.name||auth.user?.email||'HR',approver_role:auth.role||'HR'});}catch(error){await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='pending',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();await env.DB.prepare(`UPDATE document_approvals SET status='pending',approver_user_id=NULL,acted_at=NULL WHERE document_id=?1 AND client_id=?2 AND status='approved'`).bind(id,clientId).run();continue;} if(Number(d.acknowledgement_required)){await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();} if(String(d.visibility||'')==='employee'){await notifyEmployeeDocumentReady(env,clientId,id).catch(()=>({ok:false}));} approved++;} return json({ok:true,approved});
   }
 
   const docAck=path.match(/^\/api\/document-workflows\/(\d+)\/acknowledge$/);
@@ -6307,17 +6340,66 @@ async function serveSharedPayrollDocument(env,token){
   const hash=await sha256Hex(token); const row=await env.DB.prepare(`SELECT pd.*,pp.period_key,e.employee_code FROM payroll_documents pd JOIN payroll_periods pp ON pp.id=pd.period_id JOIN employees e ON e.id=pd.employee_id WHERE pd.share_token_hash=?1`).bind(hash).first(); if(!row)return new Response('Payslip not found',{status:404}); const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(row.client_id)).first(); if(!workspace)return new Response('Document storage unavailable',{status:503}); const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const response=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(row.drive_file_id)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}}); if(!response.ok)return new Response('Payslip not found',{status:404}); const headers=new Headers({'content-type':'application/pdf','cache-control':'private, no-store','content-disposition':`inline; filename="${row.file_name}"`,'x-robots-tag':'noindex,nofollow'}); return new Response(response.body,{headers});
 }
 
-async function materializeWorkflowDocument(env,clientId,documentId){
+function parsePdfImageDataUrl(dataUrl){
+  const value=String(dataUrl||'').trim();
+  const m=value.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
+  if(!m)return null;
+  try{
+    const binary=atob(m[2]);
+    const bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    return {type:m[1].toLowerCase()==='png'?'png':'jpeg',bytes};
+  }catch{return null;}
+}
+
+async function embedPdfImageDataUrl(pdf,dataUrl){
+  const parsed=parsePdfImageDataUrl(dataUrl); if(!parsed)return null;
+  try{return parsed.type==='png'?await pdf.embedPng(parsed.bytes):await pdf.embedJpg(parsed.bytes);}catch{return null;}
+}
+
+function fitPdfImage(image,maxWidth,maxHeight){
+  const w=Number(image?.width||1),h=Number(image?.height||1),ratio=Math.min(maxWidth/w,maxHeight/h,1);
+  return {width:w*ratio,height:h*ratio};
+}
+
+async function sha256BytesHex(bytes){
+  const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
+  const digest=await crypto.subtle.digest('SHA-256',data);
+  return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+function thaiDocumentDate(value){
+  const raw=String(value||'').slice(0,10); const parts=raw.split('-').map(Number);
+  if(parts.length!==3||!parts[0]||!parts[1]||!parts[2])return raw||dateInBangkok();
+  const months=['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+  return `${parts[2]} ${months[parts[1]-1]||''} ${parts[0]+543}`;
+}
+
+function drawSignatureLine(page,{x,y,width,label,name,position,font,dark,muted,teal,signatureImage=null,statusText=''}){
+  page.drawText(label,{x,y:y+76,size:8.5,font,color:teal});
+  if(signatureImage){
+    const fit=fitPdfImage(signatureImage,Math.min(width-36,126),44);
+    page.drawImage(signatureImage,{x:x+(width-fit.width)/2,y:y+27,width:fit.width,height:fit.height});
+  }else if(statusText){
+    page.drawText(statusText,{x:x+12,y:y+44,size:8,font,color:muted,maxWidth:width-24});
+  }
+  page.drawLine({start:{x:x+12,y:y+23},end:{x:x+width-12,y:y+23},thickness:.7,color:muted,opacity:.55});
+  if(name)page.drawText(String(name).slice(0,55),{x:x+12,y:y+7,size:8.5,font,color:dark,maxWidth:width-24});
+  if(position)page.drawText(String(position).slice(0,55),{x:x+12,y:y-7,size:7.5,font,color:muted,maxWidth:width-24});
+}
+
+async function materializeWorkflowDocument(env,clientId,documentId,approvalContext={}){
   const db=env.DB;
   const row=await db.prepare(`SELECT d.*,t.body_template,t.name AS template_name,t.code AS template_code,e.employee_code,e.first_name,e.last_name,e.nickname,e.start_date,dep.name AS department_name,pos.name AS position_name FROM employee_documents d JOIN document_templates t ON t.id=d.template_id JOIN employees e ON e.id=d.employee_id LEFT JOIN departments dep ON dep.id=e.department_id LEFT JOIN positions pos ON pos.id=e.position_id WHERE d.id=?1 AND d.client_id=?2`).bind(Number(documentId),Number(clientId)).first();
   if(!row)throw httpError('ไม่พบข้อมูลเอกสารสำหรับสร้าง PDF',404);
   if(row.drive_file_id&&row.file_name)return {drive_url:row.drive_url||null,file_name:row.file_name};
-  const [client,profile,workspace,docSettings,onboarding]=await Promise.all([
+  const [client,profile,workspace,docSettings,onboarding,asset]=await Promise.all([
     getClient(db,clientId),
     db.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1').bind(Number(row.employee_id)).first(),
     db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(),
     db.prepare('SELECT * FROM company_document_settings WHERE client_id=?1').bind(Number(clientId)).first(),
-    db.prepare('SELECT legal_name,tax_id,address,phone FROM company_onboarding WHERE client_id=?1').bind(Number(clientId)).first()
+    db.prepare('SELECT legal_name,tax_id,address,phone FROM company_onboarding WHERE client_id=?1').bind(Number(clientId)).first(),
+    db.prepare('SELECT logo_data_url FROM company_assets WHERE client_id=?1').bind(Number(clientId)).first()
   ]);
   if(!workspace)throw httpError('บริษัทนี้ยังไม่ได้เชื่อม Google Drive กรุณาไปที่ การเชื่อมต่อ → Google Workspace ก่อนอนุมัติเอกสาร',409);
   if(!workspace.drive_folder_id)throw httpError('เชื่อม Google แล้ว แต่ยังไม่พบโฟลเดอร์ Drive ของบริษัท กรุณา Sync/เชื่อม Google ใหม่',409);
@@ -6325,17 +6407,56 @@ async function materializeWorkflowDocument(env,clientId,documentId){
   let docData={}; try{docData=JSON.parse(row.data_json||'{}')||{};}catch{docData={};}
   const vars={
     '{{employee.full_name}}':fullName,'{{employee.employee_code}}':row.employee_code||'-','{{employee.position}}':row.position_name||'-','{{employee.department}}':row.department_name||'-','{{employee.start_date}}':row.start_date||'-','{{employee.salary}}':Number(profile?.base_salary||0).toLocaleString('th-TH',{minimumFractionDigits:2}),
-    '{{company.name}}':client?.name||'','{{company.legal_name}}':docSettings?.legal_name||onboarding?.legal_name||client?.name||'','{{company.tax_id}}':docSettings?.tax_id||onboarding?.tax_id||'-','{{company.address}}':docSettings?.address||onboarding?.address||'-','{{company.phone}}':docSettings?.phone||onboarding?.phone||'-','{{company.signer_name}}':docSettings?.signer_name||'','{{company.signer_position}}':docSettings?.signer_position||'','{{document.date}}':docData.issue_date||row.document_date||dateInBangkok(),'{{document.effective_date}}':docData.effective_date||row.document_date||dateInBangkok(),'{{document.number}}':row.document_number||'','{{document.note}}':docData.note||row.note||'-','{{document.purpose}}':docData.purpose||row.note||'ใช้เป็นหลักฐานตามคำขอของพนักงาน','{{document.subject}}':docData.subject||row.note||'แจ้งเพื่อทราบ','{{document.recipient}}':docData.recipient||'ผู้เกี่ยวข้อง','{{document.new_salary}}':Number(docData.new_salary||profile?.base_salary||0).toLocaleString('th-TH',{minimumFractionDigits:2}),'{{document.case_number}}':docData.case_number||'-'
+    '{{company.name}}':client?.name||'','{{company.legal_name}}':docSettings?.legal_name||onboarding?.legal_name||client?.name||'','{{company.tax_id}}':docSettings?.tax_id||onboarding?.tax_id||'-','{{company.address}}':docSettings?.address||onboarding?.address||'-','{{company.phone}}':docSettings?.phone||onboarding?.phone||'-','{{company.signer_name}}':docSettings?.signer_name||approvalContext?.approver_name||'','{{company.signer_position}}':docSettings?.signer_position||approvalContext?.approver_role||'HR','{{document.date}}':docData.issue_date||row.document_date||dateInBangkok(),'{{document.effective_date}}':docData.effective_date||row.document_date||dateInBangkok(),'{{document.number}}':row.document_number||'','{{document.note}}':docData.note||row.note||'-','{{document.purpose}}':docData.purpose||row.note||'ใช้เป็นหลักฐานตามคำขอของพนักงาน','{{document.subject}}':docData.subject||row.note||'แจ้งเพื่อทราบ','{{document.recipient}}':docData.recipient||'ผู้เกี่ยวข้อง','{{document.new_salary}}':Number(docData.new_salary||profile?.base_salary||0).toLocaleString('th-TH',{minimumFractionDigits:2}),'{{document.case_number}}':docData.case_number||'-'
   };
   let body=String(row.body_template||row.note||''); for(const [key,value] of Object.entries(vars))body=body.split(key).join(String(value));
-  const fontBytes=await fetchNaknaPdfFont(env); const pdf=await PDFDocument.create(); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(fontBytes,{subset:true}); const page=pdf.addPage([595.28,841.89]); const dark=rgb(18/255,60/255,74/255),teal=rgb(4/255,135/255,138/255),muted=rgb(107/255,120/255,122/255);
-  page.drawText(String(docSettings?.legal_name||onboarding?.legal_name||client?.name||''),{x:48,y:790,size:11,font,color:teal}); page.drawText(String(row.title||row.template_name||'เอกสารพนักงาน'),{x:48,y:750,size:20,font,color:dark}); const companyMeta=[docSettings?.address||onboarding?.address,docSettings?.tax_id||onboarding?.tax_id?`เลขประจำตัวผู้เสียภาษี ${docSettings?.tax_id||onboarding?.tax_id}`:null].filter(Boolean).join(' · '); if(companyMeta)page.drawText(companyMeta.slice(0,90),{x:48,y:725,size:8,font,color:muted}); if(row.document_number)page.drawText(`เลขที่ ${row.document_number}`,{x:400,y:790,size:9,font,color:muted});
-  let y=665; for(const paragraph of String(body).split(/\n+/)){for(const line of wrapTextSimple(paragraph||' ',74)){page.drawText(line,{x:58,y,size:11,font,color:dark});y-=23;if(y<170)break;}y-=8;if(y<170)break;}
-  page.drawText(`ออกเอกสารวันที่ ${row.document_date||dateInBangkok()}`,{x:58,y:135,size:9,font,color:muted}); page.drawText(`Document ID ${row.id} · Version ${row.version||1}`,{x:58,y:116,size:8,font,color:muted}); if(docSettings?.signer_name){page.drawText(String(docSettings.signer_name),{x:390,y:140,size:10,font,color:dark}); if(docSettings?.signer_position)page.drawText(String(docSettings.signer_position),{x:390,y:122,size:9,font,color:muted});} page.drawText(String(docSettings?.document_footer||'เอกสารฉบับนี้จัดทำและเก็บประวัติผ่านระบบ Nakna HR'),{x:58,y:98,size:8,font,color:muted});
+
+  const fontBytes=await fetchNaknaPdfFont(env); const pdf=await PDFDocument.create(); pdf.setProducer('Nakna HR'); pdf.setSubject('NAKNA_SIGNATURE_LAYOUT_V1'); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(fontBytes,{subset:true});
+  const dark=rgb(18/255,60/255,74/255),teal=rgb(4/255,135/255,138/255),muted=rgb(107/255,120/255,122/255),line=rgb(224/255,232/255,230/255),soft=rgb(247/255,250/255,249/255);
+  const logo=await embedPdfImageDataUrl(pdf,asset?.logo_data_url||'');
+  const hrSignature=await embedPdfImageDataUrl(pdf,docSettings?.signer_signature_data_url||'');
+  const companyName=String(docSettings?.legal_name||onboarding?.legal_name||client?.name||'');
+  const issueDate=docData.issue_date||row.document_date||dateInBangkok();
+  const signerName=String(docSettings?.signer_name||approvalContext?.approver_name||'HR / ผู้มีอำนาจ').trim();
+  const signerPosition=String(docSettings?.signer_position||approvalContext?.approver_role||'ฝ่ายทรัพยากรบุคคล').trim();
+  const pageSize=[595.28,841.89];
+  let page=null,y=0;
+  const addPage=()=>{
+    page=pdf.addPage(pageSize); const {width,height}=page.getSize();
+    page.drawRectangle({x:0,y:height-118,width,height:118,color:soft});
+    if(logo){const fit=fitPdfImage(logo,58,58);page.drawImage(logo,{x:48,y:height-84,width:fit.width,height:fit.height});}
+    const textX=logo?120:48;
+    page.drawText(companyName,{x:textX,y:height-50,size:12,font,color:dark,maxWidth:350});
+    const address=String(docSettings?.address||onboarding?.address||'').trim(); const phone=String(docSettings?.phone||onboarding?.phone||'').trim(); const tax=String(docSettings?.tax_id||onboarding?.tax_id||'').trim();
+    const meta=[address,tax?`เลขประจำตัวผู้เสียภาษี ${tax}`:'',phone?`โทร ${phone}`:''].filter(Boolean).join('  ·  ');
+    if(meta)for(const [i,l] of wrapTextSimple(meta,82).slice(0,2).entries())page.drawText(l,{x:textX,y:height-69-(i*12),size:7.5,font,color:muted,maxWidth:420});
+    page.drawLine({start:{x:48,y:height-102},end:{x:547,y:height-102},thickness:.8,color:line});
+    y=height-145; return page;
+  };
+  addPage();
+  const title=String(row.title||row.template_name||'เอกสารพนักงาน'); const titleWidth=font.widthOfTextAtSize(title,19); page.drawText(title,{x:Math.max(48,(595.28-titleWidth)/2),y,size:19,font,color:dark}); y-=31;
+  const docMeta=`เลขที่ ${row.document_number||'-'}    วันที่ ${thaiDocumentDate(issueDate)}`; const metaWidth=font.widthOfTextAtSize(docMeta,8.5); page.drawText(docMeta,{x:Math.max(48,(595.28-metaWidth)/2),y,size:8.5,font,color:muted}); y-=36;
+  const bodyLines=[]; for(const paragraph of String(body).split(/\n+/)){const wrapped=wrapTextSimple(paragraph||' ',77);bodyLines.push(...wrapped,'');}
+  for(const lineTextValue of bodyLines){
+    if(y<255){addPage();}
+    if(lineTextValue)page.drawText(lineTextValue,{x:58,y,size:10.5,font,color:dark,maxWidth:480});
+    y-=lineTextValue?21:10;
+  }
+  if(y<220)addPage();
+  page.drawLine({start:{x:48,y:205},end:{x:547,y:205},thickness:.8,color:line});
+  page.drawText('การลงนามและการรับทราบ',{x:48,y:190,size:9.5,font,color:dark});
+  if(Number(row.acknowledgement_required)){
+    drawSignatureLine(page,{x:48,y:96,width:225,label:'ฝ่าย HR / ผู้มีอำนาจลงนาม',name:signerName,position:signerPosition,font,dark,muted,teal,signatureImage:hrSignature,statusText:hrSignature?'':'อนุมัติผ่านระบบ Nakna HR'});
+    drawSignatureLine(page,{x:322,y:96,width:225,label:'พนักงานผู้รับทราบ',name:fullName,position:'รอลงชื่อรับทราบผ่าน LINE / Nakna HR',font,dark,muted,teal,statusText:'รอลายเซ็นรับทราบ'});
+  }else{
+    drawSignatureLine(page,{x:185,y:96,width:225,label:'ฝ่าย HR / ผู้มีอำนาจลงนาม',name:signerName,position:signerPosition,font,dark,muted,teal,signatureImage:hrSignature,statusText:hrSignature?'':'อนุมัติผ่านระบบ Nakna HR'});
+  }
+  page.drawText(`Document ID ${row.id} · Version ${row.version||1} · ออกเอกสาร ${thaiDocumentDate(issueDate)}`,{x:48,y:45,size:7.2,font,color:muted});
+  page.drawText(String(docSettings?.document_footer||'เอกสารฉบับนี้จัดทำและเก็บประวัติผ่านระบบ Nakna HR'),{x:48,y:31,size:7.2,font,color:muted,maxWidth:499});
+
   const bytes=new Uint8Array(await pdf.save());
   let accessToken;
-  try{accessToken=await getWorkspaceGoogleAccessToken(env,workspace);}
-  catch(error){
+  try{accessToken=await getWorkspaceGoogleAccessToken(env,workspace);}catch(error){
     const raw=String(error?.message||error||'');
     if(raw.includes('GOOGLE_REAUTH_REQUIRED'))throw httpError('Google Drive หมดอายุหรือสิทธิ์ถูกยกเลิก กรุณาเชื่อม Google ใหม่',409);
     if(raw.includes('Integration encryption key is not configured'))throw httpError('Worker ยังไม่ได้ตั้งค่า Integration encryption key',503);
@@ -6346,10 +6467,58 @@ async function materializeWorkflowDocument(env,clientId,documentId){
   const safeNo=String(row.document_number||`DOC-${row.id}`).replace(/[^A-Za-z0-9ก-๙_-]/g,'_');
   const fileName=`${safeNo}-${row.employee_code}.pdf`;
   const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:empFolder,fileName,contentType:'application/pdf',bytes});
-  const digest=await crypto.subtle.digest('SHA-256',bytes); const sha=[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
+  const sha=await sha256BytesHex(bytes);
   await db.prepare(`UPDATE employee_documents SET file_name=?1,storage_provider='google_drive',drive_file_id=?2,drive_url=?3,content_type='application/pdf',sha256=?4,updated_at=CURRENT_TIMESTAMP WHERE id=?5 AND client_id=?6`).bind(fileName,uploaded.id,uploaded.webViewLink||null,sha,Number(documentId),Number(clientId)).run();
-  await db.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','pdf_materialized',?4)`).bind(Number(clientId),Number(documentId),Number(row.employee_id),JSON.stringify({file_name:fileName,sha256:sha,drive_file_id:uploaded.id})).run();
+  await db.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','pdf_materialized',?4)`).bind(Number(clientId),Number(documentId),Number(row.employee_id),JSON.stringify({file_name:fileName,sha256:sha,drive_file_id:uploaded.id,signer_name:signerName,signature_image:Boolean(hrSignature)})).run();
   return {drive_url:uploaded.webViewLink||null,file_name:fileName,sha256:sha};
+}
+
+async function materializeAcknowledgedDocumentCopy(env,{document,ack,access,signatureDataUrl,responseText}){
+  const db=env.DB;
+  const workspace=await db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(document.client_id)).first();
+  if(!workspace?.drive_folder_id)throw httpError('Google Drive ของบริษัทยังไม่พร้อมสำหรับเก็บลายเซ็นรับทราบ',409);
+  const parsed=parsePdfImageDataUrl(signatureDataUrl); if(!parsed)throw httpError('กรุณาลงลายเซ็นรับทราบใหม่อีกครั้ง',400);
+  if(parsed.bytes.length>450000)throw httpError('ลายเซ็นมีขนาดใหญ่เกินไป กรุณาลงลายเซ็นใหม่',413);
+  const accessToken=await getWorkspaceGoogleAccessToken(env,workspace);
+  const source=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(document.drive_file_id)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}});
+  if(!source.ok)throw httpError('ไม่สามารถเปิดเอกสารต้นฉบับเพื่อบันทึกลายเซ็นได้',502);
+  const originalBytes=new Uint8Array(await source.arrayBuffer());
+  const pdf=await PDFDocument.load(originalBytes); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(await fetchNaknaPdfFont(env),{subset:true});
+  const signatureImage=parsed.type==='png'?await pdf.embedPng(parsed.bytes):await pdf.embedJpg(parsed.bytes);
+  const pages=pdf.getPages(); let page=pages[pages.length-1]; const dark=rgb(18/255,60/255,74/255),teal=rgb(4/255,135/255,138/255),muted=rgb(107/255,120/255,122/255),white=rgb(1,1,1),line=rgb(224/255,232/255,230/255);
+  const signedName=`${access.first_name||''} ${access.last_name||''}`.trim()||access.nickname||access.employee_code||'พนักงาน';
+  const signedAt=new Date().toISOString();
+  const layoutReady=String(pdf.getSubject?.()||'').includes('NAKNA_SIGNATURE_LAYOUT_V1');
+  if(layoutReady){
+    page.drawRectangle({x:322,y:82,width:225,height:113,color:white});
+    page.drawText('พนักงานผู้รับทราบ',{x:322,y:172,size:8.5,font,color:teal});
+    const fit=fitPdfImage(signatureImage,130,47); page.drawImage(signatureImage,{x:322+(225-fit.width)/2,y:118,width:fit.width,height:fit.height});
+    page.drawLine({start:{x:334,y:113},end:{x:535,y:113},thickness:.7,color:muted,opacity:.55});
+    page.drawText(signedName,{x:334,y:97,size:8.5,font,color:dark,maxWidth:201});
+    page.drawText(`ลงชื่อรับทราบ ${signedAt.replace('T',' ').slice(0,19)} UTC`,{x:334,y:83,size:6.8,font,color:muted,maxWidth:201});
+    if(responseText)page.drawText('มีคำชี้แจงแนบใน Evidence Timeline',{x:334,y:70,size:6.6,font,color:muted,maxWidth:201});
+  }else{
+    page=pdf.addPage([595.28,841.89]);
+    page.drawText('หลักฐานการลงชื่อรับทราบ',{x:48,y:780,size:20,font,color:dark});
+    page.drawText(`เอกสาร ${document.document_number||document.id} · Version ${document.version||1}`,{x:48,y:753,size:8.5,font,color:muted});
+    page.drawLine({start:{x:48,y:733},end:{x:547,y:733},thickness:.8,color:line});
+    page.drawText('พนักงานผู้รับทราบ',{x:48,y:690,size:9,font,color:teal});
+    const fit=fitPdfImage(signatureImage,180,70); page.drawImage(signatureImage,{x:48,y:585,width:fit.width,height:fit.height});
+    page.drawLine({start:{x:48,y:574},end:{x:270,y:574},thickness:.8,color:muted});
+    page.drawText(signedName,{x:48,y:555,size:10,font,color:dark});
+    page.drawText(`ลงชื่อรับทราบ ${signedAt.replace('T',' ').slice(0,19)} UTC`,{x:48,y:536,size:8,font,color:muted});
+    if(responseText){page.drawText('มีคำชี้แจงแนบใน Evidence Timeline',{x:48,y:508,size:8,font,color:muted});}
+    page.drawText('เอกสารต้นฉบับยังถูกเก็บแยกจากฉบับรับทราบเพื่อรักษาประวัติหลักฐาน',{x:48,y:64,size:7.5,font,color:muted});
+  }
+  const signedBytes=new Uint8Array(await pdf.save());
+  const sourceMeta=await googleApiJson(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(document.drive_file_id)}?fields=parents,name`,accessToken);
+  const folderId=sourceMeta?.parents?.[0]||workspace.drive_folder_id;
+  const sigName=`signature-${document.document_number||document.id}-v${document.version||1}.png`.replace(/[^A-Za-z0-9ก-๙._-]/g,'_');
+  const signatureUpload=await uploadGoogleDriveFile(accessToken,{folderId,fileName:sigName,contentType:parsed.type==='png'?'image/png':'image/jpeg',bytes:parsed.bytes});
+  const originalName=String(document.file_name||`document-${document.id}.pdf`).replace(/\.pdf$/i,'');
+  const signedFileName=`${originalName}-ACK.pdf`;
+  const signedUpload=await uploadGoogleDriveFile(accessToken,{folderId,fileName:signedFileName,contentType:'application/pdf',bytes:signedBytes});
+  return {signedAt,signerName:signedName,signatureDriveFileId:signatureUpload.id,signatureUrl:signatureUpload.webViewLink||null,signatureSha256:await sha256BytesHex(parsed.bytes),signedPdfDriveFileId:signedUpload.id,signedPdfUrl:signedUpload.webViewLink||null,signedPdfSha256:await sha256BytesHex(signedBytes)};
 }
 
 async function generateEmployeeCertificate(env,clientId,employeeId,type,userId,note){
@@ -6847,7 +7016,8 @@ async function getEmployeePortalAccess(db,token){
 async function getPublicEmployeeDocuments(env,token){
   const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดเมนูจาก LINE ใหม่'},401);
   const rows=(await env.DB.prepare(`SELECT d.id,d.document_type,d.title,d.document_number,d.document_date,d.final_at,d.version,d.acknowledgement_required,d.acknowledgement_status,d.file_name,d.drive_url,
-      a.status AS ack_status,a.delivered_at,a.viewed_at,a.acknowledged_at,a.response_text,
+      a.status AS ack_status,a.delivered_at,a.viewed_at,a.acknowledged_at,a.response_text,a.signer_name,a.signature_method,a.signed_at,a.acknowledged_pdf_url,
+      CASE WHEN a.acknowledged_pdf_drive_file_id IS NOT NULL THEN 1 ELSE 0 END AS has_signed_copy,
       (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='line_sent') AS line_sent_at,
       (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='viewed') AS employee_viewed_at
     FROM employee_documents d
@@ -6856,7 +7026,7 @@ async function getPublicEmployeeDocuments(env,token){
     ORDER BY COALESCE(d.final_at,d.created_at) DESC,d.id DESC LIMIT 200`).bind(Number(access.client_id),Number(access.employee_id)).all()).results||[];
   let cases=[];
   try{cases=(await env.DB.prepare(`SELECT id,case_number,case_type,title,incident_date,description,status,employee_response_status,employee_response_text,employee_responded_at,created_at FROM hr_document_cases WHERE client_id=?1 AND employee_id=?2 AND employee_response_status IN ('requested','responded') ORDER BY updated_at DESC,id DESC LIMIT 50`).bind(Number(access.client_id),Number(access.employee_id)).all()).results||[];}catch(error){console.warn(JSON.stringify({level:'warn',event:'public_document_cases_unavailable',client_id:Number(access.client_id),message:String(error?.message||error)}));}
-  return json({employee:{id:access.employee_id,name:access.nickname||access.first_name,company_name:access.company_name},documents:rows,cases});
+  return json({employee:{id:access.employee_id,name:access.nickname||access.first_name,full_name:`${access.first_name||''} ${access.last_name||''}`.trim(),company_name:access.company_name},documents:rows,cases});
 }
 
 async function respondPublicHrDocumentCase(request,env,token,caseId){
@@ -6873,25 +7043,34 @@ async function respondPublicHrDocumentCase(request,env,token,caseId){
 
 async function getPublicEmployeeDocumentFile(env,token,documentId){
   const access=await getEmployeePortalAccess(env.DB,token); if(!access)return new Response('Link expired',{status:401});
-  const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND employee_id=?3 AND visibility='employee' AND workflow_status='final' AND COALESCE(status,'active')!='archived'`).bind(Number(documentId),Number(access.client_id),Number(access.employee_id)).first();
+  const d=await env.DB.prepare(`SELECT d.*,a.status AS ack_status,a.acknowledged_pdf_drive_file_id,a.acknowledged_pdf_url FROM employee_documents d LEFT JOIN document_acknowledgements a ON a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version WHERE d.id=?1 AND d.client_id=?2 AND d.employee_id=?3 AND d.visibility='employee' AND d.workflow_status='final' AND COALESCE(d.status,'active')!='archived'`).bind(Number(documentId),Number(access.client_id),Number(access.employee_id)).first();
   if(!d?.drive_file_id)return new Response('Document not found',{status:404});
   await env.DB.prepare(`UPDATE document_acknowledgements SET status=CASE WHEN status='pending' THEN 'viewed' ELSE status END,viewed_at=COALESCE(viewed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE document_id=?1 AND employee_id=?2 AND document_version=?3`).bind(Number(d.id),Number(access.employee_id),Number(d.version||1)).run();
   await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'employee',NULL,'viewed',?4)`).bind(Number(access.client_id),Number(d.id),Number(access.employee_id),JSON.stringify({version:Number(d.version||1)})).run().catch(()=>{});
   const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(access.client_id)).first(); if(!workspace)return new Response('Storage unavailable',{status:503});
-  const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(d.drive_file_id)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}}); if(!r.ok)return new Response('Document unavailable',{status:r.status});
-  const headers=new Headers({'content-type':d.content_type||'application/pdf','cache-control':'private, no-store','content-disposition':`inline; filename*=UTF-8''${encodeURIComponent(d.file_name||'document.pdf')}`,'x-robots-tag':'noindex,nofollow'}); return new Response(r.body,{headers});
+  const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const fileId=d.acknowledged_pdf_drive_file_id||d.drive_file_id; const signed=Boolean(d.acknowledged_pdf_drive_file_id);
+  const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}}); if(!r.ok)return new Response('Document unavailable',{status:r.status});
+  const baseName=String(d.file_name||'document.pdf').replace(/\.pdf$/i,''); const fileName=signed?`${baseName}-ACK.pdf`:d.file_name||'document.pdf';
+  const headers=new Headers({'content-type':'application/pdf','cache-control':'private, no-store','content-disposition':`inline; filename*=UTF-8''${encodeURIComponent(fileName)}`,'x-robots-tag':'noindex,nofollow'}); return new Response(r.body,{headers});
 }
 
 async function acknowledgePublicEmployeeDocument(request,env,token,documentId){
   const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดเมนูจาก LINE ใหม่'},401);
   const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND employee_id=?3 AND visibility='employee' AND workflow_status='final' AND acknowledgement_required=1 AND COALESCE(status,'active')!='archived'`).bind(Number(documentId),Number(access.client_id),Number(access.employee_id)).first(); if(!d)return json({error:'ไม่พบเอกสารที่ต้องรับทราบ'},404);
-  const body=await safeJson(request),response=String(body.response_text||'').trim().slice(0,5000),status=response?'responded':'acknowledged';
+  const body=await safeJson(request),response=String(body.response_text||'').trim().slice(0,5000),signatureDataUrl=String(body.signature_data_url||'').trim();
+  if(!/^data:image\/(png|jpeg);base64,/i.test(signatureDataUrl))return json({error:'กรุณาลงลายเซ็นรับทราบก่อนยืนยัน'},400);
+  if(signatureDataUrl.length>750000)return json({error:'ลายเซ็นมีขนาดใหญ่เกินไป กรุณาลงลายเซ็นใหม่'},413);
+  const status=response?'responded':'acknowledged';
   const ack=await env.DB.prepare(`SELECT * FROM document_acknowledgements WHERE document_id=?1 AND employee_id=?2 AND document_version=?3`).bind(Number(d.id),Number(access.employee_id),Number(d.version||1)).first(); if(!ack)return json({error:'เอกสารนี้ยังไม่ได้ถูกส่งให้รับทราบ'},409);
-  if(['acknowledged','responded'].includes(String(ack.status)))return json({ok:true,status:ack.status,already:true});
-  await env.DB.prepare(`UPDATE document_acknowledgements SET status=?1,viewed_at=COALESCE(viewed_at,CURRENT_TIMESTAMP),acknowledged_at=CURRENT_TIMESTAMP,response_text=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3`).bind(status,response||null,Number(ack.id)).run();
+  if(['acknowledged','responded'].includes(String(ack.status)))return json({ok:true,status:ack.status,already:true,signed_copy_url:ack.acknowledged_pdf_url||null});
+  let evidence;
+  try{evidence=await materializeAcknowledgedDocumentCopy(env,{document:d,ack,access,signatureDataUrl,responseText:response});}
+  catch(error){console.error(JSON.stringify({level:'error',event:'document_ack_signature_failed',client_id:Number(access.client_id),document_id:Number(d.id),employee_id:Number(access.employee_id),message:String(error?.message||error)}));return json({error:error?.message||'บันทึกลายเซ็นรับทราบไม่สำเร็จ'},Number(error?.status||500));}
+  await env.DB.prepare(`UPDATE document_acknowledgements SET status=?1,viewed_at=COALESCE(viewed_at,CURRENT_TIMESTAMP),acknowledged_at=CURRENT_TIMESTAMP,response_text=?2,signer_name=?3,signature_method='drawn_signature',signature_sha256=?4,signature_drive_file_id=?5,signature_url=?6,signature_user_agent=?7,signed_at=?8,acknowledged_pdf_drive_file_id=?9,acknowledged_pdf_url=?10,acknowledged_pdf_sha256=?11,updated_at=CURRENT_TIMESTAMP WHERE id=?12`)
+    .bind(status,response||null,evidence.signerName,evidence.signatureSha256,evidence.signatureDriveFileId,evidence.signatureUrl,String(request.headers.get('user-agent')||'').slice(0,500),evidence.signedAt,evidence.signedPdfDriveFileId,evidence.signedPdfUrl,evidence.signedPdfSha256,Number(ack.id)).run();
   await env.DB.prepare(`UPDATE employee_documents SET acknowledgement_status=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(status,Number(d.id),Number(access.client_id)).run();
-  await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'employee',NULL,?4,?5)`).bind(Number(access.client_id),Number(d.id),Number(access.employee_id),status,JSON.stringify({version:Number(d.version||1),response_text:response||null})).run();
-  return json({ok:true,status});
+  await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'employee',NULL,?4,?5)`).bind(Number(access.client_id),Number(d.id),Number(access.employee_id),status,JSON.stringify({version:Number(d.version||1),response_text:response||null,signature_method:'drawn_signature',signature_sha256:evidence.signatureSha256,signed_pdf_sha256:evidence.signedPdfSha256})).run();
+  return json({ok:true,status,signed_copy_url:evidence.signedPdfUrl});
 }
 
 async function getPublicLearningPortal(env,token){
@@ -7693,6 +7872,10 @@ async function ensureDocumentWorkflowReady(db){
     FOREIGN KEY(document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
   )`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_document_ack_pending ON document_acknowledgements(client_id,status,employee_id)`).run().catch(()=>{});
+  await ensureColumns(db,'document_acknowledgements',[
+    ['signer_name','TEXT'],['signature_method','TEXT'],['signature_sha256','TEXT'],['signature_drive_file_id','TEXT'],['signature_url','TEXT'],['signature_user_agent','TEXT'],['signed_at','TEXT'],
+    ['acknowledged_pdf_drive_file_id','TEXT'],['acknowledged_pdf_url','TEXT'],['acknowledged_pdf_sha256','TEXT']
+  ]);
 
   await db.prepare(`CREATE TABLE IF NOT EXISTS company_document_settings (
     client_id INTEGER PRIMARY KEY,
@@ -7707,6 +7890,9 @@ async function ensureDocumentWorkflowReady(db){
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
   )`).run();
+  await ensureColumns(db,'company_document_settings',[
+    ['signer_signature_data_url','TEXT']
+  ]);
 
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_employee_documents_template_workflow ON employee_documents(client_id,template_id,workflow_status,created_at)`).run().catch(()=>{});
   SCHEMA_READY.add('doc-workflow');
