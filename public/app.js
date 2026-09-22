@@ -26,6 +26,7 @@ const state = {
   payrollDetail: null,
   documents: { data: [], payslips: [] },
   documentSystem: {summary:{},templates:[],pending_approvals:[],pending_acknowledgements:[],open_cases:[],expiring:[]},
+  documentSettings: null,
   learning: { courses: [], assignments: [], summary: {} },
   performance: { cycles: [], goals: [], one_on_ones: [], probation_reviews: [], probation_due: [], summary: {} },
   engagement: { rules: [], rewards: [], redemptions: [], leaderboard: [], recent_transactions: [], summary: {} },
@@ -4494,6 +4495,32 @@ async function refreshDocuments(options={}){
   if(docsError&&!options.silent)toast(docsError.message||'โหลดรายการเอกสารไม่สำเร็จ',true);
   return {documents_ok:!docsError,overview_ok:!overviewError};
 }
+async function openDocumentSettings(){
+  const dlg=$('#documentSettingsModal'); if(!dlg)return;
+  try{
+    const r=await api('/api/document-settings'); const d=r?.data||{}; state.documentSettings=d;
+    $('#docSignerName').value=d.signer_name||state.me?.user?.name||'';
+    $('#docSignerPosition').value=d.signer_position||'ฝ่ายทรัพยากรบุคคล';
+    $('#docFooterText').value=d.document_footer||'เอกสารฉบับนี้จัดทำและเก็บประวัติผ่านระบบ Nakna HR';
+    $('#docSignatureDataUrl').value=d.signer_signature_data_url||'';
+    const preview=$('#docSignaturePreview'); preview.innerHTML=d.signer_signature_data_url?`<img src="${escapeAttr(d.signer_signature_data_url)}" alt="ลายเซ็น HR"><span>ลายเซ็นที่จะใช้ในเอกสาร</span>`:'<span>ยังไม่มีรูปลายเซ็น · ระบบจะแสดงชื่อผู้อนุมัติแทน</span>';
+    const logo=$('#docCompanyLogoPreview'); logo.innerHTML=d.logo_data_url?`<img src="${escapeAttr(d.logo_data_url)}" alt="โลโก้บริษัท">`:'<span>ยังไม่มี Logo บริษัท</span>';
+    dlg.showModal();
+  }catch(e){toast(e.message||'โหลดการตั้งค่าเอกสารไม่สำเร็จ',true);}
+}
+
+function bindDocumentSignatureUpload(){
+  const input=$('#docSignerSignatureFile'); if(!input||input.dataset.bound)return; input.dataset.bound='1';
+  input.addEventListener('change',()=>{const file=input.files?.[0];if(!file)return;if(!/^image\/(png|jpeg)$/.test(file.type))return toast('ลายเซ็นรองรับ PNG หรือ JPG',true);if(file.size>520000)return toast('ไฟล์ลายเซ็นต้องไม่เกินประมาณ 500 KB',true);const reader=new FileReader();reader.onload=()=>{const data=String(reader.result||'');$('#docSignatureDataUrl').value=data;$('#docSignaturePreview').innerHTML=`<img src="${escapeAttr(data)}" alt="ลายเซ็น HR"><span>พร้อมใช้ในเอกสาร</span>`;};reader.readAsDataURL(file);});
+  $('#clearDocSignerSignatureBtn')?.addEventListener('click',()=>{$('#docSignatureDataUrl').value='';input.value='';$('#docSignaturePreview').innerHTML='<span>ลบลายเซ็นแล้ว · เอกสารจะแสดงชื่อผู้อนุมัติแทน</span>';});
+}
+
+async function saveDocumentSettings(){
+  const btn=$('#saveDocumentSettingsBtn'); if(!btn)return; const old=btn.textContent;btn.disabled=true;btn.textContent='กำลังบันทึก…';
+  try{await api('/api/document-settings',{method:'PUT',body:JSON.stringify({signer_name:$('#docSignerName').value.trim(),signer_position:$('#docSignerPosition').value.trim(),signer_signature_data_url:$('#docSignatureDataUrl').value,document_footer:$('#docFooterText').value.trim()})});$('#documentSettingsModal')?.close();state.documentSettings=null;toast('บันทึกผู้ลงนามและลายเซ็น HR แล้ว');renderDocumentA4Preview();}
+  catch(e){toast(e.message||'บันทึกการตั้งค่าเอกสารไม่สำเร็จ',true);}finally{btn.disabled=false;btn.textContent=old;}
+}
+
 const documentTypeMeta={
   EMP_CERT:['รับรองการทำงาน','ชื่อ · ตำแหน่ง · แผนก · วันเริ่มงาน','DOC'],
   SAL_CERT:['รับรองเงินเดือน','ชื่อ · ตำแหน่ง · เงินเดือนล่าสุด','฿'],
@@ -4556,7 +4583,11 @@ function renderDocumentA4Preview(){
   if(code==='PROB_PASS') body=`เรียน ${escapeHtml(name)}<br><br>${escapeHtml(company)} ขอแจ้งให้ทราบว่าท่านผ่านการทดลองงานในตำแหน่ง ${escapeHtml(position)} สังกัด ${escapeHtml(department)} โดยมีผลตั้งแต่วันที่ ${escapeHtml(d.effective_date||'-')} เป็นต้นไป${d.note?`<br><br>${escapeHtml(d.note)}`:''}`;
   if(code==='SAL_ADJ') body=`เรียน ${escapeHtml(name)}<br><br>${escapeHtml(company)} ขอแจ้งการปรับเงินเดือนของท่านเป็น <b>${Number(d.new_salary||0).toLocaleString('th-TH')} บาท/เดือน</b> มีผลตั้งแต่วันที่ ${escapeHtml(d.effective_date||'-')} เป็นต้นไป${d.note?`<br><br>${escapeHtml(d.note)}`:''}`;
   if(code==='ACK_NOTICE') body=`เรียน ${escapeHtml(name)}<br><b>เรื่อง ${escapeHtml(d.subject||'—')}</b><br><br>${escapeHtml(d.note||'กรอกรายละเอียดประกาศด้านบน')}`;
-  root.innerHTML=`<p class="kicker">A4 DOCUMENT PREVIEW</p><div style="background:#fff;border:1px solid #dfe8e6;border-radius:16px;padding:24px;box-shadow:0 8px 28px rgba(18,60,74,.06);"><div style="font-size:12px;color:#04878a;font-weight:700;letter-spacing:.08em;">${escapeHtml(company)}</div><h3 style="margin:12px 0 18px;">${escapeHtml(meta[0])}</h3><div style="font-size:14px;line-height:1.85;color:#243b40;">${body}</div><div style="margin-top:28px;padding-top:16px;border-top:1px solid #edf1f0;font-size:12px;color:#738286;">ข้อมูลบริษัท ผู้ลงนาม เลขเอกสาร และ Logo จะใช้ของบริษัทที่กำลังใช้งาน</div></div>`;
+  const needsAck=['PROB_PASS','SAL_ADJ','ACK_NOTICE'].includes(code);
+  const signerName=state.documentSettings?.signer_name||'HR / ผู้มีอำนาจ';
+  const signerPosition=state.documentSettings?.signer_position||'ฝ่ายทรัพยากรบุคคล';
+  const hrSig=state.documentSettings?.signer_signature_data_url||'';
+  root.innerHTML=`<p class="kicker">A4 DOCUMENT PREVIEW</p><div class="document-a4-preview-sheet"><div class="document-a4-brand"><div class="document-a4-logo">${state.documentSettings?.logo_data_url?`<img src="${escapeAttr(state.documentSettings.logo_data_url)}" alt="Logo">`:'<span>LOGO</span>'}</div><div><strong>${escapeHtml(company)}</strong><small>ข้อมูลที่อยู่ เลขภาษี และเบอร์โทรจะดึงจากบริษัทนี้</small></div></div><div class="document-a4-title"><h3>${escapeHtml(meta[0])}</h3><small>เลขเอกสารจะถูกสร้างเมื่อบันทึก Draft</small></div><div class="document-a4-body">${body}</div><div class="document-a4-signatures ${needsAck?'two':''}"><div class="signature-preview-box"><span>ฝ่าย HR / ผู้มีอำนาจลงนาม</span>${hrSig?`<img src="${escapeAttr(hrSig)}" alt="ลายเซ็น HR">`:'<div class="signature-placeholder">ลายเซ็น HR</div>'}<b>${escapeHtml(signerName)}</b><small>${escapeHtml(signerPosition)}</small></div>${needsAck?`<div class="signature-preview-box"><span>พนักงานผู้รับทราบ</span><div class="signature-placeholder">ลงชื่อผ่าน LINE / Nakna HR</div><b>${escapeHtml(name)}</b><small>ระบบจะเก็บวันเวลาและหลักฐานการรับทราบ</small></div>`:''}</div><div class="document-a4-footnote">Logo · ข้อมูลบริษัท · ลายเซ็น HR · ลายเซ็นรับทราบ จะถูกผูกกับบริษัทและพนักงานของเอกสารฉบับนั้น</div></div>`;
 }
 
 function renderDocumentDynamicForm(){
@@ -4923,7 +4954,7 @@ window.sendEmployeeDocument=async function sendEmployeeDocument(id,button=null){
 async function bulkApproveDocumentWorkflows(){const ids=(state.documentSystem?.pending_approvals||[]).map(x=>Number(x.document_id)).filter(Boolean);if(!ids.length)return toast('ไม่มีเอกสารรออนุมัติ');if(!confirm(`อนุมัติเอกสาร ${ids.length} ฉบับพร้อมกัน?`))return;try{const r=await api('/api/document-workflows/bulk-approve',{method:'POST',body:JSON.stringify({ids}),timeoutMs:90000});await refreshDocuments({silent:true});toast(`อนุมัติแล้ว ${Number(r.approved||0)} ฉบับ`);}catch(e){toast(`อนุมัติหลายเอกสารไม่สำเร็จ · ${e.message}`,true)}}
 async function seedDocumentTemplates(){try{await api('/api/document-templates/seed',{method:'POST',body:'{}'});await refreshDocuments();toast('ติดตั้ง Template มาตรฐานแล้ว');}catch(e){toast(e.message,true)}}
 
-$('#seedDocumentTemplatesBtn')?.addEventListener('click',seedDocumentTemplates); $('#refreshDocumentSystemBtn')?.addEventListener('click',refreshDocuments); $('#bulkApproveDocumentsBtn')?.addEventListener('click',bulkApproveDocumentWorkflows);
+$('#seedDocumentTemplatesBtn')?.addEventListener('click',seedDocumentTemplates); $('#refreshDocumentSystemBtn')?.addEventListener('click',refreshDocuments); $('#bulkApproveDocumentsBtn')?.addEventListener('click',bulkApproveDocumentWorkflows); $('#documentSettingsBtn')?.addEventListener('click',()=>{bindDocumentSignatureUpload();openDocumentSettings();}); $('#saveDocumentSettingsBtn')?.addEventListener('click',saveDocumentSettings);
 
 window.quickOpenDocumentCase=async function quickOpenDocumentCase(){
   try{
