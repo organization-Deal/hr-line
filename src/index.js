@@ -1605,6 +1605,12 @@ export default {
         return await redeemPublicReward(request, env, publicRewardRedeemMatch[1], Number(publicRewardRedeemMatch[2]));
       }
 
+      const publicAttendanceGpsLogMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{32,})\/gps-log$/);
+      if (publicAttendanceGpsLogMatch && request.method === 'POST') {
+        await ensureV100P1Ready(env.DB);
+        return await submitQuickAttendanceGpsLog(request, env, publicAttendanceGpsLogMatch[1]);
+      }
+
       const publicAttendanceMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{32,})\/(check-in|check-out)$/);
       if (publicAttendanceMatch && request.method === 'POST') {
         await ensureV100P1Ready(env.DB);
@@ -1696,6 +1702,22 @@ async function handleApi(request, env, url, auth, ctx) {
   const method = request.method;
   const path = url.pathname;
   const clientId = auth.clientId ? Number(auth.clientId) : null;
+
+  if (path === '/api/attendance/gps-diagnostics' && method === 'GET') {
+    if (!clientId) return json({error:'COMPANY_REQUIRED'},409);
+    if (!['owner','co_owner','hr_admin','hr','manager'].includes(String(auth.role||''))) return json({error:'ไม่มีสิทธิ์ดู GPS diagnostics'},403);
+    await ensureAttendanceGpsDiagnosticsReady(env.DB);
+    const requestedLimit=Math.max(1,Math.min(200,Number(url.searchParams.get('limit')||50)));
+    const employeeId=Number(url.searchParams.get('employee_id')||0);
+    const code=String(url.searchParams.get('code')||'').trim().slice(0,80);
+    let sql=`SELECT d.*,e.employee_code,e.first_name,e.last_name,e.nickname FROM attendance_gps_diagnostics d JOIN employees e ON e.id=d.employee_id AND e.client_id=d.client_id WHERE d.client_id=?1`;
+    const binds=[clientId];
+    if(employeeId>0){binds.push(employeeId);sql+=` AND d.employee_id=?${binds.length}`;}
+    if(code){binds.push(code);sql+=` AND d.error_code=?${binds.length}`;}
+    binds.push(requestedLimit);sql+=` ORDER BY d.id DESC LIMIT ?${binds.length}`;
+    const rows=await env.DB.prepare(sql).bind(...binds).all();
+    return json({ok:true,items:rows.results||[]},200);
+  }
 
   if (path === '/api/me' && method === 'GET') {
     // Account reconciliation can touch several D1 tables and is only needed
@@ -5522,6 +5544,80 @@ async function getQuickAttendanceAccess(db,token){
   return getEmployeePortalAccessFast(db,raw).catch(()=>null);
 }
 
+
+async function ensureAttendanceGpsDiagnosticsReady(db){
+  if(SCHEMA_READY.has('attendance_gps_diagnostics'))return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_gps_diagnostics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    action TEXT,
+    stage TEXT NOT NULL,
+    attempt INTEGER,
+    outcome TEXT,
+    error_code TEXT,
+    error_message TEXT,
+    accuracy_m REAL,
+    elapsed_ms INTEGER,
+    permission_state TEXT,
+    browser_name TEXT,
+    browser_version TEXT,
+    os_name TEXT,
+    os_version TEXT,
+    line_version TEXT,
+    user_agent TEXT,
+    visibility_state TEXT,
+    is_secure_context INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_attendance_gps_diagnostics_employee ON attendance_gps_diagnostics(client_id,employee_id,created_at DESC)`).run().catch(()=>{});
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_attendance_gps_diagnostics_code ON attendance_gps_diagnostics(client_id,error_code,created_at DESC)`).run().catch(()=>{});
+  SCHEMA_READY.add('attendance_gps_diagnostics');
+}
+function gpsDiagText(value,max=500){
+  if(value==null)return null;
+  return String(value).replace(/[\u0000-\u001f\u007f]/g,' ').slice(0,max);
+}
+function gpsDiagInt(value){
+  const n=Number(value);return Number.isFinite(n)?Math.round(n):null;
+}
+function gpsDiagNumber(value){
+  const n=Number(value);return Number.isFinite(n)?n:null;
+}
+async function writeAttendanceGpsDiagnostic(db,access,payload={}){
+  if(!access?.client_id||!access?.employee_id)return;
+  await ensureAttendanceGpsDiagnosticsReady(db);
+  const row={
+    action:gpsDiagText(payload.action,20),stage:gpsDiagText(payload.stage||'unknown',60)||'unknown',attempt:gpsDiagInt(payload.attempt),
+    outcome:gpsDiagText(payload.outcome,30),error_code:gpsDiagText(payload.error_code,80),error_message:gpsDiagText(payload.error_message,500),
+    accuracy_m:gpsDiagNumber(payload.accuracy_m),elapsed_ms:gpsDiagInt(payload.elapsed_ms),permission_state:gpsDiagText(payload.permission_state,30),
+    browser_name:gpsDiagText(payload.browser_name,80),browser_version:gpsDiagText(payload.browser_version,40),os_name:gpsDiagText(payload.os_name,50),
+    os_version:gpsDiagText(payload.os_version,40),line_version:gpsDiagText(payload.line_version,40),user_agent:gpsDiagText(payload.user_agent,500),
+    visibility_state:gpsDiagText(payload.visibility_state,30),is_secure_context:payload.is_secure_context===false?0:1,
+  };
+  await db.prepare(`INSERT INTO attendance_gps_diagnostics (
+    client_id,employee_id,action,stage,attempt,outcome,error_code,error_message,accuracy_m,elapsed_ms,permission_state,
+    browser_name,browser_version,os_name,os_version,line_version,user_agent,visibility_state,is_secure_context
+  ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)`)
+    .bind(Number(access.client_id),Number(access.employee_id),row.action,row.stage,row.attempt,row.outcome,row.error_code,row.error_message,
+      row.accuracy_m,row.elapsed_ms,row.permission_state,row.browser_name,row.browser_version,row.os_name,row.os_version,row.line_version,row.user_agent,
+      row.visibility_state,row.is_secure_context).run();
+  console.log(JSON.stringify({level:'info',event:'attendance_gps_diagnostic',client_id:Number(access.client_id),employee_id:Number(access.employee_id),
+    action:row.action,stage:row.stage,attempt:row.attempt,outcome:row.outcome,error_code:row.error_code,accuracy_m:row.accuracy_m,elapsed_ms:row.elapsed_ms,
+    browser:row.browser_name,os:row.os_name,line_version:row.line_version}));
+}
+async function submitQuickAttendanceGpsLog(request,env,token){
+  const access=await getQuickAttendanceAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์เช็กอินหมดอายุ'},401,{'cache-control':'no-store'});
+  const body=await safeJson(request);
+  try{await writeAttendanceGpsDiagnostic(env.DB,access,body||{});}catch(error){
+    console.error(JSON.stringify({level:'warn',event:'attendance_gps_diagnostic_write_failed',message:String(error?.message||error)}));
+  }
+  return json({ok:true},200,{'cache-control':'no-store'});
+}
+
 async function getLineMenuManagementAccessFast(env,lineCtx,lineUserId,preferredClientId=null){
   const providerScope=String(lineCtx?.providerScope||'default');
   const preferred=Number(preferredClientId||0);
@@ -5565,8 +5661,8 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
   const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
   const attendanceAccessToken=attendanceToken||portalToken||null;
-  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.79`:null;
-  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.79`:null;
+  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=P8.23-GPS1`:null;
+  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=P8.23-GPS1`:null;
   const wellnessUrl=portalToken?`${base}/wellness.html?token=${encodeURIComponent(portalToken)}`:null;
   return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,wellnessUrl,NAKNA_RUNTIME_RELEASE);
 }
@@ -5580,7 +5676,7 @@ async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='c
     if(!token) throw new Error('สร้างลิงก์ Quick Attendance ไม่สำเร็จ');
     const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
     const normalized=action==='checkout'?'checkout':'checkin';
-    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.79`;
+    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=P8.23-GPS1`;
     return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
   }catch(e){
     return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
@@ -5606,6 +5702,10 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
   if(!access)return json({error:'ลิงก์เช็กอินหมดอายุ กรุณากดเมนูใน LINE ใหม่อีกครั้ง'},401);
   const body=await safeJson(request);
   const lat=Number(body.latitude),lng=Number(body.longitude),accuracy=Number(body.accuracy||0);
+  const gpsMeta=body?.gps_meta&&typeof body.gps_meta==='object'?body.gps_meta:{};
+  const receiptDiag={...gpsMeta,action:routeAction==='check-out'?'checkout':'checkin',stage:'server_fix_received',outcome:'success',accuracy_m:Number.isFinite(accuracy)?Math.round(accuracy):null,elapsed_ms:gpsMeta?.acquisition_ms};
+  const receiptLog=writeAttendanceGpsDiagnostic(env.DB,access,receiptDiag).catch(error=>console.error(JSON.stringify({level:'warn',event:'attendance_gps_server_receipt_log_failed',message:String(error?.message||error)})));
+  if(ctx?.waitUntil)ctx.waitUntil(receiptLog);
   const positionTimestamp=body.position_timestamp?Date.parse(String(body.position_timestamp)):NaN;
   if(Number.isFinite(positionTimestamp)&&Math.abs(Date.now()-positionTimestamp)>120000){
     return json({error:'GPS ที่ได้รับเป็นตำแหน่งเก่า กรุณาเปิด Location แล้วกดลองใหม่',code:'STALE_LOCATION_FIX'},422);
