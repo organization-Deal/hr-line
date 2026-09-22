@@ -4463,7 +4463,7 @@ function renderDocuments(){
     pending_approvals:Math.max(Number(sum.pending_approvals||0),computed.pending_approvals),
     pending_ack:Math.max(Number(sum.pending_ack||0),computed.pending_ack)
   };
-  const lineCount=pays.filter(x=>x.line_notified_at).length;
+  const lineCount=pays.filter(x=>x.line_notified_at).length+docs.filter(x=>x.line_sent_at).length;
   $('#documentSummary').innerHTML=`<div><span>เอกสารทั้งหมด</span><strong>${summary.total}</strong></div><div><span>Draft</span><strong>${summary.drafts}</strong></div><div><span>รออนุมัติ</span><strong>${summary.pending_approvals}</strong></div><div><span>รอรับทราบ</span><strong>${summary.pending_ack}</strong></div><div><span>Payslip</span><strong>${pays.length}</strong></div><div><span>แจ้ง LINE</span><strong>${lineCount}</strong></div>`;
   const apiApprovals=sys.pending_approvals||[];
   const approvalIds=new Set(apiApprovals.map(x=>Number(x.document_id)));
@@ -4474,7 +4474,7 @@ function renderDocuments(){
   const templateRows=templates.length?templates:standardDocumentCatalog.map(t=>({...t,automation_mode:'assisted',approval_required:1,acknowledgement_required:['PROB_PASS','SAL_ADJ','ACK_NOTICE','WARNING'].includes(t.code)}));
   $('#documentTemplateList').innerHTML=templateRows.map(t=>`<article class="document-row"><div class="document-file-icon">T</div><div><strong>${escapeHtml(t.name)}</strong><p>${escapeHtml(t.code)} · ${escapeHtml(t.automation_mode||'assisted')}</p><small>${t.approval_required?'ต้องอนุมัติ':'ไม่ต้องอนุมัติ'}${t.acknowledgement_required?' · ต้องรับทราบ':''}${templates.length?'':' · มาตรฐาน Nakna'}</small></div></article>`).join('');
   $('#payslipDocumentList').innerHTML=pays.length?pays.map(p=>{const share=p.share_token_value?`${location.origin}/payslip/${p.share_token_value}`:p.drive_url;return `<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(p.nickname||p.first_name)} · ${escapeHtml(p.period_key)}</strong><p>${escapeHtml(p.file_name)}</p><small>${p.email_sent_at?'✓ Email ':''}${p.line_notified_at?'✓ LINE ':''}· ${formatDateTime(p.created_at)}</small></div>${share?`<a class="secondary-btn" href="${escapeHtml(share)}" target="_blank" rel="noopener">เปิด</a>`:''}</article>`}).join(''):emptyState('ยังไม่มี Payslip','เมื่อ Lock และ Publish Payroll เอกสารจะมาอยู่ตรงนี้อัตโนมัติ');
-  $('#employeeDocumentList').innerHTML=docs.length?docs.map(x=>`<article class="document-row"><div class="document-file-icon">${x.drive_url?'PDF':'DOC'}</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'เอกสารบริษัท')} · ${escapeHtml(x.document_number||'')} · ${formatDate(x.document_date||x.created_at)}</p><small>${escapeHtml(x.document_type)} · ${escapeHtml(x.workflow_status||'final')} · v${Number(x.version||1)}${x.drive_url?'':' · รออนุมัติก่อนสร้าง PDF'}</small></div>${x.drive_url?`<a class="secondary-btn" href="${escapeHtml(x.drive_url)}" target="_blank" rel="noopener">Drive</a>`:''}</article>`).join(''):emptyState('ยังไม่มีเอกสาร','สร้างเอกสารจาก Template ได้จากปุ่มด้านบน');
+  $('#employeeDocumentList').innerHTML=docs.length?docs.map(x=>{const final=String(x.workflow_status||'')==='final',employeeVisible=String(x.visibility||'')==='employee';let delivery='';if(final&&employeeVisible){if(x.employee_viewed_at)delivery='✓ พนักงานเปิดแล้ว';else if(x.line_sent_at)delivery='✓ ส่ง LINE แล้ว';else if(!x.line_user_id)delivery='ยังไม่เชื่อม LINE';else if(x.delivery_failed_at)delivery='ส่ง LINE ไม่สำเร็จ';else delivery='ยังไม่ส่ง LINE';}const sendBtn=final&&employeeVisible?`<button class="secondary-btn" type="button" onclick="window.sendEmployeeDocument(${Number(x.id)},this)">${x.line_sent_at?'ส่งอีกครั้ง':'ส่งให้พนักงาน'}</button>`:'';return `<article class="document-row"><div class="document-file-icon">${x.drive_url?'PDF':'DOC'}</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'เอกสารบริษัท')} · ${escapeHtml(x.document_number||'')} · ${formatDate(x.document_date||x.created_at)}</p><small>${escapeHtml(x.document_type)} · ${escapeHtml(x.workflow_status||'final')} · v${Number(x.version||1)}${x.drive_url?'':' · รออนุมัติก่อนสร้าง PDF'}${delivery?` · ${escapeHtml(delivery)}`:''}</small></div><div class="document-row-actions">${x.drive_url?`<a class="secondary-btn" href="${escapeHtml(x.drive_url)}" target="_blank" rel="noopener">Drive</a>`:''}${sendBtn}</div></article>`}).join(''):emptyState('ยังไม่มีเอกสาร','สร้างเอกสารจาก Template ได้จากปุ่มด้านบน');
   const acks=sys.pending_acknowledgements||[]; $('#documentAckList').innerHTML=acks.length?acks.map(x=>`<article class="document-row"><div class="document-file-icon">ACK</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>${x.status==='viewed'?'เปิดอ่านแล้ว':'ยังไม่รับทราบ'}</small></div></article>`).join(''):emptyState('ไม่มีรายการรอรับทราบ','เมื่อเอกสารสำคัญถูกส่งให้พนักงาน สถานะจะแสดงตรงนี้');
   const cases=sys.open_cases||[]; $('#documentCaseList').innerHTML=cases.length?cases.map(x=>`<article class="document-row"><div class="document-file-icon">CASE</div><div><strong>${escapeHtml(x.case_number)} · ${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.case_type)}</p><small>${escapeHtml(x.status)}</small></div></article>`).join(''):emptyState('ไม่มี Case เปิดอยู่','Case ใบเตือนและเหตุการณ์ HR จะอยู่ใน Timeline เดียวกัน');
   const sel=$('#documentTemplate'); if(sel)sel.innerHTML='<option value="">เลือก Template</option>'+templates.map(t=>`<option value="${Number(t.id)}">${escapeHtml(t.name)}</option>`).join('');
@@ -4880,7 +4880,8 @@ window.approveDocumentWorkflow=async function approveDocumentWorkflow(id,button=
   try{
     const r=await api(`/api/document-workflows/${id}/approve`,{method:'POST',body:JSON.stringify({}),timeoutMs:60000,silentStatus:true});
     await refreshDocuments({silent:true});
-    toast(r.already_approved?'เอกสารนี้อนุมัติแล้ว':(r.drive_url?'อนุมัติแล้ว · สร้าง PDF และเก็บเข้า Google Drive แล้ว':'อนุมัติและล็อกเอกสาร Final แล้ว'));
+    const deliveryText=r.delivery?.ok?' · ส่ง LINE ให้พนักงานแล้ว':r.delivery?.reason==='line_not_connected'?' · เอกสาร Final แล้ว แต่พนักงานยังไม่เชื่อม LINE':r.delivery?.reason?' · เอกสาร Final แล้ว แต่ LINE ยังส่งไม่สำเร็จ':'';
+    toast(r.already_approved?'เอกสารนี้อนุมัติแล้ว':((r.drive_url?'อนุมัติแล้ว · สร้าง PDF และเก็บเข้า Google Drive แล้ว':'อนุมัติและล็อกเอกสาร Final แล้ว')+deliveryText));
   }catch(e){
     console.error('[Nakna] document approve failed',id,e);
     const raw=String(e?.message||e||'');
@@ -4907,6 +4908,18 @@ window.rejectDocumentWorkflow=async function rejectDocumentWorkflow(id,button=nu
     if(button && button.isConnected){button.disabled=false;button.textContent=original;}
   }
 };
+window.sendEmployeeDocument=async function sendEmployeeDocument(id,button=null){
+  const original=button?.textContent||'ส่งให้พนักงาน';
+  if(button){button.disabled=true;button.textContent='กำลังส่ง LINE…';}
+  try{
+    const r=await api(`/api/employee-documents/${Number(id)}/send`,{method:'POST',body:'{}',timeoutMs:30000,silentStatus:true});
+    await refreshDocuments({silent:true});
+    toast(r.delivery?.ok?'ส่งเอกสารให้พนักงานทาง LINE แล้ว':'ส่งเอกสารแล้ว');
+  }catch(e){
+    toast(`ส่งเอกสารไม่สำเร็จ · ${e.message}`,true);
+  }finally{if(button&&button.isConnected){button.disabled=false;button.textContent=original;}}
+};
+
 async function bulkApproveDocumentWorkflows(){const ids=(state.documentSystem?.pending_approvals||[]).map(x=>Number(x.document_id)).filter(Boolean);if(!ids.length)return toast('ไม่มีเอกสารรออนุมัติ');if(!confirm(`อนุมัติเอกสาร ${ids.length} ฉบับพร้อมกัน?`))return;try{const r=await api('/api/document-workflows/bulk-approve',{method:'POST',body:JSON.stringify({ids}),timeoutMs:90000});await refreshDocuments({silent:true});toast(`อนุมัติแล้ว ${Number(r.approved||0)} ฉบับ`);}catch(e){toast(`อนุมัติหลายเอกสารไม่สำเร็จ · ${e.message}`,true)}}
 async function seedDocumentTemplates(){try{await api('/api/document-templates/seed',{method:'POST',body:'{}'});await refreshDocuments();toast('ติดตั้ง Template มาตรฐานแล้ว');}catch(e){toast(e.message,true)}}
 
