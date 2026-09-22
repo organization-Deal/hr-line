@@ -1,30 +1,38 @@
-# Nakna HR P8.25 — Two-signature Document Composition
+# Nakna HR P8.26 — Signature Workflow Engine
 
-Base: P8.24 Document Signatures (and P8.23 GPS patch already applied)
+ฐานที่ใช้: P8.25 Two-signature Composition (รวม P8.23 GPS patch แล้ว)
 
-## Files
-- REPLACE `src/index.js`
-- ADD `migrations/0029_two_party_document_signatures.sql`
+## สำคัญ: ลำดับ Deploy
+1. Backup D1 ก่อน
+2. รัน `migrations/0030_signature_workflow_engine.sql` **ก่อน Deploy Worker/Frontend P8.26**
+3. Replace ไฟล์ด้านล่าง
+4. Deploy
+5. Refresh/เปิดหน้าใหม่เพื่อให้ cache `P8.26.0` ทำงาน
 
-## What changed
-- Standard employee documents now use a two-party signature composition by default.
-- Employment certificate and salary certificate now require employee receipt/signature evidence too.
-- New PDF layout reserves two balanced signature cards:
-  - HR / authorized signer
-  - Employee recipient / acknowledgement signer
-- Employee signature from LINE / Employee Portal is embedded into the right-hand card on the `-ACK.pdf` copy.
-- HR signature, signer name/position and company branding remain tenant-scoped.
-- Warning / acknowledgement documents include the fairness note that acknowledgement is evidence of receipt, not admission of an allegation or waiver of the right to explain.
-- Signature timestamps shown in the PDF use Asia/Bangkok time.
-- Older V1 PDFs remain compatible with the acknowledgement renderer.
+## REPLACE
+- `src/index.js`
+- `public/app.js`
+- `public/index.html`
+- `public/styles.css`
+- `public/documents.html`
+- `public/documents.js`
+- `public/documents.css`
 
-## Deploy
-1. Back up D1.
-2. Replace `src/index.js`.
-3. Add and run migration `0029_two_party_document_signatures.sql`.
-4. Deploy Worker.
-5. Generate a NEW test document. Existing PDFs are immutable and will not be visually rewritten.
-6. Approve → send to employee → employee signs → open the generated `-ACK.pdf` and verify both signatures.
+## ADD
+- `migrations/0030_signature_workflow_engine.sql`
 
-## Important
-The migration changes only the standard `EMP_CERT` and `SAL_CERT` acknowledgement flag. Custom template body text is not overwritten.
+## Workflow ใหม่
+`Draft → HR ตรวจ → HR ลงลายเซ็น → ส่ง LINE → พนักงานตรวจ PDF ที่ HR เซ็นแล้ว → พนักงานลงลายเซ็น → Final PDF`
+
+- HR ต้องกดลงนามจริงใน modal (ใช้ลายเซ็นที่บันทึกไว้ หรือเซ็นใหม่เฉพาะเอกสาร)
+- หลัง HR เซ็น ระบบสร้าง PDF ฝั่งบริษัทก่อน
+- เอกสารที่ต้องมี 2 ฝ่ายจะอยู่สถานะ `awaiting_employee_signature`
+- พนักงานเปิดจาก LINE / เอกสารของฉัน แล้วลงลายเซ็น
+- Final PDF ถูกสร้างเป็นไฟล์แยก ไม่เขียนทับ PDF ที่ HR เซ็นไว้
+- Evidence เก็บ HR signed time, employee signed time, signature hash, version และ event timeline
+- เอกสารรับรองการทำงาน/เงินเดือนใช้ข้อความ “รับเอกสาร”
+- เอกสารผ่านทดลองงาน/ปรับเงินเดือน/ประกาศ/ใบเตือนใช้ข้อความ “รับทราบ”
+- ใบเตือน/ประกาศยังระบุชัดว่าการรับทราบไม่เท่ากับยอมรับข้อกล่าวหา
+
+## ไม่ต้อง Replace ไฟล์อื่น
+Patch นี้จงใจส่งเฉพาะไฟล์ที่เพิ่ม/แก้จาก P8.25

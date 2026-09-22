@@ -1,17 +1,22 @@
-# P8.25 Test Result
+# P8.26 Test Result
 
-- Full project reconstructed from P8.11 + patches P8.12–P8.24 + P8.25: PASS
-- `npm run check`: PASS
-- `npm run audit`: PASS
-- `npm run migration:smoke`: PASS
-- Fresh migration chain `0001 -> 0029`: PASS
-- P8.25 migration data test: PASS
-- V2 signature layout marker: PASS
-- Backward-compatible V1 acknowledgement rendering retained: PASS
+- `npm run check` — PASS
+- `npm run audit` — PASS
+- `npm run migration:smoke` — PASS
+- `npm run release:check` — PASS
+- Fresh migration chain `0001 → 0030` — PASS
+- P8.23 GPS diagnostic code preserved — PASS (static verification)
 
-Runtime verification still required after deploy:
-1. Generate a NEW salary/employment certificate.
-2. Confirm HR signature appears in the left card.
-3. Confirm employee placeholder appears in the right card.
-4. Send via LINE and sign as employee.
-5. Confirm `-ACK.pdf` contains both signatures and Bangkok timestamp.
+## ต้อง Smoke Test หลัง Deploy
+1. สร้าง Draft เอกสาร Test
+2. กด `ตรวจและลงนาม`
+3. HR เซ็นด้วยนิ้ว หรือเลือก Saved Signature
+4. ตรวจว่า PDF หลัง HR เซ็นถูกสร้างบน Drive
+5. ตรวจว่า LINE พนักงานได้รับข้อความ `HR ลงนามแล้ว · รอลายเซ็นคุณ`
+6. พนักงานเปิด PDF ที่ HR เซ็นแล้ว
+7. พนักงานลงลายเซ็น
+8. ตรวจว่า Final PDF มีลายเซ็น 2 ฝ่าย
+9. HR Dashboard ต้องขึ้น `Final · ลงนามครบ 2 ฝ่าย`
+10. Employee Portal ต้องเปิด `Final PDF` ได้
+
+Production LINE/Google Drive/iPhone runtime ยังต้องยืนยันบน environment จริง
