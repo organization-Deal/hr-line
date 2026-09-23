@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.00-PAYROLL';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.00-PAYROLL';
-const NAKNA_RUNTIME_FEATURE = 'payroll-control-center';
+const NAKNA_RUNTIME_RELEASE = 'P9.05-LINE-ACCESS';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.05-LINE-ACCESS';
+const NAKNA_RUNTIME_FEATURE = 'line-owner-dashboard-access';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -5716,12 +5716,49 @@ function lineManagementRoleLabel(role){
   return 'ผู้ดูแล';
 }
 
+async function findLineManagementAccessViaEmployeeIdentity(db,providerScope,lineUserId,preferredClientId=null){
+  const preferred=Number(preferredClientId||0);
+  // Important: a LINE-linked employee may have a legacy/synthetic users row while the
+  // real Owner/HR membership lives on the Google/Nakna user that shares the employee email.
+  // Resolve that canonical account without granting access by company membership alone.
+  // The match requires the LINE-linked employee AND the same verified employee email.
+  return db.prepare(`SELECT u.id AS user_id,c.id,c.name,c.code,m.role
+    FROM employees e
+    JOIN users u ON LOWER(u.email)=LOWER(e.email) AND u.status='active'
+    JOIN company_members m ON m.user_id=u.id AND m.client_id=e.client_id AND m.status='active'
+    JOIN clients c ON c.id=m.client_id
+    WHERE e.line_user_id=?1 AND COALESCE(e.line_provider_scope,'default')=?2
+      AND e.status='active' AND e.email IS NOT NULL AND TRIM(e.email)<>''
+      AND m.role IN ('owner','co_owner','hr_admin','hr','payroll_admin','manager','approver')
+    ORDER BY CASE WHEN c.id=?3 THEN 0 ELSE 1 END,m.id DESC LIMIT 1`)
+    .bind(String(lineUserId),String(providerScope||'default'),preferred).first().catch(()=>null);
+}
+
 async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId,preferredClientId=null){
   const providerScope=String(lineCtx?.providerScope||'default');
   let user=await findLineBusinessUser(env.DB,providerScope,lineUserId).catch(()=>null);
+  let memberships=[];
+  let managed=[];
+
+  if(user?.id){
+    memberships=await getLineBusinessMemberships(env.DB,Number(user.id)).catch(()=>[]);
+    managed=memberships.filter(row=>isDashboardAccessRole(row.role));
+  }
+
+  // A common legacy case: LINE is attached to a synthetic employee user, but the
+  // Owner/HR membership belongs to the canonical Google account with the same employee email.
+  // Fall back to that canonical identity before treating the user as employee-only.
+  if(!managed.length){
+    const canonical=await findLineManagementAccessViaEmployeeIdentity(env.DB,providerScope,lineUserId,preferredClientId);
+    if(canonical?.user_id){
+      user=await env.DB.prepare('SELECT * FROM users WHERE id=?1 AND status='active' LIMIT 1').bind(Number(canonical.user_id)).first().catch(()=>null);
+      memberships=user?.id?await getLineBusinessMemberships(env.DB,Number(user.id)).catch(()=>[]):[];
+      managed=memberships.filter(row=>isDashboardAccessRole(row.role));
+    }
+  }
 
   // Legacy employee rows may have LINE linked before the Nakna account layer existed.
-  // Backfill the account on demand so Owner/HR permissions are visible in the same LINE card.
+  // Backfill the account on demand if no user identity exists at all.
   if(!user?.id){
     const params=[String(lineUserId),providerScope];
     let query=`SELECT e.* FROM employees e WHERE e.line_user_id=?1 AND COALESCE(e.line_provider_scope,'default')=?2 AND e.status='active'`;
@@ -5729,12 +5766,12 @@ async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId,preferredClien
     query+=` ORDER BY e.id DESC LIMIT 1`;
     const employeeRow=await env.DB.prepare(query).bind(...params).first().catch(()=>null);
     if(employeeRow) user=await ensureEmployeeNaknaUser(env.DB,employeeRow).catch(()=>null);
+    if(user?.id){
+      memberships=await getLineBusinessMemberships(env.DB,Number(user.id)).catch(()=>[]);
+      managed=memberships.filter(row=>isDashboardAccessRole(row.role));
+    }
   }
-  if(!user?.id) return null;
-
-  const memberships=await getLineBusinessMemberships(env.DB,Number(user.id));
-  const managed=memberships.filter(row=>isDashboardAccessRole(row.role));
-  if(!managed.length) return null;
+  if(!user?.id||!managed.length) return null;
 
   const preferred=Number(preferredClientId||0)>0 ? managed.find(row=>Number(row.id)===Number(preferredClientId)) : null;
   const primary=preferred||managed[0];
@@ -5910,9 +5947,8 @@ async function getLineMenuManagementAccessFast(env,lineCtx,lineUserId,preferredC
   const key=`${providerScope}:${String(lineUserId)}:${preferred}`;
   const cached=lineMenuCacheGet(LINE_MENU_ACCESS_CACHE,key,LINE_MENU_ACCESS_TTL_MS);
   if(cached!==null) return cached;
-  // Fast path: one read-only query, no schema migration checks and no login-token writes.
-  // The expensive one-time Dashboard login URL is generated only after the user taps it.
-  const row=await env.DB.prepare(`SELECT u.id AS user_id,c.id,c.name,c.code,m.role
+  // Fast path: direct LINE identity on the canonical Owner/HR user.
+  let row=await env.DB.prepare(`SELECT u.id AS user_id,c.id,c.name,c.code,m.role
     FROM users u
     JOIN company_members m ON m.user_id=u.id AND m.status='active'
     JOIN clients c ON c.id=m.client_id
@@ -5920,6 +5956,12 @@ async function getLineMenuManagementAccessFast(env,lineCtx,lineUserId,preferredC
       AND u.status='active' AND m.role IN ('owner','co_owner','hr_admin','hr','payroll_admin','manager','approver')
     ORDER BY CASE WHEN c.id=?3 THEN 0 ELSE 1 END,m.id DESC LIMIT 1`)
     .bind(String(lineUserId),providerScope,preferred).first().catch(()=>null);
+
+  // Fallback for accounts that used the employee LINE flow before Owner/HR LINE identity
+  // was unified with the Google account. This restores the Dashboard button in the
+  // employee menu while still requiring an exact employee-email match to the member user.
+  if(!row) row=await findLineManagementAccessViaEmployeeIdentity(env.DB,providerScope,lineUserId,preferred);
+
   if(!row){
     LINE_MENU_ACCESS_CACHE.set(key,{at:Date.now(),value:null});
     return null;
