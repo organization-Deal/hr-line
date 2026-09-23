@@ -3219,9 +3219,13 @@ async function handleApi(request, env, url, auth, ctx) {
     const attendanceCutoff=Math.max(1,Math.min(31,Math.floor(num(body.attendance_cutoff_day,current.attendance_cutoff_day||25))));
     const commissionCutoff=Math.max(1,Math.min(31,Math.floor(num(body.commission_cutoff_day,current.commission_cutoff_day||25))));
     const varianceWarning=Math.max(0,Math.min(500,num(body.variance_warning_pct,current.variance_warning_pct||30)));
-    await env.DB.prepare(`UPDATE payroll_settings SET pay_day=?1,daily_rate_divisor=?2,absence_deduction_enabled=?3,late_deduction_enabled=?4,late_deduction_per_minute=?5,social_security_enabled=?6,tax_enabled=?7,attendance_cutoff_day=?8,commission_cutoff_day=?9,variance_warning_pct=?10,require_separate_approver=?11,employer_social_security_enabled=?12,updated_at=CURRENT_TIMESTAMP WHERE client_id=?13`)
-      .bind(payDay,divisor,body.absence_deduction_enabled?1:0,body.late_deduction_enabled?1:0,latePerMinute,body.social_security_enabled===false?0:1,body.tax_enabled===false?0:1,attendanceCutoff,commissionCutoff,varianceWarning,body.require_separate_approver?1:0,body.employer_social_security_enabled===false?0:1,clientId).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.settings.update','client',String(clientId),{pay_day:payDay,daily_rate_divisor:divisor});
+    const cycleStartDay=Math.max(1,Math.min(31,Math.floor(num(body.cycle_start_day,current.cycle_start_day||1))));
+    const cycleStartOffset=Math.max(-1,Math.min(0,Math.floor(num(body.cycle_start_month_offset,current.cycle_start_month_offset??0))));
+    const cycleEndDay=Math.max(0,Math.min(31,Math.floor(num(body.cycle_end_day,current.cycle_end_day??0))));
+    const cycleEndOffset=Math.max(0,Math.min(1,Math.floor(num(body.cycle_end_month_offset,current.cycle_end_month_offset??0))));
+    await env.DB.prepare(`UPDATE payroll_settings SET pay_day=?1,daily_rate_divisor=?2,absence_deduction_enabled=?3,late_deduction_enabled=?4,late_deduction_per_minute=?5,social_security_enabled=?6,tax_enabled=?7,attendance_cutoff_day=?8,commission_cutoff_day=?9,variance_warning_pct=?10,require_separate_approver=?11,employer_social_security_enabled=?12,cycle_start_day=?13,cycle_start_month_offset=?14,cycle_end_day=?15,cycle_end_month_offset=?16,updated_at=CURRENT_TIMESTAMP WHERE client_id=?17`)
+      .bind(payDay,divisor,body.absence_deduction_enabled?1:0,body.late_deduction_enabled?1:0,latePerMinute,body.social_security_enabled===false?0:1,body.tax_enabled===false?0:1,attendanceCutoff,commissionCutoff,varianceWarning,body.require_separate_approver?1:0,body.employer_social_security_enabled===false?0:1,cycleStartDay,cycleStartOffset,cycleEndDay,cycleEndOffset,clientId).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.settings.update','client',String(clientId),{pay_day:payDay,daily_rate_divisor:divisor,cycle_start_day:cycleStartDay,cycle_start_month_offset:cycleStartOffset,cycle_end_day:cycleEndDay,cycle_end_month_offset:cycleEndOffset});
     return json({ok:true,settings:await env.DB.prepare('SELECT * FROM payroll_settings WHERE client_id=?1').bind(clientId).first()});
   }
 
@@ -3299,17 +3303,24 @@ async function handleApi(request, env, url, auth, ctx) {
     const periodKey=String(body.period_key||dateInBangkok().slice(0,7));
     if(!/^\d{4}-\d{2}$/.test(periodKey)) return json({error:'รอบเงินเดือนต้องเป็น YYYY-MM'},400);
     const [year,month]=periodKey.split('-').map(Number);
-    const periodStart=body.period_start||`${periodKey}-01`;
-    const lastDay=new Date(Date.UTC(year,month,0)).getUTCDate();
-    const periodEnd=body.period_end||`${periodKey}-${String(lastDay).padStart(2,'0')}`;
     const settings=await env.DB.prepare('SELECT * FROM payroll_settings WHERE client_id=?1').bind(clientId).first();
+    const periodStart=String(body.period_start||payrollCycleDateFromPeriodKey(periodKey,Number(settings?.cycle_start_month_offset??0),Number(settings?.cycle_start_day??1)));
+    const periodEnd=String(body.period_end||payrollCycleDateFromPeriodKey(periodKey,Number(settings?.cycle_end_month_offset??0),Number(settings?.cycle_end_day??0)));
+    if(!validPayrollDateKey(periodStart)||!validPayrollDateKey(periodEnd))return json({error:'วันที่เริ่ม/สิ้นสุดรอบเงินเดือนไม่ถูกต้อง'},400);
+    if(periodStart>periodEnd)return json({error:'วันที่เริ่มรอบต้องไม่เกินวันที่สิ้นสุดรอบ'},400);
+    const spanDays=dateKeysInclusive(periodStart,periodEnd).length;
+    if(spanDays<1||spanDays>62)return json({error:'รอบเงินเดือนต้องมีช่วงเวลา 1–62 วัน กรุณาตรวจวันที่อีกครั้ง'},400);
+    const overlap=await env.DB.prepare(`SELECT id,period_key,period_start,period_end FROM payroll_periods WHERE client_id=?1 AND status!='void' AND period_start<=?2 AND period_end>=?3 LIMIT 1`).bind(clientId,periodEnd,periodStart).first();
+    if(overlap)return json({error:`ช่วงวันที่นี้ทับกับรอบ ${overlap.period_key} (${overlap.period_start} ถึง ${overlap.period_end})`},409);
+    const lastDay=new Date(Date.UTC(year,month,0)).getUTCDate();
     const payDay=Math.min(lastDay,Number(settings?.pay_day||28));
-    const payDate=body.pay_date||`${periodKey}-${String(payDay).padStart(2,'0')}`;
+    const payDate=String(body.pay_date||`${periodKey}-${String(payDay).padStart(2,'0')}`);
+    if(!validPayrollDateKey(payDate))return json({error:'วันที่จ่ายเงินเดือนไม่ถูกต้อง'},400);
     try{
       const result=await env.DB.prepare(`INSERT INTO payroll_periods (client_id,period_key,period_start,period_end,pay_date,status,approval_status,cutoff_start,cutoff_end,created_by_user_id) VALUES (?1,?2,?3,?4,?5,'draft','not_required',?3,?4,?6)`).bind(clientId,periodKey,periodStart,periodEnd,payDate,Number(auth.user.id)).run();
       const id=Number(result.meta.last_row_id);
       await recalculatePayrollPeriod(env,clientId,id);
-      await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'period_created',{period_key:periodKey,pay_date:payDate});
+      await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'period_created',{period_key:periodKey,period_start:periodStart,period_end:periodEnd,pay_date:payDate,span_days:spanDays});
       return json({ok:true,id,period:await getPayrollPeriodDetail(env.DB,clientId,id)},201);
     }catch(error){ if(/UNIQUE/i.test(String(error?.message||error))) return json({error:'มีรอบเงินเดือนเดือนนี้แล้ว'},409); throw error; }
   }
@@ -3351,7 +3362,7 @@ async function handleApi(request, env, url, auth, ctx) {
     const periodId=Number(payrollCellMatch[1]); const period=await env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(periodId,clientId).first();
     if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(!['draft','review'].includes(period.status))return json({error:'แก้ตารางได้เฉพาะ Draft / รอตรวจ'},409);
     const b=await safeJson(request),employeeId=Number(b.employee_id),category=String(b.category||'').trim(); const amount=Math.max(0,num(b.amount,0));
-    const allowed={commission:['earning',1,0],incentive:['earning',1,0],bonus:['earning',1,0],other:['earning',1,0],other_deduction:['deduction',0,0],tax_add:['deduction',0,0],tax_reduce:['earning',0,0]};
+    const allowed={commission:['earning',1,0],kpi:['earning',1,0],incentive:['earning',1,0],bonus:['earning',1,0],other:['earning',1,0],other_deduction:['deduction',0,0],tax_add:['deduction',0,0],tax_reduce:['earning',0,0]};
     if(!allowed[category])return json({error:'คอลัมน์นี้แก้จากตารางไม่ได้'},400); const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
     const [type,taxable,sso]=allowed[category],sourceKey=`grid:${category}`;
     if(amount<=0)await env.DB.prepare(`DELETE FROM payroll_adjustments WHERE period_id=?1 AND employee_id=?2 AND client_id=?3 AND source_key=?4`).bind(periodId,employeeId,clientId,sourceKey).run();
@@ -6424,7 +6435,7 @@ async function getPayrollPeriodDetail(db,clientId,periodId){
   const period=await db.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(Number(periodId),Number(clientId)).first();
   if(!period)return {period:null,items:[],adjustments:[],documents:[],exceptions:[],timeline:[]};
   const [items,adjustments,documents,events,settings,components]=await db.batch([
-    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,d.name AS department_name,pos.name AS position_name,pp.bank_name,pp.bank_account_name,pp.bank_account_no,pp.tax_enabled AS employee_tax_enabled,pp.social_security_enabled AS employee_sso_enabled
+    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.start_date,e.end_date,d.name AS department_name,pos.name AS position_name,pp.bank_name,pp.bank_account_name,pp.bank_account_no,pp.payroll_note,pp.tax_enabled AS employee_tax_enabled,pp.social_security_enabled AS employee_sso_enabled
       FROM payroll_items pi JOIN employees e ON e.id=pi.employee_id LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions pos ON pos.id=e.position_id LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id
       WHERE pi.period_id=?1 AND pi.client_id=?2 ORDER BY e.first_name,e.last_name`).bind(Number(periodId),Number(clientId)),
     db.prepare(`SELECT a.*,e.employee_code,e.first_name,e.last_name,e.nickname FROM payroll_adjustments a JOIN employees e ON e.id=a.employee_id WHERE a.period_id=?1 AND a.client_id=?2 ORDER BY a.employee_id,a.id`).bind(Number(periodId),Number(clientId)),
@@ -6436,6 +6447,17 @@ async function getPayrollPeriodDetail(db,clientId,periodId){
   const itemRows=items.results||[];
   const settingRow=settings.results?.[0]||{};
   return {period,items:itemRows,adjustments:adjustments.results||[],documents:documents.results||[],timeline:events.results||[],components:components.results||[],settings:settingRow,exceptions:payrollExceptionRows(period,itemRows,settingRow)};
+}
+
+function validPayrollDateKey(value){
+  const v=String(value||''); if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return false;
+  const [y,m,d]=v.split('-').map(Number); if(!y||m<1||m>12||d<1||d>31)return false;
+  const date=new Date(Date.UTC(y,m-1,d)); return date.getUTCFullYear()===y&&date.getUTCMonth()===m-1&&date.getUTCDate()===d;
+}
+function payrollCycleDateFromPeriodKey(periodKey,monthOffset=0,day=1){
+  const [year,month]=String(periodKey||'').split('-').map(Number); const anchor=new Date(Date.UTC(year,month-1+Number(monthOffset||0),1));
+  const y=anchor.getUTCFullYear(),m=anchor.getUTCMonth(); const last=new Date(Date.UTC(y,m+1,0)).getUTCDate(); const requested=Number(day||0); const d=requested<=0?last:Math.min(last,Math.max(1,requested));
+  return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
 }
 
 function dateKeysInclusive(startDate,endDate){
@@ -6520,18 +6542,18 @@ async function recalculatePayrollPeriod(env,clientId,periodId){
       if(date<=cutoff && !att?.check_in_at){ const leave=leaveByEmployeeDate.get(`${employee.id}:${date}`); if(!leave || String(leave.policy_code||'').toLowerCase().includes('unpaid')) absentDays+=leave&&leave.start_date===leave.end_date&&['am','pm','half'].includes(String(leave.day_part||''))?.5:1; }
     }
     let attendanceDeduction=0; if(Number(settings?.absence_deduction_enabled))attendanceDeduction+=roundMoney((salary/divisor)*absentDays); if(Number(settings?.late_deduction_enabled))attendanceDeduction+=roundMoney(lateMinutes*Number(settings?.late_deduction_per_minute||0));
-    let overtime=0,commission=0,incentive=0,allowance=0,bonus=0,otherEarnings=0,otherDeductions=0,taxableAdjustments=0,ssoAdjustments=0,taxManualAdjust=0;
+    let overtime=0,commission=0,kpi=0,incentive=0,allowance=0,bonus=0,otherEarnings=0,otherDeductions=0,taxableAdjustments=0,ssoAdjustments=0,taxManualAdjust=0;
     let recurringEarnings=0,recurringDeductions=0,recurringTaxable=0,recurringSso=0; const recurringItems=[];
     for(const c of recurringByEmployee.get(Number(employee.id))||[]){const amt=Math.max(0,Number(c.amount||0)); if(!amt)continue; recurringItems.push({code:c.code,name:c.name,type:c.component_type,amount:amt,taxable:Boolean(Number(c.taxable)),sso_contributable:Boolean(Number(c.sso_contributable))}); if(c.component_type==='deduction')recurringDeductions+=amt; else {recurringEarnings+=amt;if(Number(c.taxable))recurringTaxable+=amt;if(Number(c.sso_contributable))recurringSso+=amt;}}
-    for(const a of adjustmentsByEmployee.get(Number(employee.id))||[]){const amt=Number(a.amount||0); const category=String(a.category||'other'); if(category==='tax_add'){taxManualAdjust+=amt;continue;} if(category==='tax_reduce'){taxManualAdjust-=amt;continue;} if(a.adjustment_type==='deduction'){otherDeductions+=amt;continue;} if(Number(a.taxable))taxableAdjustments+=amt;if(Number(a.sso_contributable))ssoAdjustments+=amt; switch(category){case'overtime':overtime+=amt;break;case'commission':commission+=amt;break;case'kpi':otherEarnings+=amt;break;case'incentive':incentive+=amt;break;case'allowance':allowance+=amt;break;case'bonus':bonus+=amt;break;default:otherEarnings+=amt;}}
-    const gross=roundMoney(prorated+recurringEarnings+overtime+commission+incentive+allowance+bonus+otherEarnings); const taxableMonthly=Math.max(0,roundMoney(prorated+recurringTaxable+taxableAdjustments-attendanceDeduction));
+    for(const a of adjustmentsByEmployee.get(Number(employee.id))||[]){const amt=Number(a.amount||0); const category=String(a.category||'other'); if(category==='tax_add'){taxManualAdjust+=amt;continue;} if(category==='tax_reduce'){taxManualAdjust-=amt;continue;} if(a.adjustment_type==='deduction'){otherDeductions+=amt;continue;} if(Number(a.taxable))taxableAdjustments+=amt;if(Number(a.sso_contributable))ssoAdjustments+=amt; switch(category){case'overtime':overtime+=amt;break;case'commission':commission+=amt;break;case'kpi':kpi+=amt;break;case'incentive':incentive+=amt;break;case'allowance':allowance+=amt;break;case'bonus':bonus+=amt;break;default:otherEarnings+=amt;}}
+    const gross=roundMoney(prorated+recurringEarnings+overtime+commission+kpi+incentive+allowance+bonus+otherEarnings); const taxableMonthly=Math.max(0,roundMoney(prorated+recurringTaxable+taxableAdjustments-attendanceDeduction));
     let sso=0,employerSso=0; if(Number(settings?.social_security_enabled)&&Number(profile.social_security_enabled??1)){const contributable=Math.max(Number(rules.sso.wage_floor||0),Math.min(Number(rules.sso.wage_ceiling||17500),Math.max(0,prorated+recurringSso+ssoAdjustments))); if(prorated>0){sso=roundMoney(contributable*Number(rules.sso.employee_rate||.05));if(Number(settings?.employer_social_security_enabled??1))employerSso=roundMoney(contributable*Number(rules.sso.employer_rate??rules.sso.employee_rate??.05));}}
     let withholding=0; if(Number(settings?.tax_enabled)&&Number(profile.tax_enabled??1)){
       if(profile.monthly_tax_override!=null)withholding=Math.max(0,roundMoney(profile.monthly_tax_override)); else {const prior=ytd.get(Number(employee.id))||{}; const projectedIncome=Number(prior.ytd_taxable||0)+taxableMonthly*monthsRemaining; const projectedSso=Number(prior.ytd_sso||0)+sso*monthsRemaining; const expense=Math.min(projectedIncome*Number(rules.tax.expense_rate||.5),Number(rules.tax.expense_cap||100000)); const personal=Math.max(0,Number(profile.personal_allowance??rules.tax.personal_allowance??60000)); const extra=Math.max(0,Number(profile.extra_annual_deductions||0)); const netTaxable=Math.max(0,projectedIncome-expense-personal-extra-projectedSso); const annualTax=payrollTaxFromBrackets(netTaxable,rules.tax.brackets); withholding=roundMoney(Math.max(0,annualTax-Number(prior.ytd_tax||0))/monthsRemaining);}
     }
     withholding=Math.max(0,roundMoney(withholding+taxManualAdjust));
     otherDeductions=roundMoney(otherDeductions+recurringDeductions);
-    const deductions=roundMoney(attendanceDeduction+sso+withholding+otherDeductions); const netPay=roundMoney(Math.max(0,gross-deductions)); const prior=priorNet.get(Number(employee.id))||0; const variancePct=prior>0?roundMoney(((netPay-prior)/prior)*100):0; const priorYtd=ytd.get(Number(employee.id))||{}; const ytdGross=roundMoney(Number(priorYtd.ytd_gross||0)+gross),ytdTax=roundMoney(Number(priorYtd.ytd_tax||0)+withholding),ytdSso=roundMoney(Number(priorYtd.ytd_sso||0)+sso); const employerCost=roundMoney(gross+employerSso); const breakdown={scheduled_days:scheduledDays,active_calendar_days:activeCalendarDays,tax_rule:rules.tax_version,sso_rule:rules.sso_version,taxable_monthly:taxableMonthly,recurring_components:recurringItems};
+    const deductions=roundMoney(attendanceDeduction+sso+withholding+otherDeductions); const netPay=roundMoney(Math.max(0,gross-deductions)); const prior=priorNet.get(Number(employee.id))||0; const variancePct=prior>0?roundMoney(((netPay-prior)/prior)*100):0; const priorYtd=ytd.get(Number(employee.id))||{}; const ytdGross=roundMoney(Number(priorYtd.ytd_gross||0)+gross),ytdTax=roundMoney(Number(priorYtd.ytd_tax||0)+withholding),ytdSso=roundMoney(Number(priorYtd.ytd_sso||0)+sso); const employerCost=roundMoney(gross+employerSso); const payableDays=fullPeriod?divisor:Math.min(divisor,activeCalendarDays); const breakdown={scheduled_days:scheduledDays,active_calendar_days:activeCalendarDays,payable_days:payableDays,salary_mode:fullPeriod?'full':'prorated',kpi,period_days:dates.length,tax_rule:rules.tax_version,sso_rule:rules.sso_version,taxable_monthly:taxableMonthly,recurring_components:recurringItems};
     statements.push(db.prepare(`INSERT INTO payroll_items (client_id,period_id,employee_id,base_salary,prorated_salary,absent_days,late_minutes,attendance_deduction,overtime,commission,incentive,allowance,bonus,other_earnings,gross_income,social_security,withholding_tax,other_deductions,total_deductions,net_pay,breakdown_json,calculation_note,status,employer_social_security,employer_cost,prior_net_pay,variance_pct,ytd_gross,ytd_tax,ytd_sso) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,'preview',?23,?24,?25,?26,?27,?28,?29)`).bind(Number(clientId),Number(periodId),Number(employee.id),salary,prorated,absentDays,lateMinutes,attendanceDeduction,overtime,commission,incentive,allowance,bonus,roundMoney(otherEarnings+recurringEarnings),gross,sso,withholding,otherDeductions,deductions,netPay,JSON.stringify(breakdown),'ภาษีเป็นประมาณการรายเดือนแบบ annualized; HR/Payroll ต้องตรวจสอบก่อน Lock',employerSso,employerCost,prior,variancePct,ytdGross,ytdTax,ytdSso));
     totals.gross+=gross;totals.deductions+=deductions;totals.net+=netPay;totals.count++;
   }
@@ -6552,7 +6574,7 @@ async function makePayrollPdf({client,employee,period,item,fontBytes,title='ส�
   const money=v=>`${Number(v||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2})} บาท`; let y=height-214;
   const row=(label,value,{bold=false}={})=>{page.drawText(label,{x:48,y,size:9,font,color:muted});page.drawText(value,{x:360,y,size:bold?11:9,font,color:bold?dark:dark});y-=27;page.drawLine({start:{x:48,y:y+13},end:{x:548,y:y+13},thickness:.6,color:border});};
   let breakdown={};try{breakdown=typeof item.breakdown_json==='string'?JSON.parse(item.breakdown_json||'{}'):(item.breakdown_json||{});}catch{} const recurring=Array.isArray(breakdown.recurring_components)?breakdown.recurring_components:[]; const recurringEarn=recurring.filter(x=>x.type!=='deduction').reduce((a,x)=>a+Number(x.amount||0),0); const recurringDeduct=recurring.filter(x=>x.type==='deduction').reduce((a,x)=>a+Number(x.amount||0),0);
-  page.drawText('รายได้',{x:42,y,size:12,font,color:teal});y-=28; row('เงินเดือนตามรอบ',money(item.prorated_salary)); for(const c of recurring.filter(x=>x.type!=='deduction'))row(String(c.name||'รายได้ประจำ'),money(c.amount)); if(Number(item.overtime))row('OT',money(item.overtime)); if(Number(item.commission))row('Commission',money(item.commission)); if(Number(item.incentive))row('Incentive',money(item.incentive)); if(Number(item.allowance))row('Allowance',money(item.allowance)); if(Number(item.bonus))row('Bonus',money(item.bonus)); const residualOther=Math.max(0,Number(item.other_earnings||0)-recurringEarn); if(residualOther)row('รายได้อื่น',money(residualOther)); row('รายได้รวม',money(item.gross_income),{bold:true});
+  page.drawText('รายได้',{x:42,y,size:12,font,color:teal});y-=28; row('เงินเดือนตามรอบ',money(item.prorated_salary)); for(const c of recurring.filter(x=>x.type!=='deduction'))row(String(c.name||'รายได้ประจำ'),money(c.amount)); if(Number(item.overtime))row('OT',money(item.overtime)); if(Number(item.commission))row('Commission',money(item.commission)); if(Number(breakdown.kpi||0))row('KPI',money(breakdown.kpi)); if(Number(item.incentive))row('Incentive',money(item.incentive)); if(Number(item.allowance))row('Allowance',money(item.allowance)); if(Number(item.bonus))row('Bonus',money(item.bonus)); const residualOther=Math.max(0,Number(item.other_earnings||0)-recurringEarn); if(residualOther)row('รายได้อื่น',money(residualOther)); row('รายได้รวม',money(item.gross_income),{bold:true});
   y-=12;page.drawText('รายการหัก',{x:42,y,size:12,font,color:teal});y-=28; if(Number(item.attendance_deduction))row(`Attendance (${Number(item.absent_days||0)} วัน / สาย ${Number(item.late_minutes||0)} นาที)`,money(item.attendance_deduction)); row('ประกันสังคม',money(item.social_security)); row('ภาษีหัก ณ ที่จ่าย (ประมาณการ)',money(item.withholding_tax)); for(const c of recurring.filter(x=>x.type==='deduction'))row(String(c.name||'รายการหักประจำ'),money(c.amount)); const residualDeduct=Math.max(0,Number(item.other_deductions||0)-recurringDeduct); if(residualDeduct)row('รายการหักอื่น',money(residualDeduct)); row('หักรวม',money(item.total_deductions),{bold:true});
   y-=8;page.drawRectangle({x:42,y:y-12,width:506,height:58,color:soft,borderColor:border,borderWidth:1});page.drawText('รับสุทธิ',{x:58,y:y+10,size:12,font,color:dark});page.drawText(money(item.net_pay),{x:350,y:y+7,size:18,font,color:teal});
   page.drawText('เอกสารนี้สร้างจากข้อมูล Payroll ของบริษัท กรุณาติดต่อ HR หากข้อมูลไม่ถูกต้อง',{x:42,y:38,size:7.5,font,color:muted}); return new Uint8Array(await pdf.save());
@@ -8348,6 +8370,10 @@ async function ensurePayrollControlCenterReady(db){
     `ALTER TABLE payroll_settings ADD COLUMN variance_warning_pct REAL NOT NULL DEFAULT 30`,
     `ALTER TABLE payroll_settings ADD COLUMN require_separate_approver INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE payroll_settings ADD COLUMN employer_social_security_enabled INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE payroll_settings ADD COLUMN cycle_start_day INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE payroll_settings ADD COLUMN cycle_start_month_offset INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_settings ADD COLUMN cycle_end_day INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_settings ADD COLUMN cycle_end_month_offset INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE payroll_periods ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'not_required'`,
     `ALTER TABLE payroll_periods ADD COLUMN approved_by_user_id INTEGER`,
     `ALTER TABLE payroll_periods ADD COLUMN approved_at TEXT`,
