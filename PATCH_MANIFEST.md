@@ -1,6 +1,6 @@
-# Nakna P9.07 — Payroll Period Edit / Delete
+# Nakna P9.08 — Fast LINE Startup
 
-Base: P9.06 Payroll Period Create Fix (รวม P9.04 Mobile Payroll + P9.05 LINE Owner/HR Access)
+Base: P9.07 Payroll Period Manage
 
 ## REPLACE
 - `src/index.js`
@@ -9,23 +9,19 @@ Base: P9.06 Payroll Period Create Fix (รวม P9.04 Mobile Payroll + P9.05 LI
 
 ## Migration
 - ไม่มี Migration ใหม่
-- ต้องมี `0032_payroll_custom_cycle.sql` จาก P9.03 อยู่แล้ว
 
-## เพิ่มอะไร
-- รอบ Payroll สถานะ `Draft` / `รอตรวจ` มีปุ่ม `แก้ไขรอบ`
-- แก้ `เดือน Payroll / วันที่จ่าย / วันเริ่มรอบ / วันสิ้นสุดรอบ` แล้วคำนวณใหม่ได้
-- เมื่อแก้รอบที่อยู่ `รอตรวจ` ระบบจะกลับเป็น `Draft` เพื่อให้ตรวจใหม่ ลดความเสี่ยงอนุมัติข้อมูลเก่า
-- รอบ Payroll สถานะ `Draft` / `รอตรวจ` มีปุ่ม `ลบรอบ`
-- ลบแล้วลบ Preview / adjustment ของรอบนั้นและสร้างรอบใหม่เดือนเดิมได้ทันที
-- บันทึก Audit Log ก่อนลบรอบ
-- ไม่อนุญาตแก้/ลบ `Locked` หรือ `Published`
-- ไม่อนุญาตลบรอบที่มี Payslip แล้ว
-- ตรวจ period key ซ้ำและช่วงวันที่ overlap ตอนแก้
-- cache bust `P9.07.0`
+## สิ่งที่แก้
+- ปุ่ม Dashboard ที่สร้างใหม่จาก LINE ไม่ผ่าน flow เดิม `/auth/line/start -> 302 -> โหลดหน้าใหม่` แล้ว
+- เปลี่ยนเป็นเปิดหน้า Nakna ครั้งเดียว แล้วแลก LINE one-time token ผ่าน `/api/public/line-session` ใน background
+- `/api/public/line-session` ส่ง session cookie + ข้อมูล `/api/me` กลับมาใน request เดียว จึงไม่ต้องยิง `/api/me` ซ้ำใน LINE entry path
+- เริ่ม auth/session request ก่อน bind event จำนวนมาก เพื่อลด critical-path startup
+- เลื่อน Public LINE config และ Onboarding status ออกจาก first paint
+- Dashboard first paint ยิง `/api/dashboard` เป็น request หลักก่อน แล้วค่อยโหลด Company Profile ภายหลัง
+- Google Fonts เปลี่ยนเป็น non-blocking load เพื่อลดเวลาจอขาวใน LINE WebView
+- เพิ่ม console timing `Nakna shell visible ...ms`
+- Cache bust เป็น `P9.08.0`
+- Worker release เป็น `P9.08-FAST-LINE-STARTUP`
 
-## Flow
-สร้างรอบ → พบว่าช่วงวันผิด → `แก้ไขรอบ` → บันทึกและคำนวณใหม่
-
-หรือ
-
-สร้างรอบ → ต้องการเริ่มใหม่ → `ลบรอบ` → ยืนยัน → สร้างรอบใหม่ได้ทันที
+## Compatibility
+- ลิงก์ Dashboard เก่าที่สร้างก่อน P9.08 ยังเปิดได้ด้วย route เดิม แต่ยังใช้ redirect แบบเก่า
+- หลัง Deploy ให้พิมพ์ `Dashboard` หรือ `เมนู` ใน LINE ใหม่ เพื่อให้ Bot สร้างลิงก์ P9.08 แบบเร็ว
