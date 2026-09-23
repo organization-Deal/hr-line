@@ -2116,34 +2116,38 @@ function renderTeamWorkLog(){
   });
 }
 
+function dashboardCompactEmpty(title, detail, tone='clear') {
+  return `<div class="dashboard-compact-empty ${escapeHtml(tone)}"><span class="dashboard-compact-empty-icon">✓</span><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small></div></div>`;
+}
+
 function renderDashboard() {
   const d = state.dashboard;
+  if (!d?.summary) return;
   const dashboardAttention=(d.attention||[]).filter(item=>item.key!=='missing');
-  const total = dashboardAttention.reduce((sum, item) => sum + item.count, 0);
+  const total = dashboardAttention.reduce((sum, item) => sum + Number(item.count||0), 0);
+  const summaryData=d.summary||{};
 
   $('#attentionTotal').textContent = total;
   $('#navAttention').textContent = total;
   $('#navAttention').dataset.empty = total ? 'false' : 'true';
-  $('#heroSub').textContent = `${d.client.name} · ${d.summary.employees} คน · ${formatDate(d.today)}${d.summary.holiday_name ? ` · 🎉 ${d.summary.holiday_name}` : ''}`;
+  $('#heroSub').textContent = `${d.client.name} · ${summaryData.employees} คน · ${formatDate(d.today)}${summaryData.holiday_name ? ` · 🎉 ${summaryData.holiday_name}` : ''}`;
 
-  const activeCandidates=Object.entries(d.recruitment||{}).filter(([stage])=>!['hired','rejected'].includes(String(stage))).reduce((sum,[,count])=>sum+Number(count||0),0);
   const summary = [
-    ['พนักงานทั้งหมด', d.summary.employees, 'brand'],
-    ['ลาวันนี้', d.summary.leave, 'info'],
-    ['เรื่อง HR เปิดอยู่', Number(d.hr_cases_open||0), 'danger'],
-    ['ผู้สมัครที่กำลังดำเนินการ', activeCandidates, 'success'],
-    ['งานต้องจัดการ', total, 'warning'],
+    ['พนักงานทั้งหมด', summaryData.employees, 'brand', 'คน'],
+    ['เช็กอินแล้ว', summaryData.present, 'success', 'คน'],
+    ['ลาวันนี้', summaryData.leave, 'info', 'คน'],
+    ['ยังไม่เช็กอิน', summaryData.missing, summaryData.missing ? 'danger' : 'success', 'คน'],
+    ['มาสาย', summaryData.late, summaryData.late ? 'warning' : 'success', 'คน'],
   ];
-
-  $('#summaryGrid').innerHTML = summary.map(([label, value, tone]) => `
+  $('#summaryGrid').innerHTML = summary.map(([label, value, tone, unit]) => `
     <div class="summary-item">
-      <div class="summary-label"><span class="summary-dot ${tone}"></span>${label}</div>
-      <div class="summary-value">${value}<small>คน</small></div>
+      <div class="summary-label"><span class="summary-dot ${tone}"></span>${escapeHtml(label)}</div>
+      <div class="summary-value">${Number(value||0)}<small>${escapeHtml(unit)}</small></div>
     </div>`).join('');
 
   $('#attentionList').innerHTML = dashboardAttention.length
     ? dashboardAttention.map(item => `
-      <div class="list-row actionable" data-attention="${escapeHtml(item.key)}">
+      <div class="list-row actionable dashboard-action-row" data-attention="${escapeHtml(item.key)}">
         <div class="list-icon ${attentionTone(item)}">${attentionIcon(item.key)}</div>
         <div class="list-copy">
           <strong>${attentionCopy(item)}</strong>
@@ -2151,7 +2155,7 @@ function renderDashboard() {
         </div>
         <div class="count">${item.count}</div>
       </div>`).join('')
-    : emptyState('วันนี้งานสำคัญเคลียร์แล้ว', 'ยังไม่มีรายการที่ HR ต้องรีบจัดการตอนนี้');
+    : dashboardCompactEmpty('วันนี้ไม่มีงานเร่งด่วน', 'รายการอนุมัติและเรื่องที่ต้องจัดการเคลียร์แล้ว');
 
   $$('[data-attention]').forEach(row => {
     row.onclick = () => {
@@ -2163,41 +2167,68 @@ function renderDashboard() {
     };
   });
 
-  $('#birthdayList').innerHTML = d.birthdays.length
-    ? d.birthdays.map(person => `
-      <div class="list-row">
-        <div class="list-icon coral">${iconSvg('gift')}</div>
-        <div class="list-copy">
-          <strong>${escapeHtml(person.name)}</strong>
-          <small>${person.days === 0 ? 'วันเกิดวันนี้ 🎉' : `วันเกิดอีก ${person.days} วัน`} · ${formatDate(person.date)}</small>
-        </div>
-        <span class="badge ${person.days === 0 ? 'badge-brand' : 'badge-neutral'}">${person.days === 0 ? 'วันนี้' : `${person.days} วัน`}</span>
-      </div>`).join('')
-    : emptyState('ยังไม่มีวันเกิดใกล้ถึง', 'นากนะจะแจ้งให้ HR รู้ล่วงหน้าเมื่อมีวันสำคัญ');
+  const scheduled=Math.max(0,Number(summaryData.scheduled_today||0));
+  const present=Math.max(0,Number(summaryData.present||0));
+  const leave=Math.max(0,Number(summaryData.leave||0));
+  const missing=Math.max(0,Number(summaryData.missing||0));
+  const late=Math.max(0,Number(summaryData.late||0));
+  const attendanceRate=scheduled?Math.min(100,Math.round((present/scheduled)*100)):0;
+  const attendanceRoot=$('#attendanceSnapshot');
+  if(attendanceRoot) attendanceRoot.innerHTML=`
+    <div class="attendance-progress-head"><div><strong>${present}/${scheduled || summaryData.employees}</strong><span>เช็กอินแล้ว</span></div><b>${attendanceRate}%</b></div>
+    <div class="attendance-progress"><span style="width:${attendanceRate}%"></span></div>
+    <div class="attendance-mini-grid">
+      <div><span>มาแล้ว</span><strong>${present}</strong></div>
+      <div><span>ลา</span><strong>${leave}</strong></div>
+      <div class="${missing?'warn':''}"><span>ยังไม่มา</span><strong>${missing}</strong></div>
+      <div class="${late?'warn':''}"><span>สาย</span><strong>${late}</strong></div>
+    </div>`;
+
+  const payrollRoot=$('#payrollSnapshot');
+  const payroll=d.payroll||null;
+  if(payrollRoot){
+    if(payroll){
+      const statusText=payrollStatusLabel(payroll.status);
+      payrollRoot.innerHTML=`<div class="module-snapshot-main"><div><span class="dashboard-module-label">${escapeHtml(payroll.period_key||'รอบล่าสุด')}</span><strong>${formatDate(payroll.period_start)} → ${formatDate(payroll.period_end)}</strong><small>${Number(payroll.employee_count||0)} คน · จ่าย ${formatDate(payroll.pay_date)}</small></div><span class="badge ${payrollStatusClass(payroll.status)}">${escapeHtml(statusText)}</span></div><div class="module-snapshot-money"><span>ยอดโอนสุทธิ</span><strong>${money(payroll.net_total||0)}</strong></div>`;
+    }else{
+      payrollRoot.innerHTML=dashboardCompactEmpty('ยังไม่มีรอบเงินเดือน', 'สร้างรอบแรกเมื่อข้อมูลพนักงานพร้อม', 'neutral');
+    }
+  }
+
+  const documentRoot=$('#documentSnapshot');
+  const docs=d.documents||{};
+  if(documentRoot){
+    const pendingHr=Number(docs.pending_hr_sign||0),pendingEmployee=Number(docs.pending_employee_sign||0),finalTotal=Number(docs.final_total||0);
+    documentRoot.innerHTML=`<div class="module-stat-grid"><div class="${pendingHr?'needs-action':''}"><span>รอ HR เซ็น</span><strong>${pendingHr}</strong></div><div class="${pendingEmployee?'needs-action':''}"><span>รอพนักงานเซ็น</span><strong>${pendingEmployee}</strong></div><div><span>Final</span><strong>${finalTotal}</strong></div></div>${pendingHr||pendingEmployee?'':'<div class="module-clean-note">ไม่มีเอกสารรอลงนามตอนนี้</div>'}`;
+  }
 
   const pipelineStages = ['new', 'screening', 'hr_interview', 'manager_interview', 'offer', 'hired'];
-  $('#recruitmentPipeline').innerHTML = pipelineStages.map(stage => `
-    <div class="pipe-item">
-      <b>${d.recruitment[stage] || 0}</b>
-      <span>${stageLabels[stage]}</span>
+  $('#recruitmentPipeline').innerHTML = pipelineStages.map((stage,index) => `
+    <div class="pipe-item ${Number(d.recruitment?.[stage]||0)?'has-data':''}">
+      <b>${d.recruitment?.[stage] || 0}</b>
+      <span>${stageLabels[stage]}</span>${index<pipelineStages.length-1?'<i>→</i>':''}
     </div>`).join('');
 
-  const upcoming = [
-    ...d.probation.map(item => ({ ...item, type: 'Probation', icon: 'clock' })),
-    ...d.contracts.map(item => ({ ...item, type: 'สัญญา', icon: 'document' })),
-  ].sort((a, b) => a.days - b.days);
+  const moments = [
+    ...(d.birthdays||[]).map(item => ({...item,type:'วันเกิด',icon:'gift',priority:item.days===0?0:item.days})),
+    ...(d.probation||[]).map(item => ({ ...item, type: 'Probation', icon: 'clock', priority:item.days })),
+    ...(d.contracts||[]).map(item => ({ ...item, type: 'สัญญา', icon: 'document', priority:item.days })),
+  ].sort((a,b)=>Number(a.priority||0)-Number(b.priority||0)).slice(0,7);
 
-  $('#upcomingList').innerHTML = upcoming.length
-    ? upcoming.map(item => `
-      <div class="list-row">
-        <div class="list-icon ${item.days <= 7 ? 'warning' : ''}">${iconSvg(item.icon)}</div>
+  $('#upcomingList').innerHTML = moments.length
+    ? moments.map(item => `
+      <div class="list-row timeline-row">
+        <div class="list-icon ${item.type==='วันเกิด'?'coral':item.days<=7?'warning':'info'}">${iconSvg(item.icon)}</div>
         <div class="list-copy">
           <strong>${escapeHtml(item.name)}</strong>
-          <small>${item.type} · ${formatDate(item.date)}</small>
+          <small>${escapeHtml(item.type)} · ${formatDate(item.date)}</small>
         </div>
-        <span class="badge ${item.days <= 7 ? 'badge-warning' : 'badge-neutral'}">${item.days} วัน</span>
+        <span class="badge ${item.days===0?'badge-brand':item.days<=7?'badge-warning':'badge-neutral'}">${item.days===0?'วันนี้':`${item.days} วัน`}</span>
       </div>`).join('')
-    : emptyState('ยังไม่มีกำหนดการใกล้ถึง', 'Probation และสัญญาที่ใกล้ครบจะมาแสดงตรงนี้');
+    : dashboardCompactEmpty('ยังไม่มีกำหนดการใกล้ถึง', 'วันเกิด Probation และสัญญาจะมาแสดงตรงนี้', 'neutral');
+
+  const birthdayRoot=$('#birthdayList');
+  if(birthdayRoot){birthdayRoot.innerHTML='';birthdayRoot.classList.add('hidden');}
 }
 
 function renderEmployees(query = '') {
