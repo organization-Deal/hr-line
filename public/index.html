@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=P9.00.0" />
-  <link rel="modulepreload" href="/app.js?v=P9.00.0" />
+  <link rel="stylesheet" href="/styles.css?v=P9.01.0" />
+  <link rel="modulepreload" href="/app.js?v=P9.01.0" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -608,7 +608,7 @@
       </section>
 
       <section id="view-payroll" class="view">
-        <div class="page-intro payroll-page-intro"><div><p class="kicker">THAILAND PAYROLL CONTROL CENTER</p><h1>Payroll</h1><p>ตารางเดียวตั้งแต่ฐานเงินเดือน · Commission · Incentive · Attendance · ภาษี · SSO · Approval · Payslip · Export บัญชี</p></div><div class="page-actions"><button id="payrollComponentsBtn" class="secondary-btn" type="button">รายการเงิน</button><button id="payrollSettingsBtn" class="secondary-btn" type="button">ตั้งค่า Payroll</button><button id="createPayrollPeriodBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>สร้างรอบเงินเดือน</button></div></div>
+        <div class="page-intro payroll-page-intro"><div><p class="kicker">THAILAND PAYROLL CONTROL CENTER</p><h1>Payroll</h1><p>จัดการเงินเดือนทั้งบริษัทในตารางเดียว · ตั้งค่า → คำนวณ → ตรวจ → อนุมัติ → Payslip</p></div><div class="page-actions"><button id="payrollComponentsBtn" class="secondary-btn" type="button">รายการเงิน</button><button id="payrollSettingsBtn" class="secondary-btn" type="button">ตั้งค่า Payroll</button><button id="createPayrollPeriodBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>สร้างรอบเงินเดือน</button></div></div>
         <div id="payrollSummary" class="payroll-summary"></div>
         <div class="payroll-workspace">
           <aside class="panel payroll-period-panel"><div class="panel-head"><div><p class="kicker">PAY PERIODS</p><h3>รอบเงินเดือน</h3></div><span id="payrollReadyBadge" class="badge badge-soft">กำลังโหลด</span></div><div id="payrollPeriods" class="payroll-period-list"></div></aside>
@@ -1428,7 +1428,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=P9.00.0" type="module"></script>
+  <script src="/app.js?v=P9.01.0" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
