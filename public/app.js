@@ -564,11 +564,143 @@ function endMutationStatus(tracked, ok = true, errorText = null) {
   if (actionStatusCounter === 0) finishActionStatus(ok, null, ok ? null : (errorText || null));
 }
 
+
+let naknaInteractionSeq = 0;
+let naknaInteractionContext = null;
+let naknaInteractionHideTimer = null;
+
+function interactionTargetLabel(target){
+  if(!target)return 'รายการที่เลือก';
+  const aria=String(target.getAttribute?.('aria-label')||'').trim();
+  const data=String(target.dataset?.loadingLabel||target.dataset?.label||'').trim();
+  const text=String(target.textContent||'').replace(/\s+/g,' ').trim();
+  return (data||aria||text||'รายการที่เลือก').slice(0,72);
+}
+
+function interactionReadCopy(path=''){
+  const p=String(path||'').toLowerCase();
+  if(p.includes('/employees/')||p.includes('/employees?')||p.endsWith('/employees'))return ['กำลังเปิดข้อมูลพนักงาน…','กำลังดึงข้อมูลล่าสุดของพนักงาน'];
+  if(p.includes('/leave'))return ['กำลังเปิดข้อมูลการลา…','กำลังตรวจสอบสิทธิ์และรายการลา'];
+  if(p.includes('/payroll'))return ['กำลังเปิด Payroll…','กำลังโหลดรอบเงินเดือนและข้อมูลที่เกี่ยวข้อง'];
+  if(p.includes('/document'))return ['กำลังเปิดเอกสาร…','กำลังโหลดเอกสารและสถานะล่าสุด'];
+  if(p.includes('/attendance')||p.includes('/work-log')||p.includes('/work-locations'))return ['กำลังเปิดข้อมูลเวลาเข้างาน…','กำลังโหลด Attendance และสถานที่ทำงาน'];
+  if(p.includes('/recruit')||p.includes('/candidate'))return ['กำลังเปิด Recruitment…','กำลังโหลดข้อมูลผู้สมัครล่าสุด'];
+  if(p.includes('/performance')||p.includes('/learning'))return ['กำลังเปิดข้อมูลทีม…','กำลังโหลด Learning / KPI ล่าสุด'];
+  if(p.includes('/analytics'))return ['กำลังเปิดรายงาน…','กำลังประมวลผลข้อมูลสำหรับหน้านี้'];
+  if(p.includes('/company')||p.includes('/people-core')||p.includes('/settings')||p.includes('/integrations'))return ['กำลังเปิดการตั้งค่า…','กำลังโหลดข้อมูลของบริษัท'];
+  return ['กำลังโหลดข้อมูล…','ระบบกำลังเตรียมข้อมูลที่คุณเลือก'];
+}
+
+function clearNaknaInteractionVisual(context=naknaInteractionContext){
+  if(!context)return;
+  clearTimeout(context.showTimer);
+  context.target?.classList?.remove('nakna-read-pending','nakna-tap-ack');
+  document.body?.classList.remove('nakna-reading');
+}
+
+function hideInteractionStatus(delay=0){
+  clearTimeout(naknaInteractionHideTimer);
+  const root=$('#interactionStatus');
+  const hide=()=>root?.classList.add('hidden');
+  if(delay>0)naknaInteractionHideTimer=setTimeout(hide,delay);else hide();
+}
+
+function showInteractionStatus(context,path){
+  const root=$('#interactionStatus');
+  if(!root||$('#actionStatus:not(.hidden)'))return;
+  const [title,text]=interactionReadCopy(path);
+  root.classList.remove('hidden','success','error');
+  $('#interactionStatusTitle').textContent=title;
+  $('#interactionStatusText').textContent=context?.label?`${text} · ${context.label}`:text;
+  context.shown=true;
+  context.target?.classList?.add('nakna-read-pending');
+  document.body?.classList.add('nakna-reading');
+}
+
+function finishInteractionStatus(context,ok=true,errorText=''){
+  if(!context)return;
+  clearTimeout(context.showTimer);
+  context.target?.classList?.remove('nakna-read-pending');
+  document.body?.classList.remove('nakna-reading');
+  const root=$('#interactionStatus');
+  if(!root)return;
+  if(!context.shown){root.classList.add('hidden');return;}
+  root.classList.remove('success','error');
+  root.classList.add(ok?'success':'error');
+  $('#interactionStatusTitle').textContent=ok?'พร้อมแล้ว':'โหลดไม่สำเร็จ';
+  $('#interactionStatusText').textContent=ok?'ข้อมูลที่เลือกพร้อมใช้งานแล้ว':(errorText||'กรุณาลองอีกครั้ง หรือตรวจสอบการเชื่อมต่อ');
+  hideInteractionStatus(ok?420:1600);
+}
+
+function startUserReadInteraction(path,{silent=false}={}){
+  if(silent)return null;
+  const context=naknaInteractionContext;
+  if(!context||Date.now()-context.startedAt>1800)return null;
+  context.pendingReads=(context.pendingReads||0)+1;
+  context.lastPath=path;
+  clearTimeout(context.expireTimer);
+  if(context.pendingReads===1){
+    clearTimeout(context.showTimer);
+    context.showTimer=setTimeout(()=>showInteractionStatus(context,path),120);
+  }
+  return context.id;
+}
+
+function endUserReadInteraction(contextId,ok=true,errorText=''){
+  const context=naknaInteractionContext;
+  if(!context||context.id!==contextId)return;
+  context.pendingReads=Math.max(0,Number(context.pendingReads||0)-1);
+  if(context.pendingReads>0)return;
+  finishInteractionStatus(context,ok,errorText);
+  clearTimeout(context.expireTimer);
+  context.expireTimer=setTimeout(()=>{
+    if(naknaInteractionContext?.id===context.id){
+      clearNaknaInteractionVisual(context);
+      naknaInteractionContext=null;
+    }
+  },700);
+}
+
+function cancelUserInteractionForMutation(){
+  const context=naknaInteractionContext;
+  if(!context)return;
+  clearNaknaInteractionVisual(context);
+  hideInteractionStatus();
+  naknaInteractionContext=null;
+}
+
+function initGlobalInteractionFeedback(){
+  if(document.documentElement.dataset.naknaInteractionFeedback==='1')return;
+  document.documentElement.dataset.naknaInteractionFeedback='1';
+  document.addEventListener('click',event=>{
+    const target=event.target?.closest?.('button,a,[role="button"],[data-view]');
+    if(!target||target.disabled||target.getAttribute('aria-disabled')==='true')return;
+    if(target.closest('#interactionStatus,#actionStatus,#toast'))return;
+    if(target.matches('[data-no-action-feedback]'))return;
+    if(target.matches('.close-btn,[data-close-dialog],[data-modal-close],[value="cancel"]'))return;
+    target.classList.add('nakna-tap-ack');
+    setTimeout(()=>target.classList.remove('nakna-tap-ack'),220);
+    const old=naknaInteractionContext;
+    if(old)clearNaknaInteractionVisual(old);
+    const id=++naknaInteractionSeq;
+    const context={id,target,label:interactionTargetLabel(target),startedAt:Date.now(),pendingReads:0,shown:false,showTimer:null,expireTimer:null};
+    context.expireTimer=setTimeout(()=>{
+      if(naknaInteractionContext?.id!==id)return;
+      clearNaknaInteractionVisual(context);
+      hideInteractionStatus();
+      naknaInteractionContext=null;
+    },2200);
+    naknaInteractionContext=context;
+  },true);
+}
+
 async function api(path, options = {}) {
   const controller = new AbortController();
   const { timeoutMs: requestedTimeout, silentStatus = false, ...fetchOptions } = options;
   const method = String(fetchOptions.method || 'GET').toUpperCase();
   const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+  const trackedRead = !mutating ? startUserReadInteraction(path,{silent:silentStatus}) : null;
+  if(mutating) cancelUserInteractionForMutation();
   const trackedMutation = mutating ? beginMutationStatus(path, method, silentStatus) : false;
   const timeoutMs = Number(requestedTimeout || 18000);
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -586,6 +718,7 @@ async function api(path, options = {}) {
   } catch (error) {
     clearTimeout(timer);
     endMutationStatus(trackedMutation, false);
+    endUserReadInteraction(trackedRead,false,error?.name==='AbortError'?'ใช้เวลานานเกินไป กรุณาลองอีกครั้ง':String(error?.message||error||''));
     if (error?.name === 'AbortError') throw new Error(`API_TIMEOUT:${path}`);
     throw error;
   }
@@ -596,11 +729,13 @@ async function api(path, options = {}) {
 
   if (res.status === 401) {
     endMutationStatus(trackedMutation, false);
+    endUserReadInteraction(trackedRead,false,'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
     showLogin();
     throw new Error('AUTH_REQUIRED');
   }
   if (res.status === 409 && data.error === 'COMPANY_REQUIRED') {
     endMutationStatus(trackedMutation, false);
+    endUserReadInteraction(trackedRead,false,'กรุณาเลือกบริษัทก่อนใช้งาน');
     await loadSessionOnly();
     throw new Error('COMPANY_REQUIRED');
   }
@@ -608,12 +743,14 @@ async function api(path, options = {}) {
     const detail = data.detail ? ` · ${data.detail}` : '';
     const message = `${data.error || `HTTP_${res.status}`}${detail}`;
     endMutationStatus(trackedMutation, false, message);
+    endUserReadInteraction(trackedRead,false,message);
     const apiError = new Error(message);
     apiError.status = res.status;
     apiError.data = data;
     throw apiError;
   }
   endMutationStatus(trackedMutation, true);
+  endUserReadInteraction(trackedRead,true);
   return data;
 }
 
@@ -755,6 +892,7 @@ async function boot() {
 
 function bindEvents() {
   initMobileDialogSystem();
+  initGlobalInteractionFeedback();
   $('#lineBusinessBtn').onclick = openLineBusinessOnboarding;
   $('#bootRetryBtn').onclick = () => window.location.reload();
   $('#googleLoginBtn').onclick = () => { window.location.href = '/auth/google/start'; };

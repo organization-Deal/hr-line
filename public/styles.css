@@ -3058,3 +3058,31 @@ body.nakna-dialog-open{overflow:hidden;overscroll-behavior:none}
   dialog.nakna-dialog[open] textarea{min-height:104px}
   dialog.nakna-dialog[open] button{touch-action:manipulation}
 }
+
+/* P9.11 — global action / loading feedback */
+.interaction-status{position:fixed;z-index:7150;left:50%;top:24px;transform:translateX(-50%);pointer-events:none;transition:opacity .16s ease,transform .16s ease;user-select:none;caret-color:transparent}
+.interaction-status.hidden{display:none!important}
+.interaction-status-card{width:min(390px,calc(100vw - 32px));display:grid;grid-template-columns:40px minmax(0,1fr);gap:11px;align-items:center;padding:12px 14px;border:1px solid rgba(17,92,94,.12);border-radius:17px;background:rgba(255,255,255,.98);box-shadow:0 18px 54px rgba(20,55,58,.18);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);animation:nakna-action-pop .16s ease-out both}
+.interaction-status-icon{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:#eaf6f3;color:#128181;font-weight:800}
+.interaction-status-copy{display:grid;gap:2px;min-width:0}
+.interaction-status-copy strong{font-size:13px;line-height:1.3;color:#123c4a}
+.interaction-status-copy small{font-size:10px;line-height:1.45;color:#7b898b;white-space:normal}
+.interaction-status-spinner{width:19px;height:19px;border:2.4px solid #cfe4df;border-top-color:#178b8b;border-radius:50%;animation:nakna-action-spin .68s linear infinite}
+.interaction-status.success .interaction-status-icon{background:#e8f7ef;color:#168457}
+.interaction-status.error .interaction-status-icon{background:#fff0ed;color:#c95a4b}
+.interaction-status.success .interaction-status-spinner,.interaction-status.error .interaction-status-spinner{display:none}
+.interaction-status.success .interaction-status-icon::before{content:'✓';font-size:18px}
+.interaction-status.error .interaction-status-icon::before{content:'!';font-size:18px}
+body.nakna-reading{cursor:progress}
+button,a,[role="button"],[data-view]{-webkit-tap-highlight-color:transparent}
+button.nakna-tap-ack,a.nakna-tap-ack,[role="button"].nakna-tap-ack,[data-view].nakna-tap-ack{transform:scale(.985);filter:brightness(.985);transition:transform .08s ease,filter .08s ease}
+button.nakna-read-pending,a.nakna-read-pending,[role="button"].nakna-read-pending,[data-view].nakna-read-pending{cursor:wait!important;position:relative}
+button.nakna-read-pending:not(.icon-btn):not(.close-btn)::after,a.nakna-read-pending:not(.icon-btn)::after,[role="button"].nakna-read-pending::after,[data-view].nakna-read-pending::after{content:'';width:13px;height:13px;display:inline-block;margin-left:8px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-2px;animation:nakna-action-spin .68s linear infinite;opacity:.72}
+
+@media(max-width:720px){
+  .interaction-status{top:calc(72px + env(safe-area-inset-top));width:100%;padding:0 14px}
+  .interaction-status-card{width:100%;max-width:420px;margin:0 auto;padding:12px 13px;border-radius:16px}
+  .interaction-status-icon{width:38px;height:38px}
+  .interaction-status-copy strong{font-size:13px}
+  .interaction-status-copy small{font-size:10px}
+}
