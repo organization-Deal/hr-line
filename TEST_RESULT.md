@@ -1,19 +1,7 @@
-# TEST RESULT — P9.08 Fast LINE Startup
+# TEST RESULT — P9.08.1
 
-## Static checks
-- [x] `node --check public/app.js`
-- [x] `node --check src/index.js`
-- [x] LINE dashboard/workspace URL generator points to `/?line_login=...`
-- [x] `/api/public/line-session` route exists before authenticated `/api/*` gate
-- [x] LINE session response sets auth/company cookies and returns `me` payload
-- [x] client removes one-time token from URL using `history.replaceState`
-- [x] old `/auth/line/start?token=` flow remains for compatibility
-- [x] frontend asset cache key bumped to P9.08.0
+- แก้บรรทัดที่ Cloudflare ระบุใน `src/index.js` แล้ว
+- ตรวจค้นรูปแบบ `prepare('... status='active' ...')` ที่เสี่ยง syntax error ไม่พบจุดอื่น
+- ไม่มี Migration ใหม่
 
-## Device QA still required
-- LINE iOS cold open
-- LINE iOS second open / warm cache
-- LINE Android
-- Safari / Chrome direct reopen
-
-Target after device QA: shell visible roughly 1–3s on normal mobile connection; full dashboard can continue loading progressively.
+Cloudflare build เดิม fail ก่อน deploy เพราะ JavaScript parser; หลังแก้จุดนี้ source ไม่เหลือ nested single-quote รูปแบบเดียวกันใน prepare()
