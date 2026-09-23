@@ -250,8 +250,10 @@ function setViewLoading(name, loading, label = 'กำลังโหลดข�
     if(!overlay){
       overlay=document.createElement('div');
       overlay.className='view-loading-overlay';
-      overlay.innerHTML=`<div class="view-loading-card"><span class="view-loading-spinner" aria-hidden="true"></span><div><strong>${escapeHtml(label)}</strong><small>แสดงข้อมูลที่พร้อมใช้ก่อน แล้วอัปเดตส่วนที่เหลือเบื้องหลัง</small></div></div>`;
-      view.appendChild(overlay);
+      overlay.setAttribute('role','status');
+      overlay.setAttribute('aria-live','polite');
+      overlay.innerHTML=`<span class="view-loading-progress-bar" aria-hidden="true"></span><span class="sr-only">${escapeHtml(label)}</span>`;
+      view.prepend(overlay);
     }
     view.classList.add('is-view-loading');
   }else{
@@ -482,7 +484,9 @@ const settingsCategoryMeta = {
 
 let actionStatusCounter = 0;
 let actionStatusHideTimer = null;
-let actionStatusStartedAt = 0;
+let actionStatusShowTimer = null;
+let actionStatusVisible = false;
+let actionStatusHadError = false;
 
 function clearTransientTextCaret() {
   requestAnimationFrame(() => {
@@ -513,7 +517,7 @@ function setButtonBusy(button, busy, label = 'กำลังบันทึก�
 function requestActionCopy(path = '', method = 'POST') {
   const p = String(path).toLowerCase();
   const m = String(method || 'POST').toUpperCase();
-  if (m === 'DELETE') return ['กำลังลบข้อมูล…', 'ระบบกำลังอัปเดตข้อมูลให้ตรงกัน'];
+  if (m === 'DELETE') return ['กำลังลบข้อมูล…', 'กำลังอัปเดตข้อมูลให้ตรงกัน'];
   if (p.includes('/sync')) return ['กำลังซิงก์ข้อมูล…', 'กำลังอัปเดตข้อมูลล่าสุด'];
   if (p.includes('check-in') || p.includes('checkin')) return ['กำลังเช็กอิน…', 'กำลังบันทึกเวลาและตำแหน่ง'];
   if (p.includes('check-out') || p.includes('checkout')) return ['กำลังเช็กเอาต์…', 'กำลังบันทึกเวลาออกงาน'];
@@ -526,44 +530,71 @@ function showActionStatus(title = 'กำลังบันทึก…', text =
   const root = $('#actionStatus');
   if (!root) return;
   clearTimeout(actionStatusHideTimer);
-  actionStatusStartedAt = Date.now();
+  actionStatusVisible = true;
   root.classList.remove('hidden', 'success', 'error');
   $('#actionStatusTitle').textContent = title;
   $('#actionStatusText').textContent = text;
   document.body?.classList.add('is-mutating');
 }
 
-function finishActionStatus(ok = true, title = null, text = null) {
-  const root = $('#actionStatus');
-  if (!root) return;
-  root.classList.remove('success', 'error');
-  root.classList.add(ok ? 'success' : 'error');
-  $('#actionStatusTitle').textContent = title || (ok ? 'บันทึกแล้ว' : 'บันทึกไม่สำเร็จ');
-  $('#actionStatusText').textContent = text || (ok ? 'ข้อมูลล่าสุดถูกอัปเดตเรียบร้อย' : 'ลองใหม่อีกครั้ง หรือตรวจสอบการเชื่อมต่อ');
-  document.body?.classList.remove('is-mutating');
-  const elapsed = Date.now() - actionStatusStartedAt;
-  const minimumLoadingMs = 280;
-  const wait = Math.max(0, minimumLoadingMs - elapsed);
+function hideActionStatus(delay = 0){
+  const root=$('#actionStatus');
   clearTimeout(actionStatusHideTimer);
-  actionStatusHideTimer = setTimeout(() => root.classList.add('hidden'), ok ? wait + 450 : wait + 1600);
+  const hide=()=>{root?.classList.add('hidden');document.body?.classList.remove('is-mutating');actionStatusVisible=false;};
+  if(delay>0) actionStatusHideTimer=setTimeout(hide,delay); else hide();
 }
 
-function beginMutationStatus(path, method, silent = false) {
-  if (silent) return false;
+function beginMutationStatus(path, method, silent = false, target = null) {
+  if (silent) return null;
   actionStatusCounter += 1;
-  if (actionStatusCounter === 1) {
-    const [title, text] = requestActionCopy(path, method);
-    showActionStatus(title, text);
+  const inlineBusy=Boolean(target)&&target.getAttribute?.('aria-busy')!=='true';
+  const tracker={target,done:false,inlineBusy};
+  if(inlineBusy){
+    target?.classList?.add('nakna-mutation-pending');
+    target?.setAttribute?.('aria-busy','true');
   }
-  return true;
+  if (actionStatusCounter === 1) {
+    actionStatusHadError = false;
+    clearTimeout(actionStatusShowTimer);
+    const [title, text] = requestActionCopy(path, method);
+    // Fast saves should feel instant. Only show a global status when the operation is actually taking time.
+    actionStatusShowTimer=setTimeout(()=>{
+      if(actionStatusCounter>0) showActionStatus(title,text);
+    },450);
+  }
+  return tracker;
 }
 
-function endMutationStatus(tracked, ok = true, errorText = null) {
-  if (!tracked) return;
+function endMutationStatus(tracker, ok = true, errorText = null) {
+  if (!tracker || tracker.done) return;
+  tracker.done=true;
+  if(tracker.inlineBusy){
+    tracker.target?.classList?.remove('nakna-mutation-pending');
+    tracker.target?.removeAttribute?.('aria-busy');
+  }
   actionStatusCounter = Math.max(0, actionStatusCounter - 1);
-  if (actionStatusCounter === 0) finishActionStatus(ok, null, ok ? null : (errorText || null));
+  if(!ok) actionStatusHadError=true;
+  if (actionStatusCounter > 0) return;
+  clearTimeout(actionStatusShowTimer);
+  const root=$('#actionStatus');
+  if(actionStatusHadError){
+    if(root){
+      root.classList.remove('hidden','success');
+      root.classList.add('error');
+      $('#actionStatusTitle').textContent='ทำรายการไม่สำเร็จ';
+      $('#actionStatusText').textContent=errorText||'กรุณาลองอีกครั้ง หรือตรวจสอบการเชื่อมต่อ';
+      actionStatusVisible=true;
+      document.body?.classList.remove('is-mutating');
+      hideActionStatus(1700);
+    }
+  }else if(actionStatusVisible){
+    // Do not show a second "success" popup; normal toast / updated UI is enough confirmation.
+    hideActionStatus(120);
+  }else{
+    document.body?.classList.remove('is-mutating');
+  }
+  actionStatusHadError=false;
 }
-
 
 let naknaInteractionSeq = 0;
 let naknaInteractionContext = null;
@@ -595,6 +626,7 @@ function clearNaknaInteractionVisual(context=naknaInteractionContext){
   if(!context)return;
   clearTimeout(context.showTimer);
   context.target?.classList?.remove('nakna-read-pending','nakna-tap-ack');
+  if(!context.target?.classList?.contains('nakna-mutation-pending')) context.target?.removeAttribute?.('aria-busy');
   document.body?.classList.remove('nakna-reading');
 }
 
@@ -606,30 +638,22 @@ function hideInteractionStatus(delay=0){
 }
 
 function showInteractionStatus(context,path){
-  const root=$('#interactionStatus');
-  if(!root||$('#actionStatus:not(.hidden)'))return;
-  const [title,text]=interactionReadCopy(path);
-  root.classList.remove('hidden','success','error');
-  $('#interactionStatusTitle').textContent=title;
-  $('#interactionStatusText').textContent=context?.label?`${text} · ${context.label}`:text;
+  if(!context)return;
+  // Read/navigation actions use only inline feedback on the button that was actually tapped.
+  // No floating popup: view-level loading already has its own progress indicator when needed.
   context.shown=true;
   context.target?.classList?.add('nakna-read-pending');
-  document.body?.classList.add('nakna-reading');
+  context.target?.setAttribute?.('aria-busy','true');
 }
 
 function finishInteractionStatus(context,ok=true,errorText=''){
   if(!context)return;
   clearTimeout(context.showTimer);
   context.target?.classList?.remove('nakna-read-pending');
+  if(!context.target?.classList?.contains('nakna-mutation-pending')) context.target?.removeAttribute?.('aria-busy');
   document.body?.classList.remove('nakna-reading');
-  const root=$('#interactionStatus');
-  if(!root)return;
-  if(!context.shown){root.classList.add('hidden');return;}
-  root.classList.remove('success','error');
-  root.classList.add(ok?'success':'error');
-  $('#interactionStatusTitle').textContent=ok?'พร้อมแล้ว':'โหลดไม่สำเร็จ';
-  $('#interactionStatusText').textContent=ok?'ข้อมูลที่เลือกพร้อมใช้งานแล้ว':(errorText||'กรุณาลองอีกครั้ง หรือตรวจสอบการเชื่อมต่อ');
-  hideInteractionStatus(ok?420:1600);
+  hideInteractionStatus();
+  // Read failures are surfaced by the caller/toast. Avoid a second status popup here.
 }
 
 function startUserReadInteraction(path,{silent=false}={}){
@@ -641,7 +665,7 @@ function startUserReadInteraction(path,{silent=false}={}){
   clearTimeout(context.expireTimer);
   if(context.pendingReads===1){
     clearTimeout(context.showTimer);
-    context.showTimer=setTimeout(()=>showInteractionStatus(context,path),120);
+    context.showTimer=setTimeout(()=>showInteractionStatus(context,path),220);
   }
   return context.id;
 }
@@ -700,8 +724,9 @@ async function api(path, options = {}) {
   const method = String(fetchOptions.method || 'GET').toUpperCase();
   const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
   const trackedRead = !mutating ? startUserReadInteraction(path,{silent:silentStatus}) : null;
+  const mutationTarget = mutating ? naknaInteractionContext?.target : null;
+  const trackedMutation = mutating ? beginMutationStatus(path, method, silentStatus, mutationTarget) : null;
   if(mutating) cancelUserInteractionForMutation();
-  const trackedMutation = mutating ? beginMutationStatus(path, method, silentStatus) : false;
   const timeoutMs = Number(requestedTimeout || 18000);
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res;
