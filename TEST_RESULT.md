@@ -1,19 +1,8 @@
-# TEST RESULT — P9.04 Payroll Mobile Redesign
+# TEST RESULT — P9.05 LINE Owner / HR Dashboard Access Fix
 
-## Scope
-- Payroll detail page (mobile)
-- Payroll search filter
-- Inline grid editing on mobile cards
-- Desktop grid fallback
-
-## Verified
-- `public/app.js` syntax check ผ่าน (`node --check`)
-- มือถือจะแสดง Employee Cards แทนตารางใหญ่
-- Search filter ซ่อน/แสดงได้ทั้ง card และ row ผ่าน `data-payroll-search`
-- ปุ่ม `จัดการรายการเงิน` ยังทำงานเหมือนเดิม
-- ปุ่ม `ปรับรายการ` และ `ดูรายละเอียด` ยังผูก action เดิม
-- Desktop table ยังถูก render อยู่ และถูกซ่อนเฉพาะบน mobile breakpoint
-
-## Notes
-- ไม่มี migration ใหม่
-- แนะนำ hard refresh หลัง deploy เพื่อเคลียร์ cache JS/CSS เก่า
+- [x] `node --check src/index.js` ผ่าน
+- [x] ทดสอบ SQL fallback กรณี LINE อยู่บน synthetic user แต่ Owner membership อยู่บน canonical Google user ผ่าน
+- [x] Fallback ต้อง match Employee email + client เดียวกัน ไม่ grant Owner จากการเป็น employee เฉย ๆ
+- [x] Owner/HR menu จะกลับมาแสดง footer `เปิด HR Dashboard`
+- [x] คำสั่ง `Dashboard` ใช้ resolver เดียวกันและสามารถเปิด management flow ได้
+- [x] ไม่มี Migration ใหม่
