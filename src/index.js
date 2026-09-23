@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.05-LINE-ACCESS';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.05-LINE-ACCESS';
-const NAKNA_RUNTIME_FEATURE = 'line-owner-dashboard-access';
+const NAKNA_RUNTIME_RELEASE = 'P9.07-PAYROLL-PERIOD-MANAGE';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.07-PAYROLL-PERIOD-MANAGE';
+const NAKNA_RUNTIME_FEATURE = 'payroll-period-create-repair';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -3302,27 +3302,73 @@ async function handleApi(request, env, url, auth, ctx) {
     const body=await safeJson(request);
     const periodKey=String(body.period_key||dateInBangkok().slice(0,7));
     if(!/^\d{4}-\d{2}$/.test(periodKey)) return json({error:'รอบเงินเดือนต้องเป็น YYYY-MM'},400);
-    const [year,month]=periodKey.split('-').map(Number);
     const settings=await env.DB.prepare('SELECT * FROM payroll_settings WHERE client_id=?1').bind(clientId).first();
     const periodStart=String(body.period_start||payrollCycleDateFromPeriodKey(periodKey,Number(settings?.cycle_start_month_offset??0),Number(settings?.cycle_start_day??1)));
     const periodEnd=String(body.period_end||payrollCycleDateFromPeriodKey(periodKey,Number(settings?.cycle_end_month_offset??0),Number(settings?.cycle_end_day??0)));
-    if(!validPayrollDateKey(periodStart)||!validPayrollDateKey(periodEnd))return json({error:'วันที่เริ่ม/สิ้นสุดรอบเงินเดือนไม่ถูกต้อง'},400);
-    if(periodStart>periodEnd)return json({error:'วันที่เริ่มรอบต้องไม่เกินวันที่สิ้นสุดรอบ'},400);
+    if(!validPayrollDateKey(periodStart)||!validPayrollDateKey(periodEnd))return json({error:'วันที่เริ่ม/สิ้นสุดรอบเงินเดือนไม่ถูกต้อง',code:'PAYROLL_PERIOD_DATE_INVALID'},400);
+    if(periodStart>periodEnd)return json({error:'วันที่เริ่มรอบต้องไม่เกินวันที่สิ้นสุดรอบ',code:'PAYROLL_PERIOD_RANGE_INVALID'},400);
     const spanDays=dateKeysInclusive(periodStart,periodEnd).length;
-    if(spanDays<1||spanDays>62)return json({error:'รอบเงินเดือนต้องมีช่วงเวลา 1–62 วัน กรุณาตรวจวันที่อีกครั้ง'},400);
-    const overlap=await env.DB.prepare(`SELECT id,period_key,period_start,period_end FROM payroll_periods WHERE client_id=?1 AND status!='void' AND period_start<=?2 AND period_end>=?3 LIMIT 1`).bind(clientId,periodEnd,periodStart).first();
-    if(overlap)return json({error:`ช่วงวันที่นี้ทับกับรอบ ${overlap.period_key} (${overlap.period_start} ถึง ${overlap.period_end})`},409);
-    const lastDay=new Date(Date.UTC(year,month,0)).getUTCDate();
-    const payDay=Math.min(lastDay,Number(settings?.pay_day||28));
-    const payDate=String(body.pay_date||`${periodKey}-${String(payDay).padStart(2,'0')}`);
-    if(!validPayrollDateKey(payDate))return json({error:'วันที่จ่ายเงินเดือนไม่ถูกต้อง'},400);
+    if(spanDays<1||spanDays>62)return json({error:'รอบเงินเดือนต้องมีช่วงเวลา 1–62 วัน กรุณาตรวจวันที่อีกครั้ง',code:'PAYROLL_PERIOD_RANGE_TOO_LONG'},400);
+
+    // Pay date belongs to the month the cycle ends in, not blindly to period_key.
+    // This matters for companies using a cross-month cycle such as 26 Jul → 25 Aug.
+    const endYear=Number(periodEnd.slice(0,4)),endMonth=Number(periodEnd.slice(5,7));
+    const endMonthLastDay=new Date(Date.UTC(endYear,endMonth,0)).getUTCDate();
+    const payDay=Math.min(endMonthLastDay,Math.max(1,Number(settings?.pay_day||28)));
+    const defaultPayDate=`${endYear}-${String(endMonth).padStart(2,'0')}-${String(payDay).padStart(2,'0')}`;
+    const payDate=String(body.pay_date||defaultPayDate);
+    if(!validPayrollDateKey(payDate))return json({error:'วันที่จ่ายเงินเดือนไม่ถูกต้อง',code:'PAYROLL_PAY_DATE_INVALID'},400);
+
+    const existing=await env.DB.prepare(`SELECT id,period_key,period_start,period_end,pay_date,status FROM payroll_periods WHERE client_id=?1 AND period_key=?2 LIMIT 1`).bind(clientId,periodKey).first();
+    if(existing){
+      if(!['draft','review'].includes(String(existing.status||''))){
+        return json({error:`รอบ ${periodKey} มีอยู่แล้วและอยู่สถานะ ${existing.status} จึงแก้ช่วงวันไม่ได้`,code:'PAYROLL_PERIOD_EXISTS_LOCKED',existing},409);
+      }
+      if(!body.replace_existing_draft){
+        return json({error:`มีรอบ ${periodKey} อยู่แล้ว (${existing.period_start} ถึง ${existing.period_end})`,code:'PAYROLL_PERIOD_EXISTS_DRAFT',can_replace:true,existing},409);
+      }
+      const otherOverlap=await env.DB.prepare(`SELECT id,period_key,period_start,period_end,pay_date,status FROM payroll_periods WHERE client_id=?1 AND id<>?2 AND status!='void' AND period_start<=?3 AND period_end>=?4 LIMIT 1`).bind(clientId,Number(existing.id),periodEnd,periodStart).first();
+      if(otherOverlap){
+        if(!['draft','review'].includes(String(otherOverlap.status||'')) || !body.replace_overlapping_draft){
+          return json({error:`ช่วงวันที่นี้ทับกับรอบ ${otherOverlap.period_key} (${otherOverlap.period_start} ถึง ${otherOverlap.period_end})`,code:'PAYROLL_PERIOD_OVERLAP',can_replace:['draft','review'].includes(String(otherOverlap.status||'')),overlap:otherOverlap},409);
+        }
+        await env.DB.prepare(`UPDATE payroll_periods SET status='void',payroll_note=COALESCE(payroll_note,'') || ?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3 AND status IN ('draft','review')`).bind(`\nAUTO-VOID: ถูกแทนที่ตอนปรับรอบ ${periodKey}`,Number(otherOverlap.id),clientId).run();
+        await recordPayrollPeriodEvent(env.DB,clientId,Number(otherOverlap.id),Number(auth.user.id),'voided_for_cycle_change',{replacement_period_key:periodKey,replacement_start:periodStart,replacement_end:periodEnd});
+      }
+      const before={period_start:existing.period_start,period_end:existing.period_end,pay_date:existing.pay_date,status:existing.status};
+      try{
+        await env.DB.prepare(`UPDATE payroll_periods SET period_start=?1,period_end=?2,pay_date=?3,cutoff_start=?1,cutoff_end=?2,status='draft',approval_status='not_required',approved_by_user_id=NULL,approved_at=NULL,locked_by_user_id=NULL,locked_at=NULL,published_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?4 AND client_id=?5`).bind(periodStart,periodEnd,payDate,Number(existing.id),clientId).run();
+        await recalculatePayrollPeriod(env,clientId,Number(existing.id));
+        await recordPayrollPeriodEvent(env.DB,clientId,Number(existing.id),Number(auth.user.id),'period_range_rebuilt',{period_key:periodKey,period_start:periodStart,period_end:periodEnd,pay_date:payDate,previous:before});
+        return json({ok:true,id:Number(existing.id),reused:true,period:await getPayrollPeriodDetail(env.DB,clientId,Number(existing.id))},200);
+      }catch(error){
+        await env.DB.prepare(`UPDATE payroll_periods SET period_start=?1,period_end=?2,pay_date=?3,status=?4,cutoff_start=?1,cutoff_end=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?5 AND client_id=?6`).bind(before.period_start,before.period_end,before.pay_date,before.status,Number(existing.id),clientId).run().catch(()=>{});
+        return json({error:'คำนวณรอบเงินเดือนไม่สำเร็จ',detail:String(error?.message||error).slice(0,260),code:'PAYROLL_RECALCULATE_FAILED'},500);
+      }
+    }
+
+    const overlap=await env.DB.prepare(`SELECT id,period_key,period_start,period_end,pay_date,status FROM payroll_periods WHERE client_id=?1 AND status!='void' AND period_start<=?2 AND period_end>=?3 LIMIT 1`).bind(clientId,periodEnd,periodStart).first();
+    if(overlap){
+      const replaceable=['draft','review'].includes(String(overlap.status||''));
+      if(!replaceable || !body.replace_overlapping_draft){
+        return json({error:`ช่วงวันที่นี้ทับกับรอบ ${overlap.period_key} (${overlap.period_start} ถึง ${overlap.period_end})`,code:'PAYROLL_PERIOD_OVERLAP',can_replace:replaceable,overlap},409);
+      }
+      await env.DB.prepare(`UPDATE payroll_periods SET status='void',payroll_note=COALESCE(payroll_note,'') || ?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3 AND status IN ('draft','review')`).bind(`\nAUTO-VOID: ถูกแทนที่ตอนสร้างรอบ ${periodKey}`,Number(overlap.id),clientId).run();
+      await recordPayrollPeriodEvent(env.DB,clientId,Number(overlap.id),Number(auth.user.id),'voided_for_cycle_change',{replacement_period_key:periodKey,replacement_start:periodStart,replacement_end:periodEnd});
+    }
+
+    let createdId=0;
     try{
       const result=await env.DB.prepare(`INSERT INTO payroll_periods (client_id,period_key,period_start,period_end,pay_date,status,approval_status,cutoff_start,cutoff_end,created_by_user_id) VALUES (?1,?2,?3,?4,?5,'draft','not_required',?3,?4,?6)`).bind(clientId,periodKey,periodStart,periodEnd,payDate,Number(auth.user.id)).run();
-      const id=Number(result.meta.last_row_id);
-      await recalculatePayrollPeriod(env,clientId,id);
-      await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'period_created',{period_key:periodKey,period_start:periodStart,period_end:periodEnd,pay_date:payDate,span_days:spanDays});
-      return json({ok:true,id,period:await getPayrollPeriodDetail(env.DB,clientId,id)},201);
-    }catch(error){ if(/UNIQUE/i.test(String(error?.message||error))) return json({error:'มีรอบเงินเดือนเดือนนี้แล้ว'},409); throw error; }
+      createdId=Number(result.meta.last_row_id);
+      await recalculatePayrollPeriod(env,clientId,createdId);
+      await recordPayrollPeriodEvent(env.DB,clientId,createdId,Number(auth.user.id),'period_created',{period_key:periodKey,period_start:periodStart,period_end:periodEnd,pay_date:payDate,span_days:spanDays});
+      return json({ok:true,id:createdId,period:await getPayrollPeriodDetail(env.DB,clientId,createdId)},201);
+    }catch(error){
+      if(createdId) await env.DB.prepare(`DELETE FROM payroll_periods WHERE id=?1 AND client_id=?2 AND status='draft'`).bind(createdId,clientId).run().catch(()=>{});
+      if(/UNIQUE/i.test(String(error?.message||error))) return json({error:'มีรอบเงินเดือนเดือนนี้แล้ว',code:'PAYROLL_PERIOD_UNIQUE'},409);
+      return json({error:'คำนวณรอบเงินเดือนไม่สำเร็จ',detail:String(error?.message||error).slice(0,260),code:'PAYROLL_RECALCULATE_FAILED'},500);
+    }
   }
 
   const payrollPeriodMatch=path.match(/^\/api\/payroll\/periods\/(\d+)$/);
@@ -3332,6 +3378,64 @@ async function handleApi(request, env, url, auth, ctx) {
     const detail=await getPayrollPeriodDetail(env.DB,clientId,Number(payrollPeriodMatch[1]));
     if(!detail.period)return json({error:'ไม่พบรอบเงินเดือน'},404);
     return json(detail);
+  }
+
+  if(payrollPeriodMatch && method==='PATCH'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์แก้รอบเงินเดือน'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const id=Number(payrollPeriodMatch[1]);
+    const current=await env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(id,clientId).first();
+    if(!current)return json({error:'ไม่พบรอบเงินเดือน'},404);
+    if(!['draft','review'].includes(String(current.status||'')))return json({error:'แก้ไขได้เฉพาะรอบ Draft หรือรอตรวจเท่านั้น',code:'PAYROLL_PERIOD_EDIT_LOCKED'},409);
+    const body=await safeJson(request);
+    const periodKey=String(body.period_key??current.period_key);
+    const periodStart=String(body.period_start??current.period_start);
+    const periodEnd=String(body.period_end??current.period_end);
+    const payDate=String(body.pay_date??current.pay_date);
+    if(!/^\d{4}-\d{2}$/.test(periodKey))return json({error:'รอบเงินเดือนต้องเป็น YYYY-MM'},400);
+    if(!validPayrollDateKey(periodStart)||!validPayrollDateKey(periodEnd)||!validPayrollDateKey(payDate))return json({error:'วันที่รอบเงินเดือนหรือวันที่จ่ายไม่ถูกต้อง'},400);
+    if(periodStart>periodEnd)return json({error:'วันที่เริ่มรอบต้องไม่เกินวันที่สิ้นสุดรอบ'},400);
+    const spanDays=dateKeysInclusive(periodStart,periodEnd).length;
+    if(spanDays<1||spanDays>62)return json({error:'รอบเงินเดือนต้องมีช่วงเวลา 1–62 วัน'},400);
+    const duplicate=await env.DB.prepare(`SELECT id,period_key,status FROM payroll_periods WHERE client_id=?1 AND period_key=?2 AND id<>?3 LIMIT 1`).bind(clientId,periodKey,id).first();
+    if(duplicate)return json({error:`มีรอบ ${periodKey} อยู่แล้ว`,code:'PAYROLL_PERIOD_KEY_DUPLICATE',existing:duplicate},409);
+    const overlap=await env.DB.prepare(`SELECT id,period_key,period_start,period_end,status FROM payroll_periods WHERE client_id=?1 AND id<>?2 AND status!='void' AND period_start<=?3 AND period_end>=?4 LIMIT 1`).bind(clientId,id,periodEnd,periodStart).first();
+    if(overlap)return json({error:`ช่วงวันที่นี้ทับกับรอบ ${overlap.period_key} (${overlap.period_start} ถึง ${overlap.period_end})`,code:'PAYROLL_PERIOD_OVERLAP',overlap},409);
+    const before={period_key:current.period_key,period_start:current.period_start,period_end:current.period_end,pay_date:current.pay_date,status:current.status,approval_status:current.approval_status,approved_by_user_id:current.approved_by_user_id,approved_at:current.approved_at};
+    try{
+      await env.DB.prepare(`UPDATE payroll_periods SET period_key=?1,period_start=?2,period_end=?3,pay_date=?4,cutoff_start=?2,cutoff_end=?3,status='draft',approval_status='not_required',approved_by_user_id=NULL,approved_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?5 AND client_id=?6`).bind(periodKey,periodStart,periodEnd,payDate,id,clientId).run();
+      await recalculatePayrollPeriod(env,clientId,id);
+      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.period.edit','payroll_period',String(id),{before,after:{period_key:periodKey,period_start:periodStart,period_end:periodEnd,pay_date:payDate,status:'draft'}});
+      await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'period_edited',{before,after:{period_key:periodKey,period_start:periodStart,period_end:periodEnd,pay_date:payDate}});
+      return json({ok:true,id,period:await getPayrollPeriodDetail(env.DB,clientId,id)});
+    }catch(error){
+      await env.DB.prepare(`UPDATE payroll_periods SET period_key=?1,period_start=?2,period_end=?3,pay_date=?4,cutoff_start=?2,cutoff_end=?3,status=?5,approval_status=?6,approved_by_user_id=?7,approved_at=?8,updated_at=CURRENT_TIMESTAMP WHERE id=?9 AND client_id=?10`).bind(before.period_key,before.period_start,before.period_end,before.pay_date,before.status,before.approval_status||'not_required',before.approved_by_user_id||null,before.approved_at||null,id,clientId).run().catch(()=>{});
+      return json({error:'แก้ไขรอบเงินเดือนไม่สำเร็จ',detail:String(error?.message||error).slice(0,260),code:'PAYROLL_PERIOD_EDIT_FAILED'},500);
+    }
+  }
+
+  if(payrollPeriodMatch && method==='DELETE'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ลบรอบเงินเดือน'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const id=Number(payrollPeriodMatch[1]);
+    const current=await env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(id,clientId).first();
+    if(!current)return json({error:'ไม่พบรอบเงินเดือน'},404);
+    if(!['draft','review'].includes(String(current.status||'')))return json({error:'ลบได้เฉพาะรอบ Draft หรือรอตรวจเท่านั้น รอบที่ Lock/ส่งแล้วต้องเก็บเป็นประวัติ',code:'PAYROLL_PERIOD_DELETE_LOCKED'},409);
+    const docs=await env.DB.prepare(`SELECT COUNT(*) AS n FROM payroll_documents WHERE client_id=?1 AND period_id=?2`).bind(clientId,id).first();
+    if(Number(docs?.n||0)>0)return json({error:'รอบนี้มีเอกสาร Payslip แล้ว จึงลบไม่ได้',code:'PAYROLL_PERIOD_HAS_DOCUMENTS'},409);
+    const snapshot={period_key:current.period_key,period_start:current.period_start,period_end:current.period_end,pay_date:current.pay_date,status:current.status,employee_count:current.employee_count,gross_total:current.gross_total,deduction_total:current.deduction_total,net_total:current.net_total};
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.period.delete','payroll_period',String(id),snapshot);
+    try{
+      await env.DB.batch([
+        env.DB.prepare(`DELETE FROM payroll_period_events WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
+        env.DB.prepare(`DELETE FROM payroll_adjustments WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
+        env.DB.prepare(`DELETE FROM payroll_items WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
+        env.DB.prepare(`DELETE FROM payroll_periods WHERE client_id=?1 AND id=?2 AND status IN ('draft','review')`).bind(clientId,id)
+      ]);
+      return json({ok:true,id,deleted:true,period_key:current.period_key});
+    }catch(error){
+      return json({error:'ลบรอบเงินเดือนไม่สำเร็จ',detail:String(error?.message||error).slice(0,260),code:'PAYROLL_PERIOD_DELETE_FAILED'},500);
+    }
   }
 
   const payrollRecalcMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/recalculate$/);
