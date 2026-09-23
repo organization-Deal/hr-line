@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.07-PAYROLL-PERIOD-MANAGE';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.07-PAYROLL-PERIOD-MANAGE';
+const NAKNA_RUNTIME_RELEASE = 'P9.08-FAST-LINE-STARTUP';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.08-FAST-LINE-STARTUP';
 const NAKNA_RUNTIME_FEATURE = 'payroll-period-create-repair';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -1465,6 +1465,9 @@ export default {
 
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
         return await getPublicOnboardingConfig(env);
+      }
+      if (url.pathname === '/api/public/line-session' && request.method === 'POST') {
+        return await finishInlineLineSession(request, env);
       }
       if (url.pathname === '/api/public/diagnostics' && request.method === 'GET') {
         return await getPublicDiagnostics(env);
@@ -6340,7 +6343,64 @@ async function issueLineWebLoginLink(env,userId,{clientId=null,purpose='business
   await env.DB.prepare(`INSERT INTO line_web_login_tokens (token_hash,user_id,client_id,purpose,expires_at) VALUES (?1,?2,?3,?4,?5)`)
     .bind(tokenHash,Number(userId),clientId?Number(clientId):null,String(purpose),expiresAt).run();
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
+  // Dashboard/workspace links now open the app shell first, then exchange the
+  // one-time LINE token with fetch(). This removes the old auth-endpoint -> 302
+  // -> full-page reload chain that was especially slow inside LINE iOS.
+  if(['dashboard','workspace_access'].includes(String(purpose||''))){
+    return `${base}/?line_login=${encodeURIComponent(token)}&entry=${encodeURIComponent(String(purpose||'dashboard'))}`;
+  }
   return `${base}/auth/line/start?token=${encodeURIComponent(token)}`;
+}
+
+async function finishInlineLineSession(request,env){
+  // This endpoint intentionally does not redirect. The root app is already
+  // painted in LINE WebView; we only set the session cookies and continue boot.
+  const body=await safeJson(request);
+  const token=String(body.token||'').trim();
+  if(token.length<20) return json({error:'LINE_TOKEN_INVALID'},400);
+  const tokenHash=await sha256Hex(token);
+  let row;
+  try{
+    row=await env.DB.prepare(`SELECT t.*,u.status AS user_status FROM line_web_login_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=?1 AND t.used_at IS NULL`).bind(tokenHash).first();
+  }catch(error){
+    // Schema is migration-managed; this fallback only repairs old workspaces.
+    await ensureV100P7Ready(env.DB);
+    row=await env.DB.prepare(`SELECT t.*,u.status AS user_status FROM line_web_login_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=?1 AND t.used_at IS NULL`).bind(tokenHash).first();
+  }
+  if(!row||row.user_status!=='active'||new Date(row.expires_at).getTime()<=Date.now()){
+    if(row) await env.DB.prepare(`UPDATE line_web_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(tokenHash).run().catch(()=>{});
+    return json({error:'LINE_TOKEN_EXPIRED'},401);
+  }
+  let selectedClientId=row.client_id?Number(row.client_id):null;
+  if(selectedClientId){
+    const membership=await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(Number(row.user_id),selectedClientId).first();
+    if(!membership) selectedClientId=null;
+  }
+  const sessionToken=randomToken(40);
+  const sessionHash=await sha256Hex(sessionToken);
+  const sessionExpiresAt=new Date(Date.now()+30*24*60*60*1000).toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE line_web_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(tokenHash),
+    env.DB.prepare(`INSERT INTO auth_sessions (token_hash,user_id,selected_client_id,expires_at) VALUES (?1,?2,?3,?4)`).bind(sessionHash,Number(row.user_id),selectedClientId,sessionExpiresAt),
+  ]);
+  const purpose=String(row.purpose||'dashboard');
+  const cookies=[sessionCookie(sessionToken),clearCookie('nakna_setup_mode')];
+  if(selectedClientId) cookies.push(companyCookie(selectedClientId));
+  // Return /api/me-equivalent data in the same response. The LINE entry path
+  // can therefore paint the authenticated shell without an extra auth request.
+  const memberships=await getMemberships(env.DB,Number(row.user_id));
+  const activeMembership=memberships.find(x=>Number(x.id)===Number(selectedClientId))||memberships[0]||null;
+  const user=await env.DB.prepare(`SELECT id,google_sub,email,name,picture_url,locale,line_user_id,line_provider_scope,auth_provider FROM users WHERE id=?1`).bind(Number(row.user_id)).first();
+  const me={
+    user:publicUser(user||{id:Number(row.user_id)}),
+    companies:memberships,
+    active_company_id:selectedClientId||activeMembership?.id||null,
+    active_role:activeMembership?.role||null,
+    is_primary_owner:Boolean(activeMembership?.is_primary_owner),
+    setup_mode:null,
+    claimable_company:null,
+  };
+  return jsonWithCookies({ok:true,purpose,selected_client_id:selectedClientId,workspace_joined:purpose==='workspace_access',me},200,cookies);
 }
 
 async function finishLineWebLogin(request,env){
@@ -11006,6 +11066,12 @@ function redirectResponse(location, cookies = []) {
   const headers = new Headers({ location });
   for (const cookie of cookies) headers.append('Set-Cookie', cookie);
   return new Response(null, { status: 302, headers });
+}
+
+function jsonWithCookies(data,status=200,cookies=[]){
+  const headers=new Headers(JSON_HEADERS);
+  for(const cookie of cookies) headers.append('Set-Cookie',cookie);
+  return new Response(JSON.stringify(data),{status,headers});
 }
 
 function getCookie(request, name) {
