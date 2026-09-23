@@ -2622,3 +2622,30 @@ button.worklog-day-card{width:100%;border:0;background:#fff;text-align:left;font
 .payroll-quick-edit-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .payroll-quick-edit-grid .full{grid-column:1/-1}
 @media(max-width:760px){.payroll-quick-edit-grid{grid-template-columns:1fr}}
+
+/* P9.03 — company-specific payroll cycle + company payroll sheet */
+.payroll-cycle-settings{padding:14px;border:1px solid #dbe7e4;border-radius:14px;background:#f8fbfa}
+.payroll-cycle-row{display:grid;grid-template-columns:auto minmax(120px,1fr) 92px auto minmax(120px,1fr) 92px;gap:8px;align-items:center;margin-top:8px}
+.payroll-cycle-row>span{font-size:8px;color:#6f8380;font-weight:700}
+.payroll-cycle-row select,.payroll-cycle-row input{height:38px;border:1px solid #dce6e4;border-radius:10px;background:#fff;padding:0 10px;color:#23474d;font-size:9px}
+.payroll-cycle-settings>small{display:block;margin-top:8px;color:#04878a;font-size:8px;font-weight:600}
+.payroll-period-preview{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:center;padding:13px 14px;border:1px solid #d6e8e4;border-radius:13px;background:#f2faf8}
+.payroll-period-preview strong{color:#173f48;font-size:9px}
+.payroll-period-preview span{color:#04878a;font-size:10px;font-weight:700}
+.payroll-period-preview small{grid-column:1/-1;color:#80908d;font-size:7.8px}
+.payroll-period-range{display:flex;align-items:center;gap:8px;margin:5px 0 8px;color:#04878a;font-size:9px;font-weight:700}
+.payroll-period-range span{display:inline-flex;padding:3px 7px;border-radius:999px;background:#edf8f6;color:#50716f;font-size:7px;font-weight:600}
+.payroll-sheet-company{min-width:3250px!important}
+.payroll-sheet-v2 .group-bank{background:#f6f2fb}
+.payroll-salary-mode{display:inline-flex;align-items:center;padding:4px 7px;border-radius:999px;font-size:7px;font-weight:700;white-space:nowrap}
+.payroll-salary-mode.full{background:#eaf6ef;color:#25704d}
+.payroll-salary-mode.partial{background:#fff0ea;color:#b6533f}
+.payroll-sheet-company th,.payroll-sheet-company td{white-space:nowrap}
+.payroll-sheet-company td small{white-space:normal;max-width:150px}
+@media(max-width:760px){
+  .payroll-cycle-row{grid-template-columns:1fr 1fr}
+  .payroll-cycle-row>span{grid-column:1/-1}
+  .payroll-sheet-company{min-width:3100px!important}
+}
+
+.payroll-cycle-presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.payroll-cycle-presets button{border:1px solid #d7e5e2;background:#fff;color:#3e6563;border-radius:999px;padding:6px 9px;font-size:7.4px;cursor:pointer}.payroll-cycle-presets button:hover{border-color:#8bc5bc;background:#eef8f6;color:#047d80}
