@@ -1,29 +1,26 @@
-# Nakna P9.09 — HR Dashboard Command Center
+# Nakna P9.10 — Mobile Modal System
 
-Base: P9.08.1 Fast LINE Startup Build Fix
+Base: P9.09 Dashboard Command Center
 
-## REPLACE
-- `src/index.js`
+## REPLACE ONLY
 - `public/app.js`
 - `public/index.html`
 - `public/styles.css`
 
 ## Migration
 - ไม่มี Migration ใหม่
+- ไม่ต้องแก้ `src/index.js`
 
-## เปลี่ยนอะไร
-- ออกแบบ Dashboard ใหม่ให้เป็น HR Command Center และลดการ์ด Empty State ขนาดใหญ่
-- เพิ่ม Quick Actions: เวลาเข้างาน / การลา / เอกสาร / Payroll / ประกาศ
-- KPI บนสุดเปลี่ยนเป็นข้อมูลรายวัน: พนักงานทั้งหมด / เช็กอินแล้ว / ลา / ยังไม่เช็กอิน / มาสาย
-- เพิ่ม Attendance Snapshot พร้อม progress + ตัวเลขมา/ลา/ยังไม่มา/สาย
-- เพิ่ม Payroll Snapshot จากรอบล่าสุดแบบ query เบา ๆ ใน Dashboard API
-- เพิ่ม Document Snapshot: รอ HR เซ็น / รอพนักงานเซ็น / Final
-- Recruitment ปรับเป็น compact funnel
-- Upcoming รวมวันเกิด + Probation + Contract ใน timeline เดียว
-- Empty State ของ Dashboard ใช้ compact status แทน mascot ขนาดใหญ่ซ้ำ ๆ
-- Mobile: Quick Actions เป็น horizontal scroll และ widgets ย่อให้เห็นข้อมูลมากขึ้นต่อหนึ่งหน้าจอ
-- Frontend cache key: P9.09.0
+## แก้อะไร
+- เปลี่ยน modal บนมือถือทั้งระบบให้มี vertical scroll เพียงชั้นเดียว
+- Header ของ modal ติดด้านบน และ Footer action ติดด้านล่างโดยไม่บังข้อมูล
+- รองรับ LINE iOS / Safari / Chrome และ `visualViewport` ตอนคีย์บอร์ดเด้งขึ้น
+- เมื่อ focus input ระบบเลื่อน field ให้อยู่กลางพื้นที่ที่มองเห็นอัตโนมัติ
+- แก้ Leave Profile โดยเฉพาะ: รายการสิทธิ์ลาไม่เป็น nested scroll อีกต่อไป
+- แก้ nested scroll ใน Payroll Bulk, Payroll Components, Broadcast acknowledgement, Department/Position assignment, Organization Builder, Employee documents และ Help Center
+- ปรับ Document HR Signature / Document Settings / Generate Document ให้ใช้ระบบ scroll เดียวกัน
+- Mobile fields บังคับ 16px เพื่อลดปัญหา iOS zoom ตอนแตะ input
+- Cache busting เป็น `P9.10.0`
 
-## หมายเหตุ Performance
-- Payroll / Document Dashboard metrics ใช้ query สรุปขนาดเล็กเท่านั้น
-- ไม่โหลด Payroll page หรือ Document page ทั้งโมดูลตอนเปิด Dashboard
+## Dialog audit
+ตรวจ dialog ทั้งหมด 44 ตัวใน `public/index.html` และใช้ mobile shell กลางชุดเดียวกัน
