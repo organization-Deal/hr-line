@@ -4669,9 +4669,16 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
   const candidates = candidatesRes.results || [];
   const requests = requestsRes.results || [];
   await ensureDashboardAttentionReady(db);
-  const [hrCasesOpenRes,attentionReadRes]=await Promise.all([
+  const [hrCasesOpenRes,attentionReadRes,latestPayroll,documentSummary]=await Promise.all([
     includeHrCases ? db.prepare(`SELECT id,created_at FROM hr_cases WHERE client_id=?1 AND status NOT IN ('resolved','closed')`).bind(clientId).all().catch(()=>({results:[]})) : Promise.resolve({results:[]}),
     userId ? db.prepare(`SELECT attention_key,item_key FROM dashboard_attention_reads WHERE client_id=?1 AND user_id=?2`).bind(clientId,Number(userId)).all().catch(()=>({results:[]})) : Promise.resolve({results:[]}),
+    db.prepare(`SELECT id,period_key,period_start,period_end,pay_date,status,employee_count,gross_total,net_total,approval_status FROM payroll_periods WHERE client_id=?1 AND status!='void' ORDER BY period_end DESC,id DESC LIMIT 1`).bind(clientId).first().catch(()=>null),
+    db.prepare(`SELECT
+      COALESCE(SUM(CASE WHEN approval_status='pending' THEN 1 ELSE 0 END),0) AS pending_hr_sign,
+      COALESCE(SUM(CASE WHEN workflow_status='awaiting_employee_signature' THEN 1 ELSE 0 END),0) AS pending_employee_sign,
+      COALESCE(SUM(CASE WHEN workflow_status='final' THEN 1 ELSE 0 END),0) AS final_total
+      FROM employee_documents
+      WHERE client_id=?1 AND COALESCE(status,'active')!='archived'`).bind(clientId).first().catch(()=>({pending_hr_sign:0,pending_employee_sign:0,final_total:0})),
   ]);
   const hrCasesOpen = hrCasesOpenRes.results || [];
   const attentionReadSet=new Set((attentionReadRes.results||[]).map(r=>`${String(r.attention_key)}|${String(r.item_key)}`));
@@ -4745,6 +4752,17 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
     requests: requests.slice(0, 6),
     hr_cases_open: hrCasesOpen.length,
     recent_attendance: attendance.slice(0, 8),
+    payroll: latestPayroll ? {
+      id: Number(latestPayroll.id), period_key: latestPayroll.period_key, period_start: latestPayroll.period_start,
+      period_end: latestPayroll.period_end, pay_date: latestPayroll.pay_date, status: latestPayroll.status,
+      approval_status: latestPayroll.approval_status || 'not_required', employee_count: Number(latestPayroll.employee_count||0),
+      gross_total: Number(latestPayroll.gross_total||0), net_total: Number(latestPayroll.net_total||0)
+    } : null,
+    documents: {
+      pending_hr_sign: Number(documentSummary?.pending_hr_sign||0),
+      pending_employee_sign: Number(documentSummary?.pending_employee_sign||0),
+      final_total: Number(documentSummary?.final_total||0)
+    },
   };
 }
 
