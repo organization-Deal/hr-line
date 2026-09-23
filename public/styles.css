@@ -2649,3 +2649,73 @@ button.worklog-day-card{width:100%;border:0;background:#fff;text-align:left;font
 }
 
 .payroll-cycle-presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.payroll-cycle-presets button{border:1px solid #d7e5e2;background:#fff;color:#3e6563;border-radius:999px;padding:6px 9px;font-size:7.4px;cursor:pointer}.payroll-cycle-presets button:hover{border-color:#8bc5bc;background:#eef8f6;color:#047d80}
+
+/* P9.04 — Payroll mobile redesign */
+.payroll-mobile-list{display:none}
+.payroll-mobile-card{display:grid;gap:12px;padding:14px;border:1px solid #dbe8e4;border-radius:18px;background:#fff;box-shadow:0 8px 20px rgba(12,55,61,.04)}
+.payroll-mobile-card+.payroll-mobile-card{margin-top:12px}
+.payroll-mobile-card-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}
+.payroll-mobile-card-head .payroll-person{padding:0;background:transparent;border:0}
+.payroll-mobile-card-head .payroll-person strong{font-size:16px}
+.payroll-mobile-card-head .payroll-person small{font-size:12px;color:#7d8c89}
+.payroll-mobile-net{display:grid;justify-items:end;gap:2px;padding:10px 12px;border-radius:14px;background:#f4fbfa;border:1px solid #d5ece6}
+.payroll-mobile-net span{font-size:11px;color:#6f8a86}
+.payroll-mobile-net strong{font:700 18px/1.1 var(--font-en);color:#04878a}
+.payroll-mobile-meta{display:flex;flex-wrap:wrap;gap:8px}
+.payroll-mobile-meta span{display:inline-flex;align-items:center;padding:7px 10px;border-radius:999px;background:#f5f8f7;color:#56726f;font-size:11px}
+.payroll-mobile-sections{display:grid;gap:10px}
+.payroll-mobile-section{padding:12px;border:1px solid #edf3f1;border-radius:15px;background:#fcfdfd}
+.payroll-mobile-section-title{margin-bottom:10px;color:#173f48;font-size:12px;font-weight:700;letter-spacing:.02em}
+.payroll-mobile-pairs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.payroll-mobile-pairs>div,.payroll-mobile-edit-grid label{display:grid;gap:4px;padding:10px;border-radius:12px;background:#fff;border:1px solid #e8f0ed;min-width:0}
+.payroll-mobile-pairs .full,.payroll-mobile-edit-grid .full{grid-column:1/-1}
+.payroll-mobile-pairs span,.payroll-mobile-edit-grid label>span{font-size:11px;color:#83938f}
+.payroll-mobile-pairs strong{color:#173f48;font-size:15px;line-height:1.2;word-break:break-word}
+.payroll-mobile-pairs strong.net{color:#04878a}
+.payroll-mobile-pairs small{font-size:10px;color:#8ea09c}
+.payroll-mobile-edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.payroll-mobile-edit-grid .payroll-grid-input{width:100%;min-width:0;height:42px;border-radius:10px;font-size:14px}
+.payroll-mobile-pairs-highlight{grid-template-columns:1fr 1fr}
+.payroll-mobile-pairs-highlight .payroll-variance{justify-self:start}
+.payroll-mobile-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.payroll-mobile-actions .primary-btn,.payroll-mobile-actions .secondary-btn{width:100%;justify-content:center}
+.payroll-mobile-actions .primary-btn.ghost{background:#eef8f7;color:#0f6570;border:1px solid #cde4df}
+.payroll-page-actions-mobile{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.payroll-page-actions-mobile button{height:38px}
+.payroll-grid-toolbar-mobile>button{white-space:nowrap}
+.payroll-sheet-hint-mobile{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.payroll-sheet-hint-mobile span{font-size:11px;line-height:1.55}
+.payroll-mobile-list .payroll-grid-input::-webkit-outer-spin-button,.payroll-mobile-list .payroll-grid-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.payroll-mobile-list .payroll-grid-input{appearance:textfield}
+
+@media(max-width:720px){
+  .payroll-layout{display:block}
+  .payroll-period-panel{margin-bottom:12px}
+  .payroll-detail-head-mobile{display:grid;gap:12px}
+  .payroll-detail-head-mobile h2{font-size:28px;line-height:1.1}
+  .payroll-detail-head-mobile .kicker{font-size:11px;letter-spacing:.12em}
+  .payroll-page-actions-mobile{display:grid;grid-template-columns:1fr 1fr}
+  .payroll-page-actions-mobile button:last-child:nth-child(odd){grid-column:1/-1}
+  .payroll-detail-totals-v2{grid-template-columns:1fr!important}
+  .payroll-detail-totals-v2>div+div{border-left:0!important;border-top:1px solid var(--border)}
+  .payroll-grid-toolbar-mobile{display:grid;gap:10px}
+  .payroll-grid-toolbar-mobile>div{display:grid;gap:8px}
+  .payroll-grid-toolbar-mobile>button{width:100%;height:44px;justify-content:center}
+  .payroll-grid-toolbar-mobile input[type=search]{height:46px;font-size:16px;border-radius:14px}
+  .payroll-grid-toolbar-mobile span{font-size:11px;line-height:1.55}
+  .payroll-sheet-hint-mobile{display:grid;padding:12px 14px;border-radius:14px}
+  .payroll-mobile-list{display:block;margin-top:12px}
+  .payroll-desktop-grid{display:none}
+  .payroll-mobile-card{padding:14px}
+  .payroll-mobile-card-head{grid-template-columns:1fr;gap:12px}
+  .payroll-mobile-net{justify-items:start}
+  .payroll-mobile-pairs,.payroll-mobile-edit-grid,.payroll-mobile-pairs-highlight,.payroll-mobile-actions{grid-template-columns:1fr}
+  .payroll-mobile-pairs>div,.payroll-mobile-edit-grid label{padding:11px}
+  .payroll-mobile-pairs strong{font-size:16px}
+  .payroll-mobile-meta span{font-size:10.5px}
+  .payroll-mobile-section-title{font-size:12.5px}
+  .payroll-exception-center{padding:14px}
+  .payroll-exception-head{display:grid;gap:10px}
+  .payroll-exception-count{justify-self:start}
+  .payroll-footnote{display:grid;gap:8px}
+}
