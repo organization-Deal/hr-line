@@ -1,6 +1,6 @@
-# Nakna P9.12 — Smart Action Feedback
+# Nakna P9.13 — Payroll Flow & Clarity UX
 
-Base: P9.11 Global Action Feedback
+Base: P9.12 Smart Action Feedback
 
 ## REPLACE
 - `public/app.js`
@@ -10,13 +10,18 @@ Base: P9.11 Global Action Feedback
 ## Migration
 - ไม่มี Migration ใหม่
 
-## เปลี่ยนอะไร
-- ยกเลิก popup โหลดซ้ำสำหรับ GET / เปิด modal / เปิดข้อมูล
-- ปุ่มที่กดจะแสดง spinner เล็กเฉพาะเมื่อโหลดเกิน ~220ms
-- การเปลี่ยนหน้า/refresh view ใช้ progress bar บางด้านบน แทน popup กลางจอ
-- Save/Delete/Publish ที่เสร็จเร็วจะไม่แสดง popup กลางจอ
-- Save/Delete/Publish ที่ใช้เวลามากกว่า ~450ms จะแสดง status compact เพียง 1 อัน
-- เมื่อสำเร็จไม่แสดง success popup ซ้ำ เพราะ UI/toast เดิมเพียงพอ
-- Error ยังแจ้งให้เห็นชัด
-- ป้องกัน spinner ซ้ำในปุ่มที่มี `setButtonBusy()` อยู่แล้ว
-- cache/version bump เป็น `P9.12.0`
+## สิ่งที่เปลี่ยน
+- เพิ่ม Payroll Stepper 5 ขั้น: เตรียมข้อมูล → ตรวจสอบ → อนุมัติ → ปิดการแก้ไข → ออกสลิป
+- เหลือ Primary Action หลักเพียงปุ่มเดียวตามสถานะของรอบ
+- ย้าย Edit / Delete / Recalculate / Bulk / Export ไปไว้ใน `เครื่องมือเพิ่มเติม`
+- แสดงช่วงรอบจริงเด่นขึ้น พร้อมปุ่มรอบก่อน / รอบถัดไป
+- เพิ่ม Readiness สรุปจำนวนพนักงานที่พร้อม และสิ่งที่ยังขาด
+- Validation ถ้าไม่มีปัญหาจะย่อเป็นแถบเล็ก ไม่กินพื้นที่
+- เปลี่ยนศัพท์หลักเป็นภาษาไทยที่อ่านง่าย: รายได้รวมก่อนหัก / ยอดโอนสุทธิ / ต้นทุนบริษัท
+- แยกช่อง `กรอกเอง` กับ `ระบบคำนวณ` ให้เห็นชัดใน Grid
+- Net / Attendance / Tax กดดูที่มาของตัวเลขได้
+- Employee Payroll Detail เพิ่ม Source Breakdown และรายการที่ HR ปรับในรอบ
+- Mobile Payroll Card ย่อให้เห็น Gross / หัก / Net ก่อน แล้วค่อยกางรายละเอียด
+- เพิ่ม Final Check ก่อนปิดรอบ แสดงยอดรวม ความพร้อม และจำนวนบัญชีธนาคาร
+- ถ้ายังมี blocking exception จะกดยืนยันปิดรอบไม่ได้
+- Frontend cache version `P9.13.0`

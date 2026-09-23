@@ -1,10 +1,19 @@
-# TEST RESULT — P9.12
+# TEST RESULT — P9.13 Payroll Flow & Clarity UX
 
-- [x] `node --check public/app.js`
-- [x] Read action ไม่เรียก floating interaction popup
-- [x] Read action ใช้ inline spinner หลัง delay
-- [x] View loading เปลี่ยนเป็น progress line
-- [x] Mutation feedback delay ก่อนแสดง global status
-- [x] Success ไม่แสดง popup ซ้ำ
-- [x] ป้องกัน duplicate spinner เมื่อปุ่มมี aria-busy อยู่แล้ว
-- [x] ไม่มี Migration ใหม่
+## Static validation
+- `node --check public/app.js` ผ่าน
+- CSS `{}` balance ผ่าน
+- HTML duplicate id = 0
+- `payrollLockPreviewModal`, `payrollLockPreviewBody`, `payrollLockConfirmBtn` มีครบ
+
+## Flow covered
+- Draft → ตรวจสอบรอบ
+- Review / Pending → อนุมัติรอบ
+- Review / Approved → Final Check → ปิดการแก้ไข
+- Locked → ออกสลิปและส่งพนักงาน
+- Published → แสดงสถานะเสร็จแล้ว
+
+## Notes
+- ไม่มี migration ใหม่
+- Backend API เดิมถูกใช้ต่อ ไม่แก้ schema
+- แนะนำ Hard Refresh หลัง Deploy เพื่อให้ cache P9.13.0 ทำงาน
