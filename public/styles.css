@@ -2828,3 +2828,233 @@ button.worklog-day-card{width:100%;border:0;background:#fff;text-align:left;font
   .list-copy strong{font-size:10.8px}
   .list-copy small{font-size:8.7px}
 }
+
+/* =========================================================
+   Nakna P9.10 — Mobile Modal System
+   Goal: one vertical scroll layer per dialog on LINE iOS,
+   Safari and Chrome. Header/footer remain reachable and
+   nested lists no longer trap touch scrolling.
+   ========================================================= */
+body.nakna-dialog-open{overflow:hidden;overscroll-behavior:none}
+
+@media(max-width:720px){
+  dialog.nakna-dialog[open]{
+    box-sizing:border-box!important;
+    width:100vw!important;
+    max-width:none!important;
+    height:var(--nakna-visual-height,100dvh)!important;
+    max-height:var(--nakna-visual-height,100dvh)!important;
+    min-height:0!important;
+    inset:var(--nakna-visual-offset-top,0) 0 auto 0!important;
+    margin:0!important;
+    padding:0!important;
+    border:0!important;
+    border-radius:0!important;
+    background:#fff!important;
+    overflow-x:hidden!important;
+    overflow-y:auto!important;
+    overscroll-behavior:contain!important;
+    -webkit-overflow-scrolling:touch!important;
+    scroll-padding-top:88px!important;
+    scroll-padding-bottom:calc(104px + env(safe-area-inset-bottom))!important;
+    box-shadow:none!important;
+  }
+  dialog.nakna-dialog::backdrop{background:rgba(18,45,50,.38);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+
+  /* Make the dialog itself the only vertical scroller. */
+  dialog.nakna-dialog[open]>form{
+    box-sizing:border-box!important;
+    display:block!important;
+    width:100%!important;
+    height:auto!important;
+    min-height:100%!important;
+    max-height:none!important;
+    margin:0!important;
+    padding:0!important;
+    overflow:visible!important;
+  }
+  dialog.nakna-dialog[open] .modal-fields{
+    display:grid!important;
+    grid-template-columns:1fr!important;
+    gap:13px!important;
+    margin:0!important;
+    padding:16px 18px 22px!important;
+    max-height:none!important;
+    overflow:visible!important;
+    overscroll-behavior:auto!important;
+  }
+  dialog.nakna-dialog[open] .field.full{grid-column:auto!important}
+
+  /* Stable top and bottom controls. */
+  dialog.nakna-dialog[open] .modal-head{
+    position:sticky!important;
+    top:0!important;
+    z-index:40!important;
+    margin:0!important;
+    padding:calc(14px + env(safe-area-inset-top)) 18px 14px!important;
+    border-bottom:1px solid var(--border)!important;
+    background:rgba(255,255,255,.97)!important;
+    backdrop-filter:blur(16px)!important;
+    -webkit-backdrop-filter:blur(16px)!important;
+  }
+  dialog.nakna-dialog[open] .modal-actions{
+    position:sticky!important;
+    left:0!important;
+    right:0!important;
+    bottom:0!important;
+    z-index:45!important;
+    display:flex!important;
+    gap:10px!important;
+    width:100%!important;
+    box-sizing:border-box!important;
+    margin:0!important;
+    padding:12px 18px calc(12px + env(safe-area-inset-bottom))!important;
+    border-top:1px solid var(--border)!important;
+    background:rgba(255,255,255,.98)!important;
+    box-shadow:0 -10px 28px rgba(18,60,74,.09)!important;
+    backdrop-filter:blur(14px)!important;
+    -webkit-backdrop-filter:blur(14px)!important;
+  }
+  dialog.nakna-dialog[open] .modal-actions>*{flex:1 1 0!important;min-height:48px!important;font-size:13px!important}
+
+  /* Any custom content that sits directly between header/footer gets breathing room. */
+  dialog.nakna-dialog[open]>form>:not(.modal-head):not(.modal-actions):not(.modal-fields):not(input[type="hidden"]){
+    box-sizing:border-box;
+    margin-left:18px;
+    margin-right:18px;
+  }
+
+  /* Kill nested vertical scroll traps inside dialogs. */
+  dialog.nakna-dialog[open] .entitlement-list,
+  dialog.nakna-dialog[open] .position-assign-people,
+  dialog.nakna-dialog[open] .broadcast-ack-list,
+  dialog.nakna-dialog[open] .payroll-bulk-employees,
+  dialog.nakna-dialog[open] .payroll-component-list,
+  dialog.nakna-dialog[open] .employee-documents-list,
+  dialog.nakna-dialog[open] .organization-builder-list,
+  dialog.nakna-dialog[open] .help-guide-nav,
+  dialog.nakna-dialog[open] .help-center-content,
+  dialog.nakna-dialog[open] .document-hr-sign-dialog>form,
+  dialog.nakna-dialog[open] .attendance-person-summary-wrap{
+    max-height:none!important;
+    height:auto!important;
+    overflow:visible!important;
+    overscroll-behavior:auto!important;
+    -webkit-overflow-scrolling:auto!important;
+  }
+
+  /* Leave Profile — the reported broken screen. */
+  #leaveProfileModal .leave-profile-head{
+    display:grid!important;
+    grid-template-columns:1fr!important;
+    gap:13px!important;
+    margin:0!important;
+    padding:16px 18px 4px!important;
+  }
+  #leaveProfileModal .entitlement-list{
+    display:grid!important;
+    gap:10px!important;
+    margin:0!important;
+    padding:12px 18px 24px!important;
+  }
+  #leaveProfileModal .entitlement-row{
+    grid-template-columns:1fr 1fr!important;
+    gap:12px!important;
+    align-items:end!important;
+    padding:14px!important;
+    border-radius:16px!important;
+  }
+  #leaveProfileModal .entitlement-name{grid-column:1/-1}
+  #leaveProfileModal .entitlement-balance{grid-column:1/-1;padding:2px 0 0!important}
+  #leaveProfileModal .entitlement-name strong{font-size:14px!important}
+  #leaveProfileModal .entitlement-name small{font-size:11px!important;line-height:1.45}
+  #leaveProfileModal .entitlement-input label,#leaveProfileModal .entitlement-balance span{font-size:11px!important}
+  #leaveProfileModal .entitlement-input input{height:46px!important;font-size:16px!important;border-radius:12px!important}
+  #leaveProfileModal .entitlement-balance strong{font-size:18px!important}
+
+  /* Payroll long forms / lists. */
+  #payrollSettingsModal .payroll-cycle-row{display:grid!important;grid-template-columns:72px minmax(0,1fr)!important;gap:8px!important}
+  #payrollSettingsModal .payroll-cycle-row>span{align-self:center}
+  #payrollSettingsModal .payroll-cycle-presets{display:grid!important;grid-template-columns:1fr!important;gap:8px!important}
+  #payrollBulkAdjustmentModal .payroll-bulk-employees{grid-template-columns:1fr!important;padding:0!important;border:0!important;background:transparent!important}
+  #payrollComponentsModal .payroll-component-list{margin-bottom:18px!important}
+
+  /* Broadcast acknowledgement / assignment dialogs without <form>. */
+  #broadcastAckModal.nakna-dialog[open],
+  #departmentAssignModal.nakna-dialog[open],
+  #positionAssignModal.nakna-dialog[open],
+  #workLogDetailModal.nakna-dialog[open]{padding-bottom:0!important}
+  #broadcastAckModal>.broadcast-ack-summary,
+  #broadcastAckModal>.broadcast-ack-toolbar,
+  #broadcastAckModal>.broadcast-ack-list,
+  #departmentAssignModal>.department-assign-note,
+  #departmentAssignModal>.position-assign-toolbar,
+  #departmentAssignModal>.position-assign-people,
+  #positionAssignModal>.position-assign-toolbar,
+  #positionAssignModal>.position-assign-people,
+  #workLogDetailModal>.worklog-detail-body{
+    box-sizing:border-box!important;
+    margin-left:18px!important;
+    margin-right:18px!important;
+  }
+  #broadcastAckModal>.broadcast-ack-summary{margin-top:16px!important}
+  #broadcastAckModal>.broadcast-ack-list{margin-bottom:22px!important}
+  #departmentAssignModal>.position-assign-people,#positionAssignModal>.position-assign-people{margin-bottom:22px!important}
+  #workLogDetailModal>.worklog-detail-body{margin-top:16px!important;margin-bottom:22px!important}
+
+  /* Organization builder: use the same page scroll, not an inner list. */
+  #organizationBuilderModal.nakna-dialog[open]{overflow-y:auto!important}
+  #organizationBuilderModal .organization-builder-shell{
+    display:block!important;
+    max-height:none!important;
+    min-height:100%!important;
+    padding:0 18px calc(24px + env(safe-area-inset-bottom))!important;
+    overflow:visible!important;
+  }
+  #organizationBuilderModal .organization-builder-shell>.modal-head{margin:0 -18px 16px!important}
+  #organizationBuilderModal .organization-builder-list{padding-bottom:20px!important}
+
+  /* Help Center stays full-screen but also has a single scroll layer. */
+  #helpCenterModal.nakna-dialog[open]{overflow-y:auto!important}
+  #helpCenterModal .help-center-shell{display:block!important;height:auto!important;min-height:100%!important}
+  #helpCenterModal .help-center-content{overflow:visible!important}
+  #helpCenterModal .help-center-head{top:0!important}
+  #helpCenterModal .help-center-content:before{position:static!important}
+
+  /* Document dialogs had their own scrolling rules. Override them here. */
+  #documentHrSignModal.document-hr-sign-dialog[open],
+  #documentSettingsModal.document-settings-dialog[open],
+  #documentGenerateModal.document-generate-dialog[open]{height:var(--nakna-visual-height,100dvh)!important;max-height:var(--nakna-visual-height,100dvh)!important}
+  #documentHrSignModal.document-hr-sign-dialog>form{overflow:visible!important;height:auto!important;max-height:none!important;padding:0!important}
+  #documentHrSignModal .document-sign-flow,
+  #documentHrSignModal .hr-sign-document-card,
+  #documentHrSignModal .hr-sign-grid,
+  #documentHrSignModal .document-sign-workflow-note,
+  #documentHrSignModal .inline-error{
+    margin-left:18px!important;margin-right:18px!important;
+  }
+  #documentHrSignModal .document-sign-flow{margin-top:16px!important}
+  #documentHrSignModal .inline-error{margin-bottom:10px!important}
+  #documentSettingsModal .document-settings-grid{grid-template-columns:1fr!important;margin:16px 18px 22px!important;padding:0!important}
+  #documentGenerateModal .document-type-cards{grid-template-columns:1fr!important}
+
+  /* Long role / access / employee forms. */
+  #companyAccessModal .modal-fields,
+  #approverAccessModal .modal-fields,
+  #peopleProfileModal .modal-fields,
+  #scheduleModal .modal-fields,
+  #leavePolicyModal .modal-fields,
+  #broadcastModal .modal-fields,
+  #probationReviewModal .modal-fields,
+  #courseModal .modal-fields,
+  #moduleModal .modal-fields,
+  #kpiModal .modal-fields,
+  #performanceCycleModal .modal-fields{padding-bottom:28px!important}
+
+  /* Prevent iOS from zooming and make fields reliably tappable. */
+  dialog.nakna-dialog[open] input,
+  dialog.nakna-dialog[open] select,
+  dialog.nakna-dialog[open] textarea{font-size:16px!important;touch-action:manipulation}
+  dialog.nakna-dialog[open] textarea{min-height:104px}
+  dialog.nakna-dialog[open] button{touch-action:manipulation}
+}

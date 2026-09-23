@@ -643,6 +643,57 @@ async function consumeInlineLineSession(){
   }finally{clearTimeout(timer);}
 }
 
+
+// P9.10 — one-scroll mobile dialog system for LINE iOS / Safari / Chrome.
+let naknaMobileDialogSystemBound = false;
+let naknaMobileDialogObserver = null;
+function updateNaknaVisualViewport(){
+  const vv=window.visualViewport;
+  const height=Math.max(320,Math.round(vv?.height||window.innerHeight||720));
+  const offsetTop=Math.max(0,Math.round(vv?.offsetTop||0));
+  document.documentElement.style.setProperty('--nakna-visual-height',`${height}px`);
+  document.documentElement.style.setProperty('--nakna-visual-offset-top',`${offsetTop}px`);
+}
+function syncNaknaOpenDialogs(){
+  const open=[...document.querySelectorAll('dialog[open]')];
+  document.body?.classList.toggle('nakna-dialog-open',open.length>0);
+  open.forEach(dialog=>dialog.classList.add('nakna-dialog-active'));
+  document.querySelectorAll('dialog.nakna-dialog-active:not([open])').forEach(dialog=>dialog.classList.remove('nakna-dialog-active'));
+  updateNaknaVisualViewport();
+}
+function initMobileDialogSystem(){
+  if(naknaMobileDialogSystemBound)return;
+  naknaMobileDialogSystemBound=true;
+  updateNaknaVisualViewport();
+  const dialogs=[...document.querySelectorAll('dialog')];
+  dialogs.forEach(dialog=>{
+    dialog.classList.add('nakna-dialog');
+    dialog.addEventListener('close',syncNaknaOpenDialogs);
+    dialog.addEventListener('cancel',()=>setTimeout(syncNaknaOpenDialogs,0));
+  });
+  naknaMobileDialogObserver=new MutationObserver(records=>{
+    if(records.some(record=>record.type==='attributes'&&record.attributeName==='open'))syncNaknaOpenDialogs();
+  });
+  dialogs.forEach(dialog=>naknaMobileDialogObserver.observe(dialog,{attributes:true,attributeFilter:['open']}));
+  window.visualViewport?.addEventListener('resize',updateNaknaVisualViewport,{passive:true});
+  window.visualViewport?.addEventListener('scroll',updateNaknaVisualViewport,{passive:true});
+  window.addEventListener('resize',updateNaknaVisualViewport,{passive:true});
+  document.addEventListener('focusin',event=>{
+    if(window.matchMedia('(max-width: 720px)').matches===false)return;
+    const target=event.target;
+    if(!(target instanceof HTMLElement)||!target.matches('input,select,textarea,[contenteditable="true"]'))return;
+    const dialog=target.closest('dialog[open]');
+    if(!dialog)return;
+    // iOS/LINE resizes the visual viewport after the keyboard animation.
+    // Re-center the active field after that resize so the sticky footer never covers it.
+    setTimeout(()=>{
+      updateNaknaVisualViewport();
+      try{target.scrollIntoView({block:'center',inline:'nearest',behavior:'smooth'});}catch{}
+    },280);
+  },true);
+  syncNaknaOpenDialogs();
+}
+
 async function boot() {
   const bootStarted=performance.now();
   closeAllDialogs();
@@ -703,6 +754,7 @@ async function boot() {
 }
 
 function bindEvents() {
+  initMobileDialogSystem();
   $('#lineBusinessBtn').onclick = openLineBusinessOnboarding;
   $('#bootRetryBtn').onclick = () => window.location.reload();
   $('#googleLoginBtn').onclick = () => { window.location.href = '/auth/google/start'; };
