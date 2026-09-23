@@ -1,27 +1,26 @@
-# Nakna P9.03 — Company-specific Payroll Cycle
+# Nakna P9.04 — Payroll Mobile Redesign
 
-Base: P9.02 Payroll Inline Edit + Bank Split
+Base: P9.03 Custom Payroll Cycle
 
 ## REPLACE
-- `src/index.js`
 - `public/app.js`
-- `public/index.html`
 - `public/styles.css`
 
 ## ADD / RUN
-- `migrations/0032_payroll_custom_cycle.sql`
+- ไม่มี migration ใหม่
 
 ## สิ่งที่เปลี่ยน
-- แต่ละบริษัทกำหนดรอบเงินเดือนของตัวเองได้
-- ตั้ง Default ได้เป็น `วันเริ่ม + เดือนอ้างอิง` และ `วันสิ้นสุด + เดือนอ้างอิง`
-- Preset: `1 → สิ้นเดือน`, `26 เดือนก่อน → 25 เดือนนี้`, `25 เดือนก่อน → 25 เดือนนี้`
-- ตอนสร้างรอบ HR แก้ `เริ่มคิดรอบ / สิ้นสุดรอบ` เฉพาะรอบได้
-- ระบบกัน Payroll period ที่มีช่วงวันทับกัน
-- Attendance / Leave / Prorate ใช้ `period_start → period_end` จริง
-- Sidebar และหัว Payroll แสดงช่วงวันที่จริงของรอบ
-- ตาราง Payroll เพิ่ม Start date, รูปแบบเต็มเดือน/Prorate, วันคิดเงิน, KPI, ธนาคาร, เลขบัญชี, ชื่อบัญชี
-- KPI แก้จาก Grid ได้โดยตรงและแสดงใน Payslip แยกจากรายได้อื่น
-- Frontend cache version `P9.03.0`
+- ปรับหน้า Payroll บนมือถือใหม่ให้ดูง่ายขึ้น
+- จากเดิมที่ตารางใหญ่เลื่อนยาก เปลี่ยนให้มือถือใช้ `Employee Cards`
+- แต่ละการ์ดแสดง: ชื่อพนักงาน, แผนก/ตำแหน่ง, ฐานเงินเดือน, เงินเดือนรอบนี้, รายได้แปรผัน, รายการหัก, รับสุทธิ, Employer Cost และบัญชีรับเงิน
+- ช่อง `Commission / KPI / Incentive / Bonus / อื่น ๆ / หักอื่น` ยังแก้ได้จากมือถือโดยตรง
+- Search เดิมใช้ได้กับทั้งตาราง Desktop และการ์ด Mobile
+- Desktop ยังเก็บตารางเต็มแบบเดิมไว้ ไม่กระทบ workflow ฝั่งคอม
+- ปรับ action buttons, toolbar, hint และ spacing บนจอเล็กให้อ่านง่ายขึ้น
+- Validation / Summary / Period detail จัดลำดับใหม่ให้เหมาะกับมือถือ
 
-## ตั้งค่าบริษัทตัวอย่าง 25/01/2026 → 25/02/2026
-ไปที่ `ตั้งค่า Payroll` แล้วเลือก Preset `25 เดือนก่อน → 25 เดือนนี้` หนึ่งครั้ง จากนั้นรอบ Payroll เดือน 2026-02 จะสร้างช่วง `2026-01-25 → 2026-02-25` อัตโนมัติ
+## วิธีอัป
+1. Backup โปรเจกต์เดิม
+2. Replace 2 ไฟล์ตามรายการด้านบน
+3. Deploy
+4. Hard refresh บนมือถืออีกครั้ง

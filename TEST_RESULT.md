@@ -1,9 +1,19 @@
-# P9.03 Test Result
+# TEST RESULT — P9.04 Payroll Mobile Redesign
 
-- `node --check public/app.js` — PASS
-- `node --check src/index.js` — PASS
-- Migration `0032_payroll_custom_cycle.sql` tested against existing `payroll_settings` table — PASS
-- Cycle calculation `2026-02`, start offset `-1`, day `25` → `2026-01-25` — PASS
-- Cycle calculation `2026-02`, end offset `0`, day `25` → `2026-02-25` — PASS
-- Period validation: start <= end, max 62 days, overlap protection — included
-- Existing P9.02 inline salary / bank editing preserved
+## Scope
+- Payroll detail page (mobile)
+- Payroll search filter
+- Inline grid editing on mobile cards
+- Desktop grid fallback
+
+## Verified
+- `public/app.js` syntax check ผ่าน (`node --check`)
+- มือถือจะแสดง Employee Cards แทนตารางใหญ่
+- Search filter ซ่อน/แสดงได้ทั้ง card และ row ผ่าน `data-payroll-search`
+- ปุ่ม `จัดการรายการเงิน` ยังทำงานเหมือนเดิม
+- ปุ่ม `ปรับรายการ` และ `ดูรายละเอียด` ยังผูก action เดิม
+- Desktop table ยังถูก render อยู่ และถูกซ่อนเฉพาะบน mobile breakpoint
+
+## Notes
+- ไม่มี migration ใหม่
+- แนะนำ hard refresh หลัง deploy เพื่อเคลียร์ cache JS/CSS เก่า
