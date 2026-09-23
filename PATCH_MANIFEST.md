@@ -1,6 +1,6 @@
-# Nakna P9.01 — Payroll UX Refresh
+# Nakna P9.02 — Payroll Inline Edit + Bank Split
 
-Base: P9.00 Payroll Control Center
+Base: P9.01 Payroll UX Refresh
 
 ## REPLACE
 - `public/app.js`
@@ -9,15 +9,12 @@ Base: P9.00 Payroll Control Center
 
 ## Migration
 - ไม่มี Migration ใหม่
-- ใช้ฐานข้อมูลเดิมหลัง `0031_payroll_control_center.sql`
+- ใช้ฐานข้อมูลเดิมต่อได้
 
 ## เปลี่ยนอะไร
-- แก้หน้าตั้งต้น Payroll จาก card list เป็น table-first UX
-- แก้ bug `payroll-detail-empty` ที่ทำให้ Salary Setup ถูกบีบ/จัดกึ่งกลางผิด layout
-- KPI ตอนยังไม่มีรอบ เปลี่ยนเป็นความพร้อมของพนักงาน/ฐานเงินเดือน/บัญชีรับเงิน
-- เพิ่ม Getting Started progress + checklist
-- เพิ่มตารางตั้งค่า Payroll รายพนักงาน พร้อม Search และ Status filter
-- แสดง Department / Position / Base salary / Tax / SSO / Bank / Readiness ในหน้าเดียว
-- เพิ่มปุ่มไปยังพนักงานที่ยังตั้งค่าไม่ครบ
-- ปรับ hierarchy / spacing / empty-state / desktop + mobile responsive
-- bump frontend cache key เป็น `P9.01.0`
+- คลิกที่ช่อง `ฐานเงินเดือน` ได้เลย ไม่ต้องกดปุ่ม `ตั้งค่า`
+- แยกคอลัมน์ `ธนาคาร` ออกจาก `เลขบัญชี` ชัดเจน
+- เพิ่ม Quick Edit Modal สำหรับแก้ฐานเงินเดือน / ธนาคาร / ชื่อบัญชี / เลขบัญชี
+- เก็บปุ่ม `ดูเต็ม` ไว้สำหรับเข้า modal โปรไฟล์เงินเดือนฉบับเต็ม
+- ปรับ hint / microcopy ให้เข้าใจว่าแก้ไขจากตารางได้ทันที
+- เพิ่ม cache busting เป็น `P9.02.0`
