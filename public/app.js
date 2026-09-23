@@ -177,17 +177,22 @@ function hydrateDashboardCache() {
 async function loadDashboardFast({ silent = true } = {}) {
   const started = performance.now();
   try {
-    const [dashboard, companyProfile] = await Promise.all([
-      api('/api/dashboard', { timeoutMs: 12000 }),
-      api('/api/company-profile', { timeoutMs: 12000 }).catch(() => null),
-    ]);
+    // Dashboard is the only first-paint API. Company profile is not required to
+    // paint the shell and is fetched after the dashboard so D1 does not compete
+    // with the critical request on LINE mobile.
+    const dashboard = await api('/api/dashboard', { timeoutMs: 12000 });
     state.dashboard = dashboard || emptyDashboard();
-    if (companyProfile) state.companyProfile = companyProfile.company || companyProfile;
     renderDashboard();
     renderIdentity();
     $('#todayText').textContent = formatDate(state.dashboard.today);
     $('#sidebarCompany').textContent = state.dashboard.client?.name || activeCompany()?.name || 'บริษัทของคุณ';
     writeDashboardCache();
+    setTimeout(async()=>{
+      try{
+        const companyProfile=await api('/api/company-profile',{timeoutMs:12000});
+        if(companyProfile){state.companyProfile=companyProfile.company||companyProfile;renderIdentity();writeDashboardCache();}
+      }catch{}
+    },650);
     if (!silent) toast('อัปเดตภาพรวมแล้ว');
     return true;
   } catch (error) {
@@ -612,35 +617,84 @@ async function api(path, options = {}) {
   return data;
 }
 
+function inlineLineLoginToken(){
+  try{return new URL(window.location.href).searchParams.get('line_login')||'';}catch{return '';}
+}
+function cleanupInlineLineLoginUrl(){
+  try{
+    const url=new URL(window.location.href);
+    ['line_login','entry'].forEach(key=>url.searchParams.delete(key));
+    const query=url.searchParams.toString();
+    history.replaceState({},'',`${url.pathname}${query?`?${query}`:''}${url.hash}`);
+  }catch{}
+}
+async function consumeInlineLineSession(){
+  const token=inlineLineLoginToken();
+  if(!token)return null;
+  setBootStatus('กำลังยืนยันสิทธิ์จาก LINE',false);
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),9000);
+  try{
+    const res=await fetch('/api/public/line-session',{method:'POST',credentials:'same-origin',signal:controller.signal,headers:{'content-type':'application/json'},body:JSON.stringify({token})});
+    let data={};try{data=await res.json();}catch{}
+    if(!res.ok)throw new Error(data.error||`HTTP_${res.status}`);
+    cleanupInlineLineLoginUrl();
+    return data;
+  }finally{clearTimeout(timer);}
+}
+
 async function boot() {
+  const bootStarted=performance.now();
   closeAllDialogs();
   document.body?.classList.add('nakna-ready');
   showBootSplash();
   startBootWatchdog();
-  bindEvents();
   renderLoadingState();
-  loadPublicOnboarding();
   const returnState = handleReturnMessage();
-  try {
-    const ready = await loadSessionOnly({ forceNewBusiness: returnState.forceNewBusiness, reconcileIdentity: returnState.reconcileIdentity });
-    if (!ready) return;
 
-    // Existing users see the app immediately after /api/me. Onboarding status
-    // is checked after first paint instead of blocking every reopen on mobile.
+  // Start network work immediately. Previously bindEvents + public LINE config
+  // ran before /api/me, delaying every reopen inside LINE WebView.
+  const sessionPromise=(async()=>{
+    const inline=await consumeInlineLineSession();
+    if(inline?.workspace_joined) toast('เปิด Workspace ที่ได้รับสิทธิ์แล้ว');
+    if(inline?.me) return applySessionPayload(inline.me,{forceNewBusiness:returnState.forceNewBusiness});
+    return loadSessionOnly({ forceNewBusiness: returnState.forceNewBusiness, reconcileIdentity: returnState.reconcileIdentity });
+  })();
+  bindEvents();
+
+  try {
+    const ready = await sessionPromise;
+    if (!ready) {
+      setTimeout(()=>loadPublicOnboarding(),300);
+      return;
+    }
+
     showAppShell();
     const hadCache = hydrateDashboardCache();
     if (!hadCache) {
       try { renderFallbackShell(); } catch {}
     }
+    console.info(`[Nakna] shell visible ${Math.round(performance.now()-bootStarted)}ms`);
     loadDashboardFast({ silent: true }).then(()=>markViewLoaded('dashboard')).catch(() => {});
-    scheduleDeferredLoad(hadCache ? 6500 : 4800);
+    scheduleDeferredLoad(hadCache ? 7000 : 5200);
+
+    // Public LINE config and onboarding checks are useful but not part of first
+    // paint. Delaying them prevents extra requests from competing with /api/me
+    // and /api/dashboard on mobile networks.
+    setTimeout(()=>loadPublicOnboarding(),1800);
     if (!returnState.forceNewBusiness) {
       setTimeout(async()=>{
         const onboardingReady=await maybeRunOnboarding({forceNewBusiness:false});
         if(onboardingReady) showAppShell();
-      }, 0);
+      }, 2200);
     }
   } catch (error) {
+    cleanupInlineLineLoginUrl();
+    if(String(error?.message||'').includes('LINE_TOKEN')){
+      showLogin();
+      showLoginError('ลิงก์จาก LINE หมดอายุ กรุณากด Dashboard จากเมนู LINE ใหม่อีกครั้ง');
+      return;
+    }
     showAppShell();
     if (!['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message)) {
       renderLoadProblem([{ label: 'เริ่มระบบ', message: error.message }]);
@@ -907,23 +961,25 @@ function bindEvents() {
   });
 }
 
+function applySessionPayload(data,{forceNewBusiness=false}={}){
+  state.me=data;
+  hideLogin();
+  renderIdentity();
+  if(forceNewBusiness||data?.setup_mode==='new'){
+    showOnboarding({step:'company',forceNewBusiness:true});
+    return false;
+  }
+  if(!(data?.companies||[]).length){
+    showOnboarding({step:'company'});
+    return false;
+  }
+  return true;
+}
 async function loadSessionOnly({ forceNewBusiness = false, reconcileIdentity = false } = {}) {
   try {
     const meUrl = reconcileIdentity ? '/api/me?reconcile=1' : '/api/me';
     const data = await api(meUrl, { timeoutMs: 9000 });
-    state.me = data;
-    hideLogin();
-    renderIdentity();
-
-    if (forceNewBusiness || data.setup_mode === 'new') {
-      showOnboarding({ step: 'company', forceNewBusiness: true });
-      return false;
-    }
-    if (!(data.companies || []).length) {
-      showOnboarding({ step: 'company' });
-      return false;
-    }
-    return true;
+    return applySessionPayload(data,{forceNewBusiness});
   } catch (error) {
     if (error.message === 'AUTH_REQUIRED') {
       state.me = null;
