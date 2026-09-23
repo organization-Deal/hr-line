@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.08-FAST-LINE-STARTUP';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.08-FAST-LINE-STARTUP';
+const NAKNA_RUNTIME_RELEASE = 'P9.08.1-FAST-LINE-BUILD-FIX';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.08.1-FAST-LINE-BUILD-FIX';
 const NAKNA_RUNTIME_FEATURE = 'payroll-period-create-repair';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -5858,7 +5858,7 @@ async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId,preferredClien
   if(!managed.length){
     const canonical=await findLineManagementAccessViaEmployeeIdentity(env.DB,providerScope,lineUserId,preferredClientId);
     if(canonical?.user_id){
-      user=await env.DB.prepare('SELECT * FROM users WHERE id=?1 AND status='active' LIMIT 1').bind(Number(canonical.user_id)).first().catch(()=>null);
+      user=await env.DB.prepare("SELECT * FROM users WHERE id=?1 AND status='active' LIMIT 1").bind(Number(canonical.user_id)).first().catch(()=>null);
       memberships=user?.id?await getLineBusinessMemberships(env.DB,Number(user.id)).catch(()=>[]):[];
       managed=memberships.filter(row=>isDashboardAccessRole(row.role));
     }
