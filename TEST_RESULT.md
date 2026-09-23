@@ -1,8 +1,19 @@
-# TEST RESULT — P9.05 LINE Owner / HR Dashboard Access Fix
+# TEST RESULT — P9.07 Payroll Period Edit / Delete
 
-- [x] `node --check src/index.js` ผ่าน
-- [x] ทดสอบ SQL fallback กรณี LINE อยู่บน synthetic user แต่ Owner membership อยู่บน canonical Google user ผ่าน
-- [x] Fallback ต้อง match Employee email + client เดียวกัน ไม่ grant Owner จากการเป็น employee เฉย ๆ
-- [x] Owner/HR menu จะกลับมาแสดง footer `เปิด HR Dashboard`
-- [x] คำสั่ง `Dashboard` ใช้ resolver เดียวกันและสามารถเปิด management flow ได้
-- [x] ไม่มี Migration ใหม่
+## Static checks
+- `node --check public/app.js` ✅
+- `node --check src/index.js` ✅
+
+## Verified logic
+- Create Payroll จาก P9.06 ยังอยู่ ✅
+- Edit period ใช้ `PATCH /api/payroll/periods/:id` ✅
+- Delete period ใช้ `DELETE /api/payroll/periods/:id` ✅
+- Edit/Delete จำกัดเฉพาะ Draft / Review ✅
+- Locked / Published ถูก block ✅
+- Edit ตรวจ duplicate period key ✅
+- Edit ตรวจ overlapping date range ✅
+- Edit แล้ว recalculate ใหม่ ✅
+- Delete เก็บ audit snapshot ก่อนลบ ✅
+- Delete child Preview / adjustments / period events ✅
+- Delete แล้ว frontend reset active period + refresh ✅
+- ไม่มี migration ใหม่ ✅
