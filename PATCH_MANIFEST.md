@@ -1,6 +1,6 @@
-# Nakna P9.11 — Global Action Feedback
+# Nakna P9.12 — Smart Action Feedback
 
-Base: P9.10 Mobile Modal System Fix
+Base: P9.11 Global Action Feedback
 
 ## REPLACE
 - `public/app.js`
@@ -9,21 +9,14 @@ Base: P9.10 Mobile Modal System Fix
 
 ## Migration
 - ไม่มี Migration ใหม่
-- ไม่แก้ Worker / Database
 
-## สิ่งที่เปลี่ยน
-- เพิ่ม feedback กลางระบบให้ปุ่มแทบทุกจุด ทั้งมือถือและคอม
-- ทุกปุ่มมี tap/pressed feedback ทันที เพื่อยืนยันว่าระบบรับการกดแล้ว
-- ถ้าปุ่มเริ่มโหลดข้อมูลด้วย GET API จะขึ้นกล่อง `กำลังโหลด...` อัตโนมัติหลัง ~120ms
-- เมื่อข้อมูลพร้อมจะแสดง `พร้อมแล้ว` ชั่วครู่
-- ถ้าโหลดไม่สำเร็จจะแสดงสาเหตุ/ข้อความ error
-- Mutation เดิม (บันทึก/ลบ/อนุมัติ/ส่ง) ยังใช้ Action Status เต็มจอเดิม และไม่ชนกับ loading ใหม่
-- เพิ่ม spinner บนปุ่มที่กำลังรอข้อมูลโดยไม่แก้ innerHTML ของปุ่ม
-- Background requests / silent requests ไม่เด้ง popup รบกวนผู้ใช้
-- Cache version `P9.11.0`
-
-## เป้าหมาย UX
-ผู้ใช้ต้องรู้ทันทีว่า:
-1. แตะปุ่มสำเร็จแล้ว
-2. ระบบกำลังโหลด/บันทึกอะไรอยู่
-3. งานเสร็จแล้วหรือเกิด error
+## เปลี่ยนอะไร
+- ยกเลิก popup โหลดซ้ำสำหรับ GET / เปิด modal / เปิดข้อมูล
+- ปุ่มที่กดจะแสดง spinner เล็กเฉพาะเมื่อโหลดเกิน ~220ms
+- การเปลี่ยนหน้า/refresh view ใช้ progress bar บางด้านบน แทน popup กลางจอ
+- Save/Delete/Publish ที่เสร็จเร็วจะไม่แสดง popup กลางจอ
+- Save/Delete/Publish ที่ใช้เวลามากกว่า ~450ms จะแสดง status compact เพียง 1 อัน
+- เมื่อสำเร็จไม่แสดง success popup ซ้ำ เพราะ UI/toast เดิมเพียงพอ
+- Error ยังแจ้งให้เห็นชัด
+- ป้องกัน spinner ซ้ำในปุ่มที่มี `setButtonBusy()` อยู่แล้ว
+- cache/version bump เป็น `P9.12.0`
