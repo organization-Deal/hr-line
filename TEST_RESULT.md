@@ -1,28 +1,17 @@
-# P9.00 Test Result
+# P9.01 Test Result
 
-## Automated gates
-- `npm run check` — PASS
-- `npm run audit` — PASS
-- `npm run migration:smoke` — PASS
-- `npm run release:check` — PASS
-- Fresh migration chain `0001 → 0031` — PASS
-- Existing DB upgrade simulation `0030 → 0031` with existing payroll settings/period preserved — PASS
-- Payroll grid UPSERT key `(period_id, employee_id, source_key)` — PASS
+- `node --check public/app.js` — PASS
+- ตรวจ event handlers สำหรับ Search / Status filter — PASS (static)
+- ตรวจ Salary Setup render เมื่อไม่มี Pay Period — PASS (static)
+- ตรวจ Payroll Detail render เอา class `payroll-detail-empty` ออก — PASS (static)
+- ไม่มี Backend/API schema change
+- ไม่มี Migration ใหม่
 
 ## Smoke test หลัง Deploy
-1. เปิด Payroll → ตั้ง Payroll Settings
-2. ตั้งฐานเงินเดือนพนักงาน Test 1 คน + recurring component
-3. สร้างรอบ Payroll Test
-4. ใส่ Commission/Incentive ในตาราง
-5. ตรวจ Gross / Tax / SSO / Net / Employer Cost
-6. ดู Validation Center และ Employee Detail
-7. ส่งตรวจ → Approve (ถ้า Maker–Checker เปิด) → Lock
-8. Export Bank CSV + Accounting CSV
-9. Generate/Publish Payslip → เปิดจากฝั่งพนักงาน
-10. หากต้องแก้หลัง Lock ให้ทดสอบ Unlock พร้อมเหตุผลก่อนมี Payslip delivered
-
-## ขอบเขตที่ต้องตรวจด้วยข้อมูลบริษัทจริง
-- สูตรภาษี/ค่าลดหย่อนของพนักงานจริง
-- Rule SSO ที่บริษัทใช้ในปีนั้น
-- Bank file format เฉพาะธนาคาร (P9.00 ให้ CSV กลาง)
-- Accounting mapping เข้าผังบัญชีจริง
+1. เปิด Payroll โดยยังไม่มีรอบเงินเดือน
+2. ต้องเห็น KPI 4 ใบ: พนักงาน / ฐานเงินเดือน / บัญชี / ความพร้อม
+3. ฝั่งซ้ายต้องเป็น Getting Started 3 ขั้น
+4. ฝั่งขวาต้องเป็นตารางพนักงานเต็มพื้นที่ ไม่ใช่ card list แคบกลางหน้า
+5. Search / Filter ต้องซ่อนแถวตามเงื่อนไข
+6. กด `ตั้งค่า` ต้องเปิด Payroll Profile เดิม
+7. สร้างรอบเงินเดือนแล้ว ต้องกลับไปใช้ Payroll Spreadsheet เดิมได้
