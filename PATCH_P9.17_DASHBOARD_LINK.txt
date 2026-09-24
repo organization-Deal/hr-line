@@ -1,0 +1,32 @@
+Nakna HR — P9.17 DASHBOARD LINK FIX
+
+ปัญหาที่แก้
+- ปุ่ม “เปิด HR Dashboard” ใน LINE ใช้ one-time login token
+- token เดิมถูก mark ว่า used หลังเปิดครั้งแรก และ token bootstrap เดิมมีอายุ 15 นาที
+- ทำให้กดการ์ด Dashboard เดิมซ้ำแล้วขึ้นว่าลิงก์หมดอายุ ทั้งที่ nakna_session ยังมีอายุ 30 วัน
+
+สิ่งที่เปลี่ยน
+1) ถ้ากด Dashboard card เก่าและ LINE token ถูกใช้/หมดอายุแล้ว
+   - Worker จะตรวจ session cookie เดิม
+   - ถ้า session 30 วันยังใช้งานได้ จะเปิด Dashboard ต่อทันที
+   - ตรวจ membership/สิทธิ์ปัจจุบันอีกครั้ง ไม่ bypass permission
+
+2) อายุ token สำหรับ Dashboard ตอน “เปิดครั้งแรก” เพิ่มจาก 15 นาทีเป็น 24 ชั่วโมง
+   - business setup / workspace access อื่น ๆ ยัง 15 นาทีเหมือนเดิม
+   - หลังเปิดสำเร็จ ระบบยังใช้ session 30 วันตามเดิม
+
+3) ไม่ต้อง Migration / ไม่ต้องแก้ Database
+
+ไฟล์ที่เปลี่ยน
+- src/index.js
+
+ตรวจแล้ว
+- node --check src/index.js : PASS
+- npm run check (บนฐาน P9.16 FACE UX) : PASS
+
+Deploy
+- วาง src/index.js ทับของเดิม
+- wrangler deploy
+
+Release
+- P9.17-DASHBOARD-LINK
