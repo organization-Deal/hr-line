@@ -53,6 +53,7 @@ const state = {
   attendancePolicySavedAt: 0,
   attendanceFaceSaving: false,
   attendanceFaceSavedAt: 0,
+  attendanceFaceLoaded: false,
   organizationViewMode: (() => { try { const saved = localStorage.getItem('nakna.organizationViewMode'); return saved === 'list' ? 'list' : 'chart'; } catch { return 'chart'; } })(),
   teamDirectorySearch: '',
   teamDirectoryDepartment: 'all',
@@ -238,6 +239,7 @@ const viewLoadInFlight = new Map();
 function markViewLoaded(name){ viewLoadedAt.set(name, Date.now()); }
 function mergePeopleCoreFromServer(incoming){
   if(!incoming)return state.peopleCore;
+  if(incoming.attendance_face && typeof incoming.attendance_face.mode === 'string') state.attendanceFaceLoaded = true;
   const recentPolicyChange=state.attendancePolicySaving || (Date.now()-Number(state.attendancePolicySavedAt||0)<4000);
   if(recentPolicyChange && state.peopleCore?.attendance_policy){
     incoming={...incoming,attendance_policy:{...(incoming.attendance_policy||{}),...state.peopleCore.attendance_policy}};
@@ -1145,8 +1147,9 @@ function bindEvents() {
   $('#scheduleScopeType').onchange = refreshScheduleTarget;
   $('#holidaySaveBtn').onclick = saveHoliday;
   $('#attendancePolicyToggle').onchange = saveAttendancePolicy;
-  if ($('#attendanceFaceSaveBtn')) $('#attendanceFaceSaveBtn').onclick = saveAttendanceFaceSettings;
-  if ($('#attendanceFaceMode')) $('#attendanceFaceMode').onchange = updateAttendanceFaceModeHint;
+  if ($('#attendanceFaceSaveBtn')) $('#attendanceFaceSaveBtn').onclick = () => saveAttendanceFaceSettings({ silentSuccess: false });
+  if ($('#attendanceFaceMode')) $('#attendanceFaceMode').onchange = () => { updateAttendanceFaceModeHint(); saveAttendanceFaceSettings({ silentSuccess: true }); };
+  if ($('#attendanceFaceCheckoutToggle')) $('#attendanceFaceCheckoutToggle').onchange = () => saveAttendanceFaceSettings({ silentSuccess: true });
   if ($('#attendanceReminderToggle')) $('#attendanceReminderToggle').onchange = () => { updateAttendanceReminderEditor(); saveAttendanceReminderSettings({fromToggle:true}); };
   if ($('#attendanceReminderMessage')) $('#attendanceReminderMessage').oninput = updateAttendanceReminderEditor;
   if ($('#attendanceReminderResetBtn')) $('#attendanceReminderResetBtn').onclick = () => { $('#attendanceReminderMessage').value=DEFAULT_ATTENDANCE_REMINDER_MESSAGE; updateAttendanceReminderEditor(); $('#attendanceReminderMessage').focus(); };
@@ -3779,8 +3782,19 @@ function attendanceFaceModeLabel(mode){
 }
 function renderAttendanceFaceSettings(){
   const settings=state.peopleCore?.attendance_face||{};
+  const loaded=Boolean(state.attendanceFaceLoaded || typeof settings.mode==='string');
   const mode=['off','enroll','required'].includes(String(settings.mode))?String(settings.mode):'off';
-  const modeSelect=$('#attendanceFaceMode'),checkout=$('#attendanceFaceCheckoutToggle'),status=$('#attendanceFaceStatus');
+  const modeSelect=$('#attendanceFaceMode'),checkout=$('#attendanceFaceCheckoutToggle'),status=$('#attendanceFaceStatus'),autoNote=$('#attendanceFaceAutosaveNote');
+  if(!loaded){
+    if(modeSelect)modeSelect.disabled=true;
+    if(checkout)checkout.disabled=true;
+    if($('#attendanceFaceReadyCount'))$('#attendanceFaceReadyCount').textContent='—';
+    if($('#attendanceFacePendingCount'))$('#attendanceFacePendingCount').textContent='—';
+    if($('#attendanceFacePendingPeople')){$('#attendanceFacePendingPeople').classList.add('hidden');$('#attendanceFacePendingPeople').innerHTML='';}
+    if(status)status.textContent='กำลังโหลดการตั้งค่าจากบริษัท…';
+    if(autoNote)autoNote.textContent='กำลังโหลดการตั้งค่า…';
+    return;
+  }
   if(modeSelect&&!state.attendanceFaceSaving)modeSelect.value=mode;
   if(checkout&&!state.attendanceFaceSaving)checkout.checked=Boolean(settings.verify_checkout);
   if(modeSelect)modeSelect.disabled=Boolean(state.attendanceFaceSaving);
@@ -3801,29 +3815,50 @@ function renderAttendanceFaceSettings(){
     else if(mode==='enroll')status.textContent=`ช่วงลงทะเบียน · พนักงานยังเช็กอินได้ตามปกติ · พร้อมแล้ว ${enrolled}/${active} คน`;
     else status.textContent='ปิดใช้งาน · ระบบเช็กอินใช้ GPS ตามเดิม';
   }
+  if(autoNote){
+    if(state.attendanceFaceSaving)autoNote.textContent='กำลังบันทึก…';
+    else if(state.attendanceFaceSavedAt)autoNote.textContent='บันทึกแล้ว ✓ · เปลี่ยนค่าเมื่อไหร่ระบบจะบันทึกอัตโนมัติ';
+    else autoNote.textContent='เปลี่ยนค่าแล้วระบบจะบันทึกอัตโนมัติ';
+  }
   updateAttendanceFaceModeHint();
 }
 function updateAttendanceFaceModeHint(){
+  if(!state.attendanceFaceLoaded && typeof state.peopleCore?.attendance_face?.mode!=='string')return;
   const mode=String($('#attendanceFaceMode')?.value||'off');
   const checkout=$('#attendanceFaceCheckoutToggle');if(checkout)checkout.disabled=state.attendanceFaceSaving||mode==='off';
   const status=$('#attendanceFaceStatus');if(!status||state.attendanceFaceSaving)return;
-  if(mode==='required')status.textContent='เมื่อบันทึก คนที่ยังไม่มีใบหน้าจะถูกพาไปลงทะเบียนก่อนเช็กอินครั้งถัดไป';
-  else if(mode==='enroll')status.textContent='พนักงานจะได้รับคำแนะนำให้ลงทะเบียนใบหน้า แต่ยังสามารถข้ามและเช็กอินได้';
-  else status.textContent='ปิด Face Verification · ใช้กฎ GPS/Work Location ตามเดิม';
+  if(mode==='required')status.textContent='กำลังเปิดโหมดบังคับ · คนที่ยังไม่มีใบหน้าจะลงทะเบียนก่อนเช็กอินครั้งถัดไป';
+  else if(mode==='enroll')status.textContent='กำลังเปิดช่วงลงทะเบียน · พนักงานยังสามารถเช็กอินได้ตามปกติ';
+  else status.textContent='กำลังปิด Face Verification · ใช้กฎ GPS/Work Location ตามเดิม';
 }
-async function saveAttendanceFaceSettings(){
+async function saveAttendanceFaceSettings({silentSuccess=true}={}){
   const button=$('#attendanceFaceSaveBtn'),modeSelect=$('#attendanceFaceMode'),checkout=$('#attendanceFaceCheckoutToggle');
-  if(!button||!modeSelect||!checkout)return;
+  if(!modeSelect||!checkout||state.attendanceFaceSaving)return;
   const previous={...(state.peopleCore?.attendance_face||{})};
-  state.attendanceFaceSaving=true;setButtonBusy(button,true,'กำลังบันทึก…');renderAttendanceFaceSettings();
+  const draft={mode:String(modeSelect.value||'off'),verify_checkout:Boolean(checkout.checked)};
+  state.attendanceFaceSaving=true;
+  if(button)setButtonBusy(button,true,'กำลังบันทึก…');
+  renderAttendanceFaceSettings();
   try{
-    const result=await api('/api/attendance-face-settings',{method:'PATCH',body:JSON.stringify({mode:modeSelect.value,verify_checkout:Boolean(checkout.checked)}),silentStatus:true});
-    state.peopleCore.attendance_face=result.settings||previous;state.attendanceFaceSavedAt=Date.now();
+    const result=await api('/api/attendance-face-settings',{method:'PATCH',body:JSON.stringify(draft),silentStatus:true});
+    state.peopleCore.attendance_face=result.settings||{...previous,...draft};
+    state.attendanceFaceLoaded=true;
+    state.attendanceFaceSavedAt=Date.now();
     renderAttendanceFaceSettings();renderSettingsSidebar();
-    const mode=state.peopleCore.attendance_face?.mode;
-    toast(mode==='required'?'เปิดบังคับ Face Verification แล้ว':mode==='enroll'?'เปิดช่วงลงทะเบียนใบหน้าแล้ว':'ปิด Face Verification แล้ว');
-  }catch(error){state.peopleCore.attendance_face=previous;renderAttendanceFaceSettings();toast(error.message||'บันทึก Face Verification ไม่สำเร็จ',true);}
-  finally{state.attendanceFaceSaving=false;setButtonBusy(button,false);renderAttendanceFaceSettings();}
+    if(!silentSuccess){
+      const mode=state.peopleCore.attendance_face?.mode;
+      toast(mode==='required'?'เปิดบังคับ Face Verification แล้ว':mode==='enroll'?'เปิดช่วงลงทะเบียนใบหน้าแล้ว':'ปิด Face Verification แล้ว');
+    }
+  }catch(error){
+    state.peopleCore.attendance_face=previous;
+    state.attendanceFaceLoaded=typeof previous.mode==='string';
+    renderAttendanceFaceSettings();
+    toast(error.message||'บันทึก Face Verification ไม่สำเร็จ',true);
+  }finally{
+    state.attendanceFaceSaving=false;
+    if(button)setButtonBusy(button,false);
+    renderAttendanceFaceSettings();
+  }
 }
 async function loadPeopleFaceProfile(employeeId){
   const status=$('#peopleFaceProfileStatus'),meta=$('#peopleFaceProfileMeta'),reset=$('#peopleFaceResetBtn');
