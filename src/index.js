@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.15.3-FACE-SCANNER-VISIBLE';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.15.3-FACE-SCANNER-VISIBLE';
+const NAKNA_RUNTIME_RELEASE = 'P9.16-FACE-UX';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.16-FACE-UX';
 const NAKNA_RUNTIME_FEATURE = 'attendance-face-verification-no-photo-storage';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -6289,7 +6289,7 @@ async function sendAttendanceFaceEnrollmentReminders(request,env,clientId,auth,b
       const lineToken=await getLineToken(employee.line_provider_scope||'default');
       if(!lineToken)return {employee,status:'line_not_ready'};
       const attendanceToken=await issueQuickAttendanceToken(env.DB,Number(clientId),Number(employee.id));
-      const enrollUrl=`${base}/face?token=${encodeURIComponent(attendanceToken)}&face=enroll&v=P9.15.3`;
+      const enrollUrl=`${base}/face?token=${encodeURIComponent(attendanceToken)}&face=enroll&v=P9.16`;
       const messages=[buildFaceEnrollmentReminderFlex(employee,employee.company_name||'',enrollUrl)];
       let sent=await pushLineMessagesReliable(lineToken,String(employee.line_user_id),messages);
       if(!sent&&fallbackCtx?.accessToken&&fallbackCtx.accessToken!==lineToken){
@@ -6329,7 +6329,7 @@ function faceDistance(a,b){
 }
 function faceChallengeActions(){
   const byte=new Uint8Array(1);crypto.getRandomValues(byte);
-  return byte[0]%2===0?['blink','turn']:['turn','blink'];
+  return byte[0]%2===0?['blink']:['turn'];
 }
 async function createFaceChallenge(db,clientId,employeeId,purpose){
   await ensureAttendanceFaceReady(db);
@@ -6610,10 +6610,10 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
   const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
   const attendanceAccessToken=attendanceToken||portalToken||null;
-  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=P9.15.3-FACE`:null;
-  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=P9.15.3-FACE`:null;
+  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=P9.16-FACE`:null;
+  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=P9.16-FACE`:null;
   const wellnessUrl=portalToken?`${base}/wellness.html?token=${encodeURIComponent(portalToken)}`:null;
-  const faceManageUrl=attendanceAccessToken&&normalizeAttendanceFaceMode(faceSettings?.mode)!=='off'?`${base}/face?token=${encodeURIComponent(attendanceAccessToken)}&face=manage&v=P9.15.3`:null;
+  const faceManageUrl=attendanceAccessToken&&normalizeAttendanceFaceMode(faceSettings?.mode)!=='off'?`${base}/face?token=${encodeURIComponent(attendanceAccessToken)}&face=manage&v=P9.16`:null;
   return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,wellnessUrl,faceManageUrl,NAKNA_RUNTIME_RELEASE);
 }
 
@@ -6626,7 +6626,7 @@ async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='c
     if(!token) throw new Error('สร้างลิงก์ Quick Attendance ไม่สำเร็จ');
     const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
     const normalized=action==='checkout'?'checkout':'checkin';
-    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=P9.15.3-FACE`;
+    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=P9.16-FACE`;
     return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
   }catch(e){
     return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
@@ -11585,7 +11585,7 @@ function publicAppOrigin(request, env) {
 
 function faceVerificationUrl(request, env, token, mode='manage') {
   const safeMode=['enroll','test','manage'].includes(String(mode||'').toLowerCase())?String(mode).toLowerCase():'manage';
-  return `${publicAppOrigin(request,env)}/face?token=${encodeURIComponent(String(token||''))}&face=${encodeURIComponent(safeMode)}&v=P9.15.3`;
+  return `${publicAppOrigin(request,env)}/face?token=${encodeURIComponent(String(token||''))}&face=${encodeURIComponent(safeMode)}&v=P9.16`;
 }
 
 function serveFaceVerificationPage() {
@@ -11597,7 +11597,7 @@ function serveFaceVerificationPage() {
   <meta name="theme-color" content="#f7fbfa" />
   <meta name="robots" content="noindex,nofollow" />
   <title>นากนะ · ยืนยันตัวตน</title>
-  <link rel="stylesheet" href="/attendance.css?v=P9.15.3-FACE-SCANNER" />
+  <link rel="stylesheet" href="/attendance.css?v=P9.16-FACE-UX" />
 </head>
 <body>
   <main class="quick-shell">
@@ -11619,12 +11619,12 @@ function serveFaceVerificationPage() {
         </div>
         <div class="face-copy">
           <strong id="faceTitle">ยืนยันตัวตนด้วยใบหน้า</strong>
-          <p id="faceInstruction">มองตรงเข้ากล้องและทำตามคำแนะนำ</p>
+          <p id="faceInstruction">ถือมือถือห่างจากใบหน้าประมาณ 35–60 ซม. แล้วทำตามคำแนะนำ</p>
           <div class="face-steps" aria-hidden="true"><span id="faceStepCamera">1</span><span id="faceStepLive">2</span><span id="faceStepMatch">3</span></div>
         </div>
         <button id="faceStartBtn" class="primary-btn" type="button">เริ่มสแกนใบหน้า</button>
         <button id="faceSkipBtn" class="secondary-face-btn hidden" type="button">ข้ามครั้งนี้และเช็กอินต่อ</button>
-        <p class="face-privacy">รูปจากกล้องไม่ถูกบันทึกและไม่ถูกอัปโหลด ระบบส่งเฉพาะ Face Template แบบตัวเลขเพื่อยืนยันตัวตน</p>
+        <p class="face-privacy">ภาพจากกล้องใช้เฉพาะตอนยืนยันตัวตนและไม่ถูกบันทึก ระบบเก็บเฉพาะ Face Template แบบตัวเลข</p>
       </section>
 
       <div id="detailCard" class="detail-card hidden">
@@ -11643,11 +11643,11 @@ function serveFaceVerificationPage() {
       <button id="retryBtn" class="primary-btn hidden" type="button">ลองใหม่</button>
       <p id="permissionHint" class="permission-hint hidden">ถ้ามือถือถามสิทธิ์ Location หรือ Camera ให้เลือก “อนุญาตขณะใช้งาน” แล้วกดลองใหม่</p>
       <p id="diagnosticText" class="privacy-note hidden"></p>
-      <p class="privacy-note">หน้านี้ใช้ Token ของพนักงานโดยตรง ไม่ต้อง Login เข้า HR Dashboard · ไม่เก็บรูปใบหน้าประจำวัน · P9.15.3</p>
+      <p class="privacy-note">หน้านี้ใช้ Token ของพนักงานโดยตรง ไม่ต้อง Login เข้า HR Dashboard · ไม่เก็บรูปใบหน้าประจำวัน · P9.16</p>
     </section>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" defer></script>
-  <script src="/attendance.js?v=P9.15.3-FACE-SCANNER" defer></script>
+  <script src="/attendance.js?v=P9.16-FACE-UX" defer></script>
 </body>
 </html>`;
   return new Response(html,{status:200,headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-robots-tag':'noindex, nofollow'}});
