@@ -258,7 +258,13 @@ async function facePost(path,body){
 }
 async function fetchFaceStatus(){
   const response=await fetch(`/api/public/attendance/${encodeURIComponent(token)}/face-status?action=${encodeURIComponent(action)}`,{headers:{accept:'application/json'},cache:'no-store'});
-  const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'ตรวจ Face Verification ไม่สำเร็จ');return data;
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){
+    const routeMissing=response.status===404&&String(data.error||'').toLowerCase().includes('route not found');
+    if(routeMissing)throw Object.assign(new Error('Worker ฝั่งเซิร์ฟเวอร์ยังไม่ได้อัปเดต Face Verification กรุณา Deploy src/index.js เวอร์ชัน P9.14.1 แล้วเปิดจาก LINE ใหม่'),{faceCode:'FACE_BACKEND_ROUTE_MISSING',status:404});
+    throw Object.assign(new Error(data.error||'ตรวจ Face Verification ไม่สำเร็จ'),{faceCode:data.code||'FACE_STATUS_FAILED',status:response.status});
+  }
+  return data;
 }
 async function performFaceFlow(){
   if(faceFlowBusy)return;faceFlowBusy=true;
@@ -294,7 +300,7 @@ async function prepareAttendanceFlow(){
     if(faceStatus.verify_required){showFacePanel({title:'ยืนยันใบหน้าก่อนลงเวลา',instruction:'ตรวจว่าเป็นเจ้าของบัญชีจริงก่อนบันทึกเวลา',allowSkip:false,startLabel:'สแกนหน้าและยืนยัน'});return;}
     if(faceStatus.enrollment_recommended){showFacePanel({title:'ตั้งค่าใบหน้าให้พร้อมใช้งาน',instruction:'บริษัทอยู่ในช่วงลงทะเบียน คุณสามารถตั้งค่าตอนนี้ หรือข้ามและเช็กอินตามปกติได้',allowSkip:true,startLabel:'ลงทะเบียนใบหน้าตอนนี้'});return;}
     await submit();
-  }catch(error){setError(error.message||'เตรียมการเช็กอินไม่สำเร็จ',{code:'FACE_STATUS_FAILED'});}finally{facePreparing=false;}
+  }catch(error){setError(error.message||'เตรียมการเช็กอินไม่สำเร็จ',{code:error.faceCode||'FACE_STATUS_FAILED'});}finally{facePreparing=false;}
 }
 
 function runtimeInfo(){
