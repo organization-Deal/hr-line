@@ -268,7 +268,7 @@ async function fetchFaceStatus(){
   const data=await response.json().catch(()=>({}));
   if(!response.ok){
     const routeMissing=response.status===404&&String(data.error||'').toLowerCase().includes('route not found');
-    if(routeMissing)throw Object.assign(new Error('Worker ฝั่งเซิร์ฟเวอร์ยังไม่ได้อัปเดต Face Verification กรุณา Deploy src/index.js เวอร์ชัน P9.15 แล้วเปิดจาก LINE ใหม่'),{faceCode:'FACE_BACKEND_ROUTE_MISSING',status:404});
+    if(routeMissing)throw Object.assign(new Error('Worker ฝั่งเซิร์ฟเวอร์ยังไม่ได้อัปเดต Face Verification กรุณา Deploy src/index.js เวอร์ชัน P9.15.2 แล้วเปิดจาก LINE ใหม่'),{faceCode:'FACE_BACKEND_ROUTE_MISSING',status:404});
     throw Object.assign(new Error(data.error||'ตรวจ Face Verification ไม่สำเร็จ'),{faceCode:data.code||'FACE_STATUS_FAILED',status:response.status});
   }
   return data;

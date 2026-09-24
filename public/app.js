@@ -1,4 +1,4 @@
-// P9.15.1 — Safety redirect for LINE/Cloudflare SPA fallback.
+// P9.15.2 — Safety redirect for LINE/Cloudflare SPA fallback.
 // If a Face link is accidentally served by index.html, recover before booting the HR login page.
 try {
   const bootUrl = new URL(window.location.href);
@@ -8,7 +8,7 @@ try {
     const target = new URL('/face', bootUrl.origin);
     target.searchParams.set('token', legacyFaceToken);
     target.searchParams.set('face', legacyFaceMode);
-    target.searchParams.set('v', 'P9.15.1');
+    target.searchParams.set('v', 'P9.15.2');
     window.location.replace(target.toString());
   }
 } catch {}
@@ -941,6 +941,7 @@ async function boot() {
 }
 
 function bindEvents() {
+  ensureAttendanceFaceCard();
   initMobileDialogSystem();
   initGlobalInteractionFeedback();
   $('#lineBusinessBtn').onclick = openLineBusinessOnboarding;
@@ -3795,12 +3796,58 @@ async function saveAttendanceReminderSettings({fromToggle=false}={}){
 }
 
 
+function ensureAttendanceFaceCard(){
+  if ($('#attendanceFaceCard')) return $('#attendanceFaceCard');
+  const host=document.querySelector('.settings-category-panel[data-settings-category="attendance"] .work-location-section');
+  if(!host)return null;
+  const reminder=$('#attendanceReminderCard');
+  const wrap=document.createElement('div');
+  wrap.innerHTML=`<section id="attendanceFaceCard" class="attendance-face-card face-card-recovered">
+    <div class="attendance-face-head">
+      <div class="attendance-face-icon" aria-hidden="true">◉</div>
+      <div class="attendance-face-copy">
+        <div class="attendance-face-title-row"><strong>ยืนยันตัวตนด้วยใบหน้า</strong><span class="badge badge-soft">FACE VERIFY · BETA</span></div>
+        <p>Face Verification แยกจาก Location โดยสิ้นเชิง ใช้ยืนยันว่าเป็นเจ้าของบัญชีจริงก่อนบันทึกเวลา</p>
+        <small id="attendanceFaceStatus">กำลังโหลดการตั้งค่า…</small>
+      </div>
+    </div>
+    <div class="attendance-face-grid">
+      <label class="field"><span>โหมดการใช้งาน</span><select id="attendanceFaceMode">
+        <option value="off">ปิดใช้งาน</option>
+        <option value="enroll">ช่วงลงทะเบียน · ยังไม่บังคับ</option>
+        <option value="required">บังคับยืนยันก่อนเช็กอิน</option>
+      </select></label>
+      <div class="attendance-face-option"><div><strong>ตรวจตอนเช็กเอาต์ด้วย</strong><small>เช็กอินจะตรวจเสมอเมื่อเลือกโหมดบังคับ</small></div><label class="switch"><input id="attendanceFaceCheckoutToggle" type="checkbox"/><span></span></label></div>
+    </div>
+    <div class="attendance-face-summary">
+      <div><strong id="attendanceFaceReadyCount">0/0</strong><span>ลงทะเบียนแล้ว</span></div>
+      <div><strong id="attendanceFacePendingCount">0</strong><span>ยังไม่ลงทะเบียน</span></div>
+      <div class="attendance-face-privacy"><b>ไม่เก็บรูปประจำวัน</b><span>ภาพจากกล้องใช้ชั่วคราวเพื่อสร้าง Face Template แล้วทิ้งทันที · Template ในฐานข้อมูลเข้ารหัส</span></div>
+    </div>
+    <div id="attendanceFacePendingPeople" class="attendance-face-pending hidden"></div>
+    <div class="attendance-face-rollout">
+      <div class="attendance-face-rollout-copy"><strong>สแกนหน้าได้จากตรงนี้</strong><span>กดปุ่มด้านล่างเพื่อเปิดกล้องทันที ไม่สร้าง Check-in ซ้ำ และใช้ทดสอบได้แม้วันนี้เช็กอินแล้ว</span></div>
+      <div class="attendance-face-rollout-buttons">
+        <button id="attendanceFaceSelfTestBtn" class="primary-btn attendance-face-scan-btn" type="button">สแกน / ลงทะเบียนใบหน้าของฉัน</button>
+        <button id="attendanceFaceRemindBtn" class="secondary-btn" type="button">ส่ง LINE ให้คนที่ยังไม่ลงทะเบียน</button>
+        <button id="attendanceFaceCopyInstructionBtn" class="text-btn" type="button">คัดลอกข้อความแจ้งทีม</button>
+      </div>
+      <small id="attendanceFaceRolloutStatus" class="attendance-face-rollout-status">กำลังโหลดสถานะการลงทะเบียน…</small>
+    </div>
+    <div class="attendance-face-actions"><small id="attendanceFaceAutosaveNote">เปลี่ยนค่าแล้วระบบจะบันทึกอัตโนมัติ</small></div>
+  </section>`;
+  const card=wrap.firstElementChild;
+  if(reminder)host.insertBefore(card,reminder); else host.appendChild(card);
+  return card;
+}
+
 function attendanceFaceModeLabel(mode){
   if(mode==='required')return 'บังคับยืนยันก่อนเช็กอิน';
   if(mode==='enroll')return 'ช่วงลงทะเบียน · ยังไม่บังคับ';
   return 'ปิดใช้งาน';
 }
 function renderAttendanceFaceSettings(){
+  ensureAttendanceFaceCard();
   const settings=state.peopleCore?.attendance_face||{};
   const loaded=Boolean(state.attendanceFaceLoaded || typeof settings.mode==='string');
   const mode=['off','enroll','required'].includes(String(settings.mode))?String(settings.mode):'off';
@@ -3936,7 +3983,7 @@ async function openAttendanceFaceSelfTest(){
   const sameWindow=isLineInAppBrowser() || window.matchMedia?.('(max-width: 820px)')?.matches;
   const preview=sameWindow?null:window.open('about:blank','_blank');
   state.attendanceFaceRolloutBusy=true;
-  state.attendanceFaceRolloutStatus='กำลังสร้างหน้าลงทะเบียน/ทดสอบของบัญชีคุณ…';
+  state.attendanceFaceRolloutStatus='กำลังเปิดกล้องสแกนใบหน้าของบัญชีคุณ…';
   renderAttendanceFaceSettings();
   try{
     const result=await api('/api/attendance-face-enrollment/self-link',{method:'POST',body:'{}',silentStatus:true});
