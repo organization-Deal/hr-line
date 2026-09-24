@@ -1,8 +1,14 @@
-# P9.14.3 Test Result
+# P9.15 Test Result
 
+- `node --check src/index.js` — PASS
 - `node --check public/app.js` — PASS
-- Face mode change handler calls auto-save — PASS (static check)
-- Checkout toggle change handler calls auto-save — PASS (static check)
-- Face settings initial loading no longer defaults visually to OFF/0-0 — PASS (code-path review)
-- Face Save button removed from HTML — PASS
-- Cache bust version updated to P9.14.3 — PASS
+- `node --check public/attendance.js` — PASS
+- CSS brace balance — PASS
+- `public/index.html` duplicate ID check — PASS (0 duplicate)
+- Admin controls wired: remind / self test / copy instruction — PASS
+- Backend routes present: reminder / self-link — PASS
+- Standalone Face modes present: enroll / test / manage — PASS
+- `verify_test` challenge path present — PASS
+- standalone enrollment uses `face_only` and does not issue Attendance pass — PASS (code-path review)
+- Test verification does not issue Attendance pass — PASS (code-path review)
+- No migration added — PASS

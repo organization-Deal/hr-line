@@ -1,18 +1,54 @@
-# Nakna P9.14.3 — Face Settings Auto-save
+# Nakna P9.15 — Face Enrollment Rollout
 
-แก้ UX การตั้งค่า Face Verification ที่เดิมการเลือกโหมด/เปิดสวิตช์เป็นเพียง draft ในหน้าเว็บ และจะบันทึกลง D1 ก็ต่อเมื่อกดปุ่ม “บันทึก Face Verification” เท่านั้น ทำให้ผู้ใช้เข้าใจว่าเปิดแล้ว แต่เมื่อ Refresh ระบบอ่านค่าจริงจากฐานข้อมูลและกลับเป็น `off`.
+รอบนี้แก้ Flow สำหรับบริษัทที่ใช้งานอยู่แล้วและพนักงานเช็กอินไปแล้ว ให้ HR สามารถพาพนักงานไปลงทะเบียนใบหน้าได้ทันทีโดยไม่ต้องรอเช็กอินวันถัดไป
 
-## เปลี่ยนแปลง
-- เปลี่ยน `โหมดการใช้งาน` แล้วบันทึกทันที
-- เปิด/ปิด `ตรวจตอนเช็กเอาต์ด้วย` แล้วบันทึกทันที
-- ตัดปุ่ม Save ที่ซ้ำซ้อนออก
-- แสดงสถานะเล็ก ๆ `กำลังบันทึก…` / `บันทึกแล้ว ✓`
-- ระหว่างโหลดครั้งแรก จะไม่โชว์ `ปิดใช้งาน 0/0` หลอกตา แต่แสดงสถานะกำลังโหลดและ disable control จนได้ค่าจาก server
-- หาก backend ปฏิเสธการเปิดใช้งาน (เช่น Secret ยังไม่พร้อม) UI จะ revert เป็นค่าจริงเดิมพร้อม error
-- bump browser cache key เป็น `P9.14.3`
+## สิ่งที่เพิ่ม
+
+- ปุ่ม `ส่ง LINE ให้คนที่ยังไม่ลงทะเบียน` ใน Settings > การเช็กอิน > Face Verification
+  - ส่งเฉพาะพนักงาน Active ที่ยังไม่มี Face Template
+  - แต่ละคนได้รับลิงก์เฉพาะบัญชีของตัวเอง
+  - คนที่เช็กอินวันนี้แล้วก็ลงทะเบียนได้
+  - หน้าลงทะเบียนแบบนี้ไม่สร้าง/แก้ไข Attendance
+- ปุ่ม `ลงทะเบียน / ทดสอบบัญชีของฉัน`
+  - จับคู่ HR/Owner กับ Employee Profile จาก LINE identity หรือ email
+  - ถ้ายังไม่ลงทะเบียน จะเปิด Enrollment
+  - ถ้าลงทะเบียนแล้ว จะเปิด Test Mode
+  - Test Mode เทียบใบหน้าอย่างเดียว ไม่บันทึกเวลา
+- เพิ่ม `ใบหน้า & การยืนยันตัวตน` ในเมนูพนักงาน LINE เมื่อบริษัทเปิด Face Verification
+  - ยังไม่ลงทะเบียน -> Enrollment
+  - ลงทะเบียนแล้ว -> Test Face Verification
+- เพิ่ม `คัดลอกข้อความแจ้งทีม` แทนการทำ Shared Enrollment Link
+  - ไม่สร้างลิงก์กลางที่อาจทำให้คนอื่นลงทะเบียนแทนบัญชีพนักงาน
+- Standalone Face Enrollment/Test Mode ใน `attendance.html`
+  - `?face=enroll` = ลงทะเบียนอย่างเดียว
+  - `?face=test` = ทดสอบอย่างเดียว
+  - `?face=manage` = ถ้ายังไม่มีให้ลงทะเบียน ถ้ามีแล้วให้ทดสอบ
+- Test Mode มี Challenge/Liveness + Face Matching แต่ไม่ออก Attendance pass และไม่บันทึกเวลา
+- Enrollment แบบ standalone ไม่ออก Attendance pass
+- ยังไม่เก็บรูปภาพจากกล้องประจำวันเหมือนเดิม
+
+## Backend API ใหม่
+
+- `POST /api/attendance-face-enrollment/remind`
+- `POST /api/attendance-face-enrollment/self-link`
 
 ## ไฟล์ที่ต้อง Replace
+
+- `src/index.js`
 - `public/app.js`
 - `public/index.html`
+- `public/styles.css`
+- `public/attendance.js`
+- `public/attendance.html`
 
-ไม่มี Migration และไม่ต้องเปลี่ยน `src/index.js` สำหรับ hotfix นี้
+## Migration
+
+ไม่มี Migration ใหม่ ใช้ตาราง Face Verification และ Attendance token เดิมจาก P9.14 อยู่แล้ว
+
+## หลัง Deploy
+
+1. เปิด Settings > การเช็กอิน
+2. เลือก `ช่วงลงทะเบียน` หรือ `บังคับยืนยันก่อนเช็กอิน`
+3. กด `ส่ง LINE ให้คนที่ยังไม่ลงทะเบียน`
+4. สำหรับการทดสอบของ Owner/HR กด `ลงทะเบียน / ทดสอบบัญชีของฉัน`
+5. หลังพนักงานลงทะเบียน กด Refresh แล้วตัวเลข `ลงทะเบียนแล้ว` จะเพิ่มขึ้น
