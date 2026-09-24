@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.14.1-FACE-ROUTE-HOTFIX';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.14.1-FACE-ROUTE-HOTFIX';
+const NAKNA_RUNTIME_RELEASE = 'P9.15-FACE-ENROLLMENT-ROLLOUT';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.15-FACE-ENROLLMENT-ROLLOUT';
 const NAKNA_RUNTIME_FEATURE = 'attendance-face-verification-no-photo-storage';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -2397,6 +2397,35 @@ async function handleApi(request, env, url, auth, ctx) {
     const settings=await getAttendanceFaceSettings(env,clientId,{includeSummary:true});
     await safeAudit(env.DB,clientId,'user',String(auth.user.id),'attendance.face.settings.update','client',String(clientId),{mode:settings.mode,verify_checkout:settings.verify_checkout});
     return json({ok:true,settings});
+  }
+
+  if(path==='/api/attendance-face-enrollment/remind' && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ส่งคำขอลงทะเบียนใบหน้า'},403);
+    try{
+      const body=await safeJson(request);
+      return json(await sendAttendanceFaceEnrollmentReminders(request,env,clientId,auth,body||{}));
+    }catch(error){
+      const status=Number(error?.status||500);
+      return json({error:error?.message||'ส่ง LINE ให้พนักงานไม่สำเร็จ'},status);
+    }
+  }
+
+  if(path==='/api/attendance-face-enrollment/self-link' && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ทดสอบ Face Verification'},403);
+    try{
+      const settings=await getAttendanceFaceSettings(env,clientId,{includeSummary:false});
+      if(settings.mode==='off')return json({error:'กรุณาเปิด Face Verification ก่อนทดสอบ'},409);
+      if(!settings.encryption_ready)return json({error:'ระบบเข้ารหัสข้อมูลชีวมิติยังไม่พร้อม กรุณาตั้ง NAKNA_BIOMETRIC_ENCRYPTION_KEY ก่อน'},503);
+      const employee=await getFaceEnrollmentEmployeeForUser(env.DB,clientId,auth.user);
+      if(!employee)return json({error:'บัญชี HR นี้ยังไม่พบ Employee Profile ที่ตรงกัน กรุณาเชื่อม LINE หรือใช้อีเมลเดียวกับข้อมูลพนักงาน'},404);
+      const attendanceToken=await issueQuickAttendanceToken(env.DB,Number(clientId),Number(employee.id));
+      const url=`${appOrigin(request,env)}/attendance.html?token=${encodeURIComponent(attendanceToken)}&face=manage&v=P9.15`;
+      const profile=await env.DB.prepare(`SELECT status,enrolled_at FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(Number(clientId),Number(employee.id)).first();
+      await safeAudit(env.DB,Number(clientId),'user',String(auth.user.id),'attendance.face.self_test.open','employee',String(employee.id),{enrolled:Boolean(profile&&profile.status==='active')}).catch(()=>{});
+      return json({ok:true,url,employee:{id:Number(employee.id),name:employee.nickname||employee.first_name||employee.employee_code},enrolled:Boolean(profile&&profile.status==='active')});
+    }catch(error){
+      return json({error:error?.message||'สร้างลิงก์ทดสอบไม่สำเร็จ'},Number(error?.status||500));
+    }
   }
 
   const employeeFaceProfileMatch=path.match(/^\/api\/employees\/(\d+)\/face-profile$/);
@@ -6151,9 +6180,15 @@ async function ensureAttendanceFaceReady(db){
 async function getAttendanceFaceSettings(env,clientId,{includeSummary=false}={}){
   await ensureAttendanceFaceReady(env.DB);
   let row=await env.DB.prepare(`SELECT mode,verify_checkin,verify_checkout,max_distance,updated_at FROM attendance_face_settings WHERE client_id=?1`).bind(Number(clientId)).first();
-  if(!row) row={mode:'off',verify_checkin:1,verify_checkout:0,max_distance:0.56,updated_at:null};
+  // P9.14.2: Face Verification was requested as the new attendance identity layer.
+  // A workspace that has never chosen a Face mode should therefore enter the
+  // required enrollment flow instead of silently behaving as `off`.
+  // Once HR explicitly saves `off`, that row exists and the choice is respected.
+  const configured=Boolean(row);
+  if(!row) row={mode:'required',verify_checkin:1,verify_checkout:0,max_distance:0.56,updated_at:null};
   const settings={
     mode:normalizeAttendanceFaceMode(row.mode),
+    configured,
     verify_checkin:Boolean(Number(row.verify_checkin??1)),
     verify_checkout:Boolean(Number(row.verify_checkout||0)),
     max_distance:Number(row.max_distance||0.56),
@@ -6173,6 +6208,104 @@ async function getAttendanceFaceSettings(env,clientId,{includeSummary=false}={})
   }
   return settings;
 }
+
+async function getFaceEnrollmentEmployeeForUser(db,clientId,user){
+  const cid=Number(clientId);
+  const lineUserId=String(user?.line_user_id||'').trim();
+  if(lineUserId){
+    const byLine=await db.prepare(`SELECT id,employee_code,first_name,last_name,nickname,email,line_user_id,line_provider_scope FROM employees WHERE client_id=?1 AND status='active' AND line_user_id=?2 LIMIT 1`).bind(cid,lineUserId).first().catch(()=>null);
+    if(byLine)return byLine;
+  }
+  const email=String(user?.email||'').trim();
+  if(email&&!email.endsWith('@nakna.local')){
+    const byEmail=await db.prepare(`SELECT id,employee_code,first_name,last_name,nickname,email,line_user_id,line_provider_scope FROM employees WHERE client_id=?1 AND status='active' AND lower(email)=lower(?2) LIMIT 1`).bind(cid,email).first().catch(()=>null);
+    if(byEmail)return byEmail;
+  }
+  return null;
+}
+function buildFaceEnrollmentReminderFlex(employee,companyName,url){
+  const name=employee?.nickname||employee?.first_name||'พนักงาน';
+  return {type:'flex',altText:'กรุณาลงทะเบียนใบหน้ากับนากนะ',contents:lineBubble({
+    eyebrow:'FACE VERIFICATION',
+    title:'ลงทะเบียนใบหน้า',
+    subtitle:`${name} · ${companyName||'บริษัทของคุณ'}`,
+    status:'ใช้เวลาประมาณ 30 วินาที',
+    statusTone:'teal',
+    body:[
+      lineText('บริษัทเปิดใช้งานการยืนยันตัวตนด้วยใบหน้าสำหรับการลงเวลา กรุณาลงทะเบียน Face Template ของคุณให้พร้อมใช้งาน','sm',LINE_CI.text),
+      lineInfoCard([
+        lineInfoRow('รูปประจำวัน','ไม่บันทึก',LINE_CI.success),
+        lineInfoRow('ข้อมูลที่เก็บ','Face Template แบบเข้ารหัส',LINE_CI.primary)
+      ],'teal'),
+      lineText('ลิงก์นี้เป็นของบัญชีคุณโดยเฉพาะ ไม่ควรส่งต่อให้ผู้อื่น','xxs',LINE_CI.muted)
+    ],
+    footer:[linePrimaryButton('ลงทะเบียนใบหน้า',{type:'uri',label:'ลงทะเบียนใบหน้า',uri:url})]
+  })};
+}
+async function sendAttendanceFaceEnrollmentReminders(request,env,clientId,auth,body={}){
+  const settings=await getAttendanceFaceSettings(env,clientId,{includeSummary:false});
+  if(settings.mode==='off')throw httpError('กรุณาเปิด Face Verification ก่อนส่งให้พนักงานลงทะเบียน',409);
+  if(!settings.encryption_ready)throw httpError('ระบบเข้ารหัสข้อมูลชีวมิติยังไม่พร้อม กรุณาตั้ง NAKNA_BIOMETRIC_ENCRYPTION_KEY ก่อน',503);
+  await ensureAttendanceFaceReady(env.DB);
+  const ids=Array.isArray(body.employee_ids)?[...new Set(body.employee_ids.map(Number).filter(n=>Number.isInteger(n)&&n>0))].slice(0,200):[];
+  let sql=`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.line_user_id,e.line_provider_scope,c.name AS company_name
+    FROM employees e
+    JOIN clients c ON c.id=e.client_id
+    LEFT JOIN employee_face_profiles p ON p.client_id=e.client_id AND p.employee_id=e.id AND p.status='active'
+    WHERE e.client_id=?1 AND e.status='active' AND p.employee_id IS NULL`;
+  const binds=[Number(clientId)];
+  if(ids.length){
+    const placeholders=ids.map((_,i)=>`?${i+2}`).join(',');
+    sql+=` AND e.id IN (${placeholders})`;
+    binds.push(...ids);
+  }
+  sql+=` ORDER BY e.id`;
+  const employees=(await env.DB.prepare(sql).bind(...binds).all()).results||[];
+  if(!employees.length){
+    return {ok:true,sent:0,pending:0,not_linked:0,failed:0,message:'ทุกคนลงทะเบียนใบหน้าแล้ว',settings:await getAttendanceFaceSettings(env,clientId,{includeSummary:true})};
+  }
+  const fallbackCtx=await getEffectiveLineContextForClient(env,Number(clientId)).catch(()=>null);
+  const tokenByScope=new Map();
+  const getLineToken=async(scope)=>{
+    const key=String(scope||'default');
+    if(tokenByScope.has(key))return tokenByScope.get(key);
+    let token=null;
+    try{token=await getAccessTokenForProviderScope(env,Number(clientId),key);}catch{}
+    if(!token)token=fallbackCtx?.accessToken||null;
+    tokenByScope.set(key,token);
+    return token;
+  };
+  const base=appOrigin(request,env);
+  const results=await Promise.all(employees.map(async employee=>{
+    if(!employee.line_user_id)return {employee,status:'not_linked'};
+    try{
+      const lineToken=await getLineToken(employee.line_provider_scope||'default');
+      if(!lineToken)return {employee,status:'line_not_ready'};
+      const attendanceToken=await issueQuickAttendanceToken(env.DB,Number(clientId),Number(employee.id));
+      const enrollUrl=`${base}/attendance.html?token=${encodeURIComponent(attendanceToken)}&face=enroll&v=P9.15`;
+      const messages=[buildFaceEnrollmentReminderFlex(employee,employee.company_name||'',enrollUrl)];
+      let sent=await pushLineMessagesReliable(lineToken,String(employee.line_user_id),messages);
+      if(!sent&&fallbackCtx?.accessToken&&fallbackCtx.accessToken!==lineToken){
+        sent=await pushLineMessagesReliable(fallbackCtx.accessToken,String(employee.line_user_id),messages);
+      }
+      return {employee,status:sent?'sent':'failed'};
+    }catch(error){
+      console.warn(JSON.stringify({level:'warn',event:'face_enrollment_reminder_failed',client_id:Number(clientId),employee_id:Number(employee.id),message:String(error?.message||error)}));
+      return {employee,status:'failed'};
+    }
+  }));
+  const sent=results.filter(x=>x.status==='sent').length;
+  const notLinked=results.filter(x=>x.status==='not_linked').length;
+  const lineNotReady=results.filter(x=>x.status==='line_not_ready').length;
+  const failed=results.filter(x=>x.status==='failed').length+lineNotReady;
+  const notLinkedPeople=results.filter(x=>x.status==='not_linked').slice(0,12).map(x=>({
+    id:Number(x.employee.id),
+    name:x.employee.nickname||x.employee.first_name||x.employee.employee_code||'พนักงาน'
+  }));
+  await safeAudit(env.DB,Number(clientId),'user',String(auth.user.id),'attendance.face.enrollment.remind','client',String(clientId),{requested:employees.length,sent,not_linked:notLinked,failed}).catch(()=>{});
+  return {ok:true,requested:employees.length,sent,not_linked:notLinked,failed,not_linked_people:notLinkedPeople,settings:await getAttendanceFaceSettings(env,clientId,{includeSummary:true})};
+}
+
 function attendanceFaceRequiredForAction(settings,action){
   if(normalizeAttendanceFaceMode(settings?.mode)!=='required')return false;
   return action==='checkout'?Boolean(settings?.verify_checkout):Boolean(settings?.verify_checkin??true);
@@ -6281,13 +6414,18 @@ async function getPublicAttendanceFaceStatus(request,env,token,url){
   const today=await env.DB.prepare(`SELECT check_in_at,check_out_at FROM attendance WHERE employee_id=?1 AND work_date=?2 LIMIT 1`).bind(Number(access.employee_id),dateInBangkok()).first().catch(()=>null);
   const alreadyRecorded=action==='checkout'?Boolean(today?.check_out_at):Boolean(today?.check_in_at);
   const enrolled=Boolean(profile&&profile.status==='active');
-  const required=!alreadyRecorded&&attendanceFaceRequiredForAction(settings,action);
-  return json({ok:true,action,employee_name:access.nickname||access.first_name||'พนักงาน',company_name:access.company_name||'',mode:settings.mode,enrolled,enrolled_at:enrolled?profile.enrolled_at:null,model_version:enrolled?profile.model_version:settings.model_version,verify_required:required&&enrolled,enrollment_required:required&&!enrolled,enrollment_recommended:settings.mode==='enroll'&&!enrolled,already_recorded:alreadyRecorded,system_ready:settings.mode==='off'||settings.encryption_ready,privacy:{photos_stored:false,daily_photo_upload:false,template_encrypted:true}} ,200,{'cache-control':'no-store'});
+  const actionRequiresFace=attendanceFaceRequiredForAction(settings,action);
+  // Enrollment is an identity setup step, so an employee who has already
+  // checked in today should still be allowed/required to enroll now. Only the
+  // per-attendance verification pass is skipped for a record that already exists.
+  const enrollmentRequired=actionRequiresFace&&!enrolled;
+  const verifyRequired=!alreadyRecorded&&actionRequiresFace&&enrolled;
+  return json({ok:true,action,employee_name:access.nickname||access.first_name||'พนักงาน',company_name:access.company_name||'',mode:settings.mode,configured:settings.configured,enrolled,enrolled_at:enrolled?profile.enrolled_at:null,model_version:enrolled?profile.model_version:settings.model_version,verify_required:verifyRequired,enrollment_required:enrollmentRequired,enrollment_recommended:settings.mode==='enroll'&&!enrolled,already_recorded:alreadyRecorded,system_ready:settings.mode==='off'||settings.encryption_ready,privacy:{photos_stored:false,daily_photo_upload:false,template_encrypted:true}} ,200,{'cache-control':'no-store'});
 }
 async function issuePublicAttendanceFaceChallenge(request,env,token){
   const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดจาก LINE ใหม่'},401,{'cache-control':'no-store'});
   const body=await safeJson(request);const purpose=String(body.purpose||'');
-  if(!['enroll','verify_checkin','verify_checkout'].includes(purpose))return json({error:'Face challenge ไม่ถูกต้อง'},400);
+  if(!['enroll','verify_checkin','verify_checkout','verify_test'].includes(purpose))return json({error:'Face challenge ไม่ถูกต้อง'},400);
   const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
   if(settings.mode==='off')return json({error:'บริษัทนี้ยังไม่ได้เปิด Face Verification'},409);
   if(!biometricEncryptionKey(env))return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503);
@@ -6305,15 +6443,20 @@ async function enrollPublicAttendanceFace(request,env,token){
   if(current?.status==='active')return json({error:'บัญชีนี้ลงทะเบียนใบหน้าแล้ว หากต้องการเปลี่ยนให้ HR รีเซ็ตก่อน'},409);
   const encrypted=await encryptJson({descriptor,model_version:modelVersion},key);
   await env.DB.prepare(`INSERT INTO employee_face_profiles(client_id,employee_id,template_encrypted,model_version,status,enrolled_at,reset_at,updated_at) VALUES(?1,?2,?3,?4,'active',CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP) ON CONFLICT(client_id,employee_id) DO UPDATE SET template_encrypted=excluded.template_encrypted,model_version=excluded.model_version,status='active',enrolled_at=CURRENT_TIMESTAMP,reset_at=NULL,updated_at=CURRENT_TIMESTAMP`).bind(Number(access.client_id),Number(access.employee_id),encrypted,modelVersion).run();
-  const action=String(body.action||'checkin')==='checkout'?'checkout':'checkin';
-  await writeFaceEvent(env.DB,{clientId:access.client_id,employeeId:access.employee_id,action,eventType:'enroll',status:'passed',livenessPassed:true,modelVersion,detail:'template_created_no_photo_storage'});
-  let verificationToken=null;if(attendanceFaceRequiredForAction(settings,action))verificationToken=await issueFacePass(env.DB,access.client_id,access.employee_id,action,modelVersion,0);
-  return json({ok:true,enrolled:true,verification_token:verificationToken,privacy:{photo_saved:false,template_encrypted:true}},200,{'cache-control':'no-store'});
+  const faceOnly=body.face_only===true||body.face_only===1||String(body.face_only).toLowerCase()==='true'||String(body.face_only)==='1';
+  const action=faceOnly?'enroll':(String(body.action||'checkin')==='checkout'?'checkout':'checkin');
+  await writeFaceEvent(env.DB,{clientId:access.client_id,employeeId:access.employee_id,action,eventType:'enroll',status:'passed',livenessPassed:true,modelVersion,detail:faceOnly?'standalone_template_created_no_photo_storage':'template_created_no_photo_storage'});
+  let verificationToken=null;
+  if(!faceOnly&&attendanceFaceRequiredForAction(settings,action))verificationToken=await issueFacePass(env.DB,access.client_id,access.employee_id,action,modelVersion,0);
+  return json({ok:true,enrolled:true,face_only:faceOnly,verification_token:verificationToken,privacy:{photo_saved:false,template_encrypted:true}},200,{'cache-control':'no-store'});
 }
 async function verifyPublicAttendanceFace(request,env,token){
   const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดจาก LINE ใหม่'},401,{'cache-control':'no-store'});
   const settings=await getAttendanceFaceSettings(env,Number(access.client_id));const key=biometricEncryptionKey(env);if(!key)return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503);
-  const body=await safeJson(request);const action=String(body.action||'checkin')==='checkout'?'checkout':'checkin';const purpose=action==='checkout'?'verify_checkout':'verify_checkin';
+  const body=await safeJson(request);
+  const testMode=body.test_mode===true||body.test_mode===1||String(body.test_mode).toLowerCase()==='true'||String(body.test_mode)==='1';
+  const action=testMode?'test':(String(body.action||'checkin')==='checkout'?'checkout':'checkin');
+  const purpose=testMode?'verify_test':(action==='checkout'?'verify_checkout':'verify_checkin');
   const descriptor=sanitizeFaceDescriptor(body.descriptor);const modelVersion=String(body.model_version||'face-api-0.22.2').slice(0,80);
   await consumeFaceChallenge(env.DB,Number(access.client_id),Number(access.employee_id),body.challenge_token,purpose,body.liveness);
   await ensureAttendanceFaceReady(env.DB);
@@ -6324,8 +6467,8 @@ async function verifyPublicAttendanceFace(request,env,token){
   const passed=Number.isFinite(distance)&&distance<=threshold;
   await writeFaceEvent(env.DB,{clientId:access.client_id,employeeId:access.employee_id,action,eventType:'verify',status:passed?'passed':'failed',livenessPassed:true,distance,threshold,modelVersion,detail:passed?'match':'not_match'});
   if(!passed)return json({error:'ใบหน้าไม่ตรงกับข้อมูลที่ลงทะเบียน กรุณาลองใหม่',code:'FACE_NOT_MATCHED'},422,{'cache-control':'no-store'});
-  const verificationToken=await issueFacePass(env.DB,access.client_id,access.employee_id,action,modelVersion,distance);
-  return json({ok:true,verified:true,verification_token:verificationToken,result:'passed'},200,{'cache-control':'no-store'});
+  const verificationToken=testMode?null:await issueFacePass(env.DB,access.client_id,access.employee_id,action,modelVersion,distance);
+  return json({ok:true,verified:true,test_mode:testMode,verification_token:verificationToken,result:'passed'},200,{'cache-control':'no-store'});
 }
 async function requireAttendanceFacePass(env,access,action,rawToken){
   const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
@@ -6450,19 +6593,21 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   // Attendance has its own lightweight token table. This keeps one-tap check-in
   // independent from Learning/Leave schema readiness and prevents fallback to
   // the old LINE location quick-reply flow.
-  const [ownerAccess,portalToken,attendanceToken]=await Promise.all([
+  const [ownerAccess,portalToken,attendanceToken,faceSettings]=await Promise.all([
     getLineMenuManagementAccessFast(env,lineCtx,lineUserId,Number(emp.client_id)).catch(()=>null),
     getEmployeePortalTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id)).catch(()=>null),
     getQuickAttendanceTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id)).catch(error=>{console.error(JSON.stringify({level:'error',event:'quick_attendance_token_failed',employee_id:Number(emp.id),message:String(error?.message||error)}));return null;}),
+    getAttendanceFaceSettings(env,Number(emp.client_id),{includeSummary:false}).catch(()=>({mode:'off'})),
   ]);
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
   const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
   const attendanceAccessToken=attendanceToken||portalToken||null;
-  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=P8.23-GPS1`:null;
-  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=P8.23-GPS1`:null;
+  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=P9.15-FACE`:null;
+  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=P9.15-FACE`:null;
   const wellnessUrl=portalToken?`${base}/wellness.html?token=${encodeURIComponent(portalToken)}`:null;
-  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,wellnessUrl,NAKNA_RUNTIME_RELEASE);
+  const faceManageUrl=attendanceAccessToken&&normalizeAttendanceFaceMode(faceSettings?.mode)!=='off'?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&face=manage&v=P9.15`:null;
+  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,wellnessUrl,faceManageUrl,NAKNA_RUNTIME_RELEASE);
 }
 
 
@@ -6474,7 +6619,7 @@ async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='c
     if(!token) throw new Error('สร้างลิงก์ Quick Attendance ไม่สำเร็จ');
     const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
     const normalized=action==='checkout'?'checkout':'checkin';
-    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=P8.23-GPS1`;
+    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=P9.15-FACE`;
     return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
   }catch(e){
     return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
@@ -9636,7 +9781,7 @@ function buildWelcomeFlex(name,company){
     footer:[linePrimaryButton('เปิดเมนูพนักงาน',{type:'postback',label:'เปิดเมนูพนักงาน',data:'action=menu'})]
   })};
 }
-function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null,quickCheckInUrl=null,quickCheckOutUrl=null,wellnessUrl=null,runtimeRelease=NAKNA_RUNTIME_RELEASE){
+function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null,quickCheckInUrl=null,quickCheckOutUrl=null,wellnessUrl=null,faceManageUrl=null,runtimeRelease=NAKNA_RUNTIME_RELEASE){
   const name=emp.nickname||emp.first_name;
   const hasManagement=Boolean(ownerAccess?.primary);
   const managementCompany=ownerAccess?.primary?.name||emp.company_name||'';
@@ -9654,6 +9799,7 @@ function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseForm
       lineText(`Quick Attendance · ${runtimeRelease}`,'xxs',LINE_CI.primary,'bold'),
       linePrimaryButton('📍  เช็กอิน',quickCheckInUrl?{type:'uri',label:'เช็กอิน',uri:quickCheckInUrl}:{type:'postback',label:'เช็กอิน',data:'action=quick_attendance_unavailable&mode=checkin'}),
       lineSecondaryButton('🏠  เช็กเอาต์',quickCheckOutUrl?{type:'uri',label:'เช็กเอาต์',uri:quickCheckOutUrl}:{type:'postback',label:'เช็กเอาต์',data:'action=quick_attendance_unavailable&mode=checkout'}),
+      ...(faceManageUrl?[lineSecondaryButton('👤  ใบหน้า & การยืนยันตัวตน',{type:'uri',label:'ใบหน้า & การยืนยัน',uri:faceManageUrl},'#EEF9F5')]:[]),
       lineSecondaryButton('🏖  ขอลางาน',leaveFormUrl?{type:'uri',label:'ขอลางาน',uri:leaveFormUrl}:{type:'postback',label:'ขอลางาน',data:'action=leave_menu'},'#F1F7F5'),
       lineSecondaryButton('📅  สิทธิ์ลา',{type:'postback',label:'สิทธิ์ลา',data:'action=leave_balance'},'#F7F9F8'),
       lineSecondaryButton('🎉  วันหยุดบริษัท',{type:'postback',label:'วันหยุดบริษัท',data:'action=holidays'},'#F7F9F8'),
