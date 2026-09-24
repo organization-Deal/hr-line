@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.15.2-FACE-SCANNER-VISIBLE';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.15.2-FACE-SCANNER-VISIBLE';
+const NAKNA_RUNTIME_RELEASE = 'P9.15.3-FACE-SCANNER-VISIBLE';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.15.3-FACE-SCANNER-VISIBLE';
 const NAKNA_RUNTIME_FEATURE = 'attendance-face-verification-no-photo-storage';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -1498,7 +1498,7 @@ export default {
         return await finishGmailConnection(request, env);
       }
 
-      // P9.15.2: Face Enrollment gets its own Worker-served page.
+      // P9.15.3: Face Enrollment gets its own Worker-served page.
       // This intentionally bypasses SPA/static-asset fallback so a Face link can never
       // land on the main HR login/setup screen when opened from LINE.
       if (url.pathname === '/face' && request.method === 'GET') {
@@ -6289,7 +6289,7 @@ async function sendAttendanceFaceEnrollmentReminders(request,env,clientId,auth,b
       const lineToken=await getLineToken(employee.line_provider_scope||'default');
       if(!lineToken)return {employee,status:'line_not_ready'};
       const attendanceToken=await issueQuickAttendanceToken(env.DB,Number(clientId),Number(employee.id));
-      const enrollUrl=`${base}/face?token=${encodeURIComponent(attendanceToken)}&face=enroll&v=P9.15.2`;
+      const enrollUrl=`${base}/face?token=${encodeURIComponent(attendanceToken)}&face=enroll&v=P9.15.3`;
       const messages=[buildFaceEnrollmentReminderFlex(employee,employee.company_name||'',enrollUrl)];
       let sent=await pushLineMessagesReliable(lineToken,String(employee.line_user_id),messages);
       if(!sent&&fallbackCtx?.accessToken&&fallbackCtx.accessToken!==lineToken){
@@ -6610,10 +6610,10 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
   const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
   const attendanceAccessToken=attendanceToken||portalToken||null;
-  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=P9.15.2-FACE`:null;
-  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=P9.15.2-FACE`:null;
+  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=P9.15.3-FACE`:null;
+  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=P9.15.3-FACE`:null;
   const wellnessUrl=portalToken?`${base}/wellness.html?token=${encodeURIComponent(portalToken)}`:null;
-  const faceManageUrl=attendanceAccessToken&&normalizeAttendanceFaceMode(faceSettings?.mode)!=='off'?`${base}/face?token=${encodeURIComponent(attendanceAccessToken)}&face=manage&v=P9.15.2`:null;
+  const faceManageUrl=attendanceAccessToken&&normalizeAttendanceFaceMode(faceSettings?.mode)!=='off'?`${base}/face?token=${encodeURIComponent(attendanceAccessToken)}&face=manage&v=P9.15.3`:null;
   return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,wellnessUrl,faceManageUrl,NAKNA_RUNTIME_RELEASE);
 }
 
@@ -6626,7 +6626,7 @@ async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='c
     if(!token) throw new Error('สร้างลิงก์ Quick Attendance ไม่สำเร็จ');
     const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
     const normalized=action==='checkout'?'checkout':'checkin';
-    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=P9.15.2-FACE`;
+    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=P9.15.3-FACE`;
     return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
   }catch(e){
     return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
@@ -11585,7 +11585,7 @@ function publicAppOrigin(request, env) {
 
 function faceVerificationUrl(request, env, token, mode='manage') {
   const safeMode=['enroll','test','manage'].includes(String(mode||'').toLowerCase())?String(mode).toLowerCase():'manage';
-  return `${publicAppOrigin(request,env)}/face?token=${encodeURIComponent(String(token||''))}&face=${encodeURIComponent(safeMode)}&v=P9.15.2`;
+  return `${publicAppOrigin(request,env)}/face?token=${encodeURIComponent(String(token||''))}&face=${encodeURIComponent(safeMode)}&v=P9.15.3`;
 }
 
 function serveFaceVerificationPage() {
@@ -11597,7 +11597,7 @@ function serveFaceVerificationPage() {
   <meta name="theme-color" content="#f7fbfa" />
   <meta name="robots" content="noindex,nofollow" />
   <title>นากนะ · ยืนยันตัวตน</title>
-  <link rel="stylesheet" href="/attendance.css?v=P9.15.2-FACE-SCANNER" />
+  <link rel="stylesheet" href="/attendance.css?v=P9.15.3-FACE-SCANNER" />
 </head>
 <body>
   <main class="quick-shell">
@@ -11643,11 +11643,11 @@ function serveFaceVerificationPage() {
       <button id="retryBtn" class="primary-btn hidden" type="button">ลองใหม่</button>
       <p id="permissionHint" class="permission-hint hidden">ถ้ามือถือถามสิทธิ์ Location หรือ Camera ให้เลือก “อนุญาตขณะใช้งาน” แล้วกดลองใหม่</p>
       <p id="diagnosticText" class="privacy-note hidden"></p>
-      <p class="privacy-note">หน้านี้ใช้ Token ของพนักงานโดยตรง ไม่ต้อง Login เข้า HR Dashboard · ไม่เก็บรูปใบหน้าประจำวัน · P9.15.2</p>
+      <p class="privacy-note">หน้านี้ใช้ Token ของพนักงานโดยตรง ไม่ต้อง Login เข้า HR Dashboard · ไม่เก็บรูปใบหน้าประจำวัน · P9.15.3</p>
     </section>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" defer></script>
-  <script src="/attendance.js?v=P9.15.2-FACE-SCANNER" defer></script>
+  <script src="/attendance.js?v=P9.15.3-FACE-SCANNER" defer></script>
 </body>
 </html>`;
   return new Response(html,{status:200,headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-robots-tag':'noindex, nofollow'}});
