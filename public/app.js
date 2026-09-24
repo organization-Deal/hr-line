@@ -1,3 +1,18 @@
+// P9.15.1 — Safety redirect for LINE/Cloudflare SPA fallback.
+// If a Face link is accidentally served by index.html, recover before booting the HR login page.
+try {
+  const bootUrl = new URL(window.location.href);
+  const legacyFaceMode = String(bootUrl.searchParams.get('face') || '').toLowerCase();
+  const legacyFaceToken = String(bootUrl.searchParams.get('token') || '').trim();
+  if (legacyFaceToken && ['enroll','test','manage'].includes(legacyFaceMode) && bootUrl.pathname !== '/face') {
+    const target = new URL('/face', bootUrl.origin);
+    target.searchParams.set('token', legacyFaceToken);
+    target.searchParams.set('face', legacyFaceMode);
+    target.searchParams.set('v', 'P9.15.1');
+    window.location.replace(target.toString());
+  }
+} catch {}
+
 function dedupeBroadcastSidebar(){const sidebar=document.querySelector('.sidebar');if(!sidebar)return;const xs=[...sidebar.querySelectorAll('button,a')].filter(el=>el.id==='broadcastNav'||el.dataset?.view==='broadcast'||(el.textContent||'').replace(/\s+/g,'').trim()==='ประกาศ');const keep=xs.find(el=>el.id==='broadcastNav')||xs[0];xs.forEach(el=>{if(keep&&el!==keep)el.remove();});}
 
 const state = {
@@ -3918,7 +3933,8 @@ async function sendAttendanceFaceEnrollmentReminders(){
 }
 async function openAttendanceFaceSelfTest(){
   if(state.attendanceFaceRolloutBusy)return;
-  const preview=window.open('about:blank','_blank');
+  const sameWindow=isLineInAppBrowser() || window.matchMedia?.('(max-width: 820px)')?.matches;
+  const preview=sameWindow?null:window.open('about:blank','_blank');
   state.attendanceFaceRolloutBusy=true;
   state.attendanceFaceRolloutStatus='กำลังสร้างหน้าลงทะเบียน/ทดสอบของบัญชีคุณ…';
   renderAttendanceFaceSettings();
@@ -3927,11 +3943,13 @@ async function openAttendanceFaceSelfTest(){
     state.attendanceFaceRolloutStatus=result.enrolled
       ?`เปิดหน้าทดสอบของ ${result.employee?.name||'บัญชีคุณ'} แล้ว`
       :`เปิดหน้าลงทะเบียนของ ${result.employee?.name||'บัญชีคุณ'} แล้ว`;
-    if(preview){
+    if(sameWindow){
+      location.assign(result.url);
+    }else if(preview){
       preview.location.href=result.url;
       try{preview.focus();}catch{}
     }else{
-      location.href=result.url;
+      location.assign(result.url);
     }
   }catch(error){
     try{preview?.close();}catch{}
