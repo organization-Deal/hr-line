@@ -1,22 +1,18 @@
-# Nakna P9.14.1 — Face Route Hotfix
+# Nakna P9.14.3 — Face Settings Auto-save
 
-แก้กรณี Quick Attendance แสดง `API route not found` / `FACE_STATUS_FAILED` ก่อนเริ่ม Face Verification
+แก้ UX การตั้งค่า Face Verification ที่เดิมการเลือกโหมด/เปิดสวิตช์เป็นเพียง draft ในหน้าเว็บ และจะบันทึกลง D1 ก็ต่อเมื่อกดปุ่ม “บันทึก Face Verification” เท่านั้น ทำให้ผู้ใช้เข้าใจว่าเปิดแล้ว แต่เมื่อ Refresh ระบบอ่านค่าจริงจากฐานข้อมูลและกลับเป็น `off`.
 
-## Root cause
-Public Face API route ใช้ token matcher `{32,}` แต่ access validator รองรับ token ตั้งแต่ 20 ตัวขึ้นไป หาก token จาก LINE/portal ไม่เข้า matcher request จะหลุดไป authenticated `/api/` router และจบด้วย `API route not found` แทนที่จะเข้า Face Verification
+## เปลี่ยนแปลง
+- เปลี่ยน `โหมดการใช้งาน` แล้วบันทึกทันที
+- เปิด/ปิด `ตรวจตอนเช็กเอาต์ด้วย` แล้วบันทึกทันที
+- ตัดปุ่ม Save ที่ซ้ำซ้อนออก
+- แสดงสถานะเล็ก ๆ `กำลังบันทึก…` / `บันทึกแล้ว ✓`
+- ระหว่างโหลดครั้งแรก จะไม่โชว์ `ปิดใช้งาน 0/0` หลอกตา แต่แสดงสถานะกำลังโหลดและ disable control จนได้ค่าจาก server
+- หาก backend ปฏิเสธการเปิดใช้งาน (เช่น Secret ยังไม่พร้อม) UI จะ revert เป็นค่าจริงเดิมพร้อม error
+- bump browser cache key เป็น `P9.14.3`
 
-## Changed files
-- `src/index.js`
-- `public/attendance.js`
-- `public/attendance.html`
+## ไฟล์ที่ต้อง Replace
+- `public/app.js`
+- `public/index.html`
 
-## Changes
-- รวม Face endpoints เป็น public attendance matcher เดียว
-- token matcher ใช้ `{20,}` ให้ตรงกับ `getQuickAttendanceAccess()`
-- `gps-log`, `check-in`, `check-out` ใช้กฎ token เดียวกัน
-- ไม่ปล่อย method ผิดหลุดเข้า `/api` router; ตอบ 405 โดยตรง
-- Frontend แยก error `FACE_BACKEND_ROUTE_MISSING` หาก Worker backend ยังเป็นเวอร์ชันเก่า
-- bump runtime เป็น `P9.14.1-FACE-ROUTE-HOTFIX`
-
-## Deploy note
-ต้องอัปเดต `src/index.js` จริง ไม่ใช่อัปเฉพาะ `public/*` เพราะ Face API อยู่ใน Worker backend
+ไม่มี Migration และไม่ต้องเปลี่ยน `src/index.js` สำหรับ hotfix นี้
