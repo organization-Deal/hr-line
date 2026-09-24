@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f7fbfa" />
   <meta name="robots" content="noindex,nofollow" />
   <title>นากนะ · ลงเวลา</title>
-  <link rel="stylesheet" href="/attendance.css?v=1.0-p7.82" />
+  <link rel="stylesheet" href="/attendance.css?v=P9.15.3-FACE-SCANNER" />
 </head>
 <body>
   <main class="quick-shell">
@@ -17,11 +17,28 @@
       </div>
 
       <div id="stateIcon" class="state-icon loading" aria-hidden="true"><span class="spinner"></span></div>
-      <h1 id="title">กำลังตรวจตำแหน่ง…</h1>
-      <p id="message">กรุณารอสักครู่ นากนะกำลังอ่าน GPS จากมือถือของคุณ</p>
+      <h1 id="title">กำลังเตรียมเช็กอิน…</h1>
+      <p id="message">กรุณารอสักครู่ นากนะกำลังตรวจเงื่อนไขการลงเวลา</p>
+
+      <section id="facePanel" class="face-panel hidden" aria-live="polite">
+        <div class="face-camera-wrap">
+          <video id="faceVideo" autoplay muted playsinline></video>
+          <div class="face-guide"><span></span></div>
+          <div id="faceCameraState" class="face-camera-state">กล้องยังไม่เปิด</div>
+        </div>
+        <div class="face-copy">
+          <strong id="faceTitle">ยืนยันตัวตนด้วยใบหน้า</strong>
+          <p id="faceInstruction">มองตรงเข้ากล้องและทำตามคำแนะนำ</p>
+          <div class="face-steps" aria-hidden="true"><span id="faceStepCamera">1</span><span id="faceStepLive">2</span><span id="faceStepMatch">3</span></div>
+        </div>
+        <button id="faceStartBtn" class="primary-btn" type="button">เริ่มสแกนใบหน้า</button>
+        <button id="faceSkipBtn" class="secondary-face-btn hidden" type="button">ข้ามครั้งนี้และเช็กอินต่อ</button>
+        <p class="face-privacy">รูปจากกล้องไม่ถูกบันทึกและไม่ถูกอัปโหลด ระบบส่งเฉพาะ Face Template แบบตัวเลขเพื่อยืนยันตัวตน</p>
+      </section>
 
       <div id="detailCard" class="detail-card hidden">
         <div><span>เวลา</span><strong id="timeText">—</strong></div>
+        <div id="faceResultRow" class="hidden"><span>ยืนยันใบหน้า</span><strong id="faceResultText" class="status-ok">ผ่าน</strong></div>
         <div><span id="locationLabel">จุดที่ลงเวลาจริง</span><strong id="locationText">—</strong></div>
         <div id="areaStatusRow"><span>สถานะพื้นที่</span><strong id="areaStatusText">—</strong></div>
         <div id="workLocationRow"><span>Work Location ที่กำหนด</span><strong id="workLocationText">—</strong></div>
@@ -33,10 +50,12 @@
       </div>
 
       <button id="retryBtn" class="primary-btn hidden" type="button">ลองใหม่</button>
-      <p id="permissionHint" class="permission-hint hidden">ถ้ามือถือถามสิทธิ์ Location ให้เลือก “อนุญาตขณะใช้งาน” แล้วกดลองใหม่</p>
-      <p class="privacy-note">นากนะใช้ตำแหน่งเฉพาะตอนที่คุณกดลงเวลาเท่านั้น ไม่ติดตามตำแหน่งเบื้องหลัง · Quick Attendance P7.85</p>
+      <p id="permissionHint" class="permission-hint hidden">ถ้ามือถือถามสิทธิ์ Location หรือ Camera ให้เลือก “อนุญาตขณะใช้งาน” แล้วกดลองใหม่</p>
+      <p id="diagnosticText" class="privacy-note hidden"></p>
+      <p class="privacy-note">นากนะใช้กล้องและตำแหน่งเฉพาะตอนที่คุณกดลงเวลา ไม่ติดตามเบื้องหลัง และไม่เก็บรูปใบหน้าประจำวัน · P9.15.3 Face Verification</p>
     </section>
   </main>
-  <script src="/attendance.js?v=1.0-p7.82" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" defer></script>
+  <script src="/attendance.js?v=P9.15.3-FACE-SCANNER" defer></script>
 </body>
 </html>

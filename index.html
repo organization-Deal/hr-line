@@ -1,18 +1,21 @@
 <!doctype html>
 <html lang="th">
 <head>
-  <script>document.documentElement.classList.add('js');</script>
+  <script>window.__NAKNA_BOOT_T0=performance.now();document.documentElement.classList.add('js');</script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#F8FAF8" />
   <meta name="color-scheme" content="light" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>นากนะ — HR Tech สำหรับคนไทย</title>
   <meta name="description" content="นากนะ HR Tech สำหรับคนไทย โดย Otterwork Co., Ltd." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1.0-p7.98" />
-  <link rel="modulepreload" href="/app.js?v=1.0-p7.98" />
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
+  <link rel="stylesheet" href="/styles.css?v=P9.15.3" />
+  <link rel="modulepreload" href="/app.js?v=P9.15.3" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -230,7 +233,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P8.01</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P9.15.3</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -265,54 +268,81 @@
         <button id="retryDataLoadBtn" class="secondary-btn" type="button">ลองโหลดใหม่</button>
       </div>
 
-      <section id="view-dashboard" class="view active">
-        <div class="welcome-bar">
-          <div>
-            <p class="kicker">สวัสดี HR 👋</p>
+      <section id="view-dashboard" class="view active dashboard-command-center">
+        <div class="welcome-bar dashboard-hero-v2">
+          <div class="dashboard-hero-copy">
+            <p class="kicker">HR COMMAND CENTER</p>
             <h1>วันนี้ทีมของเราเป็นยังไงบ้าง</h1>
             <p id="heroSub">กำลังโหลดข้อมูลบริษัท...</p>
           </div>
-          <div class="attention-summary">
+          <div class="attention-summary dashboard-attention-summary">
             <div class="attention-ring"><strong id="attentionTotal">0</strong><span>เรื่อง</span></div>
-            <div><strong>ต้องจัดการวันนี้</strong><span>นากนะรวมรายการที่ควรเช็กไว้ให้แล้ว</span></div>
+            <div><strong>ต้องจัดการวันนี้</strong><span>งานสำคัญที่ควรเช็กก่อนเริ่มวัน</span></div>
           </div>
         </div>
 
-        <div id="summaryGrid" class="summary-strip" aria-label="สรุปวันนี้"></div>
+        <div class="dashboard-quick-actions" aria-label="ทางลัด HR">
+          <button type="button" data-jump="attendance"><span>เวลาเข้างาน</span><small>เช็กคนมา / สาย / ยังไม่มา</small></button>
+          <button type="button" data-jump="leave"><span>อนุมัติการลา</span><small>ดูคำขอลาและสิทธิ์คงเหลือ</small></button>
+          <button type="button" data-jump="documents"><span>เอกสาร</span><small>เซ็น ส่ง และติดตามเอกสาร</small></button>
+          <button type="button" data-jump="payroll"><span>Payroll</span><small>ตรวจรอบเงินเดือนล่าสุด</small></button>
+          <button type="button" data-jump="broadcast"><span>ประกาศ</span><small>ส่งข่าวให้ทีมงาน</small></button>
+        </div>
 
-        <div class="dashboard-grid primary-dashboard-grid">
-          <article class="panel radar-panel">
+        <div id="summaryGrid" class="summary-strip summary-strip-v2" aria-label="สรุปวันนี้"></div>
+
+        <div class="dashboard-grid dashboard-grid-v2 primary-dashboard-grid">
+          <article class="panel radar-panel dashboard-compact-panel">
             <div class="panel-head">
-              <div><p class="kicker">TODAY'S ATTENTION</p><h3>เรื่องที่ควรจัดการก่อน</h3><p class="panel-subtitle">เรียงงานสำคัญให้ HR ไม่ต้องไล่หาเอง</p></div>
+              <div><p class="kicker">TODAY'S ATTENTION</p><h3>เรื่องที่ควรจัดการก่อน</h3><p class="panel-subtitle">รายการที่ต้องตัดสินใจหรือดำเนินการวันนี้</p></div>
               <span class="badge badge-brand">Auto</span>
             </div>
             <div id="attentionList" class="list-stack"></div>
           </article>
 
-          <article class="panel moments-panel">
+          <article class="panel dashboard-compact-panel attendance-panel-v2">
             <div class="panel-head">
-              <div><p class="kicker">PEOPLE MOMENTS</p><h3>วันสำคัญของทีม</h3><p class="panel-subtitle">วันเกิดและช่วงเวลาที่ HR ไม่ควรพลาด</p></div>
-              <span class="badge badge-neutral">7 วัน</span>
+              <div><p class="kicker">TODAY ATTENDANCE</p><h3>สถานะเข้างานวันนี้</h3><p class="panel-subtitle">ดูภาพรวมก่อนเปิดหน้ารายละเอียด</p></div>
+              <button class="text-btn" data-jump="attendance">ดูเวลาเข้างาน <span>→</span></button>
             </div>
-            <div id="birthdayList" class="list-stack"></div>
+            <div id="attendanceSnapshot" class="attendance-snapshot"></div>
           </article>
         </div>
 
-        <div class="dashboard-grid secondary-dashboard-grid">
-          <article class="panel recruitment-panel">
+        <div class="dashboard-grid dashboard-grid-v2 operations-dashboard-grid">
+          <article class="panel dashboard-compact-panel payroll-dashboard-card">
             <div class="panel-head">
-              <div><p class="kicker">RECRUITMENT</p><h3>สถานะผู้สมัคร</h3></div>
-              <button class="text-btn" data-jump="recruitment">ดู Recruitment <span>→</span></button>
+              <div><p class="kicker">PAYROLL</p><h3>รอบเงินเดือน</h3></div>
+              <button class="text-btn" data-jump="payroll">เปิด Payroll <span>→</span></button>
             </div>
-            <div id="recruitmentPipeline" class="pipeline"></div>
+            <div id="payrollSnapshot" class="dashboard-module-snapshot"></div>
           </article>
 
-          <article class="panel">
+          <article class="panel dashboard-compact-panel document-dashboard-card">
             <div class="panel-head">
-              <div><p class="kicker">UPCOMING</p><h3>กำหนดการที่ใกล้ถึง</h3></div>
-              <span class="badge badge-soft">Probation & Contract</span>
+              <div><p class="kicker">DOCUMENTS</p><h3>เอกสารที่กำลังดำเนินการ</h3></div>
+              <button class="text-btn" data-jump="documents">เปิดเอกสาร <span>→</span></button>
             </div>
-            <div id="upcomingList" class="list-stack compact-list"></div>
+            <div id="documentSnapshot" class="dashboard-module-snapshot"></div>
+          </article>
+        </div>
+
+        <div class="dashboard-grid dashboard-grid-v2 secondary-dashboard-grid">
+          <article class="panel recruitment-panel dashboard-compact-panel">
+            <div class="panel-head">
+              <div><p class="kicker">RECRUITMENT</p><h3>สถานะผู้สมัคร</h3><p class="panel-subtitle">ดู Funnel ทั้งหมดในหน้าเดียว</p></div>
+              <button class="text-btn" data-jump="recruitment">ดู Recruitment <span>→</span></button>
+            </div>
+            <div id="recruitmentPipeline" class="pipeline pipeline-v2"></div>
+          </article>
+
+          <article class="panel dashboard-compact-panel moments-panel">
+            <div class="panel-head">
+              <div><p class="kicker">UPCOMING</p><h3>กำหนดการและวันสำคัญ</h3><p class="panel-subtitle">วันเกิด · Probation · สัญญา</p></div>
+              <span class="badge badge-soft">ใกล้ถึง</span>
+            </div>
+            <div id="upcomingList" class="list-stack compact-list timeline-list"></div>
+            <div id="birthdayList" class="list-stack compact-list birthday-list-merged"></div>
           </article>
         </div>
       </section>
@@ -608,7 +638,7 @@
       </section>
 
       <section id="view-payroll" class="view">
-        <div class="page-intro payroll-page-intro"><div><p class="kicker">THAILAND PAYROLL</p><h1>Payroll</h1><p>ปิดเงินเดือนแบบตารางเดียว · เงินเดือน Commission KPI Incentive ภาษี SSO และรายการหักอยู่ในแถวเดียวกัน</p></div><div class="page-actions"><button id="payrollSettingsBtn" class="secondary-btn" type="button">ตั้งค่า Payroll</button><button id="createPayrollPeriodBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>สร้างรอบเงินเดือน</button></div></div>
+        <div class="page-intro payroll-page-intro"><div><p class="kicker">THAILAND PAYROLL CONTROL CENTER</p><h1>Payroll</h1><p>ทำเงินเดือนให้จบเป็นขั้นตอน · เตรียมข้อมูล → ตรวจสอบ → อนุมัติ → ปิดรอบ → ส่งสลิป</p></div><div class="page-actions"><button id="payrollComponentsBtn" class="secondary-btn" type="button">รายการเงิน</button><button id="payrollSettingsBtn" class="secondary-btn" type="button">ตั้งค่า Payroll</button><button id="createPayrollPeriodBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>สร้างรอบเงินเดือน</button></div></div>
         <div id="payrollSummary" class="payroll-summary"></div>
         <div class="payroll-workspace">
           <aside class="panel payroll-period-panel"><div class="panel-head"><div><p class="kicker">PAY PERIODS</p><h3>รอบเงินเดือน</h3></div><span id="payrollReadyBadge" class="badge badge-soft">กำลังโหลด</span></div><div id="payrollPeriods" class="payroll-period-list"></div></aside>
@@ -618,7 +648,7 @@
       <section id="view-documents" class="view">
         <div class="page-intro"><div><p class="kicker">EMPLOYEE DOCUMENTS</p><h1>เอกสาร HR</h1><p>แฟ้มเอกสารพนักงานแบบตรวจสอบย้อนหลังได้ · Version · สิทธิ์การมองเห็น · ประวัติหลักฐาน และ Payslip</p></div><button id="generateDocumentBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>ออกเอกสาร</button></div>
         <div id="documentSummary" class="document-summary"></div>
-        <div class="document-system-toolbar"><button id="seedDocumentTemplatesBtn" class="secondary-btn" type="button">ติดตั้ง Template มาตรฐาน</button><button id="openDocumentCaseBtn" class="secondary-btn" type="button">+ เปิด HR Case</button><button id="refreshDocumentSystemBtn" class="secondary-btn" type="button">รีเฟรช</button></div>
+        <div class="document-system-toolbar"><button id="documentSettingsBtn" class="secondary-btn" type="button">ตั้งค่าเอกสาร & ลายเซ็น</button><button id="seedDocumentTemplatesBtn" class="secondary-btn" type="button">คืนค่า Template มาตรฐาน</button><button id="openDocumentCaseBtn" class="secondary-btn" type="button">+ เปิด HR Case</button><button id="bulkApproveDocumentsBtn" class="secondary-btn" type="button">ลงนามที่รอทั้งหมด</button><button id="refreshDocumentSystemBtn" class="secondary-btn" type="button">รีเฟรช</button></div>
         <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">ACTION CENTER</p><h3>งานที่ต้องดำเนินการ</h3></div></div><div id="documentActionList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">TEMPLATES</p><h3>Template เอกสาร</h3></div></div><div id="documentTemplateList" class="document-list"></div></article></div>
         <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">MONTHLY PAYSLIPS</p><h3>สลิปเงินเดือน</h3></div></div><div id="payslipDocumentList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">HR DOCUMENTS</p><h3>เอกสารพนักงาน</h3></div></div><div id="employeeDocumentList" class="document-list"></div></article></div>
         <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">EVIDENCE</p><h3>รอพนักงานรับทราบ</h3></div></div><div id="documentAckList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">HR CASES</p><h3>Case ที่กำลังดำเนินการ</h3></div></div><div id="documentCaseList" class="document-list"></div></article></div>
@@ -795,6 +825,43 @@
               <button id="addWorkLocationBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่ม Location</button>
             </div>
             <div class="attendance-policy-card"><div><strong>เช็กอิน / เช็กเอาต์นอกพื้นที่</strong><p>เปิดเมื่อบริษัทอนุญาตให้ลงเวลานอก Work Location ระบบยังบันทึกพิกัดและระยะห่างไว้เพื่อตรวจสอบย้อนหลัง</p><small id="attendancePolicyStatus" class="attendance-policy-status">กำลังตรวจสอบการตั้งค่า…</small></div><label class="switch"><input id="attendancePolicyToggle" type="checkbox"/><span></span></label></div>
+            <section id="attendanceFaceCard" class="attendance-face-card">
+              <div class="attendance-face-head">
+                <div class="attendance-face-icon" aria-hidden="true">◉</div>
+                <div class="attendance-face-copy">
+                  <div class="attendance-face-title-row"><strong>ยืนยันตัวตนด้วยใบหน้า</strong><span class="badge badge-soft">FACE VERIFY · BETA · P9.15.3</span></div>
+                  <p>แยกจากกฎ Location โดยสิ้นเชิง พนักงานที่ได้รับสิทธิ์ลงเวลานอกพื้นที่ยังลงเวลาได้ตามเดิม แต่ระบบจะตรวจว่าเป็นเจ้าของบัญชีจริงก่อนบันทึกเวลา</p>
+                  <small id="attendanceFaceStatus">กำลังโหลดการตั้งค่า…</small>
+                </div>
+              </div>
+              <div class="attendance-face-grid">
+                <label class="field"><span>โหมดการใช้งาน</span><select id="attendanceFaceMode">
+                  <option value="off">ปิดใช้งาน</option>
+                  <option value="enroll">ช่วงลงทะเบียน · ยังไม่บังคับ</option>
+                  <option value="required">บังคับยืนยันก่อนเช็กอิน</option>
+                </select></label>
+                <div class="attendance-face-option"><div><strong>ตรวจตอนเช็กเอาต์ด้วย</strong><small>เช็กอินจะตรวจเสมอเมื่อเลือกโหมดบังคับ</small></div><label class="switch"><input id="attendanceFaceCheckoutToggle" type="checkbox"/><span></span></label></div>
+              </div>
+              <div class="attendance-face-summary">
+                <div><strong id="attendanceFaceReadyCount">0/0</strong><span>ลงทะเบียนแล้ว</span></div>
+                <div><strong id="attendanceFacePendingCount">0</strong><span>ยังไม่ลงทะเบียน</span></div>
+                <div class="attendance-face-privacy"><b>ไม่เก็บรูปประจำวัน</b><span>ภาพจากกล้องใช้ชั่วคราวบนเครื่องเพื่อสร้าง Face Template แล้วทิ้งทันที · Template ในฐานข้อมูลเข้ารหัส</span></div>
+              </div>
+              <div id="attendanceFacePendingPeople" class="attendance-face-pending hidden"></div>
+              <div class="attendance-face-rollout">
+                <div class="attendance-face-rollout-copy">
+                  <strong>ให้พนักงานลงทะเบียนได้ทันที</strong>
+                  <span>ไม่ต้องรอเช็กอินวันถัดไป · คนที่เช็กอินวันนี้แล้วก็ลงทะเบียนได้ และหน้าลงทะเบียนจะไม่สร้างเวลาเข้างานซ้ำ</span>
+                </div>
+                <div class="attendance-face-rollout-buttons">
+                  <button id="attendanceFaceSelfTestBtn" class="primary-btn attendance-face-scan-btn" type="button">สแกน / ลงทะเบียนใบหน้าของฉัน</button>
+                  <button id="attendanceFaceRemindBtn" class="secondary-btn" type="button">ส่ง LINE ให้คนที่ยังไม่ลงทะเบียน</button>
+                  <button id="attendanceFaceCopyInstructionBtn" class="text-btn" type="button">คัดลอกข้อความแจ้งทีม</button>
+                </div>
+                <small id="attendanceFaceRolloutStatus" class="attendance-face-rollout-status">เปิด Face Verification แล้วจึงส่งคำขอลงทะเบียนได้</small>
+              </div>
+              <div class="attendance-face-actions"><small id="attendanceFaceAutosaveNote">เปลี่ยนค่าแล้วระบบจะบันทึกอัตโนมัติ</small></div>
+            </section>
             <div id="attendanceReminderCard" class="attendance-reminder-card">
               <div class="attendance-reminder-head">
                 <div class="attendance-reminder-icon">◷</div>
@@ -1172,18 +1239,85 @@
   </dialog>
 
   <dialog id="peopleProfileModal">
-    <form method="dialog"><div class="modal-head"><div><p class="kicker">PEOPLE PROFILE</p><h3 id="peopleProfileTitle">จัดการพนักงาน</h3><p>กำหนดสถานะ หัวหน้า แผนก และช่วงทดลองงานโดยไม่ลบประวัติเดิม</p></div><button type="button" class="close-btn" value="cancel">×</button></div><input id="peopleProfileEmployeeId" type="hidden"/><div class="modal-fields"><div class="field"><label>สถานะ</label><select id="peopleProfileStatus"><option value="probation">ทดลองงาน</option><option value="employee">พนักงาน</option><option value="leave_of_absence">พักงาน</option><option value="resigned">ลาออก</option><option value="terminated">เลิกจ้าง</option><option value="alumni">อดีตพนักงาน</option><option value="inactive">Inactive</option></select></div><div class="field"><label>หัวหน้าโดยตรง</label><select id="peopleProfileManager"></select></div><div class="field"><label>แผนก</label><select id="peopleProfileDepartment"></select></div><div class="field"><label>ตำแหน่ง <span class="field-label-note">ใช้ร่วมกันทั้งบริษัท</span></label><select id="peopleProfilePosition"></select><button id="peopleProfileCreatePositionBtn" class="inline-create-btn" type="button">+ เพิ่มตำแหน่งกลาง</button></div><div class="field"><label>ครบ Probation</label><input id="peopleProfileProbationEnd" type="date"/></div><div class="field"><label>วันที่ผ่านโปร</label><input id="peopleProfileConfirmedAt" type="date"/></div><div class="field"><label>วันสิ้นสุดการทำงาน</label><input id="peopleProfileEndDate" type="date"/></div><div class="field"><label>เหตุผล</label><input id="peopleProfileEndReason"/></div><div class="field full"><label>Work Location ที่อนุญาต</label><div id="peopleProfileLocations" class="location-check-grid"></div><small>ถ้าไม่เลือก ระบบจะใช้ทุก Work Location ของบริษัท</small></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="peopleProfileSaveBtn" class="primary-btn">บันทึก People Profile</button></div></form>
+    <form method="dialog"><div class="modal-head"><div><p class="kicker">PEOPLE PROFILE</p><h3 id="peopleProfileTitle">จัดการพนักงาน</h3><p>กำหนดสถานะ หัวหน้า แผนก และช่วงทดลองงานโดยไม่ลบประวัติเดิม</p></div><button type="button" class="close-btn" value="cancel">×</button></div><input id="peopleProfileEmployeeId" type="hidden"/><div class="modal-fields"><div class="field"><label>สถานะ</label><select id="peopleProfileStatus"><option value="probation">ทดลองงาน</option><option value="employee">พนักงาน</option><option value="leave_of_absence">พักงาน</option><option value="resigned">ลาออก</option><option value="terminated">เลิกจ้าง</option><option value="alumni">อดีตพนักงาน</option><option value="inactive">Inactive</option></select></div><div class="field"><label>หัวหน้าโดยตรง</label><select id="peopleProfileManager"></select></div><div class="field"><label>แผนก</label><select id="peopleProfileDepartment"></select></div><div class="field"><label>ตำแหน่ง <span class="field-label-note">ใช้ร่วมกันทั้งบริษัท</span></label><select id="peopleProfilePosition"></select><button id="peopleProfileCreatePositionBtn" class="inline-create-btn" type="button">+ เพิ่มตำแหน่งกลาง</button></div><div class="field"><label>ครบ Probation</label><input id="peopleProfileProbationEnd" type="date"/></div><div class="field"><label>วันที่ผ่านโปร</label><input id="peopleProfileConfirmedAt" type="date"/></div><div class="field"><label>วันสิ้นสุดการทำงาน</label><input id="peopleProfileEndDate" type="date"/></div><div class="field"><label>เหตุผล</label><input id="peopleProfileEndReason"/></div><div class="field full"><label>Work Location ที่อนุญาต</label><div id="peopleProfileLocations" class="location-check-grid"></div><small>ถ้าไม่เลือก ระบบจะใช้ทุก Work Location ของบริษัท</small></div><div class="field full people-face-profile-field"><label>Face Verification</label><div class="people-face-profile-card"><div><strong id="peopleFaceProfileStatus">กำลังตรวจสอบ…</strong><small id="peopleFaceProfileMeta">ระบบไม่เก็บรูปเช็กอินประจำวัน</small></div><button id="peopleFaceResetBtn" class="secondary-btn hidden" type="button">รีเซ็ตใบหน้า</button></div></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="peopleProfileSaveBtn" class="primary-btn">บันทึก People Profile</button></div></form>
   </dialog>
 
-  <dialog id="payrollSettingsModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PAYROLL SETTINGS</p><h3>ตั้งค่า Payroll</h3><p>ค่าเริ่มต้นจะไม่หักขาด/สายอัตโนมัติ จนกว่า HR จะเปิดเอง</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="modal-fields"><div class="field"><label>วันที่จ่ายเงินเดือน</label><input id="payrollPayDay" type="number" min="1" max="31" /></div><div class="field"><label>ตัวหารค่าจ้างรายวัน</label><input id="payrollDailyDivisor" type="number" min="1" step="0.01" /></div><label class="toggle-line full"><input id="payrollSsoEnabled" type="checkbox" /> คำนวณประกันสังคม</label><label class="toggle-line full"><input id="payrollTaxEnabled" type="checkbox" /> ประมาณการภาษีหัก ณ ที่จ่าย</label><label class="toggle-line full payroll-auto-slip-toggle"><input id="payrollAutoPayslip" type="checkbox" /> สร้าง Payslip PDF อัตโนมัติทันทีเมื่อ Lock รอบเงินเดือน</label><label class="toggle-line full"><input id="payrollAbsenceDeduction" type="checkbox" /> หักวันขาดงานอัตโนมัติ</label><label class="toggle-line full"><input id="payrollLateDeduction" type="checkbox" /> หักมาสายอัตโนมัติ</label><div class="field full"><label>หักมาสายต่อนาที</label><input id="payrollLatePerMinute" type="number" min="0" step="0.01" /></div></div><div class="legal-callout"><strong>Payslip อัตโนมัติ</strong><span>เมื่อ Lock รอบ ระบบจะสร้าง PDF ของพนักงานทุกคนลง Google Drive อัตโนมัติ ส่วนการส่ง Email / LINE จะเกิดตอนกด Publish เพื่อป้องกันส่งก่อนตรวจเสร็จ</span></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollSettingsSaveBtn" type="button" class="primary-btn">บันทึก</button></div></form></dialog>
+  <dialog id="payrollSettingsModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PAYROLL SETTINGS</p><h3>ตั้งค่า Payroll</h3><p>แต่ละบริษัทกำหนดรอบเงินเดือนของตัวเองได้ เช่น 25 เดือนก่อน → 25 เดือนนี้</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="modal-fields"><div class="field full payroll-cycle-settings"><label>รอบเงินเดือนเริ่มต้นของบริษัท</label><div class="payroll-cycle-row"><span>เริ่ม</span><select id="payrollCycleStartOffset"><option value="-1">เดือนก่อน</option><option value="0">เดือนเดียวกับรอบ</option></select><input id="payrollCycleStartDay" type="number" min="1" max="31" placeholder="วันที่"/><span>ถึง</span><select id="payrollCycleEndOffset"><option value="0">เดือนเดียวกับรอบ</option><option value="1">เดือนถัดไป</option></select><input id="payrollCycleEndDay" type="number" min="0" max="31" placeholder="0 = วันสุดท้าย"/></div><div class="payroll-cycle-presets"><button type="button" onclick="window.applyPayrollCyclePreset('calendar')">1 → สิ้นเดือน</button><button type="button" onclick="window.applyPayrollCyclePreset('26-25')">26 เดือนก่อน → 25 เดือนนี้</button><button type="button" onclick="window.applyPayrollCyclePreset('25-25')">25 เดือนก่อน → 25 เดือนนี้</button></div><small id="payrollCycleSettingsPreview">ตัวอย่างรอบจะแสดงที่นี่</small></div><div class="field"><label>วันที่จ่ายเงินเดือน</label><input id="payrollPayDay" type="number" min="1" max="31" /></div><div class="field"><label>ตัวหารค่าจ้างรายวัน</label><input id="payrollDailyDivisor" type="number" min="1" step="0.01" /></div><div class="field"><label>Attendance Cut-off</label><input id="payrollAttendanceCutoff" type="number" min="1" max="31" /></div><div class="field"><label>Commission Cut-off</label><input id="payrollCommissionCutoff" type="number" min="1" max="31" /></div><div class="field"><label>เตือน Net ต่างจากเดือนก่อน</label><div class="input-suffix"><input id="payrollVarianceWarning" type="number" min="0" max="500" step="1" /><span>%</span></div></div><label class="toggle-line"><input id="payrollSeparateApprover" type="checkbox" /> Maker–Checker: คนสร้างรอบห้ามอนุมัติเอง</label><label class="toggle-line full"><input id="payrollSsoEnabled" type="checkbox" /> คำนวณประกันสังคมพนักงาน</label><label class="toggle-line full"><input id="payrollEmployerSsoEnabled" type="checkbox" /> คำนวณประกันสังคมฝั่งนายจ้างใน Employer Cost</label><label class="toggle-line full"><input id="payrollTaxEnabled" type="checkbox" /> ประมาณการภาษีหัก ณ ที่จ่ายจาก Tax Profile + YTD</label><label class="toggle-line full payroll-auto-slip-toggle"><input id="payrollAutoPayslip" type="checkbox" /> สร้าง Payslip PDF อัตโนมัติทันทีเมื่อ Lock รอบเงินเดือน</label><label class="toggle-line full"><input id="payrollAbsenceDeduction" type="checkbox" /> หักวันขาดงานอัตโนมัติ</label><label class="toggle-line full"><input id="payrollLateDeduction" type="checkbox" /> หักมาสายอัตโนมัติ</label><div class="field full"><label>หักมาสายต่อนาที</label><input id="payrollLatePerMinute" type="number" min="0" step="0.01" /></div></div><div class="legal-callout"><strong>รอบเงินเดือนเป็นของแต่ละบริษัท</strong><span>ค่าที่ตั้งตรงนี้เป็น Default ตอนสร้างรอบใหม่ แต่ HR ยังแก้วันที่เริ่ม/สิ้นสุดเฉพาะรอบได้ ระบบจะกันช่วงวันที่ซ้ำกับรอบเดิมเพื่อลดการคิดเงินซ้ำ</span></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollSettingsSaveBtn" type="button" class="primary-btn">บันทึก</button></div></form></dialog>
 
-  <dialog id="payrollProfileModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">SALARY PROFILE</p><h3 id="payrollProfileTitle">ข้อมูลเงินเดือนพนักงาน</h3><p>ข้อมูลส่วนนี้ควรจำกัดสิทธิ์เฉพาะ HR/Payroll</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><input id="payrollProfileEmployeeId" type="hidden" /><div class="modal-fields"><div class="field"><label>เงินเดือนฐาน</label><input id="payrollBaseSalary" type="number" min="0" step="0.01" /></div><div class="field"><label>วันที่มีผล</label><input id="payrollEffectiveFrom" type="date" /></div><label class="toggle-line"><input id="employeeSsoEnabled" type="checkbox" /> ประกันสังคม</label><label class="toggle-line"><input id="employeeTaxEnabled" type="checkbox" /> หักภาษี</label><div class="field"><label>ค่าลดหย่อนส่วนตัว/ปี</label><input id="employeePersonalAllowance" type="number" min="0" /></div><div class="field"><label>ค่าลดหย่อนอื่น/ปี</label><input id="employeeExtraDeductions" type="number" min="0" /></div><div class="field"><label>ภาษีต่อเดือน Override</label><input id="employeeTaxOverride" type="number" min="0" step="0.01" placeholder="เว้นว่าง = คำนวณให้" /></div><div class="field"><label>ธนาคาร</label><input id="employeeBankName" /></div><div class="field"><label>ชื่อบัญชี</label><input id="employeeBankAccountName" /></div><div class="field"><label>เลขบัญชี</label><input id="employeeBankAccountNo" /></div><div class="field full"><label>หมายเหตุ Payroll</label><textarea id="employeePayrollNote" rows="3"></textarea></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollProfileSaveBtn" type="button" class="primary-btn">บันทึกข้อมูลเงินเดือน</button></div></form></dialog>
+  <dialog id="payrollProfileModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">SALARY & TAX PROFILE</p><h3 id="payrollProfileTitle">ข้อมูลเงินเดือนพนักงาน</h3><p>ฐานเงินเดือน รายได้ประจำ ภาษี ประกันสังคม และบัญชีรับเงินเดือน</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><input id="payrollProfileEmployeeId" type="hidden" /><div class="modal-fields"><div class="field"><label>เงินเดือนฐาน</label><input id="payrollBaseSalary" type="number" min="0" step="0.01" /></div><div class="field"><label>วันที่มีผล</label><input id="payrollEffectiveFrom" type="date" /></div><label class="toggle-line"><input id="employeeSsoEnabled" type="checkbox" /> ประกันสังคม</label><label class="toggle-line"><input id="employeeTaxEnabled" type="checkbox" /> หักภาษี</label><div class="field"><label>ค่าลดหย่อนส่วนตัว/ปี</label><input id="employeePersonalAllowance" type="number" min="0" /></div><div class="field"><label>ค่าลดหย่อนอื่น/ปี</label><input id="employeeExtraDeductions" type="number" min="0" /></div><div class="field"><label>ภาษีต่อเดือน Override</label><input id="employeeTaxOverride" type="number" min="0" step="0.01" placeholder="เว้นว่าง = คำนวณจาก YTD" /></div><div class="field"><label>ธนาคาร</label><input id="employeeBankName" /></div><div class="field"><label>ชื่อบัญชี</label><input id="employeeBankAccountName" /></div><div class="field"><label>เลขบัญชี</label><input id="employeeBankAccountNo" /></div><div class="field full"><label>รายได้/รายการหักประจำ</label><div id="payrollRecurringComponents" class="payroll-recurring-components"></div></div><div class="field full"><label>หมายเหตุ Payroll</label><textarea id="employeePayrollNote" rows="3"></textarea></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollProfileSaveBtn" type="button" class="primary-btn">บันทึกข้อมูลเงินเดือน</button></div></form></dialog>
 
-  <dialog id="payrollPeriodModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">NEW PAY PERIOD</p><h3>สร้างรอบเงินเดือน</h3><p>ระบบจะ Preview จากเงินเดือนฐาน + Attendance + Leave ทันที</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="modal-fields"><div class="field"><label>เดือน</label><input id="payrollPeriodKey" type="month" /></div><div class="field"><label>วันที่จ่าย</label><input id="payrollPayDate" type="date" /></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollPeriodCreateBtn" type="button" class="primary-btn">สร้างและคำนวณ Preview</button></div></form></dialog>
+  <dialog id="payrollQuickEditModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PAYROLL QUICK EDIT</p><h3 id="payrollQuickEditTitle">แก้ข้อมูล Payroll</h3><p id="payrollQuickEditSubtitle">คลิกจากตารางแล้วแก้เฉพาะช่องนั้นได้ทันที โดยไม่ต้องกดปุ่มตั้งค่า</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><input id="payrollQuickEditEmployeeId" type="hidden" /><input id="payrollQuickEditField" type="hidden" /><div class="modal-fields"><div class="field full payroll-quick-edit-intro"><label id="payrollQuickEditEmployeeLabel">พนักงาน</label><small id="payrollQuickEditHint">เลือกข้อมูลที่ต้องการแก้แล้วบันทึก ระบบจะอัปเดตกลับไปที่ตาราง Payroll ทันที</small></div><div id="payrollQuickEditSalaryFields" class="payroll-quick-edit-grid"><div class="field"><label>ฐานเงินเดือน</label><input id="payrollQuickBaseSalary" type="number" min="0" step="0.01" /></div><div class="field"><label>วันที่มีผล</label><input id="payrollQuickEffectiveFrom" type="date" /></div></div><div id="payrollQuickEditBankFields" class="payroll-quick-edit-grid"><div class="field"><label>ธนาคาร</label><input id="payrollQuickBankName" placeholder="เช่น SCB, KBank, BBL" /></div><div class="field"><label>ชื่อบัญชี</label><input id="payrollQuickBankAccountName" placeholder="ชื่อเจ้าของบัญชี" /></div><div class="field full"><label>เลขบัญชี</label><input id="payrollQuickBankAccountNo" inputmode="numeric" placeholder="เลขบัญชีธนาคาร" /></div></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollQuickEditSaveBtn" type="button" class="primary-btn">บันทึกทันที</button></div></form></dialog>
+
+  <dialog id="payrollPeriodModal"><form method="dialog"><div class="modal-head"><div><p class="kicker" id="payrollPeriodModalKicker">NEW PAY PERIOD</p><h3 id="payrollPeriodModalTitle">สร้างรอบเงินเดือน</h3><p id="payrollPeriodModalDescription">ระบบจะใช้รอบ Default ของบริษัท และ HR สามารถแก้ช่วงวันที่เฉพาะรอบนี้ได้</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><input id="payrollPeriodEditId" type="hidden" value="" /><div class="modal-fields"><div class="field"><label>เดือน Payroll</label><input id="payrollPeriodKey" type="month" /></div><div class="field"><label>วันที่จ่าย</label><input id="payrollPayDate" type="date" /></div><div class="field"><label>เริ่มคิดรอบ</label><input id="payrollPeriodStart" type="date" /></div><div class="field"><label>สิ้นสุดรอบ</label><input id="payrollPeriodEnd" type="date" /></div><div class="field full payroll-period-preview" id="payrollPeriodRangePreview"><strong>ช่วงรอบเงินเดือน</strong><span>—</span></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollPeriodCreateBtn" type="button" class="primary-btn">สร้างและคำนวณ Preview</button></div></form></dialog>
 
   <dialog id="payrollAdjustmentModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PAYROLL ADJUSTMENT</p><h3>เพิ่มเงิน / รายการหัก</h3><p>เพิ่ม/หักเงินรายคน รวม Commission, KPI, Incentive และปรับภาษีของรอบนี้ได้</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><input id="payrollAdjustmentPeriodId" type="hidden" /><div class="modal-fields"><div class="field full"><label>พนักงาน</label><select id="payrollAdjustmentEmployee"></select></div><div class="field"><label>ประเภท</label><select id="payrollAdjustmentType"><option value="earning">เงินเพิ่ม</option><option value="deduction">รายการหัก</option></select></div><div class="field"><label>หมวด</label><select id="payrollAdjustmentCategory"><optgroup label="เงินเพิ่ม"><option value="overtime">OT</option><option value="commission">Commission</option><option value="kpi">KPI</option><option value="incentive">Incentive</option><option value="allowance">Allowance</option><option value="bonus">Bonus</option><option value="other">เงินเพิ่มอื่น</option></optgroup><optgroup label="รายการหัก"><option value="other_deduction">หักอื่น ๆ</option></optgroup><optgroup label="ภาษี"><option value="tax_add">เพิ่มภาษีหัก ณ ที่จ่าย</option><option value="tax_reduce">ลดภาษีหัก ณ ที่จ่าย</option></optgroup></select></div><div class="field"><label>จำนวนเงิน</label><input id="payrollAdjustmentAmount" type="number" min="0" step="0.01" /></div><div class="field full"><label>รายละเอียด</label><input id="payrollAdjustmentNote" /></div><label class="toggle-line"><input id="payrollAdjustmentTaxable" type="checkbox" checked /> นับเป็นรายได้ที่ใช้ประมาณการภาษี</label><label class="toggle-line"><input id="payrollAdjustmentSso" type="checkbox" /> นับเป็นฐานประกันสังคม</label></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollAdjustmentSaveBtn" type="button" class="primary-btn">เพิ่มและคำนวณใหม่</button></div></form></dialog>
 
-  <dialog id="documentGenerateModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">GENERATE DOCUMENT</p><h3>ออกเอกสารพนักงาน</h3><p>สร้าง PDF และเก็บใน Google Drive ของบริษัทอัตโนมัติ</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="modal-fields"><div class="field full"><label>พนักงาน</label><select id="documentEmployee"></select></div><div class="field full"><label>Template</label><select id="documentTemplate"><option value="">เลือก Template</option></select><small>ระบบจะสร้าง Draft ก่อน แล้วให้ HR ตรวจ/อนุมัติตาม Workflow</small></div><div class="field full"><label>หมายเหตุเพิ่มเติม</label><textarea id="documentNote" rows="3"></textarea></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="documentGenerateSaveBtn" type="button" class="primary-btn">สร้าง PDF ลง Drive</button></div></form></dialog>
+  <dialog id="payrollBulkAdjustmentModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">BULK PAYROLL</p><h3>เพิ่มรายการหลายคน</h3><p>เหมาะกับ Bonus / Incentive / Commission หรือรายการหักที่เท่ากันหลายคน</p></div><button type="button" class="close-btn" value="cancel">×</button></div><input id="payrollBulkPeriodId" type="hidden"/><div class="modal-fields"><div class="field full"><label>เลือกพนักงาน</label><div id="payrollBulkEmployees" class="payroll-bulk-employees"></div></div><div class="field"><label>หมวด</label><select id="payrollBulkCategory"><option value="commission">Commission</option><option value="incentive">Incentive</option><option value="bonus">Bonus</option><option value="other">รายได้อื่น</option><option value="other_deduction">หักอื่น</option></select></div><div class="field"><label>จำนวนเงิน / คน</label><input id="payrollBulkAmount" type="number" min="0" step="0.01"/></div><div class="field full"><label>หมายเหตุ</label><input id="payrollBulkNote" placeholder="เช่น Commission รอบเดือนนี้"/></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="payrollBulkSaveBtn" type="button" class="primary-btn">เพิ่มให้คนที่เลือก</button></div></form></dialog>
+
+  <dialog id="payrollComponentsModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PAY COMPONENTS</p><h3>รายการเงินของบริษัท</h3><p>สร้างรายการประจำ เช่น ค่าตำแหน่ง ค่าเดินทาง ค่าโทรศัพท์ หรือรายการหักเฉพาะบริษัท</p></div><button type="button" class="close-btn" value="cancel">×</button></div><div id="payrollComponentList" class="payroll-component-list"></div><div class="modal-fields payroll-component-builder"><div class="field full"><label>ชื่อรายการใหม่</label><input id="payrollComponentName" placeholder="เช่น ค่าตำแหน่ง"/></div><div class="field"><label>ประเภท</label><select id="payrollComponentType"><option value="earning">รายได้</option><option value="deduction">รายการหัก</option></select></div><label class="toggle-line"><input id="payrollComponentTaxable" type="checkbox" checked/> นับภาษี</label><label class="toggle-line"><input id="payrollComponentSso" type="checkbox"/> เข้า SSO</label></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ปิด</button><button id="payrollComponentSaveBtn" type="button" class="primary-btn">เพิ่มรายการ</button></div></form></dialog>
+
+  <dialog id="payrollEmployeeDetailModal" class="payroll-employee-detail-modal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PAYROLL DETAIL</p><h3 id="payrollEmployeeDetailTitle">รายละเอียดเงินเดือน</h3><p>ที่มาของยอดเดือนนี้ + YTD + ภาษี + Attendance</p></div><button type="button" class="close-btn" value="cancel">×</button></div><div id="payrollEmployeeDetailBody"></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ปิด</button></div></form></dialog>
+
+  <dialog id="payrollLockPreviewModal" class="payroll-lock-preview-modal"><form method="dialog"><div class="modal-head"><div><p class="kicker">FINAL CHECK</p><h3 id="payrollLockPreviewTitle">ตรวจสรุปก่อนปิดรอบ</h3><p>ตรวจยอดรวม ความพร้อม และบัญชีรับเงินก่อนปิดการแก้ไขรอบนี้</p></div><button type="button" class="close-btn" value="cancel">×</button></div><input id="payrollLockPreviewPeriodId" type="hidden"/><div id="payrollLockPreviewBody"></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">กลับไปแก้ไข</button><button id="payrollLockConfirmBtn" type="button" class="primary-btn" onclick="window.confirmPayrollLockPreview()">ยืนยันปิดการแก้ไขรอบ</button></div></form></dialog>
+
+  <dialog id="documentSettingsModal" class="document-settings-dialog"><form method="dialog"><div class="modal-head"><div><p class="kicker">DOCUMENT BRANDING & SIGNATURE</p><h3>ตั้งค่าเอกสารและลายเซ็น</h3><p>ใช้กับเอกสารของบริษัทนี้เท่านั้น · Logo จะดึงจากข้อมูลบริษัทอัตโนมัติ</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="document-settings-grid"><section class="document-brand-card"><span class="settings-label">Logo บริษัท</span><div id="docCompanyLogoPreview" class="document-logo-preview"><span>กำลังโหลด…</span></div><small>เปลี่ยน Logo ได้จากหน้าข้อมูลบริษัท</small></section><section class="document-brand-card"><span class="settings-label">ลายเซ็น HR / ผู้มีอำนาจ</span><div id="docSignaturePreview" class="document-signature-preview"><span>ยังไม่มีลายเซ็น</span></div><div class="document-signature-actions"><label class="secondary-btn file-button">อัปโหลด PNG / JPG<input id="docSignerSignatureFile" type="file" accept="image/png,image/jpeg" hidden></label><button id="clearDocSignerSignatureBtn" type="button" class="text-btn danger-text">ลบลายเซ็น</button></div><input id="docSignatureDataUrl" type="hidden"></section><div class="field"><label>ชื่อผู้ลงนาม</label><input id="docSignerName" placeholder="เช่น นางสาว..." /></div><div class="field"><label>ตำแหน่งผู้ลงนาม</label><input id="docSignerPosition" placeholder="เช่น HR Manager / กรรมการผู้มีอำนาจ" /></div><div class="field full"><label>ข้อความท้ายเอกสาร</label><input id="docFooterText" placeholder="เอกสารฉบับนี้จัดทำผ่านระบบ Nakna HR" /></div><div class="document-signature-note full"><strong>ลายเซ็นรับทราบของพนักงาน</strong><p>Workflow ลายเซ็น: HR ตรวจและลงนามก่อน → ระบบส่งให้พนักงานทาง LINE → พนักงานลงลายเซ็นต่อ → ระบบสร้าง Final PDF ที่มีลายเซ็นครบตามประเภทเอกสาร พร้อมเก็บหลักฐานเวลาและ Version</p></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="saveDocumentSettingsBtn" type="button" class="primary-btn">บันทึกการตั้งค่า</button></div></form></dialog>
+
+  <dialog id="documentHrSignModal" class="document-hr-sign-dialog">
+    <form method="dialog">
+      <div class="modal-head">
+        <div>
+          <p class="kicker">HR SIGNATURE WORKFLOW</p>
+          <h3>ตรวจและลงนามเอกสาร</h3>
+          <p>HR ลงนามก่อน จากนั้นระบบจะส่งให้พนักงานลงนามต่อ และสร้าง PDF Final เมื่อครบทั้งสองฝ่าย</p>
+        </div>
+        <button type="button" class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <input id="documentHrSignId" type="hidden" />
+      <div class="document-sign-flow">
+        <span class="active"><b>1</b> HR ตรวจ</span>
+        <span class="active"><b>2</b> HR เซ็น</span>
+        <span><b>3</b> พนักงานเซ็น</span>
+        <span><b>4</b> Final PDF</span>
+      </div>
+      <section class="hr-sign-document-card">
+        <small>เอกสารที่กำลังลงนาม</small>
+        <strong id="documentHrSignTitle">—</strong>
+        <span id="documentHrSignMeta">—</span>
+      </section>
+      <div class="hr-sign-grid">
+        <section class="hr-sign-panel">
+          <div class="hr-sign-panel-head">
+            <div><small>SAVED SIGNATURE</small><strong>ลายเซ็นที่บริษัทบันทึกไว้</strong></div>
+          </div>
+          <div id="documentHrSavedSignature" class="hr-sign-saved-preview"><span>กำลังโหลด…</span></div>
+          <label class="ack-confirm hr-sign-use-saved"><input id="documentHrUseSavedSignature" type="checkbox"> <span>ใช้ลายเซ็นที่บันทึกไว้กับเอกสารฉบับนี้</span></label>
+        </section>
+        <section class="hr-sign-panel">
+          <div class="hr-sign-panel-head">
+            <div><small>DRAW SIGNATURE</small><strong>หรือเซ็นใหม่สำหรับเอกสารฉบับนี้</strong></div>
+            <button id="clearDocumentHrSignature" type="button" class="text-btn">ล้าง</button>
+          </div>
+          <canvas id="documentHrSignaturePad" class="document-hr-signature-pad" aria-label="พื้นที่ลงลายเซ็น HR"></canvas>
+          <small>ใช้เมาส์หรือนิ้วลงลายเซ็น · ลายเซ็นที่เซ็นใหม่จะใช้เฉพาะเอกสารฉบับนี้</small>
+        </section>
+      </div>
+      <div class="field full">
+        <label>หมายเหตุการอนุมัติ <small>(ไม่บังคับ)</small></label>
+        <textarea id="documentHrSignNote" rows="2" placeholder="เช่น ตรวจสอบข้อมูลแล้ว ถูกต้อง"></textarea>
+      </div>
+      <div class="document-sign-workflow-note">
+        <strong>หลัง HR ลงนาม</strong>
+        <span id="documentHrSignNextStep">ระบบจะส่ง LINE ให้พนักงานตรวจเอกสารและลงลายเซ็นต่อ เมื่อพนักงานลงนามครบ ระบบจะสร้าง PDF Final อัตโนมัติ</span>
+      </div>
+      <p id="documentHrSignError" class="inline-error" role="alert"></p>
+      <div class="modal-actions">
+        <button type="button" value="cancel" class="secondary-btn">ยกเลิก</button>
+        <button id="documentHrSignSubmitBtn" type="button" class="primary-btn">ลงนามและส่งต่อให้พนักงาน</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="documentGenerateModal" class="document-generate-dialog"><form method="dialog"><div class="modal-head"><div><p class="kicker">NEW EMPLOYEE DOCUMENT</p><h3>ออกเอกสารให้พนักงาน</h3><p>เลือกประเภทเอกสารก่อน นากนะจะเตรียม Draft จากข้อมูลพนักงานให้ HR ตรวจ</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="modal-fields"><div class="field full"><label>1. ต้องการออกเอกสารอะไร</label><div id="documentTypeCards" class="document-type-cards"></div><select id="documentTemplate" class="hidden"><option value="">เลือกประเภทเอกสาร</option></select></div><div class="field full"><label>2. ออกให้พนักงาน</label><select id="documentEmployee"></select></div><div id="documentDynamicFields" class="full"></div><div id="documentDraftPreview" class="document-draft-preview full"><p class="kicker">DOCUMENT PREVIEW</p><strong>เลือกประเภทเอกสารเพื่อกรอกแบบฟอร์ม</strong><small>ระบบจะสร้าง Preview จากข้อมูลบริษัทและแฟ้มพนักงานก่อนสร้าง Draft</small></div><div class="field full"><small>เอกสารสำคัญจะยังไม่ส่งให้พนักงานจนกว่า HR จะตรวจและอนุมัติ</small></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="documentGenerateSaveBtn" type="button" class="primary-btn">สร้าง Draft เพื่อตรวจสอบ</button></div></form></dialog>
 
   <dialog id="courseModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">COURSE BUILDER</p><h3>สร้างหลักสูตร Onboarding</h3><p>สร้างคอร์สก่อน แล้วค่อยเพิ่มวิดีโอ เอกสาร เนื้อหา หรือ Quiz</p></div><button type="button" class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>ชื่อหลักสูตร</label><input id="courseTitle" placeholder="เช่น Welcome to DEAL / Product 101" /></div><div class="field full"><label>คำอธิบาย</label><textarea id="courseDescription" rows="3"></textarea></div><div class="field"><label>กลุ่มเริ่มต้น</label><select id="courseAudience"><option value="manual">เลือกทีหลัง</option><option value="all">พนักงานทั้งหมด</option><option value="probation">พนักงานทดลองงาน</option><option value="department">รายแผนก</option></select></div><div class="field"><label>คะแนนผ่าน Quiz</label><input id="coursePassingScore" type="number" min="0" max="100" value="80" /></div><div class="field"><label>เวลาโดยประมาณ</label><div class="input-suffix"><input id="courseEstimatedMinutes" type="number" min="0" value="30" /><span>นาที</span></div></div><label class="toggle-line"><input id="courseRequired" type="checkbox" checked /> บังคับเรียน</label></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="courseSaveBtn" type="button" class="primary-btn">สร้างคอร์ส</button></div></form></dialog>
 
@@ -1357,6 +1491,13 @@
     <div class="modal-actions"><button type="button" class="secondary-btn" data-close-dialog="workLogDetailModal">ปิด</button></div>
   </dialog>
 
+  <div id="interactionStatus" class="interaction-status hidden" role="status" aria-live="polite" aria-atomic="true">
+    <div class="interaction-status-card">
+      <span class="interaction-status-icon"><i class="interaction-status-spinner" aria-hidden="true"></i></span>
+      <span class="interaction-status-copy"><strong id="interactionStatusTitle">กำลังโหลดข้อมูล…</strong><small id="interactionStatusText">กรุณารอสักครู่</small></span>
+    </div>
+  </div>
+
   <div id="actionStatus" class="action-status hidden" role="status" aria-live="polite" aria-atomic="true">
     <div class="action-status-card">
       <span id="actionStatusIcon" class="action-status-icon"><i class="action-status-spinner" aria-hidden="true"></i></span>
@@ -1365,7 +1506,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=1.0-p7.98" type="module"></script>
+  <script src="/app.js?v=P9.15.3" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

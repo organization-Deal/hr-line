@@ -1,11 +1,14 @@
-# Test Result — P9.15.2
+# Test Result — P9.15.3
 
 - `node --check public/app.js` ✅
 - `node --check public/attendance.js` ✅
 - `node --check src/index.js` ✅
-- `public/index.html` ไม่มี duplicate ID ✅
-- Face card IDs ครบ: card / mode / checkout / self scan / reminder ✅
-- `index.html` asset cache key = P9.15.2 ✅
-- Worker `/face` asset cache key = P9.15.2-FACE-SCANNER ✅
-- Quick attendance/face links bump cache versionแล้ว ✅
-- ไม่มี Database migration ✅
+- `public/index.html` duplicate ID = 0 ✅
+- Settings render path เรียก Attendance lifecycle โดยตรง ✅
+- Work Location render เรียก Attendance lifecycle ✅
+- Attendance category open เรียก Attendance lifecycle ✅
+- Face card มี dynamic recovery + deterministic placement ✅
+- Face settings มี direct API fallback ✅
+- Face controls re-bind หลัง dynamic injection ✅
+- Asset/cache version = P9.15.3 ✅
+- ไม่มี migration ✅
