@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.08.1-FAST-LINE-BUILD-FIX';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.08.1-FAST-LINE-BUILD-FIX';
-const NAKNA_RUNTIME_FEATURE = 'payroll-period-create-repair';
+const NAKNA_RUNTIME_RELEASE = 'P9.14.1-FACE-ROUTE-HOTFIX';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.14.1-FACE-ROUTE-HOTFIX';
+const NAKNA_RUNTIME_FEATURE = 'attendance-face-verification-no-photo-storage';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -1515,6 +1515,17 @@ export default {
         return await acceptPublicInvite(request, env, publicInviteMatch[1]);
       }
 
+      const onboardingFaceMatch = url.pathname.match(/^\/api\/public\/onboarding-face\/([A-Za-z0-9_-]{20,})\/(status|challenge|enroll)$/);
+      if (onboardingFaceMatch) {
+        await ensureCoreSchema(env.DB);
+        await ensureAttendanceFaceReady(env.DB);
+        const onboardingToken = onboardingFaceMatch[1];
+        const faceAction = onboardingFaceMatch[2];
+        if (faceAction === 'status' && request.method === 'GET') return await getPublicOnboardingFaceStatus(env, onboardingToken);
+        if (faceAction === 'challenge' && request.method === 'POST') return await issuePublicOnboardingFaceChallenge(request, env, onboardingToken);
+        if (faceAction === 'enroll' && request.method === 'POST') return await enrollPublicOnboardingFace(request, env, onboardingToken);
+      }
+
       const sharedEvidenceMatch = url.pathname.match(/^\/evidence\/([A-Za-z0-9_-]{20,})$/);
       if (sharedEvidenceMatch && request.method === 'GET') {
         await ensureV050Ready(env.DB);
@@ -1608,13 +1619,29 @@ export default {
         return await redeemPublicReward(request, env, publicRewardRedeemMatch[1], Number(publicRewardRedeemMatch[2]));
       }
 
-      const publicAttendanceGpsLogMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{32,})\/gps-log$/);
+      // P9.14.1: Attendance public tokens are validated by getQuickAttendanceAccess().
+      // Keep the route matcher aligned with that validator (>=20 chars). Previously the
+      // stricter {32,} matcher could fall through into authenticated /api handling and
+      // return the misleading "API route not found" before Face Verification even ran.
+      const publicAttendanceFaceMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{20,})\/(face-status|face-challenge|face-enroll|face-verify)$/);
+      if (publicAttendanceFaceMatch) {
+        const attendanceToken = publicAttendanceFaceMatch[1];
+        const faceAction = publicAttendanceFaceMatch[2];
+        await ensureV100P1Ready(env.DB);
+        if (faceAction === 'face-status' && request.method === 'GET') return await getPublicAttendanceFaceStatus(request, env, attendanceToken, url);
+        if (faceAction === 'face-challenge' && request.method === 'POST') return await issuePublicAttendanceFaceChallenge(request, env, attendanceToken);
+        if (faceAction === 'face-enroll' && request.method === 'POST') return await enrollPublicAttendanceFace(request, env, attendanceToken);
+        if (faceAction === 'face-verify' && request.method === 'POST') return await verifyPublicAttendanceFace(request, env, attendanceToken);
+        return json({ error: 'Method not allowed', code: 'ATTENDANCE_FACE_METHOD_NOT_ALLOWED' }, 405, { 'cache-control': 'no-store' });
+      }
+
+      const publicAttendanceGpsLogMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{20,})\/gps-log$/);
       if (publicAttendanceGpsLogMatch && request.method === 'POST') {
         await ensureV100P1Ready(env.DB);
         return await submitQuickAttendanceGpsLog(request, env, publicAttendanceGpsLogMatch[1]);
       }
 
-      const publicAttendanceMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{32,})\/(check-in|check-out)$/);
+      const publicAttendanceMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{20,})\/(check-in|check-out)$/);
       if (publicAttendanceMatch && request.method === 'POST') {
         await ensureV100P1Ready(env.DB);
         return await submitQuickAttendance(request, env, publicAttendanceMatch[1], publicAttendanceMatch[2], ctx);
@@ -2167,7 +2194,7 @@ async function handleApi(request, env, url, auth, ctx) {
     // P7.58: positions are company-wide, not department-specific.
     await env.DB.prepare('UPDATE positions SET department_id=NULL WHERE client_id=?1 AND department_id IS NOT NULL').bind(clientId).run();
     await ensureMissingCheckinReminderReady(env.DB);
-    const [departments, positions, schedules, holidays, client, attendanceReminder] = await Promise.all([
+    const [departments, positions, schedules, holidays, client, attendanceReminder, attendanceFace] = await Promise.all([
       env.DB.prepare(`SELECT d.*,m.nickname AS manager_nickname,m.first_name AS manager_first_name,m.last_name AS manager_last_name,
         (SELECT COUNT(*) FROM employees e WHERE e.department_id=d.id AND e.client_id=d.client_id AND e.status='active') AS employee_count
         FROM departments d LEFT JOIN employees m ON m.id=d.manager_employee_id
@@ -2177,6 +2204,7 @@ async function handleApi(request, env, url, auth, ctx) {
       env.DB.prepare(`SELECT * FROM company_holidays WHERE client_id=?1 ORDER BY holiday_date`).bind(clientId).all(),
       getClient(env.DB,clientId),
       getMissingCheckinReminderSettings(env.DB,clientId),
+      getAttendanceFaceSettings(env,clientId,{includeSummary:true}),
     ]);
     return json({
       departments: departments.results||[],
@@ -2185,6 +2213,7 @@ async function handleApi(request, env, url, auth, ctx) {
       holidays: holidays.results||[],
       attendance_policy: { allow_attendance_outside_geofence: Boolean(Number(client?.allow_checkout_outside_geofence||0)), allow_checkout_outside_geofence: Boolean(Number(client?.allow_checkout_outside_geofence||0)) },
       attendance_reminder: attendanceReminder,
+      attendance_face: attendanceFace,
     });
   }
 
@@ -2350,6 +2379,50 @@ async function handleApi(request, env, url, auth, ctx) {
     }
   }
 
+  if(path==='/api/attendance-face-settings' && method==='GET'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูการตั้งค่ายืนยันใบหน้า'},403);
+    return json({ok:true,settings:await getAttendanceFaceSettings(env,clientId,{includeSummary:true})});
+  }
+
+  if(path==='/api/attendance-face-settings' && method==='PATCH'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์แก้การยืนยันใบหน้า'},403);
+    await ensureAttendanceFaceReady(env.DB);
+    const body=await safeJson(request);
+    const mode=normalizeAttendanceFaceMode(body.mode);
+    const verifyCheckout=body.verify_checkout===true||body.verify_checkout===1||String(body.verify_checkout)==='1'||String(body.verify_checkout).toLowerCase()==='true';
+    if(mode!=='off'&&!biometricEncryptionKey(env))return json({error:'ยังไม่มีกุญแจเข้ารหัสข้อมูลชีวมิติ กรุณาตั้ง Worker Secret NAKNA_BIOMETRIC_ENCRYPTION_KEY ก่อนเปิดใช้'},503);
+    await env.DB.prepare(`INSERT INTO attendance_face_settings(client_id,mode,verify_checkin,verify_checkout,max_distance,updated_at) VALUES(?1,?2,1,?3,0.56,CURRENT_TIMESTAMP)
+      ON CONFLICT(client_id) DO UPDATE SET mode=excluded.mode,verify_checkin=1,verify_checkout=excluded.verify_checkout,updated_at=CURRENT_TIMESTAMP`)
+      .bind(clientId,mode,verifyCheckout?1:0).run();
+    const settings=await getAttendanceFaceSettings(env,clientId,{includeSummary:true});
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'attendance.face.settings.update','client',String(clientId),{mode:settings.mode,verify_checkout:settings.verify_checkout});
+    return json({ok:true,settings});
+  }
+
+  const employeeFaceProfileMatch=path.match(/^\/api\/employees\/(\d+)\/face-profile$/);
+  if(employeeFaceProfileMatch && method==='GET'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูสถานะใบหน้า'},403);
+    const employeeId=Number(employeeFaceProfileMatch[1]);
+    const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+    await ensureAttendanceFaceReady(env.DB);
+    const row=await env.DB.prepare(`SELECT status,enrolled_at,reset_at,model_version,updated_at FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(clientId,employeeId).first();
+    return json({ok:true,profile:row&&row.status==='active'?{enrolled:true,status:row.status,enrolled_at:row.enrolled_at,model_version:row.model_version,updated_at:row.updated_at}:{enrolled:false,status:row?.status||'not_enrolled',reset_at:row?.reset_at||null}});
+  }
+
+  if(employeeFaceProfileMatch && method==='DELETE'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์รีเซ็ตใบหน้า'},403);
+    const employeeId=Number(employeeFaceProfileMatch[1]);
+    const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+    await ensureAttendanceFaceReady(env.DB);
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2`).bind(clientId,employeeId),
+      env.DB.prepare(`DELETE FROM attendance_face_passes WHERE client_id=?1 AND employee_id=?2`).bind(clientId,employeeId),
+      env.DB.prepare(`DELETE FROM attendance_face_challenges WHERE client_id=?1 AND employee_id=?2`).bind(clientId,employeeId),
+    ]);
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'attendance.face.profile.reset','employee',String(employeeId),{reason:'hr_reset'});
+    return json({ok:true});
+  }
+
   if(path==='/api/attendance-policy' && method==='GET'){
     await ensureV100P1Ready(env.DB);
     const row=await env.DB.prepare('SELECT allow_checkout_outside_geofence FROM clients WHERE id=?1').bind(clientId).first();
@@ -2407,6 +2480,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/team-work-log/location-detail' && method === 'GET') {
     await ensureAttendanceSourceColumns(env.DB);
+    await ensureAttendanceFaceReady(env.DB);
     const url=new URL(request.url);
     const employeeId=Number(url.searchParams.get('employee_id')||0);
     const workDate=String(url.searchParams.get('date')||'').trim();
@@ -2451,12 +2525,18 @@ async function handleApi(request, env, url, auth, ctx) {
         distance_m:distance,outside_geofence:outside,inside_work_location:Boolean(wl&&!outside),
       };
     };
-    const [checkin,checkout]=await Promise.all([row.check_in_at?enrich('checkin'):null,row.check_out_at?enrich('checkout'):null]);
-    return json({employee:{id:employeeId,employee_code:row.employee_code,first_name:row.first_name,last_name:row.last_name,nickname:row.nickname,department_name:row.department_name,position_name:row.position_name},work_date:workDate,status:row.status,late_minutes:Number(row.late_minutes||0),checkin,checkout},200);
+    const [checkin,checkout,faceEvents]=await Promise.all([
+      row.check_in_at?enrich('checkin'):null,
+      row.check_out_at?enrich('checkout'):null,
+      env.DB.prepare(`SELECT action,status,liveness_passed,model_version,created_at FROM attendance_face_events WHERE client_id=?1 AND employee_id=?2 AND work_date=?3 AND event_type='attendance_gate' ORDER BY id DESC`).bind(clientId,employeeId,workDate).all(),
+    ]);
+    const faceByAction={};for(const event of (faceEvents.results||[])){if(!faceByAction[event.action])faceByAction[event.action]={verified:event.status==='passed',liveness_passed:Boolean(Number(event.liveness_passed)),model_version:event.model_version||null,verified_at:event.created_at||null};}
+    return json({employee:{id:employeeId,employee_code:row.employee_code,first_name:row.first_name,last_name:row.last_name,nickname:row.nickname,department_name:row.department_name,position_name:row.position_name},work_date:workDate,status:row.status,late_minutes:Number(row.late_minutes||0),checkin,checkout,face_verification:{checkin:faceByAction.checkin||null,checkout:faceByAction.checkout||null}},200);
   }
 
   if (path === '/api/team-work-log' && method === 'GET') {
     await ensureAttendanceSourceColumns(env.DB);
+    await ensureAttendanceFaceReady(env.DB);
     const url = new URL(request.url);
     const modeRaw = String(url.searchParams.get('mode') || 'today').trim();
     const mode = ['today','day','week','month','range'].includes(modeRaw) ? modeRaw : 'today';
@@ -2491,7 +2571,7 @@ async function handleApi(request, env, url, auth, ctx) {
       if(days>366)return json({error:'เลือกช่วงวันที่ได้สูงสุด 366 วัน'},400);
       anchor=start;
     }
-    const [employeeRes,attendanceRes,workLocationRes,leaveRes,scheduleRes,holidayRes,client] = await Promise.all([
+    const [employeeRes,attendanceRes,workLocationRes,leaveRes,scheduleRes,holidayRes,client,faceEventsRes] = await Promise.all([
       env.DB.prepare(`SELECT e.id,e.id AS employee_id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,e.position_id,e.start_date,e.end_date,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.id`).bind(clientId).all(),
       env.DB.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 ORDER BY work_date,employee_id`).bind(clientId,start,end).all(),
       env.DB.prepare(`SELECT id,name,address,radius_m FROM work_locations WHERE client_id=?1`).bind(clientId).all(),
@@ -2499,7 +2579,9 @@ async function handleApi(request, env, url, auth, ctx) {
       env.DB.prepare(`SELECT * FROM work_schedule_rules WHERE client_id=?1`).bind(clientId).all(),
       env.DB.prepare(`SELECT * FROM company_holidays WHERE client_id=?1 AND holiday_date BETWEEN ?2 AND ?3`).bind(clientId,start,end).all(),
       getClient(env.DB,clientId),
+      env.DB.prepare(`SELECT employee_id,work_date,action,status,liveness_passed,model_version,created_at FROM attendance_face_events WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 AND event_type='attendance_gate' AND status='passed' ORDER BY id DESC`).bind(clientId,start,end).all(),
     ]);
+    const faceEventMap=new Map();for(const event of (faceEventsRes.results||[])){const key=`${Number(event.employee_id)}|${event.work_date}|${event.action}`;if(!faceEventMap.has(key))faceEventMap.set(key,event);}
     const attendanceMap = new Map((attendanceRes.results||[]).map(r=>[`${Number(r.employee_id)}|${r.work_date}`,r]));
     const workLocationMap = new Map((workLocationRes.results||[]).map(r=>[Number(r.id),r]));
     const schedules = scheduleRes.results||[];
@@ -2540,7 +2622,10 @@ async function handleApi(request, env, url, auth, ctx) {
           ? checkoutWorkLocation.name
           : (checkoutSourceTitle&&checkoutSourceTitle!==String(checkoutWorkLocation?.name||'').trim()?checkoutSourceTitle:null);
         const checkoutActualAddress=checkoutSourceAddress&&checkoutSourceAddress!==String(checkoutWorkLocation?.address||'').trim()?checkoutSourceAddress:null;
+        const checkinFace=faceEventMap.get(`${Number(e.id)}|${date}|checkin`)||null;
+        const checkoutFace=faceEventMap.get(`${Number(e.id)}|${date}|checkout`)||null;
         rows.push({...e,work_date:date,day_label:dayNames[dateObj.getUTCDay()],check_in_at:a.check_in_at||null,check_out_at:a.check_out_at||null,attendance_status:a.status||null,late_minutes:Number(a.late_minutes||0),
+          checkin_face_verified:Boolean(checkinFace),checkin_face_verified_at:checkinFace?.created_at||null,checkout_face_verified:Boolean(checkoutFace),checkout_face_verified_at:checkoutFace?.created_at||null,
           checkin_location_name:checkinWorkLocation?.name||a.checkin_location_name||null,checkin_work_location_address:checkinWorkLocation?.address||null,checkin_location_radius_m:checkinRadius,
           checkin_source_title:checkinSourceTitle||null,checkin_source_address:checkinSourceAddress||null,checkin_actual_title:checkinActualTitle,checkin_actual_address:checkinActualAddress,
           checkin_distance_m:checkinDistance,checkin_outside_geofence:checkinOutside?1:0,checkin_lat:a.checkin_lat==null?null:Number(a.checkin_lat),checkin_lng:a.checkin_lng==null?null:Number(a.checkin_lng),checkin_accuracy_m:a.checkin_accuracy_m==null?null:Number(a.checkin_accuracy_m),
@@ -5563,13 +5648,31 @@ async function acceptPublicInvite(request, env, token) {
     console.warn(JSON.stringify({ level: 'warn', event: 'line_bot_info_failed', message: String(error?.message || error) }));
   }
 
-  await safeAudit(env.DB, Number(invite.client_id), 'public_invite', String(employeeId), 'employee.self_onboard', 'employee', String(employeeId), { invite_id: Number(invite.id) });
+  let faceEnrollment={enabled:false,mode:'off',required:false,recommended:false,system_ready:true,token:lineToken,photos_stored:false};
+  try{
+    const faceSettings=await getAttendanceFaceSettings(env,Number(invite.client_id));
+    faceEnrollment={
+      enabled:faceSettings.mode!=='off',
+      mode:faceSettings.mode,
+      required:faceSettings.mode==='required',
+      recommended:faceSettings.mode==='enroll',
+      system_ready:faceSettings.mode==='off'||faceSettings.encryption_ready,
+      token:lineToken,
+      photos_stored:false,
+      template_encrypted:true,
+    };
+  }catch(error){
+    console.warn(JSON.stringify({level:'warn',event:'invite_face_enrollment_status_failed',client_id:Number(invite.client_id),employee_id:employeeId,message:String(error?.message||error)}));
+  }
+
+  await safeAudit(env.DB, Number(invite.client_id), 'public_invite', String(employeeId), 'employee.self_onboard', 'employee', String(employeeId), { invite_id: Number(invite.id), face_mode: faceEnrollment.mode });
   return json({
     ok: true,
     employee: { id: employeeId, employee_code: employeeCode, name: nickname || firstName, company_name: invite.company_name },
     line_connect_url: lineConnectUrl,
     line_command: `JOIN ${lineToken}`,
     line_token_expires_at: lineExpiresAt,
+    face_enrollment: faceEnrollment,
   }, 201);
 }
 
@@ -5993,6 +6096,248 @@ async function getQuickAttendanceAccess(db,token){
 }
 
 
+
+function normalizeAttendanceFaceMode(value){
+  const mode=String(value||'off').toLowerCase();
+  return ['off','enroll','required'].includes(mode)?mode:'off';
+}
+function biometricEncryptionKey(env){
+  return env.NAKNA_BIOMETRIC_ENCRYPTION_KEY || integrationEncryptionKey(env) || null;
+}
+async function ensureAttendanceFaceReady(db){
+  if(SCHEMA_READY.has('attendance_face_verification'))return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_face_settings (
+    client_id INTEGER PRIMARY KEY,
+    mode TEXT NOT NULL DEFAULT 'off',
+    verify_checkin INTEGER NOT NULL DEFAULT 1,
+    verify_checkout INTEGER NOT NULL DEFAULT 0,
+    max_distance REAL NOT NULL DEFAULT 0.56,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS employee_face_profiles (
+    client_id INTEGER NOT NULL, employee_id INTEGER NOT NULL, template_encrypted TEXT NOT NULL,
+    model_version TEXT NOT NULL DEFAULT 'face-api-0.22.2', status TEXT NOT NULL DEFAULT 'active',
+    enrolled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, reset_at TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (client_id,employee_id),
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_face_challenges (
+    token_hash TEXT PRIMARY KEY, client_id INTEGER NOT NULL, employee_id INTEGER NOT NULL, purpose TEXT NOT NULL,
+    actions_json TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_face_passes (
+    token_hash TEXT PRIMARY KEY, client_id INTEGER NOT NULL, employee_id INTEGER NOT NULL, action TEXT NOT NULL,
+    model_version TEXT NOT NULL, distance REAL, expires_at TEXT NOT NULL, used_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_face_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER NOT NULL, employee_id INTEGER NOT NULL, work_date TEXT NOT NULL,
+    action TEXT NOT NULL, event_type TEXT NOT NULL, status TEXT NOT NULL, liveness_passed INTEGER NOT NULL DEFAULT 0,
+    distance REAL, threshold REAL, model_version TEXT, detail TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_face_profiles_status ON employee_face_profiles(client_id,status,employee_id)`).run().catch(()=>{});
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_face_challenges_employee ON attendance_face_challenges(client_id,employee_id,expires_at)`).run().catch(()=>{});
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_face_passes_employee ON attendance_face_passes(client_id,employee_id,action,expires_at)`).run().catch(()=>{});
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_face_events_employee_date ON attendance_face_events(client_id,employee_id,work_date,created_at DESC)`).run().catch(()=>{});
+  SCHEMA_READY.add('attendance_face_verification');
+}
+async function getAttendanceFaceSettings(env,clientId,{includeSummary=false}={}){
+  await ensureAttendanceFaceReady(env.DB);
+  let row=await env.DB.prepare(`SELECT mode,verify_checkin,verify_checkout,max_distance,updated_at FROM attendance_face_settings WHERE client_id=?1`).bind(Number(clientId)).first();
+  if(!row) row={mode:'off',verify_checkin:1,verify_checkout:0,max_distance:0.56,updated_at:null};
+  const settings={
+    mode:normalizeAttendanceFaceMode(row.mode),
+    verify_checkin:Boolean(Number(row.verify_checkin??1)),
+    verify_checkout:Boolean(Number(row.verify_checkout||0)),
+    max_distance:Number(row.max_distance||0.56),
+    photos_stored:false,
+    template_encrypted:true,
+    encryption_ready:Boolean(biometricEncryptionKey(env)),
+    model_version:'face-api-0.22.2',
+    updated_at:row.updated_at||null,
+  };
+  if(includeSummary){
+    const [active,enrolled,pending]=await Promise.all([
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM employees WHERE client_id=?1 AND status='active'`).bind(Number(clientId)).first(),
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM employee_face_profiles p JOIN employees e ON e.id=p.employee_id AND e.client_id=p.client_id WHERE p.client_id=?1 AND p.status='active' AND e.status='active'`).bind(Number(clientId)).first(),
+      env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname FROM employees e LEFT JOIN employee_face_profiles p ON p.client_id=e.client_id AND p.employee_id=e.id AND p.status='active' WHERE e.client_id=?1 AND e.status='active' AND p.employee_id IS NULL ORDER BY e.id DESC LIMIT 12`).bind(Number(clientId)).all(),
+    ]);
+    settings.summary={active:Number(active?.n||0),enrolled:Number(enrolled?.n||0),pending:Math.max(0,Number(active?.n||0)-Number(enrolled?.n||0)),pending_people:pending.results||[]};
+  }
+  return settings;
+}
+function attendanceFaceRequiredForAction(settings,action){
+  if(normalizeAttendanceFaceMode(settings?.mode)!=='required')return false;
+  return action==='checkout'?Boolean(settings?.verify_checkout):Boolean(settings?.verify_checkin??true);
+}
+function sanitizeFaceDescriptor(value){
+  if(!Array.isArray(value)||value.length!==128)throw httpError('ข้อมูลใบหน้าไม่ครบ กรุณาสแกนใหม่',400);
+  const out=value.map(Number);
+  if(out.some(n=>!Number.isFinite(n)||Math.abs(n)>10))throw httpError('ข้อมูลใบหน้าไม่ถูกต้อง กรุณาสแกนใหม่',400);
+  return out;
+}
+function faceDistance(a,b){
+  if(!Array.isArray(a)||!Array.isArray(b)||a.length!==b.length)return Infinity;
+  let sum=0;for(let i=0;i<a.length;i++){const d=Number(a[i])-Number(b[i]);sum+=d*d;}return Math.sqrt(sum);
+}
+function faceChallengeActions(){
+  const byte=new Uint8Array(1);crypto.getRandomValues(byte);
+  return byte[0]%2===0?['blink','turn']:['turn','blink'];
+}
+async function createFaceChallenge(db,clientId,employeeId,purpose){
+  await ensureAttendanceFaceReady(db);
+  const token=randomToken(28),hash=await sha256Hex(token),actions=faceChallengeActions();
+  const expires=new Date(Date.now()+3*60*1000).toISOString();
+  await db.prepare(`DELETE FROM attendance_face_challenges WHERE client_id=?1 AND employee_id=?2 AND (datetime(expires_at)<CURRENT_TIMESTAMP OR used_at IS NOT NULL)`).bind(Number(clientId),Number(employeeId)).run().catch(()=>{});
+  await db.prepare(`INSERT INTO attendance_face_challenges(token_hash,client_id,employee_id,purpose,actions_json,expires_at) VALUES(?1,?2,?3,?4,?5,?6)`).bind(hash,Number(clientId),Number(employeeId),String(purpose),JSON.stringify(actions),expires).run();
+  return {token,actions,expires_at:expires};
+}
+async function consumeFaceChallenge(db,clientId,employeeId,rawToken,purpose,liveness){
+  const raw=String(rawToken||'').trim();if(raw.length<20)throw httpError('Face challenge หมดอายุ กรุณาสแกนใหม่',401);
+  const hash=await sha256Hex(raw);
+  const row=await db.prepare(`SELECT * FROM attendance_face_challenges WHERE token_hash=?1 AND client_id=?2 AND employee_id=?3 AND purpose=?4 AND used_at IS NULL AND datetime(expires_at)>CURRENT_TIMESTAMP`).bind(hash,Number(clientId),Number(employeeId),String(purpose)).first();
+  if(!row)throw httpError('Face challenge หมดอายุ กรุณาสแกนใหม่',401);
+  let actions=[];try{actions=JSON.parse(row.actions_json||'[]')}catch{}
+  const live=liveness&&typeof liveness==='object'?liveness:{};
+  for(const action of actions){if(live[action]!==true)throw httpError('ตรวจความเป็นบุคคลจริงไม่ผ่าน กรุณาทำตามคำสั่งบนหน้าจอ',422);}
+  await db.prepare(`UPDATE attendance_face_challenges SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1 AND used_at IS NULL`).bind(hash).run();
+  return {actions};
+}
+async function issueFacePass(db,clientId,employeeId,action,modelVersion,distance=null){
+  const token=randomToken(32),hash=await sha256Hex(token),expires=new Date(Date.now()+3*60*1000).toISOString();
+  await db.prepare(`DELETE FROM attendance_face_passes WHERE client_id=?1 AND employee_id=?2 AND (datetime(expires_at)<CURRENT_TIMESTAMP OR used_at IS NOT NULL)`).bind(Number(clientId),Number(employeeId)).run().catch(()=>{});
+  await db.prepare(`INSERT INTO attendance_face_passes(token_hash,client_id,employee_id,action,model_version,distance,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7)`).bind(hash,Number(clientId),Number(employeeId),String(action),String(modelVersion||'face-api-0.22.2'),distance==null?null:Number(distance),expires).run();
+  return token;
+}
+async function consumeFacePass(db,clientId,employeeId,action,rawToken){
+  const raw=String(rawToken||'').trim();if(raw.length<20)return null;
+  const hash=await sha256Hex(raw);
+  const row=await db.prepare(`SELECT * FROM attendance_face_passes WHERE token_hash=?1 AND client_id=?2 AND employee_id=?3 AND action=?4 AND used_at IS NULL AND datetime(expires_at)>CURRENT_TIMESTAMP`).bind(hash,Number(clientId),Number(employeeId),String(action)).first();
+  if(!row)return null;
+  await db.prepare(`UPDATE attendance_face_passes SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1 AND used_at IS NULL`).bind(hash).run();
+  return row;
+}
+async function writeFaceEvent(db,{clientId,employeeId,action,eventType,status,livenessPassed=false,distance=null,threshold=null,modelVersion='face-api-0.22.2',detail=null}){
+  await ensureAttendanceFaceReady(db);
+  await db.prepare(`INSERT INTO attendance_face_events(client_id,employee_id,work_date,action,event_type,status,liveness_passed,distance,threshold,model_version,detail) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`).bind(Number(clientId),Number(employeeId),dateInBangkok(),String(action||'checkin'),String(eventType||'verify'),String(status||'unknown'),livenessPassed?1:0,distance==null?null:Number(distance),threshold==null?null:Number(threshold),String(modelVersion||'face-api-0.22.2'),detail?String(detail).slice(0,300):null).run().catch(()=>{});
+}
+async function getPublicOnboardingFaceAccess(db,token){
+  const raw=String(token||'').trim();if(raw.length<20)return null;
+  const hash=await sha256Hex(raw);
+  return db.prepare(`SELECT t.employee_id,t.expires_at,t.used_at,e.client_id,e.employee_code,e.first_name,e.last_name,e.nickname,e.status,c.name AS company_name
+    FROM line_join_tokens t
+    JOIN employees e ON e.id=t.employee_id
+    JOIN clients c ON c.id=e.client_id
+    WHERE t.token_hash=?1 AND datetime(t.expires_at)>CURRENT_TIMESTAMP AND e.status='active' LIMIT 1`).bind(hash).first();
+}
+async function getPublicOnboardingFaceStatus(env,token){
+  const access=await getPublicOnboardingFaceAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์ตั้งค่าใบหน้าหมดอายุ กรุณาเชื่อม LINE แล้วลงทะเบียนตอนเช็กอินครั้งแรก'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  const profile=await env.DB.prepare(`SELECT status,enrolled_at,model_version FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  const enrolled=Boolean(profile&&profile.status==='active');
+  return json({ok:true,employee_name:access.nickname||access.first_name||'พนักงาน',company_name:access.company_name||'',mode:settings.mode,enrolled,enrolled_at:enrolled?profile.enrolled_at:null,required:settings.mode==='required'&&!enrolled,recommended:settings.mode==='enroll'&&!enrolled,enabled:settings.mode!=='off',system_ready:settings.mode==='off'||settings.encryption_ready,privacy:{photos_stored:false,daily_photo_upload:false,template_encrypted:true}},200,{'cache-control':'no-store'});
+}
+async function issuePublicOnboardingFaceChallenge(request,env,token){
+  const access=await getPublicOnboardingFaceAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์ตั้งค่าใบหน้าหมดอายุ กรุณาเชื่อม LINE แล้วลงทะเบียนตอนเช็กอินครั้งแรก'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  if(settings.mode==='off')return json({error:'บริษัทนี้ยังไม่ได้เปิด Face Verification'},409,{'cache-control':'no-store'});
+  if(!biometricEncryptionKey(env))return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503,{'cache-control':'no-store'});
+  const current=await env.DB.prepare(`SELECT 1 AS ok FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 AND status='active' LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  if(current)return json({ok:true,already_enrolled:true},200,{'cache-control':'no-store'});
+  const challenge=await createFaceChallenge(env.DB,Number(access.client_id),Number(access.employee_id),'onboard_enroll');
+  return json({ok:true,challenge_token:challenge.token,actions:challenge.actions,expires_at:challenge.expires_at},200,{'cache-control':'no-store'});
+}
+async function enrollPublicOnboardingFace(request,env,token){
+  const access=await getPublicOnboardingFaceAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์ตั้งค่าใบหน้าหมดอายุ กรุณาเชื่อม LINE แล้วลงทะเบียนตอนเช็กอินครั้งแรก'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  if(settings.mode==='off')return json({error:'บริษัทนี้ยังไม่ได้เปิด Face Verification'},409,{'cache-control':'no-store'});
+  const key=biometricEncryptionKey(env);if(!key)return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503,{'cache-control':'no-store'});
+  const body=await safeJson(request);const descriptor=sanitizeFaceDescriptor(body.descriptor);const modelVersion=String(body.model_version||'face-api-0.22.2').slice(0,80);
+  await consumeFaceChallenge(env.DB,Number(access.client_id),Number(access.employee_id),body.challenge_token,'onboard_enroll',body.liveness);
+  const current=await env.DB.prepare(`SELECT status FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  if(current?.status==='active')return json({ok:true,enrolled:true,already_enrolled:true,privacy:{photo_saved:false,template_encrypted:true}},200,{'cache-control':'no-store'});
+  const encrypted=await encryptJson({descriptor,model_version:modelVersion},key);
+  await env.DB.prepare(`INSERT INTO employee_face_profiles(client_id,employee_id,template_encrypted,model_version,status,enrolled_at,reset_at,updated_at) VALUES(?1,?2,?3,?4,'active',CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP) ON CONFLICT(client_id,employee_id) DO UPDATE SET template_encrypted=excluded.template_encrypted,model_version=excluded.model_version,status='active',enrolled_at=CURRENT_TIMESTAMP,reset_at=NULL,updated_at=CURRENT_TIMESTAMP`).bind(Number(access.client_id),Number(access.employee_id),encrypted,modelVersion).run();
+  await writeFaceEvent(env.DB,{clientId:access.client_id,employeeId:access.employee_id,action:'onboarding',eventType:'enroll',status:'passed',livenessPassed:true,modelVersion,detail:'invite_onboarding_template_created_no_photo_storage'});
+  return json({ok:true,enrolled:true,privacy:{photo_saved:false,template_encrypted:true}},200,{'cache-control':'no-store'});
+}
+
+async function getPublicAttendanceFaceStatus(request,env,token,url){
+  const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์เช็กอินหมดอายุ กรุณากดเมนูใน LINE ใหม่อีกครั้ง'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  await ensureAttendanceFaceReady(env.DB);
+  const profile=await env.DB.prepare(`SELECT status,enrolled_at,model_version FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  const action=String(url?.searchParams?.get('action')||'checkin')==='checkout'?'checkout':'checkin';
+  const today=await env.DB.prepare(`SELECT check_in_at,check_out_at FROM attendance WHERE employee_id=?1 AND work_date=?2 LIMIT 1`).bind(Number(access.employee_id),dateInBangkok()).first().catch(()=>null);
+  const alreadyRecorded=action==='checkout'?Boolean(today?.check_out_at):Boolean(today?.check_in_at);
+  const enrolled=Boolean(profile&&profile.status==='active');
+  const required=!alreadyRecorded&&attendanceFaceRequiredForAction(settings,action);
+  return json({ok:true,action,employee_name:access.nickname||access.first_name||'พนักงาน',company_name:access.company_name||'',mode:settings.mode,enrolled,enrolled_at:enrolled?profile.enrolled_at:null,model_version:enrolled?profile.model_version:settings.model_version,verify_required:required&&enrolled,enrollment_required:required&&!enrolled,enrollment_recommended:settings.mode==='enroll'&&!enrolled,already_recorded:alreadyRecorded,system_ready:settings.mode==='off'||settings.encryption_ready,privacy:{photos_stored:false,daily_photo_upload:false,template_encrypted:true}} ,200,{'cache-control':'no-store'});
+}
+async function issuePublicAttendanceFaceChallenge(request,env,token){
+  const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดจาก LINE ใหม่'},401,{'cache-control':'no-store'});
+  const body=await safeJson(request);const purpose=String(body.purpose||'');
+  if(!['enroll','verify_checkin','verify_checkout'].includes(purpose))return json({error:'Face challenge ไม่ถูกต้อง'},400);
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  if(settings.mode==='off')return json({error:'บริษัทนี้ยังไม่ได้เปิด Face Verification'},409);
+  if(!biometricEncryptionKey(env))return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503);
+  const challenge=await createFaceChallenge(env.DB,Number(access.client_id),Number(access.employee_id),purpose);
+  return json({ok:true,challenge_token:challenge.token,actions:challenge.actions,expires_at:challenge.expires_at},200,{'cache-control':'no-store'});
+}
+async function enrollPublicAttendanceFace(request,env,token){
+  const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดจาก LINE ใหม่'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));if(settings.mode==='off')return json({error:'บริษัทนี้ยังไม่ได้เปิด Face Verification'},409);
+  const key=biometricEncryptionKey(env);if(!key)return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503);
+  const body=await safeJson(request);const descriptor=sanitizeFaceDescriptor(body.descriptor);const modelVersion=String(body.model_version||'face-api-0.22.2').slice(0,80);
+  await consumeFaceChallenge(env.DB,Number(access.client_id),Number(access.employee_id),body.challenge_token,'enroll',body.liveness);
+  await ensureAttendanceFaceReady(env.DB);
+  const current=await env.DB.prepare(`SELECT status FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  if(current?.status==='active')return json({error:'บัญชีนี้ลงทะเบียนใบหน้าแล้ว หากต้องการเปลี่ยนให้ HR รีเซ็ตก่อน'},409);
+  const encrypted=await encryptJson({descriptor,model_version:modelVersion},key);
+  await env.DB.prepare(`INSERT INTO employee_face_profiles(client_id,employee_id,template_encrypted,model_version,status,enrolled_at,reset_at,updated_at) VALUES(?1,?2,?3,?4,'active',CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP) ON CONFLICT(client_id,employee_id) DO UPDATE SET template_encrypted=excluded.template_encrypted,model_version=excluded.model_version,status='active',enrolled_at=CURRENT_TIMESTAMP,reset_at=NULL,updated_at=CURRENT_TIMESTAMP`).bind(Number(access.client_id),Number(access.employee_id),encrypted,modelVersion).run();
+  const action=String(body.action||'checkin')==='checkout'?'checkout':'checkin';
+  await writeFaceEvent(env.DB,{clientId:access.client_id,employeeId:access.employee_id,action,eventType:'enroll',status:'passed',livenessPassed:true,modelVersion,detail:'template_created_no_photo_storage'});
+  let verificationToken=null;if(attendanceFaceRequiredForAction(settings,action))verificationToken=await issueFacePass(env.DB,access.client_id,access.employee_id,action,modelVersion,0);
+  return json({ok:true,enrolled:true,verification_token:verificationToken,privacy:{photo_saved:false,template_encrypted:true}},200,{'cache-control':'no-store'});
+}
+async function verifyPublicAttendanceFace(request,env,token){
+  const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดจาก LINE ใหม่'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));const key=biometricEncryptionKey(env);if(!key)return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503);
+  const body=await safeJson(request);const action=String(body.action||'checkin')==='checkout'?'checkout':'checkin';const purpose=action==='checkout'?'verify_checkout':'verify_checkin';
+  const descriptor=sanitizeFaceDescriptor(body.descriptor);const modelVersion=String(body.model_version||'face-api-0.22.2').slice(0,80);
+  await consumeFaceChallenge(env.DB,Number(access.client_id),Number(access.employee_id),body.challenge_token,purpose,body.liveness);
+  await ensureAttendanceFaceReady(env.DB);
+  const profile=await env.DB.prepare(`SELECT * FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 AND status='active' LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  if(!profile)return json({error:'ยังไม่ได้ลงทะเบียนใบหน้า',code:'FACE_ENROLLMENT_REQUIRED'},428,{'cache-control':'no-store'});
+  let saved;try{saved=await decryptJson(profile.template_encrypted,key);}catch{return json({error:'อ่านข้อมูลใบหน้าไม่สำเร็จ กรุณาให้ HR รีเซ็ตและลงทะเบียนใหม่',code:'FACE_TEMPLATE_UNREADABLE'},500,{'cache-control':'no-store'});}
+  const template=sanitizeFaceDescriptor(saved?.descriptor);const distance=faceDistance(template,descriptor);const threshold=Math.max(0.35,Math.min(0.8,Number(settings?.max_distance||0.56)));
+  const passed=Number.isFinite(distance)&&distance<=threshold;
+  await writeFaceEvent(env.DB,{clientId:access.client_id,employeeId:access.employee_id,action,eventType:'verify',status:passed?'passed':'failed',livenessPassed:true,distance,threshold,modelVersion,detail:passed?'match':'not_match'});
+  if(!passed)return json({error:'ใบหน้าไม่ตรงกับข้อมูลที่ลงทะเบียน กรุณาลองใหม่',code:'FACE_NOT_MATCHED'},422,{'cache-control':'no-store'});
+  const verificationToken=await issueFacePass(env.DB,access.client_id,access.employee_id,action,modelVersion,distance);
+  return json({ok:true,verified:true,verification_token:verificationToken,result:'passed'},200,{'cache-control':'no-store'});
+}
+async function requireAttendanceFacePass(env,access,action,rawToken){
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  if(!attendanceFaceRequiredForAction(settings,action))return {required:false,verified:false};
+  await ensureAttendanceFaceReady(env.DB);
+  const profile=await env.DB.prepare(`SELECT 1 AS ok FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 AND status='active' LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  if(!profile)throw httpError('ต้องลงทะเบียนใบหน้าก่อนลงเวลา',428);
+  const pass=await consumeFacePass(env.DB,Number(access.client_id),Number(access.employee_id),action,rawToken);
+  if(!pass)throw httpError('กรุณายืนยันใบหน้าอีกครั้งก่อนลงเวลา',428);
+  return {required:true,verified:true,model_version:pass.model_version,distance:pass.distance};
+}
+
 async function ensureAttendanceGpsDiagnosticsReady(db){
   if(SCHEMA_READY.has('attendance_gps_diagnostics'))return;
   await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_gps_diagnostics (
@@ -6154,6 +6499,15 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
   const access=await getQuickAttendanceAccess(env.DB,token);
   if(!access)return json({error:'ลิงก์เช็กอินหมดอายุ กรุณากดเมนูใน LINE ใหม่อีกครั้ง'},401);
   const body=await safeJson(request);
+  const action=routeAction==='check-out'?'checkout':'checkin';
+  let faceVerification={required:false,verified:false};
+  try{
+    const today=await env.DB.prepare(`SELECT check_in_at,check_out_at FROM attendance WHERE employee_id=?1 AND work_date=?2 LIMIT 1`).bind(Number(access.employee_id),dateInBangkok()).first().catch(()=>null);
+    const alreadyRecorded=action==='checkout'?Boolean(today?.check_out_at):Boolean(today?.check_in_at);
+    if(!alreadyRecorded) faceVerification=await requireAttendanceFacePass(env,access,action,body.face_verification_token);
+  }catch(error){
+    return json({error:error?.message||'กรุณายืนยันใบหน้าก่อนลงเวลา',code:'FACE_VERIFICATION_REQUIRED'},Number(error?.status||428),{'cache-control':'no-store'});
+  }
   const lat=Number(body.latitude),lng=Number(body.longitude),accuracy=Number(body.accuracy||0);
   const gpsMeta=body?.gps_meta&&typeof body.gps_meta==='object'?body.gps_meta:{};
   const receiptDiag={...gpsMeta,action:routeAction==='check-out'?'checkout':'checkin',stage:'server_fix_received',outcome:'success',accuracy_m:Number.isFinite(accuracy)?Math.round(accuracy):null,elapsed_ms:gpsMeta?.acquisition_ms};
@@ -6169,7 +6523,6 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
   if(Number.isFinite(accuracy)&&accuracy>1200){
     return json({error:'ตำแหน่งยังไม่แม่นยำ กรุณารอสักครู่แล้วลองใหม่',code:'LOW_LOCATION_ACCURACY',accuracy_m:Math.round(accuracy)},422);
   }
-  const action=routeAction==='check-out'?'checkout':'checkin';
   const roundedAccuracy=Number.isFinite(accuracy)?Math.round(accuracy):null;
   try{
     // P7.74: resolve the submitted place BEFORE writing attendance so the DB,
@@ -6179,6 +6532,9 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
       ? await checkIn(env.DB,Number(access.employee_id),lat,lng,'line_quick',locationMeta)
       : await checkOut(env.DB,Number(access.employee_id),lat,lng,'line_quick',locationMeta);
     const enriched={...result,source_title:result.source_title||locationMeta?.title||null,source_address:result.source_address||locationMeta?.address||null,accuracy_m:roundedAccuracy};
+    if(faceVerification?.verified){
+      await writeFaceEvent(env.DB,{clientId:access.client_id,employeeId:access.employee_id,action,eventType:'attendance_gate',status:'passed',livenessPassed:true,distance:faceVerification.distance,modelVersion:faceVerification.model_version||'face-api-0.22.2',detail:'attendance_saved'});
+    }
     // Do not return success until we have attempted the LINE confirmation. The
     // attendance row is already committed, so a LINE failure never loses time data.
     const notification=await notifyQuickAttendanceLine(env,access,action,enriched);
@@ -6188,6 +6544,7 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
       company_name:access.company_name||'',
       accuracy_m:roundedAccuracy,
       notification,
+      face_verification:faceVerification,
       result:enriched,
     },200,{'cache-control':'no-store'});
   }catch(e){
@@ -6209,6 +6566,7 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
           company_name:access.company_name||'',
           accuracy_m:roundedAccuracy,
           notification,
+          face_verification:faceVerification,
           result:saved,
           current_position:currentPosition,
           message:action==='checkin'?'วันนี้มีเช็กอินอยู่แล้ว ระบบไม่ได้บันทึกซ้ำ':'วันนี้มีเช็กเอาต์อยู่แล้ว ระบบไม่ได้บันทึกซ้ำ',
