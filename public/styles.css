@@ -3137,7 +3137,7 @@ button.nakna-mutation-pending:not(.icon-btn):not(.close-btn)::after,a.nakna-muta
 @media(max-width:720px){.attendance-face-card{padding:14px;border-radius:18px}.attendance-face-grid,.attendance-face-summary{grid-template-columns:1fr}.attendance-face-summary{gap:8px}.attendance-face-actions .primary-btn{width:100%}.attendance-face-option{min-height:64px}.attendance-face-rollout{padding:12px;border-radius:16px}.attendance-face-rollout-buttons{display:grid;grid-template-columns:1fr}.attendance-face-rollout-buttons .primary-btn,.attendance-face-rollout-buttons .secondary-btn,.attendance-face-rollout-buttons .text-btn{width:100%;margin:0}.people-face-profile-card{align-items:flex-start;flex-direction:column}.people-face-profile-card .secondary-btn{width:100%}.worklog-face-evidence{align-items:flex-start;flex-direction:column}.worklog-face-evidence small{text-align:left}}
 
 
-/* P9.15.2 — Face scanner visibility + mobile launcher */
+/* P9.15.3 — Face settings lifecycle + deterministic visibility */
 .attendance-face-scan-btn{font-weight:700;box-shadow:0 8px 18px rgba(4,135,138,.14)}
 .attendance-face-card.face-card-recovered{outline:2px solid rgba(4,135,138,.10);outline-offset:2px}
 @media(max-width:720px){
@@ -3149,3 +3149,6 @@ button.nakna-mutation-pending:not(.icon-btn):not(.close-btn)::after,a.nakna-muta
   .attendance-face-rollout-copy span{font-size:12px}
   .attendance-face-scan-btn{min-height:50px!important;font-size:14px!important}
 }
+
+/* P9.15.3 hard guarantee: attendance Face card is never collapsed by stale responsive rules. */
+.settings-category-panel[data-settings-category="attendance"] #attendanceFaceCard{display:block!important;visibility:visible!important;opacity:1!important}

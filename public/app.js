@@ -1,4 +1,5 @@
-// P9.15.2 — Safety redirect for LINE/Cloudflare SPA fallback.
+const NAKNA_FRONTEND_BUILD='P9.15.3'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
+// P9.15.3 — Face settings render lifecycle + deployment visibility fix.
 // If a Face link is accidentally served by index.html, recover before booting the HR login page.
 try {
   const bootUrl = new URL(window.location.href);
@@ -8,7 +9,7 @@ try {
     const target = new URL('/face', bootUrl.origin);
     target.searchParams.set('token', legacyFaceToken);
     target.searchParams.set('face', legacyFaceMode);
-    target.searchParams.set('v', 'P9.15.2');
+    target.searchParams.set('v', 'P9.15.3');
     window.location.replace(target.toString());
   }
 } catch {}
@@ -305,7 +306,7 @@ function renderViewData(name){
     if(name==='wellness'){ renderWellness(); return; }
     if(name==='analytics'){ renderAnalytics(); return; }
     if(name==='saas-admin'){ renderSaasAdmin(); return; }
-    if(name==='settings'){ renderSettings(); renderSettingsSidebar(); renderWorkLocations(); renderLeavePolicies(); return; }
+    if(name==='settings'){ renderSettings(); renderSettingsSidebar(); renderWorkLocations(); renderLeavePolicies(); renderAttendanceSettingsControls({fetchFace:true}); return; }
   }catch(error){ console.warn('[Nakna] render view failed', name, error); }
 }
 async function loadViewData(name,{force=false}={}){
@@ -942,6 +943,7 @@ async function boot() {
 
 function bindEvents() {
   ensureAttendanceFaceCard();
+  bindAttendanceFaceControls();
   initMobileDialogSystem();
   initGlobalInteractionFeedback();
   $('#lineBusinessBtn').onclick = openLineBusinessOnboarding;
@@ -1166,11 +1168,7 @@ function bindEvents() {
   $('#holidaySaveBtn').onclick = saveHoliday;
   $('#attendancePolicyToggle').onchange = saveAttendancePolicy;
   if ($('#attendanceFaceSaveBtn')) $('#attendanceFaceSaveBtn').onclick = () => saveAttendanceFaceSettings({ silentSuccess: false });
-  if ($('#attendanceFaceMode')) $('#attendanceFaceMode').onchange = () => { updateAttendanceFaceModeHint(); saveAttendanceFaceSettings({ silentSuccess: true }); };
-  if ($('#attendanceFaceCheckoutToggle')) $('#attendanceFaceCheckoutToggle').onchange = () => saveAttendanceFaceSettings({ silentSuccess: true });
-  if ($('#attendanceFaceRemindBtn')) $('#attendanceFaceRemindBtn').onclick = sendAttendanceFaceEnrollmentReminders;
-  if ($('#attendanceFaceSelfTestBtn')) $('#attendanceFaceSelfTestBtn').onclick = openAttendanceFaceSelfTest;
-  if ($('#attendanceFaceCopyInstructionBtn')) $('#attendanceFaceCopyInstructionBtn').onclick = copyAttendanceFaceInstructions;
+  bindAttendanceFaceControls();
   if ($('#attendanceReminderToggle')) $('#attendanceReminderToggle').onchange = () => { updateAttendanceReminderEditor(); saveAttendanceReminderSettings({fromToggle:true}); };
   if ($('#attendanceReminderMessage')) $('#attendanceReminderMessage').oninput = updateAttendanceReminderEditor;
   if ($('#attendanceReminderResetBtn')) $('#attendanceReminderResetBtn').onclick = () => { $('#attendanceReminderMessage').value=DEFAULT_ATTENDANCE_REMINDER_MESSAGE; updateAttendanceReminderEditor(); $('#attendanceReminderMessage').focus(); };
@@ -3314,6 +3312,7 @@ function openSettingsCategory(category, { scroll = true } = {}) {
   if ($('#settingsDetailDescription')) $('#settingsDetailDescription').textContent = meta.description;
   syncSettingsSidebar();
   if (category === 'company') fillCompanyProfileForm();
+  if (category === 'attendance') renderAttendanceSettingsControls({fetchFace:true});
   if (category === 'approvals' && ['owner','co_owner'].includes(String(activeCompanyRole()||''))) loadCompanyAccess();
   if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -3377,6 +3376,7 @@ function renderWorkLocations() {
       </div>
     </article>`;
   }).join('') : emptyState('ยังไม่มี Work Location', 'เพิ่มสำนักงานใหญ่ สาขา หรือหน้างาน ระบบจะใช้ทุก Location ที่เปิดใช้งานตรวจ GPS อัตโนมัติ');
+  renderAttendanceSettingsControls({fetchFace:true});
 }
 
 window.editWorkLocation = id => {
@@ -3694,9 +3694,7 @@ function renderPeopleCore(){
     $('#holidayCountBadge').textContent=`${yearItems.length} วันใน ${currentYear+543}`; $('#holidayCompliance').className=`holiday-compliance ${yearItems.length>=13?'ok':'warn'}`; $('#holidayCompliance').innerHTML=yearItems.length>=13?`<strong>✓ จำนวนวันหยุดปีนี้ ${yearItems.length} วัน</strong><span>ตรวจสอบชื่อวันหยุดและวันแรงงานให้ตรงนโยบายบริษัทอีกครั้ง</span>`:`<strong>ควรตรวจวันหยุดประจำปี</strong><span>ตอนนี้มี ${yearItems.length} วัน · ระบบแนะนำให้ HR ตรวจ requirement วันหยุดตามประเพณีก่อนประกาศใช้</span>`;
     holidayRoot.innerHTML=holidays.length?holidays.slice(0,30).map(h=>`<div class="holiday-row"><div class="holiday-date"><strong>${new Date(`${h.holiday_date}T12:00:00`).getDate()}</strong><span>${new Date(`${h.holiday_date}T12:00:00`).toLocaleDateString('th-TH',{month:'short'})}</span></div><div><strong>${escapeHtml(h.name)}</strong><small>${h.holiday_type==='traditional'?'วันหยุดตามประเพณี':escapeHtml(h.holiday_type)}${Number(h.is_paid)?' · จ่ายค่าจ้าง':' · ไม่จ่ายค่าจ้าง'}</small></div><button class="text-btn danger-text" onclick="window.deleteHoliday(${Number(h.id)})">ลบ</button></div>`).join(''):emptyState('ยังไม่ได้ตั้งวันหยุดบริษัท','เพิ่มวันหยุดประจำปีให้พนักงานตรวจสอบได้จากระบบ');
   }
-  const toggle=$('#attendancePolicyToggle'); const outsideAllowed=Boolean(core.attendance_policy?.allow_attendance_outside_geofence ?? core.attendance_policy?.allow_checkout_outside_geofence); if(toggle && !state.attendancePolicySaving) toggle.checked=outsideAllowed; updateAttendancePolicyStatus(outsideAllowed,state.attendancePolicySaving?'saving':'ready');
-  renderAttendanceFaceSettings();
-  renderAttendanceReminderSettings();
+  renderAttendanceSettingsControls();
 }
 
 window.editDepartment=id=>openDepartmentModal((state.peopleCore.departments||[]).find(d=>Number(d.id)===Number(id)));
@@ -3797,16 +3795,25 @@ async function saveAttendanceReminderSettings({fromToggle=false}={}){
 
 
 function ensureAttendanceFaceCard(){
-  if ($('#attendanceFaceCard')) return $('#attendanceFaceCard');
   const host=document.querySelector('.settings-category-panel[data-settings-category="attendance"] .work-location-section');
   if(!host)return null;
+  const policy=host.querySelector('.attendance-policy-card');
   const reminder=$('#attendanceReminderCard');
+  const existing=$('#attendanceFaceCard');
+  if(existing){
+    existing.classList.remove('hidden');
+    existing.style.removeProperty('display');
+    // Keep Face Verification in one deterministic place: directly after the geofence policy.
+    if(policy && policy.nextElementSibling!==existing) policy.insertAdjacentElement('afterend',existing);
+    else if(!policy && existing.parentElement!==host) host.prepend(existing);
+    return existing;
+  }
   const wrap=document.createElement('div');
   wrap.innerHTML=`<section id="attendanceFaceCard" class="attendance-face-card face-card-recovered">
     <div class="attendance-face-head">
       <div class="attendance-face-icon" aria-hidden="true">◉</div>
       <div class="attendance-face-copy">
-        <div class="attendance-face-title-row"><strong>ยืนยันตัวตนด้วยใบหน้า</strong><span class="badge badge-soft">FACE VERIFY · BETA</span></div>
+        <div class="attendance-face-title-row"><strong>ยืนยันตัวตนด้วยใบหน้า</strong><span class="badge badge-soft">FACE VERIFY · BETA · P9.15.3</span></div>
         <p>Face Verification แยกจาก Location โดยสิ้นเชิง ใช้ยืนยันว่าเป็นเจ้าของบัญชีจริงก่อนบันทึกเวลา</p>
         <small id="attendanceFaceStatus">กำลังโหลดการตั้งค่า…</small>
       </div>
@@ -3837,8 +3844,62 @@ function ensureAttendanceFaceCard(){
     <div class="attendance-face-actions"><small id="attendanceFaceAutosaveNote">เปลี่ยนค่าแล้วระบบจะบันทึกอัตโนมัติ</small></div>
   </section>`;
   const card=wrap.firstElementChild;
-  if(reminder)host.insertBefore(card,reminder); else host.appendChild(card);
+  if(policy) policy.insertAdjacentElement('afterend',card);
+  else if(reminder) host.insertBefore(card,reminder);
+  else host.appendChild(card);
   return card;
+}
+
+
+let attendanceFaceSettingsFetchPromise=null;
+function bindAttendanceFaceControls(){
+  ensureAttendanceFaceCard();
+  const mode=$('#attendanceFaceMode');
+  const checkout=$('#attendanceFaceCheckoutToggle');
+  const remind=$('#attendanceFaceRemindBtn');
+  const self=$('#attendanceFaceSelfTestBtn');
+  const copy=$('#attendanceFaceCopyInstructionBtn');
+  if(mode) mode.onchange=()=>{ updateAttendanceFaceModeHint(); saveAttendanceFaceSettings({silentSuccess:true}); };
+  if(checkout) checkout.onchange=()=>saveAttendanceFaceSettings({silentSuccess:true});
+  if(remind) remind.onclick=sendAttendanceFaceEnrollmentReminders;
+  if(self) self.onclick=openAttendanceFaceSelfTest;
+  if(copy) copy.onclick=copyAttendanceFaceInstructions;
+}
+async function ensureAttendanceFaceSettingsLoaded(){
+  const current=state.peopleCore?.attendance_face||{};
+  if(state.attendanceFaceLoaded||typeof current.mode==='string')return current;
+  if(attendanceFaceSettingsFetchPromise)return attendanceFaceSettingsFetchPromise;
+  attendanceFaceSettingsFetchPromise=(async()=>{
+    try{
+      const result=await api('/api/attendance-face-settings',{silentStatus:true,timeoutMs:12000});
+      if(result?.settings){
+        state.peopleCore={...(state.peopleCore||{}),attendance_face:result.settings};
+        state.attendanceFaceLoaded=true;
+      }
+      return state.peopleCore?.attendance_face||{};
+    }catch(error){
+      const status=$('#attendanceFaceStatus');
+      if(status)status.textContent=`โหลด Face Verification ไม่สำเร็จ · ${error.message||'กรุณาลองใหม่'}`;
+      console.warn('[Nakna] attendance face settings fallback failed',error?.message||error);
+      return state.peopleCore?.attendance_face||{};
+    }finally{
+      attendanceFaceSettingsFetchPromise=null;
+      renderAttendanceFaceSettings();
+    }
+  })();
+  return attendanceFaceSettingsFetchPromise;
+}
+function renderAttendanceSettingsControls({fetchFace=false}={}){
+  ensureAttendanceFaceCard();
+  bindAttendanceFaceControls();
+  const core=state.peopleCore||{};
+  const toggle=$('#attendancePolicyToggle');
+  const outsideAllowed=Boolean(core.attendance_policy?.allow_attendance_outside_geofence ?? core.attendance_policy?.allow_checkout_outside_geofence);
+  if(toggle&&!state.attendancePolicySaving)toggle.checked=outsideAllowed;
+  updateAttendancePolicyStatus(outsideAllowed,state.attendancePolicySaving?'saving':'ready');
+  renderAttendanceFaceSettings();
+  renderAttendanceReminderSettings();
+  if(fetchFace&&!state.attendanceFaceLoaded&&typeof core.attendance_face?.mode!=='string')ensureAttendanceFaceSettingsLoaded();
 }
 
 function attendanceFaceModeLabel(mode){
@@ -4514,6 +4575,7 @@ function renderSettings() {
   renderApproverAccess();
   renderSettingsHub();
   renderSettingsSidebar();
+  renderAttendanceSettingsControls({fetchFace:true});
   if($('#probationLeaveLockToggle')) $('#probationLeaveLockToggle').checked = state.employeeService?.leave_settings?.lock_leave_during_probation !== false;
 }
 
