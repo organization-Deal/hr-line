@@ -1,0 +1,20 @@
+P9.16 FACE UX PATCH
+
+ไฟล์ที่เปลี่ยน (deploy จริง):
+- public/attendance.css
+- public/attendance.js
+- public/attendance.html
+- src/index.js
+
+แก้หลัก:
+1. กล้องบนมือถือเต็มความกว้างมากขึ้นและไม่ crop ภาพด้วย object-fit: contain
+2. ขอ stream 4:3 ความละเอียดสูงขึ้น และพยายามตั้ง zoom ต่ำสุดของกล้องเมื่อ browser รองรับ
+3. ลดเงื่อนไขใบหน้าไกลจาก 24% เหลือ 14% ของความกว้างภาพ
+4. face detector input 320 / threshold 0.35 เพื่อจับหน้าได้ง่ายขึ้น
+5. blink detection เปลี่ยนเป็น adaptive baseline ตามตาของแต่ละคน แทน threshold ตายตัว
+6. liveness challenge เหลือ 1 action แบบสุ่ม (blink หรือ turn) แทนต้องทำ 2 อย่างต่อกัน
+7. หน้า scan mobile-first: เอา icon ใหญ่ออกตอนสแกน, camera edge-to-edge, stepper แบบจุด, ซ่อนปุ่ม/ข้อความส่วนเกินระหว่างสแกน
+8. bump cache/version เป็น P9.16
+
+ไม่ต้อง migrate database.
+Deploy ด้วย wrangler deploy ได้เลย.
