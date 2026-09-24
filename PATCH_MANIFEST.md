@@ -1,54 +1,25 @@
-# Nakna P9.15 — Face Enrollment Rollout
+# P9.15.1 — Face Direct Page Fix
 
-รอบนี้แก้ Flow สำหรับบริษัทที่ใช้งานอยู่แล้วและพนักงานเช็กอินไปแล้ว ให้ HR สามารถพาพนักงานไปลงทะเบียนใบหน้าได้ทันทีโดยไม่ต้องรอเช็กอินวันถัดไป
+## ปัญหาที่แก้
+ลิงก์ลงทะเบียน/ทดสอบ Face Verification บางครั้งเปิดใน LINE แล้วตกไปหน้า `index.html`/หน้า Login หลัก จึงเห็นข้อความให้ตั้งค่า LINE Official Account แทนหน้าสแกนใบหน้า
 
-## สิ่งที่เพิ่ม
-
-- ปุ่ม `ส่ง LINE ให้คนที่ยังไม่ลงทะเบียน` ใน Settings > การเช็กอิน > Face Verification
-  - ส่งเฉพาะพนักงาน Active ที่ยังไม่มี Face Template
-  - แต่ละคนได้รับลิงก์เฉพาะบัญชีของตัวเอง
-  - คนที่เช็กอินวันนี้แล้วก็ลงทะเบียนได้
-  - หน้าลงทะเบียนแบบนี้ไม่สร้าง/แก้ไข Attendance
-- ปุ่ม `ลงทะเบียน / ทดสอบบัญชีของฉัน`
-  - จับคู่ HR/Owner กับ Employee Profile จาก LINE identity หรือ email
-  - ถ้ายังไม่ลงทะเบียน จะเปิด Enrollment
-  - ถ้าลงทะเบียนแล้ว จะเปิด Test Mode
-  - Test Mode เทียบใบหน้าอย่างเดียว ไม่บันทึกเวลา
-- เพิ่ม `ใบหน้า & การยืนยันตัวตน` ในเมนูพนักงาน LINE เมื่อบริษัทเปิด Face Verification
-  - ยังไม่ลงทะเบียน -> Enrollment
-  - ลงทะเบียนแล้ว -> Test Face Verification
-- เพิ่ม `คัดลอกข้อความแจ้งทีม` แทนการทำ Shared Enrollment Link
-  - ไม่สร้างลิงก์กลางที่อาจทำให้คนอื่นลงทะเบียนแทนบัญชีพนักงาน
-- Standalone Face Enrollment/Test Mode ใน `attendance.html`
-  - `?face=enroll` = ลงทะเบียนอย่างเดียว
-  - `?face=test` = ทดสอบอย่างเดียว
-  - `?face=manage` = ถ้ายังไม่มีให้ลงทะเบียน ถ้ามีแล้วให้ทดสอบ
-- Test Mode มี Challenge/Liveness + Face Matching แต่ไม่ออก Attendance pass และไม่บันทึกเวลา
-- Enrollment แบบ standalone ไม่ออก Attendance pass
-- ยังไม่เก็บรูปภาพจากกล้องประจำวันเหมือนเดิม
-
-## Backend API ใหม่
-
-- `POST /api/attendance-face-enrollment/remind`
-- `POST /api/attendance-face-enrollment/self-link`
+## วิธีแก้
+- เพิ่มหน้า `/face` ที่ Worker เสิร์ฟ HTML สำหรับ Face Verification โดยตรง ไม่ผ่าน HR SPA/Login
+- ลิงก์ “ลงทะเบียนใบหน้า”, “ใบหน้า & การยืนยันตัวตน” และ Self Test เปลี่ยนมาใช้ `/face?token=...`
+- URL ฝั่งส่ง LINE ใช้ `APP_BASE_URL` ก่อน `APP_ORIGIN` เพื่อให้ลิงก์ชี้โดเมน public ที่ถูกต้อง
+- เพิ่ม safety redirect ใน `app.js`: ถ้า Cloudflare/LINE เผลอเสิร์ฟ `index.html` ให้ลิงก์ Face ระบบจะกู้กลับไป `/face` อัตโนมัติก่อน boot หน้า Login
+- Self Test บน LINE/มือถือใช้หน้าต่างเดิม ไม่ใช้ `window.open()` ซึ่งไม่เสถียรบน iOS LINE WebView
 
 ## ไฟล์ที่ต้อง Replace
-
 - `src/index.js`
 - `public/app.js`
-- `public/index.html`
-- `public/styles.css`
 - `public/attendance.js`
-- `public/attendance.html`
 
 ## Migration
-
-ไม่มี Migration ใหม่ ใช้ตาราง Face Verification และ Attendance token เดิมจาก P9.14 อยู่แล้ว
+ไม่มี
 
 ## หลัง Deploy
-
-1. เปิด Settings > การเช็กอิน
-2. เลือก `ช่วงลงทะเบียน` หรือ `บังคับยืนยันก่อนเช็กอิน`
-3. กด `ส่ง LINE ให้คนที่ยังไม่ลงทะเบียน`
-4. สำหรับการทดสอบของ Owner/HR กด `ลงทะเบียน / ทดสอบบัญชีของฉัน`
-5. หลังพนักงานลงทะเบียน กด Refresh แล้วตัวเลข `ลงทะเบียนแล้ว` จะเพิ่มขึ้น
+1. เปิดหน้า Settings > การเช็กอิน > Face Verification
+2. กด “ลงทะเบียน / ทดสอบบัญชีของฉัน” หรือส่ง LINE ให้พนักงานที่ยังไม่ลงทะเบียน
+3. URL ควรเข้า `/face?...`
+4. หน้าจอต้องขึ้น “กำลังเตรียม Face Verification…” และปุ่ม “เริ่มสแกนใบหน้า” โดยไม่ผ่านหน้า Login/Business Setup

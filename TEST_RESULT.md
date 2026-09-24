@@ -1,14 +1,10 @@
-# P9.15 Test Result
+# Test Result — P9.15.1
 
-- `node --check src/index.js` — PASS
-- `node --check public/app.js` — PASS
-- `node --check public/attendance.js` — PASS
-- CSS brace balance — PASS
-- `public/index.html` duplicate ID check — PASS (0 duplicate)
-- Admin controls wired: remind / self test / copy instruction — PASS
-- Backend routes present: reminder / self-link — PASS
-- Standalone Face modes present: enroll / test / manage — PASS
-- `verify_test` challenge path present — PASS
-- standalone enrollment uses `face_only` and does not issue Attendance pass — PASS (code-path review)
-- Test verification does not issue Attendance pass — PASS (code-path review)
-- No migration added — PASS
+- `node --check src/index.js` ✅
+- `node --check public/app.js` ✅
+- `node --check public/attendance.js` ✅
+- ตรวจ Face rollout URL: ไม่มีลิงก์ `attendance.html?...face=` เหลือใน Worker ✅
+- ตรวจ `/face` Worker route + direct HTML response ✅
+- ตรวจ DOM IDs ที่ `attendance.js` ต้องใช้กับหน้า `/face`: ครบ ✅
+- ตรวจ fallback redirect จาก HR SPA ไป `/face` เมื่อมี `token + face` ✅
+- ไม่มี Database migration ✅
