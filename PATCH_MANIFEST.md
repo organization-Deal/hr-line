@@ -1,27 +1,96 @@
-# Nakna P9.13 — Payroll Flow & Clarity UX
+# Nakna P9.14 — Face Verification (No Daily Photo Storage)
 
-Base: P9.12 Smart Action Feedback
+## เป้าหมาย
+เพิ่ม Face Verification ให้ Attendance เพื่อกันการฝากคนอื่นกดเช็กอินแทน โดยแยกจากกฎ Geofence เดิมอย่างชัดเจน
 
-## REPLACE
-- `public/app.js`
+- Geofence = ตรวจสถานที่และสิทธิ์เช็กอินนอกพื้นที่
+- Face Verification = ตรวจว่าเป็นเจ้าของบัญชีพนักงานจริง
+- ไม่บันทึกรูปภาพจากการเช็กอิน/เช็กเอาต์ประจำวัน
+- เก็บเฉพาะ Face Template/Descriptor แบบเข้ารหัสสำหรับพนักงานที่ลงทะเบียน
+
+## ไฟล์ที่ต้องอัปเดต
+
+### Backend
+- `src/index.js`
+- `migrations/0033_attendance_face_verification.sql`
+
+### HR Backoffice
 - `public/index.html`
+- `public/app.js`
 - `public/styles.css`
 
-## Migration
-- ไม่มี Migration ใหม่
+### Quick Attendance
+- `public/attendance.html`
+- `public/attendance.js`
+- `public/attendance.css`
 
-## สิ่งที่เปลี่ยน
-- เพิ่ม Payroll Stepper 5 ขั้น: เตรียมข้อมูล → ตรวจสอบ → อนุมัติ → ปิดการแก้ไข → ออกสลิป
-- เหลือ Primary Action หลักเพียงปุ่มเดียวตามสถานะของรอบ
-- ย้าย Edit / Delete / Recalculate / Bulk / Export ไปไว้ใน `เครื่องมือเพิ่มเติม`
-- แสดงช่วงรอบจริงเด่นขึ้น พร้อมปุ่มรอบก่อน / รอบถัดไป
-- เพิ่ม Readiness สรุปจำนวนพนักงานที่พร้อม และสิ่งที่ยังขาด
-- Validation ถ้าไม่มีปัญหาจะย่อเป็นแถบเล็ก ไม่กินพื้นที่
-- เปลี่ยนศัพท์หลักเป็นภาษาไทยที่อ่านง่าย: รายได้รวมก่อนหัก / ยอดโอนสุทธิ / ต้นทุนบริษัท
-- แยกช่อง `กรอกเอง` กับ `ระบบคำนวณ` ให้เห็นชัดใน Grid
-- Net / Attendance / Tax กดดูที่มาของตัวเลขได้
-- Employee Payroll Detail เพิ่ม Source Breakdown และรายการที่ HR ปรับในรอบ
-- Mobile Payroll Card ย่อให้เห็น Gross / หัก / Net ก่อน แล้วค่อยกางรายละเอียด
-- เพิ่ม Final Check ก่อนปิดรอบ แสดงยอดรวม ความพร้อม และจำนวนบัญชีธนาคาร
-- ถ้ายังมี blocking exception จะกดยืนยันปิดรอบไม่ได้
-- Frontend cache version `P9.13.0`
+### Employee Invite / Onboarding
+- `public/invite.html`
+- `public/invite.js`
+- `public/invite.css`
+
+## ฟีเจอร์
+
+### 1. โหมดระดับบริษัท
+ใน Attendance Settings มี 3 โหมด
+- `off` — ปิด Face Verification
+- `enroll` — ช่วงลงทะเบียน พนักงานข้ามได้ Attendance เดิมยังทำงาน
+- `required` — ต้องยืนยันใบหน้าก่อน Check-in และเลือกบังคับ Check-out เพิ่มได้
+
+### 2. พนักงานเดิม
+เมื่อเปิด `required`:
+- ยังไม่มี Face Template → กด Check-in แล้วเข้าสู่ Enrollment ก่อน
+- Enrollment สำเร็จ → ทำ Check-in ครั้งเดิมต่อทันที
+- มี Template แล้ว → Liveness → Face Match → GPS → Attendance
+
+### 3. พนักงานใหม่
+หลังกรอก Employee Invite สำเร็จ ถ้าบริษัทเปิด Face Verification ระบบจะแสดงขั้นตอนลงทะเบียนใบหน้าตั้งแต่ Onboarding
+- ทำตอนนั้นได้ทันที
+- หากเลือกทำภายหลัง ระบบ Check-in ครั้งแรกจะบังคับอีกครั้งในโหมด `required`
+
+### 4. Privacy / Data Storage
+ระบบไม่ส่งหรือเก็บ JPEG/PNG/ภาพกล้องสำหรับ Face Verification
+- Browser อ่านกล้องชั่วคราว
+- สร้าง descriptor 128 ค่า
+- ส่ง descriptor ให้ server
+- server เข้ารหัส AES-GCM ก่อนเก็บใน `employee_face_profiles.template_encrypted`
+- frame/image จากกล้องไม่ได้ถูก serialize หรือ upload
+- attendance เก็บเฉพาะผล verification/evidence เช่น passed, model, timestamp และระยะ matching สำหรับ diagnostic
+
+### 5. Liveness
+มี basic browser-side liveness แบบสุ่มลำดับ
+- กระพริบตา
+- มองตรงแล้วหันหน้าไปด้านข้าง
+
+> หมายเหตุ: เป็น anti-buddy-punch / basic anti-replay สำหรับ HR attendance ไม่ใช่ bank-grade biometric liveness
+
+### 6. HR Control
+- ดูจำนวนพนักงานที่ลงทะเบียนแล้ว / ยังไม่ลงทะเบียน
+- ดูสถานะ Face Verification ใน People Profile
+- HR รีเซ็ต Face Template ของพนักงานได้
+- หลัง reset พนักงานต้อง Enrollment ใหม่
+- Work Log แสดง evidence ว่า Check-in/Check-out ผ่าน Face Verify หรือไม่
+
+## Database
+Migration `0033_attendance_face_verification.sql` เพิ่ม:
+- `attendance_face_settings`
+- `employee_face_profiles`
+- `attendance_face_challenges`
+- `attendance_face_passes`
+- `attendance_face_events`
+
+ไม่มี column สำหรับรูปภาพใบหน้า
+
+## Worker Secret
+แนะนำให้ตั้ง secret แยกสำหรับ biometric data ก่อนเปิดใช้:
+
+`NAKNA_BIOMETRIC_ENCRYPTION_KEY`
+
+ระบบมี fallback ไปยัง integration encryption key เดิมเพื่อ compatibility แต่ production แนะนำใช้ secret แยก
+
+## Runtime dependency
+Face engine ใช้ `face-api.js 0.22.2` และโหลด model weights จาก CDN ขณะใช้งานครั้งแรก หาก network ไป CDN ไม่ได้ ระบบจะแจ้งว่าโหลด Face Verification ไม่สำเร็จและไม่แอบข้าม verification ในโหมด required
+
+## Release
+- Runtime: `P9.14-FACE-VERIFICATION`
+- Feature: `attendance-face-verification-no-photo-storage`
