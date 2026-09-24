@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.15-FACE-ENROLLMENT-ROLLOUT';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.15-FACE-ENROLLMENT-ROLLOUT';
+const NAKNA_RUNTIME_RELEASE = 'P9.15.1-FACE-DIRECT-PAGE-FIX';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.15.1-FACE-DIRECT-PAGE-FIX';
 const NAKNA_RUNTIME_FEATURE = 'attendance-face-verification-no-photo-storage';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -1498,6 +1498,13 @@ export default {
         return await finishGmailConnection(request, env);
       }
 
+      // P9.15.1: Face Enrollment gets its own Worker-served page.
+      // This intentionally bypasses SPA/static-asset fallback so a Face link can never
+      // land on the main HR login/setup screen when opened from LINE.
+      if (url.pathname === '/face' && request.method === 'GET') {
+        return serveFaceVerificationPage();
+      }
+
       const joinPageMatch = url.pathname.match(/^\/join\/([A-Za-z0-9_-]{20,})$/);
       if (joinPageMatch && request.method === 'GET') {
         return Response.redirect(`${appOrigin(request, env)}/invite.html?token=${encodeURIComponent(joinPageMatch[1])}`, 302);
@@ -2419,7 +2426,7 @@ async function handleApi(request, env, url, auth, ctx) {
       const employee=await getFaceEnrollmentEmployeeForUser(env.DB,clientId,auth.user);
       if(!employee)return json({error:'บัญชี HR นี้ยังไม่พบ Employee Profile ที่ตรงกัน กรุณาเชื่อม LINE หรือใช้อีเมลเดียวกับข้อมูลพนักงาน'},404);
       const attendanceToken=await issueQuickAttendanceToken(env.DB,Number(clientId),Number(employee.id));
-      const url=`${appOrigin(request,env)}/attendance.html?token=${encodeURIComponent(attendanceToken)}&face=manage&v=P9.15`;
+      const url=faceVerificationUrl(request,env,attendanceToken,'manage');
       const profile=await env.DB.prepare(`SELECT status,enrolled_at FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(Number(clientId),Number(employee.id)).first();
       await safeAudit(env.DB,Number(clientId),'user',String(auth.user.id),'attendance.face.self_test.open','employee',String(employee.id),{enrolled:Boolean(profile&&profile.status==='active')}).catch(()=>{});
       return json({ok:true,url,employee:{id:Number(employee.id),name:employee.nickname||employee.first_name||employee.employee_code},enrolled:Boolean(profile&&profile.status==='active')});
@@ -6275,14 +6282,14 @@ async function sendAttendanceFaceEnrollmentReminders(request,env,clientId,auth,b
     tokenByScope.set(key,token);
     return token;
   };
-  const base=appOrigin(request,env);
+  const base=publicAppOrigin(request,env);
   const results=await Promise.all(employees.map(async employee=>{
     if(!employee.line_user_id)return {employee,status:'not_linked'};
     try{
       const lineToken=await getLineToken(employee.line_provider_scope||'default');
       if(!lineToken)return {employee,status:'line_not_ready'};
       const attendanceToken=await issueQuickAttendanceToken(env.DB,Number(clientId),Number(employee.id));
-      const enrollUrl=`${base}/attendance.html?token=${encodeURIComponent(attendanceToken)}&face=enroll&v=P9.15`;
+      const enrollUrl=`${base}/face?token=${encodeURIComponent(attendanceToken)}&face=enroll&v=P9.15.1`;
       const messages=[buildFaceEnrollmentReminderFlex(employee,employee.company_name||'',enrollUrl)];
       let sent=await pushLineMessagesReliable(lineToken,String(employee.line_user_id),messages);
       if(!sent&&fallbackCtx?.accessToken&&fallbackCtx.accessToken!==lineToken){
@@ -6606,7 +6613,7 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=P9.15-FACE`:null;
   const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=P9.15-FACE`:null;
   const wellnessUrl=portalToken?`${base}/wellness.html?token=${encodeURIComponent(portalToken)}`:null;
-  const faceManageUrl=attendanceAccessToken&&normalizeAttendanceFaceMode(faceSettings?.mode)!=='off'?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&face=manage&v=P9.15`:null;
+  const faceManageUrl=attendanceAccessToken&&normalizeAttendanceFaceMode(faceSettings?.mode)!=='off'?`${base}/face?token=${encodeURIComponent(attendanceAccessToken)}&face=manage&v=P9.15.1`:null;
   return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,wellnessUrl,faceManageUrl,NAKNA_RUNTIME_RELEASE);
 }
 
@@ -11570,6 +11577,80 @@ function assertGoogleConfig(env) {
 
 function appOrigin(request, env) {
   return String(env.APP_ORIGIN || new URL(request.url).origin).replace(/\/$/, '');
+}
+
+function publicAppOrigin(request, env) {
+  return String(env.APP_BASE_URL || env.APP_ORIGIN || new URL(request.url).origin).replace(/\/$/, '');
+}
+
+function faceVerificationUrl(request, env, token, mode='manage') {
+  const safeMode=['enroll','test','manage'].includes(String(mode||'').toLowerCase())?String(mode).toLowerCase():'manage';
+  return `${publicAppOrigin(request,env)}/face?token=${encodeURIComponent(String(token||''))}&face=${encodeURIComponent(safeMode)}&v=P9.15.1`;
+}
+
+function serveFaceVerificationPage() {
+  const html = `<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#f7fbfa" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>นากนะ · ยืนยันตัวตน</title>
+  <link rel="stylesheet" href="/attendance.css?v=P9.15.1-FACE-DIRECT" />
+</head>
+<body>
+  <main class="quick-shell">
+    <section class="quick-card" aria-live="polite">
+      <div class="brand-row">
+        <img src="/logo.png" alt="นากนะ" class="brand-logo" />
+        <div><span class="eyebrow">NAKNA · FACE VERIFICATION</span><strong>นากนะ</strong></div>
+      </div>
+
+      <div id="stateIcon" class="state-icon loading" aria-hidden="true"><span class="spinner"></span></div>
+      <h1 id="title">กำลังเตรียม Face Verification…</h1>
+      <p id="message">กรุณารอสักครู่ นากนะกำลังตรวจสถานะการลงทะเบียนใบหน้า</p>
+
+      <section id="facePanel" class="face-panel hidden" aria-live="polite">
+        <div class="face-camera-wrap">
+          <video id="faceVideo" autoplay muted playsinline></video>
+          <div class="face-guide"><span></span></div>
+          <div id="faceCameraState" class="face-camera-state">กล้องยังไม่เปิด</div>
+        </div>
+        <div class="face-copy">
+          <strong id="faceTitle">ยืนยันตัวตนด้วยใบหน้า</strong>
+          <p id="faceInstruction">มองตรงเข้ากล้องและทำตามคำแนะนำ</p>
+          <div class="face-steps" aria-hidden="true"><span id="faceStepCamera">1</span><span id="faceStepLive">2</span><span id="faceStepMatch">3</span></div>
+        </div>
+        <button id="faceStartBtn" class="primary-btn" type="button">เริ่มสแกนใบหน้า</button>
+        <button id="faceSkipBtn" class="secondary-face-btn hidden" type="button">ข้ามครั้งนี้และเช็กอินต่อ</button>
+        <p class="face-privacy">รูปจากกล้องไม่ถูกบันทึกและไม่ถูกอัปโหลด ระบบส่งเฉพาะ Face Template แบบตัวเลขเพื่อยืนยันตัวตน</p>
+      </section>
+
+      <div id="detailCard" class="detail-card hidden">
+        <div><span>เวลา</span><strong id="timeText">—</strong></div>
+        <div id="faceResultRow" class="hidden"><span>ยืนยันใบหน้า</span><strong id="faceResultText" class="status-ok">ผ่าน</strong></div>
+        <div><span id="locationLabel">จุดที่ลงเวลาจริง</span><strong id="locationText">—</strong></div>
+        <div id="areaStatusRow"><span>สถานะพื้นที่</span><strong id="areaStatusText">—</strong></div>
+        <div id="workLocationRow"><span>Work Location ที่กำหนด</span><strong id="workLocationText">—</strong></div>
+        <div><span>ห่างจาก Work Location</span><strong id="distanceText">—</strong></div>
+        <div><span>GPS ตอนกดครั้งนี้</span><strong id="accuracyText">—</strong></div>
+        <div id="currentPositionRow" class="hidden"><span>ตำแหน่งที่ตรวจตอนนี้</span><strong id="currentPositionText">—</strong></div>
+        <div><span>ระบบ HR</span><strong id="systemText" class="status-ok">บันทึกแล้ว</strong></div>
+        <div><span>LINE</span><strong id="lineText">กำลังส่ง…</strong></div>
+      </div>
+
+      <button id="retryBtn" class="primary-btn hidden" type="button">ลองใหม่</button>
+      <p id="permissionHint" class="permission-hint hidden">ถ้ามือถือถามสิทธิ์ Location หรือ Camera ให้เลือก “อนุญาตขณะใช้งาน” แล้วกดลองใหม่</p>
+      <p id="diagnosticText" class="privacy-note hidden"></p>
+      <p class="privacy-note">หน้านี้ใช้ Token ของพนักงานโดยตรง ไม่ต้อง Login เข้า HR Dashboard · ไม่เก็บรูปใบหน้าประจำวัน · P9.15.1</p>
+    </section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" defer></script>
+  <script src="/attendance.js?v=P9.15.1-FACE-DIRECT" defer></script>
+</body>
+</html>`;
+  return new Response(html,{status:200,headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-robots-tag':'noindex, nofollow'}});
 }
 
 function oauthRedirectUri(request, env, path) {
