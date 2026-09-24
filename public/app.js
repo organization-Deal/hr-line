@@ -43,7 +43,7 @@ const state = {
   approverAccess: [],
   approverPermissionCatalog: [],
   companyAccess: { members: [], eligible_employees: [], current_user_id: null },
-  peopleCore: { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {}, attendance_reminder: {} },
+  peopleCore: { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {}, attendance_reminder: {}, attendance_face: {} },
   activeApproverEmployeeId: null,
   activeLeaveProfileEmployeeId: null,
   currentView: 'dashboard',
@@ -51,6 +51,8 @@ const state = {
   settingsNavExpanded: false,
   attendancePolicySaving: false,
   attendancePolicySavedAt: 0,
+  attendanceFaceSaving: false,
+  attendanceFaceSavedAt: 0,
   organizationViewMode: (() => { try { const saved = localStorage.getItem('nakna.organizationViewMode'); return saved === 'list' ? 'list' : 'chart'; } catch { return 'chart'; } })(),
   teamDirectorySearch: '',
   teamDirectoryDepartment: 'all',
@@ -239,6 +241,10 @@ function mergePeopleCoreFromServer(incoming){
   const recentPolicyChange=state.attendancePolicySaving || (Date.now()-Number(state.attendancePolicySavedAt||0)<4000);
   if(recentPolicyChange && state.peopleCore?.attendance_policy){
     incoming={...incoming,attendance_policy:{...(incoming.attendance_policy||{}),...state.peopleCore.attendance_policy}};
+  }
+  const recentFaceChange=state.attendanceFaceSaving || (Date.now()-Number(state.attendanceFaceSavedAt||0)<4000);
+  if(recentFaceChange && state.peopleCore?.attendance_face){
+    incoming={...incoming,attendance_face:{...(incoming.attendance_face||{}),...state.peopleCore.attendance_face}};
   }
   return incoming;
 }
@@ -1139,11 +1145,14 @@ function bindEvents() {
   $('#scheduleScopeType').onchange = refreshScheduleTarget;
   $('#holidaySaveBtn').onclick = saveHoliday;
   $('#attendancePolicyToggle').onchange = saveAttendancePolicy;
+  if ($('#attendanceFaceSaveBtn')) $('#attendanceFaceSaveBtn').onclick = saveAttendanceFaceSettings;
+  if ($('#attendanceFaceMode')) $('#attendanceFaceMode').onchange = updateAttendanceFaceModeHint;
   if ($('#attendanceReminderToggle')) $('#attendanceReminderToggle').onchange = () => { updateAttendanceReminderEditor(); saveAttendanceReminderSettings({fromToggle:true}); };
   if ($('#attendanceReminderMessage')) $('#attendanceReminderMessage').oninput = updateAttendanceReminderEditor;
   if ($('#attendanceReminderResetBtn')) $('#attendanceReminderResetBtn').onclick = () => { $('#attendanceReminderMessage').value=DEFAULT_ATTENDANCE_REMINDER_MESSAGE; updateAttendanceReminderEditor(); $('#attendanceReminderMessage').focus(); };
   if ($('#attendanceReminderSaveBtn')) $('#attendanceReminderSaveBtn').onclick = () => saveAttendanceReminderSettings();
   $('#peopleProfileSaveBtn').onclick = savePeopleProfile;
+  if ($('#peopleFaceResetBtn')) $('#peopleFaceResetBtn').onclick = resetPeopleFaceProfile;
   $('#addLeaveBtn').onclick = openLeaveRequestModal;
   if ($('#leaveReportMonth')) {
     $('#leaveReportMonth').value = currentBangkokMonth();
@@ -2063,6 +2072,7 @@ function workLogMatrixCell(r){
     const late=Number(r.late_minutes||0)>0;
     parts.push(`<div class="worklog-line"><span>เข้า</span><strong class="${late?'late':''}">${time(r.check_in_at)}</strong></div>`);
     parts.push(`<div class="worklog-check-state ${outside?'outside':late?'late':'inside'}">${outside?'นอกพื้นที่':late?`สาย ${Number(r.late_minutes)} นาที`:'ในพื้นที่ · ตรงเวลา'}</div>`);
+    if(r.checkin_face_verified)parts.push('<div class="worklog-face-chip">✓ Face Verify</div>');
     parts.push(`<div class="worklog-place" title="${escapeHtml(place)}">📍 ${escapeHtml(place)}</div>`);
     if(workLocation){
       const distance=workLogDistanceLabel(r.checkin_distance_m);
@@ -2075,6 +2085,7 @@ function workLogMatrixCell(r){
     const checkoutWorkLocation=String(r.checkout_location_name||'').trim();
     parts.push(`<div class="worklog-line checkout"><span>ออก</span><strong>${time(r.check_out_at)}</strong></div>`);
     parts.push(`<div class="worklog-check-state ${checkoutOutside?'outside':'inside'}">${checkoutOutside?'เช็กเอาต์นอกพื้นที่':'เช็กเอาต์ในพื้นที่'}</div>`);
+    if(r.checkout_face_verified)parts.push('<div class="worklog-face-chip">✓ Face Verify</div>');
     parts.push(`<div class="worklog-place checkout-place" title="${escapeHtml(checkoutPlace)}">📍 ${escapeHtml(checkoutPlace)}</div>`);
     if(checkoutWorkLocation){
       const checkoutDistance=workLogDistanceLabel(r.checkout_distance_m);
@@ -2146,8 +2157,10 @@ window.openWorkLogDetail=async(employeeId,workDate)=>{
     $('#workLogDetailSubtitle').textContent=`${formatDate(r.work_date)} · ${r.employee?.department_name||'ยังไม่ระบุแผนก'}`;
     const overall=!ci?'ยังไม่เช็กอิน':Boolean(ci.outside_geofence)?'เช็กอินนอกพื้นที่':Number(r.late_minutes||0)>0?`มาสาย ${Number(r.late_minutes)} นาที`:'มาทำงาน';
     const overallClass=!ci?'neutral':Boolean(ci.outside_geofence)?'outside':Number(r.late_minutes||0)>0?'late':'inside';
+    const faceCheckin=Boolean(r.face_verification?.checkin?.verified),faceCheckout=Boolean(r.face_verification?.checkout?.verified);
     $('#workLogDetailBody').innerHTML=`
       <div class="worklog-detail-status ${overallClass}"><span>สถานะวันนี้</span><strong>${escapeHtml(overall)}</strong></div>
+      ${(faceCheckin||faceCheckout)?`<div class="worklog-face-evidence"><div><span>ยืนยันตัวตน</span><strong>Face Verification ผ่าน</strong></div><small>${faceCheckin?'เช็กอิน ✓':''}${faceCheckin&&faceCheckout?' · ':''}${faceCheckout?'เช็กเอาต์ ✓':''} · ไม่เก็บรูปภาพ</small></div>`:''}
       <div class="worklog-points-stack">
         ${renderPoint('checkin',ci,{lateMinutes:Number(r.late_minutes||0)})}
         ${renderPoint('checkout',co)}
@@ -2172,8 +2185,10 @@ window.openWorkLogDetail=async(employeeId,workDate)=>{
       }:null;
       const overall=!ci?'ยังไม่เช็กอิน':ci.outside_geofence?'เช็กอินนอกพื้นที่':Number(cached.late_minutes||0)>0?`มาสาย ${Number(cached.late_minutes)} นาที`:'มาทำงาน';
       const overallClass=!ci?'neutral':ci.outside_geofence?'outside':Number(cached.late_minutes||0)>0?'late':'inside';
+      const faceCheckin=Boolean(cached.checkin_face_verified),faceCheckout=Boolean(cached.checkout_face_verified);
       $('#workLogDetailBody').innerHTML=`
         <div class="worklog-detail-status ${overallClass}"><span>สถานะวันนี้</span><strong>${escapeHtml(overall)}</strong></div>
+        ${(faceCheckin||faceCheckout)?`<div class="worklog-face-evidence"><div><span>ยืนยันตัวตน</span><strong>Face Verification ผ่าน</strong></div><small>${faceCheckin?'เช็กอิน ✓':''}${faceCheckin&&faceCheckout?' · ':''}${faceCheckout?'เช็กเอาต์ ✓':''} · ไม่เก็บรูปภาพ</small></div>`:''}
         <div class="worklog-points-stack">
           ${renderPoint('checkin',ci,{lateMinutes:Number(cached.late_minutes||0),fallback:true})}
           ${renderPoint('checkout',co,{fallback:true})}
@@ -2536,6 +2551,7 @@ window.openPeopleProfile = id => {
   const selectedLocations=new Set(String(employee.work_location_ids||'').split(',').filter(Boolean).map(Number));
   $('#peopleProfileLocations').innerHTML=(state.workLocations||[]).filter(l=>Number(l.is_active)).length?(state.workLocations||[]).filter(l=>Number(l.is_active)).map(l=>`<label class="location-check"><input type="checkbox" value="${l.id}" ${selectedLocations.has(Number(l.id))?'checked':''}/><span><strong>${escapeHtml(l.name)}</strong><small>${escapeHtml(l.address||`รัศมี ${l.radius_m} ม.`)}</small></span></label>`).join(''):`<div class="location-empty-inline"><strong>ยังไม่มี Work Location</strong><span>เพิ่ม Location จาก Settings ก่อน</span></div>`;
   $('#peopleProfileModal').showModal();
+  loadPeopleFaceProfile(Number(employee.id));
 };
 
 async function savePeopleProfile(){
@@ -3303,7 +3319,7 @@ function renderSettingsSidebar() {
   if ($('#settingsSidebarCompanyMeta')) $('#settingsSidebarCompanyMeta').textContent = `${(core.departments || []).length} แผนก · ${profile.name || 'โปรไฟล์บริษัท'}`;
   if ($('#settingsSidebarOrgMeta')) $('#settingsSidebarOrgMeta').textContent = `${(core.departments || []).length} แผนก · ${(core.positions || []).length} ตำแหน่ง`;
   if ($('#settingsSidebarWorktimeMeta')) $('#settingsSidebarWorktimeMeta').textContent = schedules.length ? `${schedules.length} กติกาเวลาทำงาน` : `${profile.work_start || '09:00'}–${profile.work_end || '18:00'} ค่าเริ่มต้น`;
-  if ($('#settingsSidebarAttendanceMeta')) $('#settingsSidebarAttendanceMeta').textContent = locations.length ? `${locations.filter(x => Number(x.is_active) !== 0).length} จุดเช็กอิน` : 'ยังไม่มี Work location';
+  if ($('#settingsSidebarAttendanceMeta')) { const face=core.attendance_face||{}; const enrolled=Number(face.summary?.enrolled||0),active=Number(face.summary?.active||0); const locationText=locations.length?`${locations.filter(x => Number(x.is_active) !== 0).length} จุดเช็กอิน`:'ยังไม่มี Work location'; $('#settingsSidebarAttendanceMeta').textContent=face.mode&&face.mode!=='off'?`${locationText} · Face ${enrolled}/${active}`:locationText; }
   if ($('#settingsSidebarLeaveMeta')) $('#settingsSidebarLeaveMeta').textContent = `${leavePolicies.length} ประเภทลา · ${holidays.length} วันหยุด`;
   if ($('#settingsSidebarApprovalMeta')) {
     const admins = (state.companyAccess?.members || []).length;
@@ -3655,6 +3671,7 @@ function renderPeopleCore(){
     holidayRoot.innerHTML=holidays.length?holidays.slice(0,30).map(h=>`<div class="holiday-row"><div class="holiday-date"><strong>${new Date(`${h.holiday_date}T12:00:00`).getDate()}</strong><span>${new Date(`${h.holiday_date}T12:00:00`).toLocaleDateString('th-TH',{month:'short'})}</span></div><div><strong>${escapeHtml(h.name)}</strong><small>${h.holiday_type==='traditional'?'วันหยุดตามประเพณี':escapeHtml(h.holiday_type)}${Number(h.is_paid)?' · จ่ายค่าจ้าง':' · ไม่จ่ายค่าจ้าง'}</small></div><button class="text-btn danger-text" onclick="window.deleteHoliday(${Number(h.id)})">ลบ</button></div>`).join(''):emptyState('ยังไม่ได้ตั้งวันหยุดบริษัท','เพิ่มวันหยุดประจำปีให้พนักงานตรวจสอบได้จากระบบ');
   }
   const toggle=$('#attendancePolicyToggle'); const outsideAllowed=Boolean(core.attendance_policy?.allow_attendance_outside_geofence ?? core.attendance_policy?.allow_checkout_outside_geofence); if(toggle && !state.attendancePolicySaving) toggle.checked=outsideAllowed; updateAttendancePolicyStatus(outsideAllowed,state.attendancePolicySaving?'saving':'ready');
+  renderAttendanceFaceSettings();
   renderAttendanceReminderSettings();
 }
 
@@ -3752,6 +3769,84 @@ async function saveAttendanceReminderSettings({fromToggle=false}={}){
   }catch(e){
     state.peopleCore.attendance_reminder=previous; renderAttendanceReminderSettings(); toast(e.message,true);
   }finally{if(button)button.disabled=false;toggle.disabled=false;}
+}
+
+
+function attendanceFaceModeLabel(mode){
+  if(mode==='required')return 'บังคับยืนยันก่อนเช็กอิน';
+  if(mode==='enroll')return 'ช่วงลงทะเบียน · ยังไม่บังคับ';
+  return 'ปิดใช้งาน';
+}
+function renderAttendanceFaceSettings(){
+  const settings=state.peopleCore?.attendance_face||{};
+  const mode=['off','enroll','required'].includes(String(settings.mode))?String(settings.mode):'off';
+  const modeSelect=$('#attendanceFaceMode'),checkout=$('#attendanceFaceCheckoutToggle'),status=$('#attendanceFaceStatus');
+  if(modeSelect&&!state.attendanceFaceSaving)modeSelect.value=mode;
+  if(checkout&&!state.attendanceFaceSaving)checkout.checked=Boolean(settings.verify_checkout);
+  if(modeSelect)modeSelect.disabled=Boolean(state.attendanceFaceSaving);
+  if(checkout)checkout.disabled=Boolean(state.attendanceFaceSaving)||mode==='off';
+  const summary=settings.summary||{};const active=Number(summary.active||0),enrolled=Number(summary.enrolled||0),pending=Math.max(0,Number(summary.pending??active-enrolled));
+  if($('#attendanceFaceReadyCount'))$('#attendanceFaceReadyCount').textContent=`${enrolled}/${active}`;
+  if($('#attendanceFacePendingCount'))$('#attendanceFacePendingCount').textContent=String(pending);
+  const pendingRoot=$('#attendanceFacePendingPeople');
+  if(pendingRoot){
+    const people=Array.isArray(summary.pending_people)?summary.pending_people:[];
+    pendingRoot.classList.toggle('hidden',!people.length||mode==='off');
+    pendingRoot.innerHTML=people.length?`<span>ยังไม่ลงทะเบียน:</span>${people.slice(0,8).map(p=>`<b>${escapeHtml(p.nickname||p.first_name||p.employee_code||'พนักงาน')}</b>`).join('')}${pending>people.length?`<em>+${pending-people.length} คน</em>`:''}`:'';
+  }
+  if(status){
+    if(state.attendanceFaceSaving)status.textContent='กำลังบันทึกการตั้งค่า…';
+    else if(mode!=='off'&&!settings.encryption_ready)status.textContent='ยังไม่พร้อม · ต้องตั้งกุญแจเข้ารหัสข้อมูลชีวมิติ';
+    else if(mode==='required')status.textContent=`เปิดใช้งาน · ${enrolled}/${active} คนลงทะเบียนแล้ว${settings.verify_checkout?' · ตรวจทั้งเข้าและออก':' · ตรวจตอนเช็กอิน'}`;
+    else if(mode==='enroll')status.textContent=`ช่วงลงทะเบียน · พนักงานยังเช็กอินได้ตามปกติ · พร้อมแล้ว ${enrolled}/${active} คน`;
+    else status.textContent='ปิดใช้งาน · ระบบเช็กอินใช้ GPS ตามเดิม';
+  }
+  updateAttendanceFaceModeHint();
+}
+function updateAttendanceFaceModeHint(){
+  const mode=String($('#attendanceFaceMode')?.value||'off');
+  const checkout=$('#attendanceFaceCheckoutToggle');if(checkout)checkout.disabled=state.attendanceFaceSaving||mode==='off';
+  const status=$('#attendanceFaceStatus');if(!status||state.attendanceFaceSaving)return;
+  if(mode==='required')status.textContent='เมื่อบันทึก คนที่ยังไม่มีใบหน้าจะถูกพาไปลงทะเบียนก่อนเช็กอินครั้งถัดไป';
+  else if(mode==='enroll')status.textContent='พนักงานจะได้รับคำแนะนำให้ลงทะเบียนใบหน้า แต่ยังสามารถข้ามและเช็กอินได้';
+  else status.textContent='ปิด Face Verification · ใช้กฎ GPS/Work Location ตามเดิม';
+}
+async function saveAttendanceFaceSettings(){
+  const button=$('#attendanceFaceSaveBtn'),modeSelect=$('#attendanceFaceMode'),checkout=$('#attendanceFaceCheckoutToggle');
+  if(!button||!modeSelect||!checkout)return;
+  const previous={...(state.peopleCore?.attendance_face||{})};
+  state.attendanceFaceSaving=true;setButtonBusy(button,true,'กำลังบันทึก…');renderAttendanceFaceSettings();
+  try{
+    const result=await api('/api/attendance-face-settings',{method:'PATCH',body:JSON.stringify({mode:modeSelect.value,verify_checkout:Boolean(checkout.checked)}),silentStatus:true});
+    state.peopleCore.attendance_face=result.settings||previous;state.attendanceFaceSavedAt=Date.now();
+    renderAttendanceFaceSettings();renderSettingsSidebar();
+    const mode=state.peopleCore.attendance_face?.mode;
+    toast(mode==='required'?'เปิดบังคับ Face Verification แล้ว':mode==='enroll'?'เปิดช่วงลงทะเบียนใบหน้าแล้ว':'ปิด Face Verification แล้ว');
+  }catch(error){state.peopleCore.attendance_face=previous;renderAttendanceFaceSettings();toast(error.message||'บันทึก Face Verification ไม่สำเร็จ',true);}
+  finally{state.attendanceFaceSaving=false;setButtonBusy(button,false);renderAttendanceFaceSettings();}
+}
+async function loadPeopleFaceProfile(employeeId){
+  const status=$('#peopleFaceProfileStatus'),meta=$('#peopleFaceProfileMeta'),reset=$('#peopleFaceResetBtn');
+  if(status)status.textContent='กำลังตรวจสอบ…';if(meta)meta.textContent='ระบบไม่เก็บรูปเช็กอินประจำวัน';if(reset)reset.classList.add('hidden');
+  try{
+    const result=await api(`/api/employees/${Number(employeeId)}/face-profile`,{silentStatus:true});const profile=result.profile||{};
+    if(profile.enrolled){
+      if(status)status.textContent='ลงทะเบียนใบหน้าแล้ว';
+      if(meta)meta.textContent=`พร้อมใช้งาน · ลงทะเบียน ${profile.enrolled_at?formatDate(profile.enrolled_at.slice(0,10)):'แล้ว'} · ไม่เก็บรูปประจำวัน`;
+      if(reset)reset.classList.remove('hidden');
+    }else{
+      if(status)status.textContent=profile.status==='reset'?'ต้องลงทะเบียนใหม่':'ยังไม่ลงทะเบียนใบหน้า';
+      if(meta)meta.textContent='เมื่อบริษัทเปิดโหมดบังคับ พนักงานจะถูกพาไปลงทะเบียนก่อนเช็กอิน';
+    }
+  }catch(error){if(status)status.textContent='ตรวจสถานะไม่ได้';if(meta)meta.textContent=error.message||'กรุณาลองใหม่';}
+}
+async function resetPeopleFaceProfile(){
+  const id=Number($('#peopleProfileEmployeeId')?.value||0);if(!id)return;
+  const employee=state.employees.find(e=>Number(e.id)===id);const name=employee?.nickname||employee?.first_name||'พนักงาน';
+  if(!confirm(`รีเซ็ตใบหน้าของ ${name} ใช่ไหม?\n\nหลังรีเซ็ต พนักงานต้องลงทะเบียนใบหน้าใหม่ก่อนเช็กอิน หากบริษัทเปิดโหมดบังคับ`))return;
+  const button=$('#peopleFaceResetBtn');setButtonBusy(button,true,'กำลังรีเซ็ต…');
+  try{await api(`/api/employees/${id}/face-profile`,{method:'DELETE',silentStatus:true});await loadPeopleFaceProfile(id);viewLoadedAt.delete('settings');toast(`รีเซ็ตใบหน้าของ ${name} แล้ว`);}
+  catch(error){toast(error.message||'รีเซ็ตใบหน้าไม่สำเร็จ',true);}finally{setButtonBusy(button,false);}
 }
 
 function updateAttendancePolicyStatus(allowed,stateName='ready'){

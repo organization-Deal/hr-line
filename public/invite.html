@@ -69,6 +69,35 @@
         </form>
       </section>
 
+      <section id="faceState" class="hidden">
+        <p class="kicker">FACE VERIFICATION</p>
+        <h1>ตั้งค่าใบหน้าของคุณ</h1>
+        <p id="faceLead" class="lead">ลงทะเบียนครั้งเดียว เพื่อให้ระบบยืนยันว่าเป็นคุณตอนเช็กอิน</p>
+
+        <div class="face-privacy-note">
+          <strong>ไม่เก็บรูปหน้ารายวัน</strong>
+          <span>กล้องใช้ภาพชั่วคราวบนเครื่องเพื่อสร้าง Face Template แบบตัวเลข แล้วส่งเฉพาะ Template ไปเข้ารหัสในระบบ</span>
+        </div>
+
+        <div class="face-camera-card">
+          <div class="face-video-wrap">
+            <video id="faceVideo" autoplay muted playsinline></video>
+            <div class="face-guide" aria-hidden="true"></div>
+            <div id="faceCameraState" class="face-camera-state">กล้องยังไม่เปิด</div>
+          </div>
+          <div class="face-steps">
+            <div id="faceStepCamera"><span>1</span><strong>กล้อง</strong></div>
+            <div id="faceStepLive"><span>2</span><strong>ตรวจคนจริง</strong></div>
+            <div id="faceStepMatch"><span>3</span><strong>จดจำใบหน้า</strong></div>
+          </div>
+          <p id="faceInstruction" class="face-instruction">มองตรงเข้ากล้อง และทำตามคำแนะนำบนหน้าจอ</p>
+        </div>
+
+        <button id="faceEnrollBtn" class="primary-btn" type="button">ลงทะเบียนใบหน้า</button>
+        <button id="faceLaterBtn" class="secondary-action" type="button">ทำภายหลังตอนเช็กอินครั้งแรก</button>
+        <p id="faceError" class="face-error hidden"></p>
+      </section>
+
       <section id="successState" class="hidden">
         <div class="state-icon success">✓</div>
         <p class="kicker">WELCOME TO THE TEAM</p>
@@ -79,6 +108,8 @@
           <span>พนักงาน</span><strong id="resultName">—</strong>
           <small id="resultCompany">—</small>
         </div>
+
+        <div id="faceDoneNote" class="face-done-note hidden"><strong>✓ Face Verification พร้อมแล้ว</strong><span>ครั้งต่อไประบบจะเทียบใบหน้าโดยไม่บันทึกรูปภาพ</span></div>
 
         <a id="lineConnectBtn" class="line-btn" href="#">เชื่อม LINE กับนากนะ</a>
         <p class="line-help">กดปุ่มแล้ว LINE จะเปิดแชต “นากนะ” พร้อมข้อความเชื่อมบัญชีไว้ให้ — กดส่ง 1 ครั้งก็จบ</p>
@@ -92,6 +123,7 @@
     </section>
     <footer>นากนะ · HR Tech สำหรับคนไทย · Otterwork Co., Ltd.</footer>
   </main>
-  <script src="/invite.js" type="module"></script>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" defer></script>
+  <script src="/invite.js?v=P9.14-FACE" type="module"></script>
 </body>
 </html>
