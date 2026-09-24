@@ -33,7 +33,7 @@ function setLoading(message){
   $('#retryBtn').classList.add('hidden');
   $('#permissionHint').classList.add('hidden');
   $('#detailCard').classList.add('hidden');
-  if(!faceFlowBusy)$('#facePanel')?.classList.add('hidden');
+  if(!faceFlowBusy){$('#facePanel')?.classList.add('hidden');document.body.classList.remove('face-mode');}
   const d=$('#diagnosticText'); if(d){d.textContent='';d.classList.add('hidden');}
 }
 function setError(message,{permission=false,code='',detail=''}={}){
@@ -45,6 +45,7 @@ function setError(message,{permission=false,code='',detail=''}={}){
   $('#retryBtn').textContent='ลองใหม่';
   $('#permissionHint').classList.toggle('hidden',!permission);
   $('#facePanel')?.classList.add('hidden');
+  document.body.classList.remove('face-mode');
   stopFaceCamera();
   const d=$('#diagnosticText');
   if(d){
@@ -64,6 +65,7 @@ function formatTime(iso){
   try{return new Intl.DateTimeFormat('th-TH',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Bangkok'}).format(new Date(iso));}catch{return '—';}
 }
 function setSuccess(payload,position){
+  document.body.classList.remove('face-mode');
   const result=payload.result||{};
   const sent=Boolean(payload.notification?.sent);
   const already=Boolean(payload.already_recorded);
@@ -130,17 +132,18 @@ function setFaceStep(step,state='active'){
 }
 function resetFaceSteps(){for(const id of ['#faceStepCamera','#faceStepLive','#faceStepMatch']){$(id)?.classList.remove('active','done');}}
 function showFacePanel({title,instruction,allowSkip=false,startLabel='เริ่มสแกนใบหน้า'}={}){
-  const panel=$('#facePanel');panel?.classList.remove('hidden','is-error','is-success');
+  const panel=$('#facePanel');panel?.classList.remove('hidden','is-error','is-success','is-running');
+  document.body.classList.add('face-mode');
   $('#detailCard')?.classList.add('hidden');$('#retryBtn')?.classList.add('hidden');$('#permissionHint')?.classList.add('hidden');
   $('#stateIcon').className='state-icon';$('#stateIcon').textContent='◎';
   $('#title').textContent=title||'ยืนยันตัวตนด้วยใบหน้า';
   $('#message').textContent=instruction||'ระบบจะตรวจว่าเป็นเจ้าของบัญชีจริงก่อนบันทึกเวลา';
   $('#faceTitle').textContent=title||'Face Verification';
-  $('#faceInstruction').textContent='มองตรงเข้ากล้อง และทำตามคำแนะนำบนหน้าจอ';
+  $('#faceInstruction').textContent='ถือมือถือห่างจากใบหน้าประมาณ 35–60 ซม. แล้วมองตรงเข้ากล้อง';
   $('#faceStartBtn').textContent=startLabel;
   $('#faceStartBtn').disabled=false;
   $('#faceSkipBtn').classList.toggle('hidden',!allowSkip);
-  $('#faceCameraState').textContent='กล้องยังไม่เปิด';
+  $('#faceCameraState').textContent='พร้อมเปิดกล้อง';
   resetFaceSteps();
 }
 async function waitForFaceApi(timeoutMs=10000){
@@ -163,21 +166,28 @@ async function startFaceCamera(){
   if(!navigator.mediaDevices?.getUserMedia)throw Object.assign(new Error('Browser นี้ไม่รองรับกล้องสำหรับ Face Verification'),{faceCode:'CAMERA_UNSUPPORTED'});
   stopFaceCamera();
   try{
-    faceStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});
+    faceStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'user'},width:{ideal:1280},height:{ideal:960},aspectRatio:{ideal:4/3},frameRate:{ideal:30,max:30}},audio:false});
+    const track=faceStream.getVideoTracks?.()[0];
+    try{
+      const caps=track?.getCapabilities?.();
+      if(caps?.zoom&&Number.isFinite(Number(caps.zoom.min)))await track.applyConstraints({advanced:[{zoom:Number(caps.zoom.min)}]});
+    }catch{}
   }catch(error){
     const denied=String(error?.name||'').includes('NotAllowed');
     throw Object.assign(new Error(denied?'ยังไม่ได้อนุญาต Camera กรุณาเปิดสิทธิ์กล้องแล้วลองใหม่':'เปิดกล้องไม่สำเร็จ กรุณาลองใหม่'),{faceCode:denied?'CAMERA_DENIED':'CAMERA_FAILED'});
   }
   const video=$('#faceVideo');video.srcObject=faceStream;await video.play();
-  await new Promise(resolve=>{if(video.readyState>=2)return resolve();video.onloadeddata=()=>resolve();setTimeout(resolve,1500);});
-  $('#faceCameraState').textContent='กล้องพร้อม · ให้ใบหน้าอยู่ในกรอบ';
+  await new Promise(resolve=>{if(video.readyState>=2)return resolve();video.onloadedmetadata=()=>resolve();setTimeout(resolve,1500);});
+  const wrap=video.closest('.face-camera-wrap');
+  if(wrap&&video.videoWidth&&video.videoHeight)wrap.style.aspectRatio=`${video.videoWidth}/${video.videoHeight}`;
+  $('#faceCameraState').textContent='กล้องพร้อม · มองตรงสบาย ๆ ไม่ต้องเอาหน้าเข้าใกล้';
   setFaceStep('camera','done');
 }
 function stopFaceCamera(){
   if(faceStream){for(const track of faceStream.getTracks())try{track.stop()}catch{};faceStream=null;}
   const video=$('#faceVideo');if(video){try{video.pause()}catch{};video.srcObject=null;}
 }
-function tinyOptions(){return new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});}
+function tinyOptions(){return new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.35});}
 async function detectFaces({withDescriptor=false}={}){
   const video=$('#faceVideo');if(!video?.videoWidth)throw Object.assign(new Error('กล้องยังไม่พร้อม'),{faceCode:'CAMERA_NOT_READY'});
   let result=faceapi.detectAllFaces(video,tinyOptions()).withFaceLandmarks(true);
@@ -187,7 +197,7 @@ async function detectFaces({withDescriptor=false}={}){
   if(faces.length>1)throw Object.assign(new Error('พบมากกว่า 1 ใบหน้า กรุณาให้มีคนเดียวในกล้อง'),{faceCode:'MULTIPLE_FACES'});
   const face=faces[0];
   const box=face.detection?.box;const ratio=box&&video.videoWidth?box.width/video.videoWidth:0;
-  if(ratio<0.24)throw Object.assign(new Error('ใบหน้าอยู่ไกลเกินไป กรุณาขยับเข้าใกล้กล้อง'),{faceCode:'FACE_TOO_FAR'});
+  if(ratio<0.14)throw Object.assign(new Error('ใบหน้าอยู่ไกลเกินไป กรุณาขยับเข้าใกล้อีกนิด'),{faceCode:'FACE_TOO_FAR'});
   return face;
 }
 function dist2d(a,b){return Math.hypot(Number(a.x)-Number(b.x),Number(a.y)-Number(b.y));}
@@ -206,32 +216,42 @@ function faceMotionMetrics(face){
   const noseOffset=(points[30].x-eyeMidX)/eyeDistance;
   return {ear,noseOffset};
 }
-async function waitForLivenessAction(action,timeoutMs=10000){
-  const started=Date.now();let seenOpen=false,seenClosed=false,seenNeutral=false,lastMessage='';
+async function waitForLivenessAction(action,timeoutMs=12000){
+  const started=Date.now();
+  let baselineEar=null,baselineNose=null,closed=false;
+  const earSamples=[],noseSamples=[];
   while(Date.now()-started<timeoutMs){
     try{
       const face=await detectFaces();const m=faceMotionMetrics(face);
-      if(action==='blink'){
-        if(m.ear>0.20)seenOpen=true;
-        if(seenOpen&&m.ear<0.16)seenClosed=true;
-        if(seenClosed&&m.ear>0.19)return true;
-        lastMessage='กระพริบตา 1 ครั้ง';
-      }else{
-        if(Math.abs(m.noseOffset)<0.11)seenNeutral=true;
-        if(seenNeutral&&Math.abs(m.noseOffset)>0.19)return true;
-        lastMessage='หันหน้าไปด้านข้างเล็กน้อย';
+      if(baselineEar==null||baselineNose==null){
+        earSamples.push(m.ear);noseSamples.push(m.noseOffset);
+        if(earSamples.length>=5){
+          const sortedEar=[...earSamples].sort((a,b)=>a-b);baselineEar=sortedEar[Math.floor(sortedEar.length/2)];
+          baselineNose=noseSamples.reduce((sum,v)=>sum+v,0)/noseSamples.length;
+        }
+        $('#faceCameraState').textContent='มองตรงนิ่ง ๆ 1 วินาที';
+        await sleep(120);continue;
       }
-      $('#faceCameraState').textContent=lastMessage;
-    }catch(error){$('#faceCameraState').textContent=error.message||'จัดใบหน้าให้อยู่ในกรอบ';}
-    await sleep(170);
+      if(action==='blink'){
+        const closeThreshold=Math.max(0.11,baselineEar*0.72);
+        const reopenThreshold=Math.max(closeThreshold+0.025,baselineEar*0.86);
+        if(m.ear<closeThreshold)closed=true;
+        if(closed&&m.ear>reopenThreshold)return true;
+        $('#faceCameraState').textContent='กระพริบตาตามปกติ 1 ครั้ง';
+      }else{
+        if(Math.abs(m.noseOffset-baselineNose)>0.13)return true;
+        $('#faceCameraState').textContent='หันหน้าไปซ้ายหรือขวาเล็กน้อย';
+      }
+    }catch(error){$('#faceCameraState').textContent=error.message||'ให้ใบหน้าอยู่ในภาพ';}
+    await sleep(120);
   }
-  throw Object.assign(new Error(action==='blink'?'ยังตรวจการกระพริบตาไม่สำเร็จ กรุณาลองใหม่':'ยังตรวจการหันหน้าไม่สำเร็จ กรุณาลองใหม่'),{faceCode:'LIVENESS_FAILED'});
+  throw Object.assign(new Error(action==='blink'?'ยังจับจังหวะกระพริบตาไม่ได้ กดลองอีกครั้ง':'ยังจับการหันหน้าไม่ได้ กดลองอีกครั้ง'),{faceCode:'LIVENESS_FAILED'});
 }
 async function runLiveness(actions){
   setFaceStep('live','active');
   const result={blink:false,turn:false};
   for(const action of actions||[]){
-    $('#faceInstruction').textContent=action==='blink'?'กระพริบตา 1 ครั้ง':'มองตรงก่อน แล้วหันหน้าไปด้านข้างเล็กน้อย';
+    $('#faceInstruction').textContent=action==='blink'?'มองตรง แล้วกระพริบตาตามปกติ 1 ครั้ง':'มองตรงก่อน แล้วหันหน้าไปซ้ายหรือขวาเล็กน้อย';
     $('#faceCameraState').textContent=$('#faceInstruction').textContent;
     await waitForLivenessAction(action);
     result[action]=true;
@@ -268,13 +288,13 @@ async function fetchFaceStatus(){
   const data=await response.json().catch(()=>({}));
   if(!response.ok){
     const routeMissing=response.status===404&&String(data.error||'').toLowerCase().includes('route not found');
-    if(routeMissing)throw Object.assign(new Error('Worker ฝั่งเซิร์ฟเวอร์ยังไม่ได้อัปเดต Face Verification กรุณา Deploy src/index.js เวอร์ชัน P9.15.3 แล้วเปิดจาก LINE ใหม่'),{faceCode:'FACE_BACKEND_ROUTE_MISSING',status:404});
+    if(routeMissing)throw Object.assign(new Error('Worker ฝั่งเซิร์ฟเวอร์ยังไม่ได้อัปเดต Face Verification กรุณา Deploy src/index.js เวอร์ชัน P9.16 แล้วเปิดจาก LINE ใหม่'),{faceCode:'FACE_BACKEND_ROUTE_MISSING',status:404});
     throw Object.assign(new Error(data.error||'ตรวจ Face Verification ไม่สำเร็จ'),{faceCode:data.code||'FACE_STATUS_FAILED',status:response.status});
   }
   return data;
 }
 function setStandaloneFaceDone(title,message){
-  stopFaceCamera();
+  stopFaceCamera();document.body.classList.remove('face-mode');
   $('#facePanel')?.classList.add('hidden');
   $('#detailCard')?.classList.add('hidden');
   $('#stateIcon').className='state-icon success';
@@ -287,7 +307,7 @@ function setStandaloneFaceDone(title,message){
 }
 async function performFaceFlow(){
   if(faceFlowBusy)return;faceFlowBusy=true;
-  const button=$('#faceStartBtn');button.disabled=true;$('#facePanel')?.classList.remove('is-error');
+  const button=$('#faceStartBtn');button.disabled=true;button.textContent='กำลังสแกน…';$('#facePanel')?.classList.remove('is-error');$('#facePanel')?.classList.add('is-running');
   try{
     await loadFaceModels();await startFaceCamera();
     const enrollment=standaloneFaceFlow?!Boolean(faceStatus?.enrolled):Boolean(faceStatus?.enrollment_required||faceStatus?.enrollment_recommended);
@@ -302,7 +322,7 @@ async function performFaceFlow(){
       : await facePost('face-verify',{challenge_token:challenge.challenge_token,liveness,descriptor,model_version:FACE_MODEL_VERSION,action,test_mode:testOnly});
     faceVerificationToken=data.verification_token||null;
     if(faceStatus){faceStatus.enrolled=true;faceStatus.enrollment_required=false;faceStatus.enrollment_recommended=false;}
-    $('#facePanel')?.classList.add('is-success');$('#faceCameraState').textContent=enrollment?'ลงทะเบียนใบหน้าแล้ว ✓':'ยืนยันใบหน้าแล้ว ✓';
+    $('#facePanel')?.classList.remove('is-running');$('#facePanel')?.classList.add('is-success');$('#faceCameraState').textContent=enrollment?'ลงทะเบียนใบหน้าแล้ว ✓':'ยืนยันใบหน้าแล้ว ✓';
 
     if(standaloneFaceFlow){
       $('#faceInstruction').textContent=enrollment?'Face Template ถูกบันทึกแบบเข้ารหัสแล้ว · ไม่มีการบันทึกรูปภาพ':'ทดสอบผ่าน · ใบหน้าตรงกับ Face Template ที่ลงทะเบียน';
@@ -317,7 +337,7 @@ async function performFaceFlow(){
 
     if(enrollment&&faceStatus?.already_recorded){
       $('#faceInstruction').textContent=action==='checkin'?'ลงทะเบียนเรียบร้อย · วันนี้มีเช็กอินอยู่แล้ว':'ลงทะเบียนเรียบร้อย · วันนี้มีเช็กเอาต์อยู่แล้ว';
-      await sleep(850);stopFaceCamera();$('#facePanel')?.classList.add('hidden');
+      await sleep(850);stopFaceCamera();$('#facePanel')?.classList.add('hidden');document.body.classList.remove('face-mode');
       $('#stateIcon').className='state-icon success';$('#stateIcon').textContent='✓';
       $('#title').textContent='ลงทะเบียนใบหน้าสำเร็จ';
       $('#message').textContent=action==='checkin'?'Face Template พร้อมใช้ตั้งแต่การเช็กอินครั้งถัดไป · วันนี้ระบบพบรายการเช็กอินเดิมแล้ว':'Face Template พร้อมใช้ตั้งแต่การเช็กเอาต์ครั้งถัดไป · วันนี้ระบบพบรายการเช็กเอาต์เดิมแล้ว';
@@ -325,10 +345,10 @@ async function performFaceFlow(){
       return;
     }
     $('#faceInstruction').textContent='ไม่บันทึกรูปภาพ · กำลังไปอ่านตำแหน่ง GPS';
-    await sleep(650);stopFaceCamera();$('#facePanel')?.classList.add('hidden');
+    await sleep(650);stopFaceCamera();$('#facePanel')?.classList.add('hidden');document.body.classList.remove('face-mode');
     await submit();
   }catch(error){
-    $('#facePanel')?.classList.add('is-error');$('#faceCameraState').textContent=error.message||'สแกนใบหน้าไม่สำเร็จ';$('#faceInstruction').textContent='จัดใบหน้าให้อยู่ในกรอบ แล้วกดลองใหม่';button.disabled=false;
+    $('#facePanel')?.classList.remove('is-running');$('#facePanel')?.classList.add('is-error');$('#faceCameraState').textContent=error.message||'สแกนใบหน้าไม่สำเร็จ';$('#faceInstruction').textContent='ถือมือถือห่างประมาณช่วงแขน แล้วกดลองอีกครั้ง';button.textContent='ลองสแกนอีกครั้ง';button.disabled=false;
   }finally{faceFlowBusy=false;}
 }
 async function prepareAttendanceFlow(){
@@ -630,6 +650,6 @@ async function submit(){
 
 $('#retryBtn').addEventListener('click',()=>{faceVerificationToken=null;prepareAttendanceFlow();});
 $('#faceStartBtn').addEventListener('click',performFaceFlow);
-$('#faceSkipBtn').addEventListener('click',()=>{stopFaceCamera();$('#facePanel').classList.add('hidden');submit();});
+$('#faceSkipBtn').addEventListener('click',()=>{stopFaceCamera();$('#facePanel').classList.add('hidden');document.body.classList.remove('face-mode');submit();});
 window.addEventListener('pagehide',stopFaceCamera);
 window.addEventListener('pageshow',()=>{if(!busy)prepareAttendanceFlow();},{once:true});

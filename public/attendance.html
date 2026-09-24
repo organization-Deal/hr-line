@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f7fbfa" />
   <meta name="robots" content="noindex,nofollow" />
   <title>นากนะ · ลงเวลา</title>
-  <link rel="stylesheet" href="/attendance.css?v=P9.15.3-FACE-SCANNER" />
+  <link rel="stylesheet" href="/attendance.css?v=P9.16-FACE-UX" />
 </head>
 <body>
   <main class="quick-shell">
@@ -28,12 +28,12 @@
         </div>
         <div class="face-copy">
           <strong id="faceTitle">ยืนยันตัวตนด้วยใบหน้า</strong>
-          <p id="faceInstruction">มองตรงเข้ากล้องและทำตามคำแนะนำ</p>
+          <p id="faceInstruction">ถือมือถือห่างจากใบหน้าประมาณ 35–60 ซม. แล้วทำตามคำแนะนำ</p>
           <div class="face-steps" aria-hidden="true"><span id="faceStepCamera">1</span><span id="faceStepLive">2</span><span id="faceStepMatch">3</span></div>
         </div>
         <button id="faceStartBtn" class="primary-btn" type="button">เริ่มสแกนใบหน้า</button>
         <button id="faceSkipBtn" class="secondary-face-btn hidden" type="button">ข้ามครั้งนี้และเช็กอินต่อ</button>
-        <p class="face-privacy">รูปจากกล้องไม่ถูกบันทึกและไม่ถูกอัปโหลด ระบบส่งเฉพาะ Face Template แบบตัวเลขเพื่อยืนยันตัวตน</p>
+        <p class="face-privacy">ภาพจากกล้องใช้เฉพาะตอนยืนยันตัวตนและไม่ถูกบันทึก ระบบเก็บเฉพาะ Face Template แบบตัวเลข</p>
       </section>
 
       <div id="detailCard" class="detail-card hidden">
@@ -52,10 +52,10 @@
       <button id="retryBtn" class="primary-btn hidden" type="button">ลองใหม่</button>
       <p id="permissionHint" class="permission-hint hidden">ถ้ามือถือถามสิทธิ์ Location หรือ Camera ให้เลือก “อนุญาตขณะใช้งาน” แล้วกดลองใหม่</p>
       <p id="diagnosticText" class="privacy-note hidden"></p>
-      <p class="privacy-note">นากนะใช้กล้องและตำแหน่งเฉพาะตอนที่คุณกดลงเวลา ไม่ติดตามเบื้องหลัง และไม่เก็บรูปใบหน้าประจำวัน · P9.15.3 Face Verification</p>
+      <p class="privacy-note">นากนะใช้กล้องและตำแหน่งเฉพาะตอนที่คุณกดลงเวลา ไม่ติดตามเบื้องหลัง และไม่เก็บรูปใบหน้าประจำวัน · P9.16 Face Verification</p>
     </section>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" defer></script>
-  <script src="/attendance.js?v=P9.15.3-FACE-SCANNER" defer></script>
+  <script src="/attendance.js?v=P9.16-FACE-UX" defer></script>
 </body>
 </html>
