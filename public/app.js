@@ -54,6 +54,8 @@ const state = {
   attendanceFaceSaving: false,
   attendanceFaceSavedAt: 0,
   attendanceFaceLoaded: false,
+  attendanceFaceRolloutBusy: false,
+  attendanceFaceRolloutStatus: '',
   organizationViewMode: (() => { try { const saved = localStorage.getItem('nakna.organizationViewMode'); return saved === 'list' ? 'list' : 'chart'; } catch { return 'chart'; } })(),
   teamDirectorySearch: '',
   teamDirectoryDepartment: 'all',
@@ -1150,6 +1152,9 @@ function bindEvents() {
   if ($('#attendanceFaceSaveBtn')) $('#attendanceFaceSaveBtn').onclick = () => saveAttendanceFaceSettings({ silentSuccess: false });
   if ($('#attendanceFaceMode')) $('#attendanceFaceMode').onchange = () => { updateAttendanceFaceModeHint(); saveAttendanceFaceSettings({ silentSuccess: true }); };
   if ($('#attendanceFaceCheckoutToggle')) $('#attendanceFaceCheckoutToggle').onchange = () => saveAttendanceFaceSettings({ silentSuccess: true });
+  if ($('#attendanceFaceRemindBtn')) $('#attendanceFaceRemindBtn').onclick = sendAttendanceFaceEnrollmentReminders;
+  if ($('#attendanceFaceSelfTestBtn')) $('#attendanceFaceSelfTestBtn').onclick = openAttendanceFaceSelfTest;
+  if ($('#attendanceFaceCopyInstructionBtn')) $('#attendanceFaceCopyInstructionBtn').onclick = copyAttendanceFaceInstructions;
   if ($('#attendanceReminderToggle')) $('#attendanceReminderToggle').onchange = () => { updateAttendanceReminderEditor(); saveAttendanceReminderSettings({fromToggle:true}); };
   if ($('#attendanceReminderMessage')) $('#attendanceReminderMessage').oninput = updateAttendanceReminderEditor;
   if ($('#attendanceReminderResetBtn')) $('#attendanceReminderResetBtn').onclick = () => { $('#attendanceReminderMessage').value=DEFAULT_ATTENDANCE_REMINDER_MESSAGE; updateAttendanceReminderEditor(); $('#attendanceReminderMessage').focus(); };
@@ -3785,6 +3790,7 @@ function renderAttendanceFaceSettings(){
   const loaded=Boolean(state.attendanceFaceLoaded || typeof settings.mode==='string');
   const mode=['off','enroll','required'].includes(String(settings.mode))?String(settings.mode):'off';
   const modeSelect=$('#attendanceFaceMode'),checkout=$('#attendanceFaceCheckoutToggle'),status=$('#attendanceFaceStatus'),autoNote=$('#attendanceFaceAutosaveNote');
+  const remindBtn=$('#attendanceFaceRemindBtn'),selfBtn=$('#attendanceFaceSelfTestBtn'),copyBtn=$('#attendanceFaceCopyInstructionBtn'),rolloutStatus=$('#attendanceFaceRolloutStatus');
   if(!loaded){
     if(modeSelect)modeSelect.disabled=true;
     if(checkout)checkout.disabled=true;
@@ -3793,6 +3799,10 @@ function renderAttendanceFaceSettings(){
     if($('#attendanceFacePendingPeople')){$('#attendanceFacePendingPeople').classList.add('hidden');$('#attendanceFacePendingPeople').innerHTML='';}
     if(status)status.textContent='กำลังโหลดการตั้งค่าจากบริษัท…';
     if(autoNote)autoNote.textContent='กำลังโหลดการตั้งค่า…';
+    if(remindBtn)remindBtn.disabled=true;
+    if(selfBtn)selfBtn.disabled=true;
+    if(copyBtn)copyBtn.disabled=true;
+    if(rolloutStatus)rolloutStatus.textContent='กำลังโหลดสถานะการลงทะเบียน…';
     return;
   }
   if(modeSelect&&!state.attendanceFaceSaving)modeSelect.value=mode;
@@ -3802,6 +3812,19 @@ function renderAttendanceFaceSettings(){
   const summary=settings.summary||{};const active=Number(summary.active||0),enrolled=Number(summary.enrolled||0),pending=Math.max(0,Number(summary.pending??active-enrolled));
   if($('#attendanceFaceReadyCount'))$('#attendanceFaceReadyCount').textContent=`${enrolled}/${active}`;
   if($('#attendanceFacePendingCount'))$('#attendanceFacePendingCount').textContent=String(pending);
+  if(remindBtn){
+    remindBtn.disabled=Boolean(state.attendanceFaceRolloutBusy)||mode==='off'||pending<=0||!settings.encryption_ready;
+    remindBtn.textContent=state.attendanceFaceRolloutBusy?'กำลังส่ง LINE…':(pending>0?`ส่ง LINE ให้ ${pending} คนที่ยังไม่ลงทะเบียน`:'ทุกคนลงทะเบียนแล้ว');
+  }
+  if(selfBtn)selfBtn.disabled=Boolean(state.attendanceFaceRolloutBusy)||mode==='off'||!settings.encryption_ready;
+  if(copyBtn)copyBtn.disabled=mode==='off';
+  if(rolloutStatus){
+    rolloutStatus.textContent=state.attendanceFaceRolloutStatus
+      ||(mode==='off'?'เปิด Face Verification แล้วจึงส่งคำขอลงทะเบียนได้'
+      :pending>0?`ยังเหลือ ${pending} คน · ส่ง LINE ได้แม้วันนี้พนักงานเช็กอินไปแล้ว`
+      :'พนักงานที่ Active ลงทะเบียนครบแล้ว ✓');
+    rolloutStatus.classList.toggle('is-success',pending===0&&mode!=='off');
+  }
   const pendingRoot=$('#attendanceFacePendingPeople');
   if(pendingRoot){
     const people=Array.isArray(summary.pending_people)?summary.pending_people:[];
@@ -3844,6 +3867,7 @@ async function saveAttendanceFaceSettings({silentSuccess=true}={}){
     state.peopleCore.attendance_face=result.settings||{...previous,...draft};
     state.attendanceFaceLoaded=true;
     state.attendanceFaceSavedAt=Date.now();
+    state.attendanceFaceRolloutStatus='';
     renderAttendanceFaceSettings();renderSettingsSidebar();
     if(!silentSuccess){
       const mode=state.peopleCore.attendance_face?.mode;
@@ -3860,6 +3884,80 @@ async function saveAttendanceFaceSettings({silentSuccess=true}={}){
     renderAttendanceFaceSettings();
   }
 }
+
+async function sendAttendanceFaceEnrollmentReminders(){
+  if(state.attendanceFaceRolloutBusy)return;
+  const settings=state.peopleCore?.attendance_face||{};
+  const pending=Number(settings.summary?.pending||0);
+  if(!pending)return toast('ทุกคนลงทะเบียนใบหน้าแล้ว');
+  state.attendanceFaceRolloutBusy=true;
+  state.attendanceFaceRolloutStatus=`กำลังส่ง LINE ให้ ${pending} คน…`;
+  renderAttendanceFaceSettings();
+  try{
+    const result=await api('/api/attendance-face-enrollment/remind',{method:'POST',body:JSON.stringify({}),silentStatus:true});
+    if(result.settings){
+      state.peopleCore.attendance_face=result.settings;
+      state.attendanceFaceLoaded=true;
+    }
+    const parts=[`ส่งแล้ว ${Number(result.sent||0)} คน`];
+    if(Number(result.not_linked||0)>0)parts.push(`ยังไม่เชื่อม LINE ${Number(result.not_linked||0)} คน`);
+    if(Number(result.failed||0)>0)parts.push(`ส่งไม่สำเร็จ ${Number(result.failed||0)} คน`);
+    state.attendanceFaceRolloutStatus=parts.join(' · ');
+    const noLine=Array.isArray(result.not_linked_people)?result.not_linked_people:[];
+    if(noLine.length){
+      const names=noLine.slice(0,5).map(x=>x.name).filter(Boolean).join(', ');
+      toast(`ส่งคำขอลงทะเบียนแล้ว · คนที่ยังไม่เชื่อม LINE: ${names}${noLine.length>5?'…':''}`);
+    }else toast(`ส่งคำขอลงทะเบียนใบหน้าแล้ว ${Number(result.sent||0)} คน`);
+  }catch(error){
+    state.attendanceFaceRolloutStatus=error.message||'ส่ง LINE ไม่สำเร็จ';
+    toast(error.message||'ส่ง LINE ให้พนักงานไม่สำเร็จ',true);
+  }finally{
+    state.attendanceFaceRolloutBusy=false;
+    renderAttendanceFaceSettings();
+  }
+}
+async function openAttendanceFaceSelfTest(){
+  if(state.attendanceFaceRolloutBusy)return;
+  const preview=window.open('about:blank','_blank');
+  state.attendanceFaceRolloutBusy=true;
+  state.attendanceFaceRolloutStatus='กำลังสร้างหน้าลงทะเบียน/ทดสอบของบัญชีคุณ…';
+  renderAttendanceFaceSettings();
+  try{
+    const result=await api('/api/attendance-face-enrollment/self-link',{method:'POST',body:'{}',silentStatus:true});
+    state.attendanceFaceRolloutStatus=result.enrolled
+      ?`เปิดหน้าทดสอบของ ${result.employee?.name||'บัญชีคุณ'} แล้ว`
+      :`เปิดหน้าลงทะเบียนของ ${result.employee?.name||'บัญชีคุณ'} แล้ว`;
+    if(preview){
+      preview.location.href=result.url;
+      try{preview.focus();}catch{}
+    }else{
+      location.href=result.url;
+    }
+  }catch(error){
+    try{preview?.close();}catch{}
+    state.attendanceFaceRolloutStatus=error.message||'เปิดหน้าทดสอบไม่สำเร็จ';
+    toast(error.message||'เปิดหน้าลงทะเบียน/ทดสอบไม่สำเร็จ',true);
+  }finally{
+    state.attendanceFaceRolloutBusy=false;
+    renderAttendanceFaceSettings();
+  }
+}
+async function copyAttendanceFaceInstructions(){
+  const company=activeCompany()?.name||'บริษัท';
+  const text=`${company} เปิดใช้งาน Face Verification แล้ว\nกรุณาเปิด LINE นากนะ → เมนูพนักงาน → “ใบหน้า & การยืนยันตัวตน” แล้วลงทะเบียนใบหน้าให้เรียบร้อย\nระบบไม่เก็บรูปภาพจากการเช็กอินประจำวัน`;
+  try{
+    await navigator.clipboard.writeText(text);
+    state.attendanceFaceRolloutStatus='คัดลอกข้อความแจ้งทีมแล้ว ✓';
+    toast('คัดลอกข้อความแจ้งทีมแล้ว');
+  }catch{
+    const area=document.createElement('textarea');area.value=text;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();
+    try{document.execCommand('copy');toast('คัดลอกข้อความแจ้งทีมแล้ว');state.attendanceFaceRolloutStatus='คัดลอกข้อความแจ้งทีมแล้ว ✓';}
+    catch{toast('คัดลอกไม่ได้ กรุณาลองใหม่',true);}
+    area.remove();
+  }
+  renderAttendanceFaceSettings();
+}
+
 async function loadPeopleFaceProfile(employeeId){
   const status=$('#peopleFaceProfileStatus'),meta=$('#peopleFaceProfileMeta'),reset=$('#peopleFaceResetBtn');
   if(status)status.textContent='กำลังตรวจสอบ…';if(meta)meta.textContent='ระบบไม่เก็บรูปเช็กอินประจำวัน';if(reset)reset.classList.add('hidden');

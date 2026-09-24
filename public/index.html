@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
-  <link rel="stylesheet" href="/styles.css?v=P9.14.3" />
-  <link rel="modulepreload" href="/app.js?v=P9.14.3" />
+  <link rel="stylesheet" href="/styles.css?v=P9.15" />
+  <link rel="modulepreload" href="/app.js?v=P9.15" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -230,7 +230,7 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P9.14.3</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P9.15</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
@@ -845,6 +845,18 @@
                 <div class="attendance-face-privacy"><b>ไม่เก็บรูปประจำวัน</b><span>ภาพจากกล้องใช้ชั่วคราวบนเครื่องเพื่อสร้าง Face Template แล้วทิ้งทันที · Template ในฐานข้อมูลเข้ารหัส</span></div>
               </div>
               <div id="attendanceFacePendingPeople" class="attendance-face-pending hidden"></div>
+              <div class="attendance-face-rollout">
+                <div class="attendance-face-rollout-copy">
+                  <strong>ให้พนักงานลงทะเบียนได้ทันที</strong>
+                  <span>ไม่ต้องรอเช็กอินวันถัดไป · คนที่เช็กอินวันนี้แล้วก็ลงทะเบียนได้ และหน้าลงทะเบียนจะไม่สร้างเวลาเข้างานซ้ำ</span>
+                </div>
+                <div class="attendance-face-rollout-buttons">
+                  <button id="attendanceFaceRemindBtn" class="primary-btn" type="button">ส่ง LINE ให้คนที่ยังไม่ลงทะเบียน</button>
+                  <button id="attendanceFaceSelfTestBtn" class="secondary-btn" type="button">ลงทะเบียน / ทดสอบบัญชีของฉัน</button>
+                  <button id="attendanceFaceCopyInstructionBtn" class="text-btn" type="button">คัดลอกข้อความแจ้งทีม</button>
+                </div>
+                <small id="attendanceFaceRolloutStatus" class="attendance-face-rollout-status">เปิด Face Verification แล้วจึงส่งคำขอลงทะเบียนได้</small>
+              </div>
               <div class="attendance-face-actions"><small id="attendanceFaceAutosaveNote">เปลี่ยนค่าแล้วระบบจะบันทึกอัตโนมัติ</small></div>
             </section>
             <div id="attendanceReminderCard" class="attendance-reminder-card">
@@ -1491,7 +1503,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=P9.14.3" type="module"></script>
+  <script src="/app.js?v=P9.15" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

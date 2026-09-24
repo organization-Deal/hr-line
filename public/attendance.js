@@ -2,6 +2,8 @@ const $=s=>document.querySelector(s);
 const params=new URLSearchParams(location.search);
 const token=String(params.get('token')||'').trim();
 const action=params.get('action')==='checkout'?'checkout':'checkin';
+const facePageMode=['enroll','test','manage'].includes(String(params.get('face')||'').toLowerCase())?String(params.get('face')).toLowerCase():'attendance';
+const standaloneFaceFlow=facePageMode!=='attendance';
 let busy=false;
 let facePreparing=false;
 let faceFlowBusy=false;
@@ -11,6 +13,11 @@ let faceStream=null;
 let faceModelsReady=false;
 const FACE_MODEL_VERSION='face-api-0.22.2';
 const FACE_MODEL_URL='https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+if(standaloneFaceFlow){
+  document.title='นากนะ · ยืนยันตัวตน';
+  const eyebrow=document.querySelector('.brand-row .eyebrow');
+  if(eyebrow)eyebrow.textContent='NAKNA · FACE VERIFICATION';
+}
 
 const GPS={
   freshMs:30000,
@@ -21,8 +28,8 @@ const GPS={
 function setLoading(message){
   $('#stateIcon').className='state-icon loading';
   $('#stateIcon').innerHTML='<span class="spinner"></span>';
-  $('#title').textContent=action==='checkin'?'กำลังเช็กอิน…':'กำลังเช็กเอาต์…';
-  $('#message').textContent=message||'กำลังอ่าน GPS จากมือถือของคุณ';
+  $('#title').textContent=standaloneFaceFlow?'กำลังเตรียม Face Verification…':(action==='checkin'?'กำลังเช็กอิน…':'กำลังเช็กเอาต์…');
+  $('#message').textContent=message||(standaloneFaceFlow?'กำลังตรวจสถานะใบหน้าของคุณ':'กำลังอ่าน GPS จากมือถือของคุณ');
   $('#retryBtn').classList.add('hidden');
   $('#permissionHint').classList.add('hidden');
   $('#detailCard').classList.add('hidden');
@@ -32,7 +39,7 @@ function setLoading(message){
 function setError(message,{permission=false,code='',detail=''}={}){
   $('#stateIcon').className='state-icon error';
   $('#stateIcon').textContent='!';
-  $('#title').textContent=action==='checkin'?'เช็กอินไม่สำเร็จ':'เช็กเอาต์ไม่สำเร็จ';
+  $('#title').textContent=standaloneFaceFlow?'Face Verification ไม่สำเร็จ':(action==='checkin'?'เช็กอินไม่สำเร็จ':'เช็กเอาต์ไม่สำเร็จ');
   $('#message').textContent=message||'กรุณาลองใหม่อีกครั้ง';
   $('#retryBtn').classList.remove('hidden');
   $('#retryBtn').textContent='ลองใหม่';
@@ -261,28 +268,62 @@ async function fetchFaceStatus(){
   const data=await response.json().catch(()=>({}));
   if(!response.ok){
     const routeMissing=response.status===404&&String(data.error||'').toLowerCase().includes('route not found');
-    if(routeMissing)throw Object.assign(new Error('Worker ฝั่งเซิร์ฟเวอร์ยังไม่ได้อัปเดต Face Verification กรุณา Deploy src/index.js เวอร์ชัน P9.14.1 แล้วเปิดจาก LINE ใหม่'),{faceCode:'FACE_BACKEND_ROUTE_MISSING',status:404});
+    if(routeMissing)throw Object.assign(new Error('Worker ฝั่งเซิร์ฟเวอร์ยังไม่ได้อัปเดต Face Verification กรุณา Deploy src/index.js เวอร์ชัน P9.15 แล้วเปิดจาก LINE ใหม่'),{faceCode:'FACE_BACKEND_ROUTE_MISSING',status:404});
     throw Object.assign(new Error(data.error||'ตรวจ Face Verification ไม่สำเร็จ'),{faceCode:data.code||'FACE_STATUS_FAILED',status:response.status});
   }
   return data;
+}
+function setStandaloneFaceDone(title,message){
+  stopFaceCamera();
+  $('#facePanel')?.classList.add('hidden');
+  $('#detailCard')?.classList.add('hidden');
+  $('#stateIcon').className='state-icon success';
+  $('#stateIcon').textContent='✓';
+  $('#title').textContent=title;
+  $('#message').textContent=message;
+  $('#retryBtn').classList.add('hidden');
+  $('#permissionHint').classList.add('hidden');
+  const d=$('#diagnosticText');if(d){d.textContent='';d.classList.add('hidden');}
 }
 async function performFaceFlow(){
   if(faceFlowBusy)return;faceFlowBusy=true;
   const button=$('#faceStartBtn');button.disabled=true;$('#facePanel')?.classList.remove('is-error');
   try{
     await loadFaceModels();await startFaceCamera();
-    const enrollment=Boolean(faceStatus?.enrollment_required||faceStatus?.enrollment_recommended);
-    const purpose=enrollment?'enroll':(action==='checkout'?'verify_checkout':'verify_checkin');
+    const enrollment=standaloneFaceFlow?!Boolean(faceStatus?.enrolled):Boolean(faceStatus?.enrollment_required||faceStatus?.enrollment_recommended);
+    const testOnly=standaloneFaceFlow&&!enrollment;
+    const purpose=enrollment?'enroll':(testOnly?'verify_test':(action==='checkout'?'verify_checkout':'verify_checkin'));
     const challenge=await facePost('face-challenge',{purpose});
     const liveness=await runLiveness(challenge.actions||[]);
     const descriptor=await captureFaceDescriptor(enrollment?3:2);
     $('#faceCameraState').textContent=enrollment?'กำลังบันทึก Face Template แบบเข้ารหัส…':'กำลังเทียบกับ Face Template ที่ลงทะเบียน…';
     const data=enrollment
-      ? await facePost('face-enroll',{challenge_token:challenge.challenge_token,liveness,descriptor,model_version:FACE_MODEL_VERSION,action})
-      : await facePost('face-verify',{challenge_token:challenge.challenge_token,liveness,descriptor,model_version:FACE_MODEL_VERSION,action});
+      ? await facePost('face-enroll',{challenge_token:challenge.challenge_token,liveness,descriptor,model_version:FACE_MODEL_VERSION,action,face_only:standaloneFaceFlow})
+      : await facePost('face-verify',{challenge_token:challenge.challenge_token,liveness,descriptor,model_version:FACE_MODEL_VERSION,action,test_mode:testOnly});
     faceVerificationToken=data.verification_token||null;
     if(faceStatus){faceStatus.enrolled=true;faceStatus.enrollment_required=false;faceStatus.enrollment_recommended=false;}
     $('#facePanel')?.classList.add('is-success');$('#faceCameraState').textContent=enrollment?'ลงทะเบียนใบหน้าแล้ว ✓':'ยืนยันใบหน้าแล้ว ✓';
+
+    if(standaloneFaceFlow){
+      $('#faceInstruction').textContent=enrollment?'Face Template ถูกบันทึกแบบเข้ารหัสแล้ว · ไม่มีการบันทึกรูปภาพ':'ทดสอบผ่าน · ใบหน้าตรงกับ Face Template ที่ลงทะเบียน';
+      await sleep(650);
+      if(enrollment){
+        setStandaloneFaceDone('ลงทะเบียนใบหน้าสำเร็จ','พร้อมใช้ Face Verification ในการลงเวลาครั้งถัดไป · ระบบไม่ได้สร้างหรือแก้ไขรายการเช็กอินวันนี้');
+      }else{
+        setStandaloneFaceDone('ทดสอบ Face Verification ผ่าน','ยืนยันได้ว่าใบหน้าปัจจุบันตรงกับ Face Template ของบัญชีนี้ · ไม่มีการบันทึกเวลาและไม่มีการเก็บรูปภาพ');
+      }
+      return;
+    }
+
+    if(enrollment&&faceStatus?.already_recorded){
+      $('#faceInstruction').textContent=action==='checkin'?'ลงทะเบียนเรียบร้อย · วันนี้มีเช็กอินอยู่แล้ว':'ลงทะเบียนเรียบร้อย · วันนี้มีเช็กเอาต์อยู่แล้ว';
+      await sleep(850);stopFaceCamera();$('#facePanel')?.classList.add('hidden');
+      $('#stateIcon').className='state-icon success';$('#stateIcon').textContent='✓';
+      $('#title').textContent='ลงทะเบียนใบหน้าสำเร็จ';
+      $('#message').textContent=action==='checkin'?'Face Template พร้อมใช้ตั้งแต่การเช็กอินครั้งถัดไป · วันนี้ระบบพบรายการเช็กอินเดิมแล้ว':'Face Template พร้อมใช้ตั้งแต่การเช็กเอาต์ครั้งถัดไป · วันนี้ระบบพบรายการเช็กเอาต์เดิมแล้ว';
+      $('#retryBtn').classList.add('hidden');$('#permissionHint').classList.add('hidden');
+      return;
+    }
     $('#faceInstruction').textContent='ไม่บันทึกรูปภาพ · กำลังไปอ่านตำแหน่ง GPS';
     await sleep(650);stopFaceCamera();$('#facePanel')?.classList.add('hidden');
     await submit();
@@ -293,14 +334,34 @@ async function performFaceFlow(){
 async function prepareAttendanceFlow(){
   if(facePreparing||busy||faceFlowBusy)return;facePreparing=true;
   try{
-    if(!token){setError('ลิงก์ไม่ถูกต้อง กรุณากดเมนูใน LINE ใหม่อีกครั้ง',{code:'INVALID_TOKEN'});return;}
-    setLoading('กำลังตรวจเงื่อนไขการยืนยันตัวตน…');faceStatus=await fetchFaceStatus();
+    if(!token){setError('ลิงก์ไม่ถูกต้อง กรุณาเปิดจาก LINE ใหม่อีกครั้ง',{code:'INVALID_TOKEN'});return;}
+    setLoading(standaloneFaceFlow?'กำลังตรวจสถานะ Face Verification…':'กำลังตรวจเงื่อนไขการยืนยันตัวตน…');
+    faceStatus=await fetchFaceStatus();
+
+    if(standaloneFaceFlow){
+      if(faceStatus.mode==='off'){setError('บริษัทนี้ยังไม่ได้เปิด Face Verification',{code:'FACE_DISABLED'});return;}
+      if(!faceStatus.system_ready){setError('ระบบ Face Verification ของบริษัทยังตั้งค่าไม่ครบ กรุณาแจ้ง HR',{code:'FACE_SYSTEM_NOT_READY'});return;}
+      if(facePageMode==='enroll'){
+        if(faceStatus.enrolled){setStandaloneFaceDone('ลงทะเบียนใบหน้าแล้ว','บัญชีนี้มี Face Template พร้อมใช้งานอยู่แล้ว · ไม่ต้องลงทะเบียนซ้ำ');return;}
+        showFacePanel({title:'ลงทะเบียนใบหน้า',instruction:'ใช้เวลาประมาณ 30 วินาที ระบบจะสร้าง Face Template แบบตัวเลขและไม่บันทึกรูปภาพ',allowSkip:false,startLabel:'เริ่มลงทะเบียนใบหน้า'});return;
+      }
+      if(facePageMode==='test'){
+        if(!faceStatus.enrolled){setError('บัญชีนี้ยังไม่ได้ลงทะเบียนใบหน้า กรุณาลงทะเบียนก่อนทดสอบ',{code:'FACE_ENROLLMENT_REQUIRED'});return;}
+        showFacePanel({title:'ทดสอบ Face Verification',instruction:'ทดสอบการจับคู่ใบหน้าโดยไม่บันทึกเวลาและไม่แก้ไข Attendance',allowSkip:false,startLabel:'เริ่มทดสอบใบหน้า'});return;
+      }
+      // manage: ถ้ายังไม่มี Template ให้ลงทะเบียน ถ้ามีแล้วให้ทดสอบได้ทันที
+      if(!faceStatus.enrolled){
+        showFacePanel({title:'ลงทะเบียนใบหน้า',instruction:'ตั้งค่า Face Template ของคุณก่อน หลังจากนี้เมนูนี้ใช้ทดสอบ Face Verification ได้ตลอด',allowSkip:false,startLabel:'เริ่มลงทะเบียนใบหน้า'});return;
+      }
+      showFacePanel({title:'ใบหน้า & การยืนยันตัวตน',instruction:'บัญชีนี้ลงทะเบียนแล้ว คุณสามารถทดสอบการยืนยันใบหน้าได้โดยไม่กระทบ Attendance',allowSkip:false,startLabel:'ทดสอบ Face Verification'});return;
+    }
+
     if(faceStatus.mode!=='off'&&!faceStatus.system_ready){setError('ระบบ Face Verification ของบริษัทยังตั้งค่าไม่ครบ กรุณาแจ้ง HR',{code:'FACE_SYSTEM_NOT_READY'});return;}
     if(faceStatus.enrollment_required){showFacePanel({title:'ลงทะเบียนใบหน้าก่อนเช็กอิน',instruction:'ครั้งแรกระบบต้องจดจำ Face Template ของคุณก่อน หลังจากนี้จะใช้เทียบทุกครั้งที่บริษัทกำหนด',allowSkip:false,startLabel:'ลงทะเบียนใบหน้า'});return;}
     if(faceStatus.verify_required){showFacePanel({title:'ยืนยันใบหน้าก่อนลงเวลา',instruction:'ตรวจว่าเป็นเจ้าของบัญชีจริงก่อนบันทึกเวลา',allowSkip:false,startLabel:'สแกนหน้าและยืนยัน'});return;}
     if(faceStatus.enrollment_recommended){showFacePanel({title:'ตั้งค่าใบหน้าให้พร้อมใช้งาน',instruction:'บริษัทอยู่ในช่วงลงทะเบียน คุณสามารถตั้งค่าตอนนี้ หรือข้ามและเช็กอินตามปกติได้',allowSkip:true,startLabel:'ลงทะเบียนใบหน้าตอนนี้'});return;}
     await submit();
-  }catch(error){setError(error.message||'เตรียมการเช็กอินไม่สำเร็จ',{code:error.faceCode||'FACE_STATUS_FAILED'});}finally{facePreparing=false;}
+  }catch(error){setError(error.message||(standaloneFaceFlow?'เตรียม Face Verification ไม่สำเร็จ':'เตรียมการเช็กอินไม่สำเร็จ'),{code:error.faceCode||'FACE_STATUS_FAILED'});}finally{facePreparing=false;}
 }
 
 function runtimeInfo(){
