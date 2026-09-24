@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.16-FACE-UX';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.16-FACE-UX';
+const NAKNA_RUNTIME_RELEASE = 'P9.17-DASHBOARD-LINK';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.17-DASHBOARD-LINK';
 const NAKNA_RUNTIME_FEATURE = 'attendance-face-verification-no-photo-storage';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -6863,7 +6863,12 @@ async function issueLineWebLoginLink(env,userId,{clientId=null,purpose='business
   await ensureV100P7Ready(env.DB);
   const token=randomToken(40);
   const tokenHash=await sha256Hex(token);
-  const expiresAt=new Date(Date.now()+15*60*1000).toISOString();
+  const normalizedPurpose=String(purpose||'business_setup');
+  // Dashboard cards are often reopened from LINE hours later. Keep the initial
+  // bootstrap token alive for 24h; after the first successful open, the normal
+  // 30-day nakna_session cookie takes over. Setup/access-grant links stay short-lived.
+  const tokenTtlMs=normalizedPurpose==='dashboard' ? 24*60*60*1000 : 15*60*1000;
+  const expiresAt=new Date(Date.now()+tokenTtlMs).toISOString();
   // Keep other still-valid cards usable. Older code deleted every unused token
   // for the same purpose, which made Dashboard buttons in previous LINE cards
   // stop working as soon as a new menu was opened.
@@ -6878,6 +6883,34 @@ async function issueLineWebLoginLink(env,userId,{clientId=null,purpose='business
     return `${base}/?line_login=${encodeURIComponent(token)}&entry=${encodeURIComponent(String(purpose||'dashboard'))}`;
   }
   return `${base}/auth/line/start?token=${encodeURIComponent(token)}`;
+}
+
+async function existingDashboardSessionPayload(request,env,purpose='dashboard'){
+  // A LINE magic link is intentionally one-time. If the same old card is tapped
+  // again, reuse the already-authenticated 30-day web session instead of showing
+  // "link expired". Access is still re-checked through authorizeUser + memberships.
+  const auth=await authorizeUser(request,env,{requireCompany:false}).catch(()=>null);
+  if(!auth?.ok||!auth.user?.id)return null;
+  const memberships=await getMemberships(env.DB,Number(auth.user.id));
+  const selectedClientId=Number(auth.clientId||0)||Number(memberships[0]?.id||0)||null;
+  const activeMembership=memberships.find(x=>Number(x.id)===Number(selectedClientId))||memberships[0]||null;
+  const user=await env.DB.prepare(`SELECT id,google_sub,email,name,picture_url,locale,line_user_id,line_provider_scope,auth_provider FROM users WHERE id=?1`).bind(Number(auth.user.id)).first();
+  return {
+    ok:true,
+    purpose:String(purpose||'dashboard'),
+    selected_client_id:selectedClientId,
+    workspace_joined:false,
+    reused_existing_session:true,
+    me:{
+      user:publicUser(user||auth.user),
+      companies:memberships,
+      active_company_id:selectedClientId||activeMembership?.id||null,
+      active_role:activeMembership?.role||null,
+      is_primary_owner:Boolean(activeMembership?.is_primary_owner),
+      setup_mode:null,
+      claimable_company:null,
+    },
+  };
 }
 
 async function finishInlineLineSession(request,env){
@@ -6897,7 +6930,9 @@ async function finishInlineLineSession(request,env){
   }
   if(!row||row.user_status!=='active'||new Date(row.expires_at).getTime()<=Date.now()){
     if(row) await env.DB.prepare(`UPDATE line_web_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(tokenHash).run().catch(()=>{});
-    return json({error:'LINE_TOKEN_EXPIRED'},401);
+    const existing=await existingDashboardSessionPayload(request,env,'dashboard').catch(()=>null);
+    if(existing)return json(existing,200,{'cache-control':'no-store'});
+    return json({error:'LINE_TOKEN_EXPIRED'},401,{'cache-control':'no-store'});
   }
   let selectedClientId=row.client_id?Number(row.client_id):null;
   if(selectedClientId){
