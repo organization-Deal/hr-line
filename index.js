@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P7.98';
-const NAKNA_RUNTIME_VERSION = '1.0-P7.98';
-const NAKNA_RUNTIME_FEATURE = 'attendance-reminder-settings-fix';
+const NAKNA_RUNTIME_RELEASE = 'P9.14-FACE-VERIFICATION';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.14-FACE-VERIFICATION';
+const NAKNA_RUNTIME_FEATURE = 'attendance-face-verification-no-photo-storage';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -1466,6 +1466,9 @@ export default {
       if (url.pathname === '/api/public/onboarding' && request.method === 'GET') {
         return await getPublicOnboardingConfig(env);
       }
+      if (url.pathname === '/api/public/line-session' && request.method === 'POST') {
+        return await finishInlineLineSession(request, env);
+      }
       if (url.pathname === '/api/public/diagnostics' && request.method === 'GET') {
         return await getPublicDiagnostics(env);
       }
@@ -1512,6 +1515,17 @@ export default {
         return await acceptPublicInvite(request, env, publicInviteMatch[1]);
       }
 
+      const onboardingFaceMatch = url.pathname.match(/^\/api\/public\/onboarding-face\/([A-Za-z0-9_-]{20,})\/(status|challenge|enroll)$/);
+      if (onboardingFaceMatch) {
+        await ensureCoreSchema(env.DB);
+        await ensureAttendanceFaceReady(env.DB);
+        const onboardingToken = onboardingFaceMatch[1];
+        const faceAction = onboardingFaceMatch[2];
+        if (faceAction === 'status' && request.method === 'GET') return await getPublicOnboardingFaceStatus(env, onboardingToken);
+        if (faceAction === 'challenge' && request.method === 'POST') return await issuePublicOnboardingFaceChallenge(request, env, onboardingToken);
+        if (faceAction === 'enroll' && request.method === 'POST') return await enrollPublicOnboardingFace(request, env, onboardingToken);
+      }
+
       const sharedEvidenceMatch = url.pathname.match(/^\/evidence\/([A-Za-z0-9_-]{20,})$/);
       if (sharedEvidenceMatch && request.method === 'GET') {
         await ensureV050Ready(env.DB);
@@ -1552,6 +1566,27 @@ export default {
         return await submitPublicHrCaseForm(request, env, publicHrCaseMatch[1], ctx);
       }
 
+      const publicDocumentsMatch = url.pathname.match(/^\/api\/public\/documents\/([A-Za-z0-9_-]{32,})$/);
+      if (publicDocumentsMatch && request.method === 'GET') {
+        await ensureV100P2Ready(env.DB);
+        return await getPublicEmployeeDocuments(env, publicDocumentsMatch[1]);
+      }
+      const publicDocumentFileMatch = url.pathname.match(/^\/api\/public\/documents\/([A-Za-z0-9_-]{32,})\/(\d+)\/file$/);
+      if (publicDocumentFileMatch && request.method === 'GET') {
+        await ensureV100P2Ready(env.DB);
+        return await getPublicEmployeeDocumentFile(env, publicDocumentFileMatch[1], Number(publicDocumentFileMatch[2]));
+      }
+      const publicDocumentAckMatch = url.pathname.match(/^\/api\/public\/documents\/([A-Za-z0-9_-]{32,})\/(\d+)\/acknowledge$/);
+      if (publicDocumentAckMatch && request.method === 'POST') {
+        await ensureV100P2Ready(env.DB);
+        return await acknowledgePublicEmployeeDocument(request, env, publicDocumentAckMatch[1], Number(publicDocumentAckMatch[2]));
+      }
+      const publicDocumentCaseResponseMatch = url.pathname.match(/^\/api\/public\/documents\/([A-Za-z0-9_-]{32,})\/cases\/(\d+)\/respond$/);
+      if (publicDocumentCaseResponseMatch && request.method === 'POST') {
+        await ensureV100P2Ready(env.DB);
+        return await respondPublicHrDocumentCase(request, env, publicDocumentCaseResponseMatch[1], Number(publicDocumentCaseResponseMatch[2]));
+      }
+
       const publicLearningMatch = url.pathname.match(/^\/api\/public\/learning\/([A-Za-z0-9_-]{32,})$/);
       if (publicLearningMatch && request.method === 'GET') {
         await ensureV100P4Ready(env.DB);
@@ -1582,6 +1617,33 @@ export default {
       if (publicRewardRedeemMatch && request.method === 'POST') {
         await ensureV100P5Ready(env.DB);
         return await redeemPublicReward(request, env, publicRewardRedeemMatch[1], Number(publicRewardRedeemMatch[2]));
+      }
+
+      const publicAttendanceFaceStatusMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{32,})\/face-status$/);
+      if (publicAttendanceFaceStatusMatch && request.method === 'GET') {
+        await ensureV100P1Ready(env.DB);
+        return await getPublicAttendanceFaceStatus(request, env, publicAttendanceFaceStatusMatch[1], url);
+      }
+      const publicAttendanceFaceChallengeMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{32,})\/face-challenge$/);
+      if (publicAttendanceFaceChallengeMatch && request.method === 'POST') {
+        await ensureV100P1Ready(env.DB);
+        return await issuePublicAttendanceFaceChallenge(request, env, publicAttendanceFaceChallengeMatch[1]);
+      }
+      const publicAttendanceFaceEnrollMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{32,})\/face-enroll$/);
+      if (publicAttendanceFaceEnrollMatch && request.method === 'POST') {
+        await ensureV100P1Ready(env.DB);
+        return await enrollPublicAttendanceFace(request, env, publicAttendanceFaceEnrollMatch[1]);
+      }
+      const publicAttendanceFaceVerifyMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{32,})\/face-verify$/);
+      if (publicAttendanceFaceVerifyMatch && request.method === 'POST') {
+        await ensureV100P1Ready(env.DB);
+        return await verifyPublicAttendanceFace(request, env, publicAttendanceFaceVerifyMatch[1]);
+      }
+
+      const publicAttendanceGpsLogMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{32,})\/gps-log$/);
+      if (publicAttendanceGpsLogMatch && request.method === 'POST') {
+        await ensureV100P1Ready(env.DB);
+        return await submitQuickAttendanceGpsLog(request, env, publicAttendanceGpsLogMatch[1]);
       }
 
       const publicAttendanceMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{32,})\/(check-in|check-out)$/);
@@ -1628,14 +1690,22 @@ export default {
     } catch (error) {
       let pathname = 'unknown';
       try { pathname = new URL(request.url).pathname; } catch {}
+      const status = Number(error?.status || 0);
+      const safeStatus = status >= 400 && status <= 599 ? status : 500;
+      const publicMessage = safeStatus < 500
+        ? String(error?.message || 'Request failed')
+        : (String(error?.message || '').startsWith('GOOGLE_REAUTH_REQUIRED')
+            ? 'Google Drive ต้องเชื่อมใหม่ กรุณาไปที่ การเชื่อมต่อ แล้วเชื่อม Google อีกครั้ง'
+            : 'Internal server error');
       console.error(JSON.stringify({
         level: 'error',
         event: 'unhandled',
         pathname,
+        status: safeStatus,
         message: String(error?.message || error),
         stack: String(error?.stack || '').slice(0, 2000),
       }));
-      return json({ error: 'Internal server error', request_path: pathname }, 500);
+      return json({ error: publicMessage, request_path: pathname }, safeStatus);
     }
   },
 
@@ -1649,7 +1719,8 @@ export default {
       jobs.push(
         sendDailyHrBrief(env),
         runPhase5DailyAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'phase5_daily_failed',message:String(error?.message||error)}))),
-        syncAllRecruitmentGmail(env).catch(error=>console.error(JSON.stringify({level:'error',event:'recruitment_gmail_daily_failed',message:String(error?.message||error)})))
+        syncAllRecruitmentGmail(env).catch(error=>console.error(JSON.stringify({level:'error',event:'recruitment_gmail_daily_failed',message:String(error?.message||error)}))),
+        runDocumentEvidenceAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'document_evidence_daily_failed',message:String(error?.message||error)})))
       );
     }
     // P7.93: once per day at 12:30 Asia/Bangkok, notify only employees who are
@@ -1666,6 +1737,22 @@ async function handleApi(request, env, url, auth, ctx) {
   const method = request.method;
   const path = url.pathname;
   const clientId = auth.clientId ? Number(auth.clientId) : null;
+
+  if (path === '/api/attendance/gps-diagnostics' && method === 'GET') {
+    if (!clientId) return json({error:'COMPANY_REQUIRED'},409);
+    if (!['owner','co_owner','hr_admin','hr','manager'].includes(String(auth.role||''))) return json({error:'ไม่มีสิทธิ์ดู GPS diagnostics'},403);
+    await ensureAttendanceGpsDiagnosticsReady(env.DB);
+    const requestedLimit=Math.max(1,Math.min(200,Number(url.searchParams.get('limit')||50)));
+    const employeeId=Number(url.searchParams.get('employee_id')||0);
+    const code=String(url.searchParams.get('code')||'').trim().slice(0,80);
+    let sql=`SELECT d.*,e.employee_code,e.first_name,e.last_name,e.nickname FROM attendance_gps_diagnostics d JOIN employees e ON e.id=d.employee_id AND e.client_id=d.client_id WHERE d.client_id=?1`;
+    const binds=[clientId];
+    if(employeeId>0){binds.push(employeeId);sql+=` AND d.employee_id=?${binds.length}`;}
+    if(code){binds.push(code);sql+=` AND d.error_code=?${binds.length}`;}
+    binds.push(requestedLimit);sql+=` ORDER BY d.id DESC LIMIT ?${binds.length}`;
+    const rows=await env.DB.prepare(sql).bind(...binds).all();
+    return json({ok:true,items:rows.results||[]},200);
+  }
 
   if (path === '/api/me' && method === 'GET') {
     // Account reconciliation can touch several D1 tables and is only needed
@@ -2112,7 +2199,7 @@ async function handleApi(request, env, url, auth, ctx) {
     // P7.58: positions are company-wide, not department-specific.
     await env.DB.prepare('UPDATE positions SET department_id=NULL WHERE client_id=?1 AND department_id IS NOT NULL').bind(clientId).run();
     await ensureMissingCheckinReminderReady(env.DB);
-    const [departments, positions, schedules, holidays, client, attendanceReminder] = await Promise.all([
+    const [departments, positions, schedules, holidays, client, attendanceReminder, attendanceFace] = await Promise.all([
       env.DB.prepare(`SELECT d.*,m.nickname AS manager_nickname,m.first_name AS manager_first_name,m.last_name AS manager_last_name,
         (SELECT COUNT(*) FROM employees e WHERE e.department_id=d.id AND e.client_id=d.client_id AND e.status='active') AS employee_count
         FROM departments d LEFT JOIN employees m ON m.id=d.manager_employee_id
@@ -2122,6 +2209,7 @@ async function handleApi(request, env, url, auth, ctx) {
       env.DB.prepare(`SELECT * FROM company_holidays WHERE client_id=?1 ORDER BY holiday_date`).bind(clientId).all(),
       getClient(env.DB,clientId),
       getMissingCheckinReminderSettings(env.DB,clientId),
+      getAttendanceFaceSettings(env,clientId,{includeSummary:true}),
     ]);
     return json({
       departments: departments.results||[],
@@ -2130,6 +2218,7 @@ async function handleApi(request, env, url, auth, ctx) {
       holidays: holidays.results||[],
       attendance_policy: { allow_attendance_outside_geofence: Boolean(Number(client?.allow_checkout_outside_geofence||0)), allow_checkout_outside_geofence: Boolean(Number(client?.allow_checkout_outside_geofence||0)) },
       attendance_reminder: attendanceReminder,
+      attendance_face: attendanceFace,
     });
   }
 
@@ -2295,6 +2384,50 @@ async function handleApi(request, env, url, auth, ctx) {
     }
   }
 
+  if(path==='/api/attendance-face-settings' && method==='GET'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูการตั้งค่ายืนยันใบหน้า'},403);
+    return json({ok:true,settings:await getAttendanceFaceSettings(env,clientId,{includeSummary:true})});
+  }
+
+  if(path==='/api/attendance-face-settings' && method==='PATCH'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์แก้การยืนยันใบหน้า'},403);
+    await ensureAttendanceFaceReady(env.DB);
+    const body=await safeJson(request);
+    const mode=normalizeAttendanceFaceMode(body.mode);
+    const verifyCheckout=body.verify_checkout===true||body.verify_checkout===1||String(body.verify_checkout)==='1'||String(body.verify_checkout).toLowerCase()==='true';
+    if(mode!=='off'&&!biometricEncryptionKey(env))return json({error:'ยังไม่มีกุญแจเข้ารหัสข้อมูลชีวมิติ กรุณาตั้ง Worker Secret NAKNA_BIOMETRIC_ENCRYPTION_KEY ก่อนเปิดใช้'},503);
+    await env.DB.prepare(`INSERT INTO attendance_face_settings(client_id,mode,verify_checkin,verify_checkout,max_distance,updated_at) VALUES(?1,?2,1,?3,0.56,CURRENT_TIMESTAMP)
+      ON CONFLICT(client_id) DO UPDATE SET mode=excluded.mode,verify_checkin=1,verify_checkout=excluded.verify_checkout,updated_at=CURRENT_TIMESTAMP`)
+      .bind(clientId,mode,verifyCheckout?1:0).run();
+    const settings=await getAttendanceFaceSettings(env,clientId,{includeSummary:true});
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'attendance.face.settings.update','client',String(clientId),{mode:settings.mode,verify_checkout:settings.verify_checkout});
+    return json({ok:true,settings});
+  }
+
+  const employeeFaceProfileMatch=path.match(/^\/api\/employees\/(\d+)\/face-profile$/);
+  if(employeeFaceProfileMatch && method==='GET'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูสถานะใบหน้า'},403);
+    const employeeId=Number(employeeFaceProfileMatch[1]);
+    const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+    await ensureAttendanceFaceReady(env.DB);
+    const row=await env.DB.prepare(`SELECT status,enrolled_at,reset_at,model_version,updated_at FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(clientId,employeeId).first();
+    return json({ok:true,profile:row&&row.status==='active'?{enrolled:true,status:row.status,enrolled_at:row.enrolled_at,model_version:row.model_version,updated_at:row.updated_at}:{enrolled:false,status:row?.status||'not_enrolled',reset_at:row?.reset_at||null}});
+  }
+
+  if(employeeFaceProfileMatch && method==='DELETE'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์รีเซ็ตใบหน้า'},403);
+    const employeeId=Number(employeeFaceProfileMatch[1]);
+    const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+    await ensureAttendanceFaceReady(env.DB);
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2`).bind(clientId,employeeId),
+      env.DB.prepare(`DELETE FROM attendance_face_passes WHERE client_id=?1 AND employee_id=?2`).bind(clientId,employeeId),
+      env.DB.prepare(`DELETE FROM attendance_face_challenges WHERE client_id=?1 AND employee_id=?2`).bind(clientId,employeeId),
+    ]);
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'attendance.face.profile.reset','employee',String(employeeId),{reason:'hr_reset'});
+    return json({ok:true});
+  }
+
   if(path==='/api/attendance-policy' && method==='GET'){
     await ensureV100P1Ready(env.DB);
     const row=await env.DB.prepare('SELECT allow_checkout_outside_geofence FROM clients WHERE id=?1').bind(clientId).first();
@@ -2352,6 +2485,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/team-work-log/location-detail' && method === 'GET') {
     await ensureAttendanceSourceColumns(env.DB);
+    await ensureAttendanceFaceReady(env.DB);
     const url=new URL(request.url);
     const employeeId=Number(url.searchParams.get('employee_id')||0);
     const workDate=String(url.searchParams.get('date')||'').trim();
@@ -2396,12 +2530,18 @@ async function handleApi(request, env, url, auth, ctx) {
         distance_m:distance,outside_geofence:outside,inside_work_location:Boolean(wl&&!outside),
       };
     };
-    const [checkin,checkout]=await Promise.all([row.check_in_at?enrich('checkin'):null,row.check_out_at?enrich('checkout'):null]);
-    return json({employee:{id:employeeId,employee_code:row.employee_code,first_name:row.first_name,last_name:row.last_name,nickname:row.nickname,department_name:row.department_name,position_name:row.position_name},work_date:workDate,status:row.status,late_minutes:Number(row.late_minutes||0),checkin,checkout},200);
+    const [checkin,checkout,faceEvents]=await Promise.all([
+      row.check_in_at?enrich('checkin'):null,
+      row.check_out_at?enrich('checkout'):null,
+      env.DB.prepare(`SELECT action,status,liveness_passed,model_version,created_at FROM attendance_face_events WHERE client_id=?1 AND employee_id=?2 AND work_date=?3 AND event_type='attendance_gate' ORDER BY id DESC`).bind(clientId,employeeId,workDate).all(),
+    ]);
+    const faceByAction={};for(const event of (faceEvents.results||[])){if(!faceByAction[event.action])faceByAction[event.action]={verified:event.status==='passed',liveness_passed:Boolean(Number(event.liveness_passed)),model_version:event.model_version||null,verified_at:event.created_at||null};}
+    return json({employee:{id:employeeId,employee_code:row.employee_code,first_name:row.first_name,last_name:row.last_name,nickname:row.nickname,department_name:row.department_name,position_name:row.position_name},work_date:workDate,status:row.status,late_minutes:Number(row.late_minutes||0),checkin,checkout,face_verification:{checkin:faceByAction.checkin||null,checkout:faceByAction.checkout||null}},200);
   }
 
   if (path === '/api/team-work-log' && method === 'GET') {
     await ensureAttendanceSourceColumns(env.DB);
+    await ensureAttendanceFaceReady(env.DB);
     const url = new URL(request.url);
     const modeRaw = String(url.searchParams.get('mode') || 'today').trim();
     const mode = ['today','day','week','month','range'].includes(modeRaw) ? modeRaw : 'today';
@@ -2436,7 +2576,7 @@ async function handleApi(request, env, url, auth, ctx) {
       if(days>366)return json({error:'เลือกช่วงวันที่ได้สูงสุด 366 วัน'},400);
       anchor=start;
     }
-    const [employeeRes,attendanceRes,workLocationRes,leaveRes,scheduleRes,holidayRes,client] = await Promise.all([
+    const [employeeRes,attendanceRes,workLocationRes,leaveRes,scheduleRes,holidayRes,client,faceEventsRes] = await Promise.all([
       env.DB.prepare(`SELECT e.id,e.id AS employee_id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,e.position_id,e.start_date,e.end_date,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.id`).bind(clientId).all(),
       env.DB.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 ORDER BY work_date,employee_id`).bind(clientId,start,end).all(),
       env.DB.prepare(`SELECT id,name,address,radius_m FROM work_locations WHERE client_id=?1`).bind(clientId).all(),
@@ -2444,7 +2584,9 @@ async function handleApi(request, env, url, auth, ctx) {
       env.DB.prepare(`SELECT * FROM work_schedule_rules WHERE client_id=?1`).bind(clientId).all(),
       env.DB.prepare(`SELECT * FROM company_holidays WHERE client_id=?1 AND holiday_date BETWEEN ?2 AND ?3`).bind(clientId,start,end).all(),
       getClient(env.DB,clientId),
+      env.DB.prepare(`SELECT employee_id,work_date,action,status,liveness_passed,model_version,created_at FROM attendance_face_events WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 AND event_type='attendance_gate' AND status='passed' ORDER BY id DESC`).bind(clientId,start,end).all(),
     ]);
+    const faceEventMap=new Map();for(const event of (faceEventsRes.results||[])){const key=`${Number(event.employee_id)}|${event.work_date}|${event.action}`;if(!faceEventMap.has(key))faceEventMap.set(key,event);}
     const attendanceMap = new Map((attendanceRes.results||[]).map(r=>[`${Number(r.employee_id)}|${r.work_date}`,r]));
     const workLocationMap = new Map((workLocationRes.results||[]).map(r=>[Number(r.id),r]));
     const schedules = scheduleRes.results||[];
@@ -2485,7 +2627,10 @@ async function handleApi(request, env, url, auth, ctx) {
           ? checkoutWorkLocation.name
           : (checkoutSourceTitle&&checkoutSourceTitle!==String(checkoutWorkLocation?.name||'').trim()?checkoutSourceTitle:null);
         const checkoutActualAddress=checkoutSourceAddress&&checkoutSourceAddress!==String(checkoutWorkLocation?.address||'').trim()?checkoutSourceAddress:null;
+        const checkinFace=faceEventMap.get(`${Number(e.id)}|${date}|checkin`)||null;
+        const checkoutFace=faceEventMap.get(`${Number(e.id)}|${date}|checkout`)||null;
         rows.push({...e,work_date:date,day_label:dayNames[dateObj.getUTCDay()],check_in_at:a.check_in_at||null,check_out_at:a.check_out_at||null,attendance_status:a.status||null,late_minutes:Number(a.late_minutes||0),
+          checkin_face_verified:Boolean(checkinFace),checkin_face_verified_at:checkinFace?.created_at||null,checkout_face_verified:Boolean(checkoutFace),checkout_face_verified_at:checkoutFace?.created_at||null,
           checkin_location_name:checkinWorkLocation?.name||a.checkin_location_name||null,checkin_work_location_address:checkinWorkLocation?.address||null,checkin_location_radius_m:checkinRadius,
           checkin_source_title:checkinSourceTitle||null,checkin_source_address:checkinSourceAddress||null,checkin_actual_title:checkinActualTitle,checkin_actual_address:checkinActualAddress,
           checkin_distance_m:checkinDistance,checkin_outside_geofence:checkinOutside?1:0,checkin_lat:a.checkin_lat==null?null:Number(a.checkin_lat),checkin_lng:a.checkin_lng==null?null:Number(a.checkin_lng),checkin_accuracy_m:a.checkin_accuracy_m==null?null:Number(a.checkin_accuracy_m),
@@ -2696,17 +2841,17 @@ async function handleApi(request, env, url, auth, ctx) {
   const employeeDocumentsMatch = path.match(/^\/api\/employees\/(\d+)\/documents$/);
   if (employeeDocumentsMatch && method === 'GET') {
     if (!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role)) return json({ error: 'ไม่มีสิทธิ์ดูเอกสารพนักงาน' }, 403);
-    await ensureV100P3Ready(env.DB);
+    await ensureDocumentFoundationReady(env.DB);
     const employeeId = Number(employeeDocumentsMatch[1]);
     const employee = await env.DB.prepare('SELECT id,employee_code,first_name,last_name,nickname FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId,clientId).first();
     if (!employee) return json({ error: 'ไม่พบพนักงาน' }, 404);
-    const rows = await env.DB.prepare(`SELECT id,document_type,title,file_name,storage_provider,drive_url,content_type,document_date,expires_at,visibility,note,created_at FROM employee_documents WHERE client_id=?1 AND employee_id=?2 ORDER BY created_at DESC`).bind(clientId,employeeId).all();
+    const rows = await env.DB.prepare(`SELECT id,document_type,title,file_name,storage_provider,drive_url,content_type,document_date,expires_at,visibility,note,status,version,source,confidentiality,sha256,archived_at,supersedes_document_id,created_at,updated_at FROM employee_documents WHERE client_id=?1 AND employee_id=?2 ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, created_at DESC`).bind(clientId,employeeId).all();
     return json({ employee, data: rows.results || [] });
   }
 
   if (employeeDocumentsMatch && method === 'POST') {
     if (!canManagePeopleAdmin(auth.role)) return json({ error: 'ไม่มีสิทธิ์เพิ่มเอกสารพนักงาน' }, 403);
-    await ensureV100P3Ready(env.DB);
+    await ensureDocumentFoundationReady(env.DB);
     const employeeId = Number(employeeDocumentsMatch[1]);
     const employee = await env.DB.prepare('SELECT id,employee_code,first_name,last_name,nickname FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId,clientId).first();
     if (!employee) return json({ error: 'ไม่พบพนักงาน' }, 404);
@@ -2714,9 +2859,9 @@ async function handleApi(request, env, url, auth, ctx) {
     const file = form.get('file');
     if (!file || typeof file.arrayBuffer !== 'function' || !file.name) return json({ error: 'กรุณาเลือกไฟล์' }, 400);
     if (Number(file.size || 0) > 10 * 1024 * 1024) return json({ error: 'ไฟล์ต้องไม่เกิน 10 MB' }, 413);
-    const allowedTypes = new Set(['employment_contract','id_card_copy','bank_book_copy','social_security','tax_document','education_certificate','other']);
+    const allowedTypes = new Set(['employment_contract','job_description','nda','id_card_copy','house_registration','bank_book_copy','social_security','tax_document','education_certificate','salary_certificate','employment_certificate','probation','salary_adjustment','performance','warning','resignation','asset_return','final_pay','other']);
     const documentType = allowedTypes.has(String(form.get('document_type') || '')) ? String(form.get('document_type')) : 'other';
-    const labels = {employment_contract:'สัญญาจ้างงาน',id_card_copy:'สำเนาบัตรประชาชน',bank_book_copy:'หน้าสมุดบัญชี',social_security:'เอกสารประกันสังคม',tax_document:'เอกสารภาษี',education_certificate:'วุฒิการศึกษา',other:'เอกสารพนักงาน'};
+    const labels = {employment_contract:'สัญญาจ้างงาน',job_description:'Job Description',nda:'ข้อตกลงรักษาความลับ',id_card_copy:'สำเนาบัตรประชาชน',house_registration:'สำเนาทะเบียนบ้าน',bank_book_copy:'หน้าสมุดบัญชี',social_security:'เอกสารประกันสังคม',tax_document:'เอกสารภาษี',education_certificate:'วุฒิการศึกษา',salary_certificate:'หนังสือรับรองเงินเดือน',employment_certificate:'หนังสือรับรองการทำงาน',probation:'เอกสารทดลองงาน',salary_adjustment:'เอกสารปรับเงินเดือน',performance:'เอกสารประเมินผลงาน',warning:'หนังสือเตือน',resignation:'เอกสารลาออก',asset_return:'เอกสารคืนทรัพย์สิน',final_pay:'เอกสาร Final Pay',other:'เอกสารพนักงาน'};
     const title = String(form.get('title') || '').trim() || labels[documentType] || 'เอกสารพนักงาน';
     const documentDate = String(form.get('document_date') || '').trim() || null;
     const expiresAt = String(form.get('expires_at') || '').trim() || null;
@@ -2729,10 +2874,48 @@ async function handleApi(request, env, url, auth, ctx) {
     const empFolder = await ensureDriveChildFolder(accessToken,rootFolder,`${employee.employee_code} - ${employee.nickname || employee.first_name}`);
     const privateFolder = await ensureDriveChildFolder(accessToken,empFolder,'HR & Contracts');
     const bytes = new Uint8Array(await file.arrayBuffer());
+    const digest = await crypto.subtle.digest('SHA-256',bytes);
+    const sha256 = [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    const confidentiality = ['internal','confidential','restricted'].includes(String(form.get('confidentiality'))) ? String(form.get('confidentiality')) : 'confidential';
     const uploaded = await uploadGoogleDriveFile(accessToken,{folderId:privateFolder,fileName:file.name,contentType:file.type || 'application/octet-stream',bytes});
-    const result = await env.DB.prepare(`INSERT INTO employee_documents (client_id,employee_id,document_type,title,file_name,storage_provider,drive_file_id,drive_url,content_type,document_date,expires_at,visibility,note,created_by_user_id) VALUES (?1,?2,?3,?4,?5,'google_drive',?6,?7,?8,?9,?10,?11,?12,?13)`).bind(clientId,employeeId,documentType,title,file.name,uploaded.id,uploaded.webViewLink || null,file.type || 'application/octet-stream',documentDate,expiresAt,visibility,note,Number(auth.user.id)).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.upload','employee',String(employeeId),{document_type:documentType,file_name:file.name});
-    return json({ ok:true, id:Number(result.meta.last_row_id), drive_url:uploaded.webViewLink || null },201);
+    const result = await env.DB.prepare(`INSERT INTO employee_documents (client_id,employee_id,document_type,title,file_name,storage_provider,drive_file_id,drive_url,content_type,document_date,expires_at,visibility,note,created_by_user_id,status,version,source,confidentiality,sha256) VALUES (?1,?2,?3,?4,?5,'google_drive',?6,?7,?8,?9,?10,?11,?12,?13,'active',1,'upload',?14,?15)`).bind(clientId,employeeId,documentType,title,file.name,uploaded.id,uploaded.webViewLink || null,file.type || 'application/octet-stream',documentDate,expiresAt,visibility,note,Number(auth.user.id),confidentiality,sha256).run();
+    const documentId=Number(result.meta.last_row_id);
+    await env.DB.prepare(`INSERT INTO employee_document_events (client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES (?1,?2,?3,'user',?4,'uploaded',?5)`).bind(clientId,documentId,employeeId,Number(auth.user.id),JSON.stringify({document_type:documentType,file_name:file.name,sha256})).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.upload','employee_document',String(documentId),{employee_id:employeeId,document_type:documentType,file_name:file.name,sha256});
+    let delivery=null;
+    if(visibility==='employee')delivery=await notifyEmployeeDocumentReady(env,clientId,documentId).catch(error=>({ok:false,reason:'push_failed',message:String(error?.message||error)}));
+    return json({ ok:true, id:documentId, drive_url:uploaded.webViewLink || null, sha256, delivery },201);
+  }
+
+  const employeeDocumentEventsMatch = path.match(/^\/api\/employee-documents\/(\d+)\/events$/);
+  if (employeeDocumentEventsMatch && method === 'GET') {
+    if (!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role)) return json({ error:'ไม่มีสิทธิ์ดูประวัติเอกสาร' },403);
+    await ensureDocumentFoundationReady(env.DB);
+    const id=Number(employeeDocumentEventsMatch[1]);
+    const doc=await env.DB.prepare('SELECT id,employee_id,title,version,status FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if(!doc)return json({error:'ไม่พบเอกสาร'},404);
+    const events=await env.DB.prepare(`SELECT e.*,u.email AS actor_email FROM employee_document_events e LEFT JOIN users u ON u.id=e.actor_user_id WHERE e.client_id=?1 AND e.document_id=?2 ORDER BY e.created_at DESC`).bind(clientId,id).all();
+    return json({document:doc,data:events.results||[]});
+  }
+
+  const employeeDocumentSendMatch = path.match(/^\/api\/employee-documents\/(\d+)\/send$/);
+  if (employeeDocumentSendMatch && method === 'POST') {
+    if (!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role)) return json({ error:'ไม่มีสิทธิ์ส่งเอกสาร' },403);
+    await ensureDocumentWorkflowReady(env.DB);
+    const id=Number(employeeDocumentSendMatch[1]);
+    const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2`).bind(id,clientId).first();
+    if(!d)return json({error:'ไม่พบเอกสาร'},404);
+    if(!['awaiting_employee_signature','final'].includes(String(d.workflow_status||'')))return json({error:'เอกสารต้องผ่านการตรวจและลงนามจาก HR ก่อนส่งให้พนักงาน'},409);
+    if(String(d.visibility||'')!=='employee')return json({error:'เอกสารนี้ไม่ได้ตั้งให้พนักงานมองเห็น'},409);
+    if(Number(d.acknowledgement_required)){
+      await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();
+    }
+    const delivery=await notifyEmployeeDocumentReady(env,clientId,id);
+    if(!delivery?.ok){
+      const messages={line_not_connected:'พนักงานยังไม่ได้เชื่อม LINE กับบริษัท',line_access_unavailable:'LINE ของบริษัทไม่พร้อมส่งข้อความ',push_failed:'ส่ง LINE ไม่สำเร็จ'};
+      return json({error:messages[delivery?.reason]||delivery?.message||'ส่งเอกสารไม่สำเร็จ',delivery},409);
+    }
+    return json({ok:true,delivery});
   }
 
   const employeeDocumentDeleteMatch = path.match(/^\/api\/employee-documents\/(\d+)$/);
@@ -2742,10 +2925,11 @@ async function handleApi(request, env, url, auth, ctx) {
     const id = Number(employeeDocumentDeleteMatch[1]);
     const row = await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
     if (!row) return json({ error:'ไม่พบเอกสาร' },404);
-    await env.DB.prepare("UPDATE employee_documents SET status='archived',archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2").bind(id,clientId).run();
-    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'archived',?5)`).bind(clientId,id,row.employee_id||null,Number(auth.user.id),JSON.stringify({file_name:row.file_name})).run().catch(()=>{});
+    await ensureDocumentFoundationReady(env.DB);
+    await env.DB.prepare(`UPDATE employee_documents SET status='archived',archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
+    await env.DB.prepare(`INSERT INTO employee_document_events (client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES (?1,?2,?3,'user',?4,'archived',?5)`).bind(clientId,id,row.employee_id||null,Number(auth.user.id),JSON.stringify({file_name:row.file_name})).run();
     await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.archive','employee_document',String(id),{employee_id:row.employee_id,file_name:row.file_name});
-    return json({ok:true});
+    return json({ok:true,archived:true});
   }
 
   const employeeLinkMatch = path.match(/^\/api\/employees\/(\d+)\/line-link-code$/);
@@ -3093,7 +3277,7 @@ async function handleApi(request, env, url, auth, ctx) {
   if (path === '/api/payroll/overview' && method === 'GET') {
     if (!canManagePayroll(auth.role)) return json({ error: 'เฉพาะ HR/Payroll ที่ดู Payroll ได้' }, 403);
     await ensurePayrollDefaults(env.DB, clientId);
-    const [settings, periods, profiles, rules, documents] = await Promise.all([
+    const [settings, periods, profiles, rules, documents, components] = await Promise.all([
       env.DB.prepare('SELECT * FROM payroll_settings WHERE client_id=?1').bind(clientId).first(),
       env.DB.prepare(`SELECT * FROM payroll_periods WHERE client_id=?1 ORDER BY period_start DESC,id DESC LIMIT 24`).bind(clientId).all(),
       env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.people_status,e.status,d.name AS department_name,p.name AS position_name,
@@ -3103,6 +3287,7 @@ async function handleApi(request, env, url, auth, ctx) {
         WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.last_name`).bind(clientId).all(),
       env.DB.prepare(`SELECT * FROM payroll_rule_versions WHERE (client_id=?1 OR client_id IS NULL) ORDER BY rule_key,effective_from DESC`).bind(clientId).all(),
       env.DB.prepare(`SELECT pd.*,e.employee_code,e.first_name,e.last_name,e.nickname,pp.period_key FROM payroll_documents pd JOIN employees e ON e.id=pd.employee_id JOIN payroll_periods pp ON pp.id=pd.period_id WHERE pd.client_id=?1 ORDER BY pd.created_at DESC LIMIT 12`).bind(clientId).all(),
+      env.DB.prepare(`SELECT * FROM payroll_component_definitions WHERE client_id=?1 AND active=1 ORDER BY display_order,id`).bind(clientId).all(),
     ]);
     const profileRows=profiles.results||[];
     return json({
@@ -3111,6 +3296,7 @@ async function handleApi(request, env, url, auth, ctx) {
       profiles: profileRows,
       rules: rules.results||[],
       recent_documents: documents.results||[],
+      components: components.results||[],
       readiness: { employees:profileRows.length, salary_ready:profileRows.filter(r=>Number(r.base_salary||0)>0).length, bank_ready:profileRows.filter(r=>r.bank_account_no).length }
     });
   }
@@ -3123,9 +3309,16 @@ async function handleApi(request, env, url, auth, ctx) {
     const payDay=Math.max(1,Math.min(31,Math.floor(num(body.pay_day,current.pay_day||28))));
     const divisor=Math.max(1,num(body.daily_rate_divisor,current.daily_rate_divisor||30));
     const latePerMinute=Math.max(0,num(body.late_deduction_per_minute,current.late_deduction_per_minute||0));
-    await env.DB.prepare(`UPDATE payroll_settings SET pay_day=?1,daily_rate_divisor=?2,absence_deduction_enabled=?3,late_deduction_enabled=?4,late_deduction_per_minute=?5,social_security_enabled=?6,tax_enabled=?7,updated_at=CURRENT_TIMESTAMP WHERE client_id=?8`)
-      .bind(payDay,divisor,body.absence_deduction_enabled?1:0,body.late_deduction_enabled?1:0,latePerMinute,body.social_security_enabled===false?0:1,body.tax_enabled===false?0:1,clientId).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.settings.update','client',String(clientId),{pay_day:payDay,daily_rate_divisor:divisor});
+    const attendanceCutoff=Math.max(1,Math.min(31,Math.floor(num(body.attendance_cutoff_day,current.attendance_cutoff_day||25))));
+    const commissionCutoff=Math.max(1,Math.min(31,Math.floor(num(body.commission_cutoff_day,current.commission_cutoff_day||25))));
+    const varianceWarning=Math.max(0,Math.min(500,num(body.variance_warning_pct,current.variance_warning_pct||30)));
+    const cycleStartDay=Math.max(1,Math.min(31,Math.floor(num(body.cycle_start_day,current.cycle_start_day||1))));
+    const cycleStartOffset=Math.max(-1,Math.min(0,Math.floor(num(body.cycle_start_month_offset,current.cycle_start_month_offset??0))));
+    const cycleEndDay=Math.max(0,Math.min(31,Math.floor(num(body.cycle_end_day,current.cycle_end_day??0))));
+    const cycleEndOffset=Math.max(0,Math.min(1,Math.floor(num(body.cycle_end_month_offset,current.cycle_end_month_offset??0))));
+    await env.DB.prepare(`UPDATE payroll_settings SET pay_day=?1,daily_rate_divisor=?2,absence_deduction_enabled=?3,late_deduction_enabled=?4,late_deduction_per_minute=?5,social_security_enabled=?6,tax_enabled=?7,attendance_cutoff_day=?8,commission_cutoff_day=?9,variance_warning_pct=?10,require_separate_approver=?11,employer_social_security_enabled=?12,cycle_start_day=?13,cycle_start_month_offset=?14,cycle_end_day=?15,cycle_end_month_offset=?16,updated_at=CURRENT_TIMESTAMP WHERE client_id=?17`)
+      .bind(payDay,divisor,body.absence_deduction_enabled?1:0,body.late_deduction_enabled?1:0,latePerMinute,body.social_security_enabled===false?0:1,body.tax_enabled===false?0:1,attendanceCutoff,commissionCutoff,varianceWarning,body.require_separate_approver?1:0,body.employer_social_security_enabled===false?0:1,cycleStartDay,cycleStartOffset,cycleEndDay,cycleEndOffset,clientId).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.settings.update','client',String(clientId),{pay_day:payDay,daily_rate_divisor:divisor,cycle_start_day:cycleStartDay,cycle_start_month_offset:cycleStartOffset,cycle_end_day:cycleEndDay,cycle_end_month_offset:cycleEndOffset});
     return json({ok:true,settings:await env.DB.prepare('SELECT * FROM payroll_settings WHERE client_id=?1').bind(clientId).first()});
   }
 
@@ -3135,8 +3328,12 @@ async function handleApi(request, env, url, auth, ctx) {
     await ensurePayrollDefaults(env.DB,clientId);
     const employeeId=Number(payrollProfileMatch[1]);
     const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
-    const profile=await env.DB.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1 AND client_id=?2').bind(employeeId,clientId).first();
-    return json({employee:{id:employee.id,employee_code:employee.employee_code,first_name:employee.first_name,last_name:employee.last_name,nickname:employee.nickname,email:employee.email},profile:profile||null});
+    const [profile,components,definitions]=await Promise.all([
+      env.DB.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1 AND client_id=?2').bind(employeeId,clientId).first(),
+      env.DB.prepare(`SELECT epc.*,d.code,d.name,d.component_type,d.category,d.taxable,d.sso_contributable FROM employee_payroll_components epc JOIN payroll_component_definitions d ON d.id=epc.component_id WHERE epc.employee_id=?1 AND epc.client_id=?2 AND epc.active=1 AND (epc.effective_to IS NULL OR epc.effective_to>=date('now')) ORDER BY d.display_order,d.id`).bind(employeeId,clientId).all(),
+      env.DB.prepare(`SELECT * FROM payroll_component_definitions WHERE client_id=?1 AND active=1 ORDER BY display_order,id`).bind(clientId).all()
+    ]);
+    return json({employee:{id:employee.id,employee_code:employee.employee_code,first_name:employee.first_name,last_name:employee.last_name,nickname:employee.nickname,email:employee.email},profile:profile||null,components:components.results||[],component_definitions:definitions.results||[]});
   }
   if (payrollProfileMatch && method === 'PUT') {
     if (!canManagePayroll(auth.role)) return json({error:'ไม่มีสิทธิ์แก้ข้อมูลเงินเดือน'},403);
@@ -3149,8 +3346,47 @@ async function handleApi(request, env, url, auth, ctx) {
       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
       ON CONFLICT(employee_id) DO UPDATE SET base_salary=excluded.base_salary,social_security_enabled=excluded.social_security_enabled,tax_enabled=excluded.tax_enabled,personal_allowance=excluded.personal_allowance,extra_annual_deductions=excluded.extra_annual_deductions,monthly_tax_override=excluded.monthly_tax_override,bank_name=excluded.bank_name,bank_account_name=excluded.bank_account_name,bank_account_no=excluded.bank_account_no,payroll_note=excluded.payroll_note,effective_from=excluded.effective_from,updated_at=CURRENT_TIMESTAMP`)
       .bind(clientId,employeeId,salary,body.social_security_enabled===false?0:1,body.tax_enabled===false?0:1,Math.max(0,num(body.personal_allowance,60000)),Math.max(0,num(body.extra_annual_deductions,0)),body.monthly_tax_override===''||body.monthly_tax_override==null?null:Math.max(0,num(body.monthly_tax_override,0)),body.bank_name||null,body.bank_account_name||null,body.bank_account_no||null,body.payroll_note||null,body.effective_from||employee.start_date||dateInBangkok()).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.profile.update','employee',String(employeeId),{base_salary:salary});
+    if(Array.isArray(body.recurring_components)){
+      const effectiveFrom=body.effective_from||employee.start_date||dateInBangkok();
+      for(const entry of body.recurring_components){
+        const componentId=Number(entry.component_id),amount=Math.max(0,num(entry.amount,0));
+        if(!componentId)continue;
+        const def=await env.DB.prepare(`SELECT id FROM payroll_component_definitions WHERE id=?1 AND client_id=?2 AND active=1`).bind(componentId,clientId).first();
+        if(!def)continue;
+        const current=await env.DB.prepare(`SELECT * FROM employee_payroll_components WHERE employee_id=?1 AND component_id=?2 AND client_id=?3 AND active=1 AND effective_to IS NULL ORDER BY id DESC LIMIT 1`).bind(employeeId,componentId,clientId).first();
+        if(current && Math.abs(Number(current.amount||0)-amount)<0.0001)continue;
+        if(current)await env.DB.prepare(`UPDATE employee_payroll_components SET effective_to=date(?1,'-1 day'),updated_at=CURRENT_TIMESTAMP WHERE id=?2`).bind(effectiveFrom,Number(current.id)).run();
+        if(amount>0)await env.DB.prepare(`INSERT INTO employee_payroll_components(client_id,employee_id,component_id,amount,effective_from,note,active,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,1,?7)`).bind(clientId,employeeId,componentId,amount,effectiveFrom,entry.note||null,Number(auth.user.id)).run();
+      }
+    }
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.profile.update','employee',String(employeeId),{base_salary:salary,recurring_components:Array.isArray(body.recurring_components)?body.recurring_components.length:undefined});
     return json({ok:true,profile:await env.DB.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1').bind(employeeId).first()});
+  }
+
+  if(path==='/api/payroll/components' && method==='GET'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ดูรายการ Payroll'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const rows=await env.DB.prepare(`SELECT * FROM payroll_component_definitions WHERE client_id=?1 ORDER BY active DESC,display_order,id`).bind(clientId).all();
+    return json({data:rows.results||[]});
+  }
+  if(path==='/api/payroll/components' && method==='POST'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์สร้างรายการ Payroll'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const b=await safeJson(request); const name=String(b.name||'').trim(); if(!name)return json({error:'กรุณาระบุชื่อรายการ'},400);
+    const requestedCode=String(b.code||'').trim().toUpperCase().replace(/[^A-Z0-9_-]+/g,'_').slice(0,48); const code=requestedCode||`COMP_${Date.now()}`;
+    const type=b.component_type==='deduction'?'deduction':'earning';
+    try{
+      const r=await env.DB.prepare(`INSERT INTO payroll_component_definitions(client_id,code,name,component_type,category,taxable,sso_contributable,recurring_default,display_order,active,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,1,?10)`).bind(clientId,code,name,type,String(b.category||'other'),b.taxable===false?0:1,b.sso_contributable?1:0,b.recurring_default===false?0:1,Math.floor(num(b.display_order,100)),Number(auth.user.id)).run();
+      return json({ok:true,id:Number(r.meta.last_row_id)},201);
+    }catch(error){if(/UNIQUE/i.test(String(error?.message||error)))return json({error:'รหัสรายการนี้มีอยู่แล้ว'},409);throw error;}
+  }
+  const payrollComponentMatch=path.match(/^\/api\/payroll\/components\/(\d+)$/);
+  if(payrollComponentMatch && method==='PATCH'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์แก้รายการ Payroll'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const id=Number(payrollComponentMatch[1]),b=await safeJson(request); const row=await env.DB.prepare(`SELECT * FROM payroll_component_definitions WHERE id=?1 AND client_id=?2`).bind(id,clientId).first(); if(!row)return json({error:'ไม่พบรายการ'},404);
+    await env.DB.prepare(`UPDATE payroll_component_definitions SET name=?1,component_type=?2,category=?3,taxable=?4,sso_contributable=?5,recurring_default=?6,display_order=?7,active=?8,updated_at=CURRENT_TIMESTAMP WHERE id=?9 AND client_id=?10`).bind(String(b.name??row.name),b.component_type==='deduction'?'deduction':b.component_type==='earning'?'earning':row.component_type,String(b.category??row.category),b.taxable===undefined?row.taxable:(b.taxable?1:0),b.sso_contributable===undefined?row.sso_contributable:(b.sso_contributable?1:0),b.recurring_default===undefined?row.recurring_default:(b.recurring_default?1:0),Math.floor(num(b.display_order,row.display_order||100)),b.active===undefined?row.active:(b.active?1:0),id,clientId).run();
+    return json({ok:true});
   }
 
   if (path === '/api/payroll/periods' && method === 'POST') {
@@ -3159,19 +3395,73 @@ async function handleApi(request, env, url, auth, ctx) {
     const body=await safeJson(request);
     const periodKey=String(body.period_key||dateInBangkok().slice(0,7));
     if(!/^\d{4}-\d{2}$/.test(periodKey)) return json({error:'รอบเงินเดือนต้องเป็น YYYY-MM'},400);
-    const [year,month]=periodKey.split('-').map(Number);
-    const periodStart=body.period_start||`${periodKey}-01`;
-    const lastDay=new Date(Date.UTC(year,month,0)).getUTCDate();
-    const periodEnd=body.period_end||`${periodKey}-${String(lastDay).padStart(2,'0')}`;
     const settings=await env.DB.prepare('SELECT * FROM payroll_settings WHERE client_id=?1').bind(clientId).first();
-    const payDay=Math.min(lastDay,Number(settings?.pay_day||28));
-    const payDate=body.pay_date||`${periodKey}-${String(payDay).padStart(2,'0')}`;
+    const periodStart=String(body.period_start||payrollCycleDateFromPeriodKey(periodKey,Number(settings?.cycle_start_month_offset??0),Number(settings?.cycle_start_day??1)));
+    const periodEnd=String(body.period_end||payrollCycleDateFromPeriodKey(periodKey,Number(settings?.cycle_end_month_offset??0),Number(settings?.cycle_end_day??0)));
+    if(!validPayrollDateKey(periodStart)||!validPayrollDateKey(periodEnd))return json({error:'วันที่เริ่ม/สิ้นสุดรอบเงินเดือนไม่ถูกต้อง',code:'PAYROLL_PERIOD_DATE_INVALID'},400);
+    if(periodStart>periodEnd)return json({error:'วันที่เริ่มรอบต้องไม่เกินวันที่สิ้นสุดรอบ',code:'PAYROLL_PERIOD_RANGE_INVALID'},400);
+    const spanDays=dateKeysInclusive(periodStart,periodEnd).length;
+    if(spanDays<1||spanDays>62)return json({error:'รอบเงินเดือนต้องมีช่วงเวลา 1–62 วัน กรุณาตรวจวันที่อีกครั้ง',code:'PAYROLL_PERIOD_RANGE_TOO_LONG'},400);
+
+    // Pay date belongs to the month the cycle ends in, not blindly to period_key.
+    // This matters for companies using a cross-month cycle such as 26 Jul → 25 Aug.
+    const endYear=Number(periodEnd.slice(0,4)),endMonth=Number(periodEnd.slice(5,7));
+    const endMonthLastDay=new Date(Date.UTC(endYear,endMonth,0)).getUTCDate();
+    const payDay=Math.min(endMonthLastDay,Math.max(1,Number(settings?.pay_day||28)));
+    const defaultPayDate=`${endYear}-${String(endMonth).padStart(2,'0')}-${String(payDay).padStart(2,'0')}`;
+    const payDate=String(body.pay_date||defaultPayDate);
+    if(!validPayrollDateKey(payDate))return json({error:'วันที่จ่ายเงินเดือนไม่ถูกต้อง',code:'PAYROLL_PAY_DATE_INVALID'},400);
+
+    const existing=await env.DB.prepare(`SELECT id,period_key,period_start,period_end,pay_date,status FROM payroll_periods WHERE client_id=?1 AND period_key=?2 LIMIT 1`).bind(clientId,periodKey).first();
+    if(existing){
+      if(!['draft','review'].includes(String(existing.status||''))){
+        return json({error:`รอบ ${periodKey} มีอยู่แล้วและอยู่สถานะ ${existing.status} จึงแก้ช่วงวันไม่ได้`,code:'PAYROLL_PERIOD_EXISTS_LOCKED',existing},409);
+      }
+      if(!body.replace_existing_draft){
+        return json({error:`มีรอบ ${periodKey} อยู่แล้ว (${existing.period_start} ถึง ${existing.period_end})`,code:'PAYROLL_PERIOD_EXISTS_DRAFT',can_replace:true,existing},409);
+      }
+      const otherOverlap=await env.DB.prepare(`SELECT id,period_key,period_start,period_end,pay_date,status FROM payroll_periods WHERE client_id=?1 AND id<>?2 AND status!='void' AND period_start<=?3 AND period_end>=?4 LIMIT 1`).bind(clientId,Number(existing.id),periodEnd,periodStart).first();
+      if(otherOverlap){
+        if(!['draft','review'].includes(String(otherOverlap.status||'')) || !body.replace_overlapping_draft){
+          return json({error:`ช่วงวันที่นี้ทับกับรอบ ${otherOverlap.period_key} (${otherOverlap.period_start} ถึง ${otherOverlap.period_end})`,code:'PAYROLL_PERIOD_OVERLAP',can_replace:['draft','review'].includes(String(otherOverlap.status||'')),overlap:otherOverlap},409);
+        }
+        await env.DB.prepare(`UPDATE payroll_periods SET status='void',payroll_note=COALESCE(payroll_note,'') || ?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3 AND status IN ('draft','review')`).bind(`\nAUTO-VOID: ถูกแทนที่ตอนปรับรอบ ${periodKey}`,Number(otherOverlap.id),clientId).run();
+        await recordPayrollPeriodEvent(env.DB,clientId,Number(otherOverlap.id),Number(auth.user.id),'voided_for_cycle_change',{replacement_period_key:periodKey,replacement_start:periodStart,replacement_end:periodEnd});
+      }
+      const before={period_start:existing.period_start,period_end:existing.period_end,pay_date:existing.pay_date,status:existing.status};
+      try{
+        await env.DB.prepare(`UPDATE payroll_periods SET period_start=?1,period_end=?2,pay_date=?3,cutoff_start=?1,cutoff_end=?2,status='draft',approval_status='not_required',approved_by_user_id=NULL,approved_at=NULL,locked_by_user_id=NULL,locked_at=NULL,published_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?4 AND client_id=?5`).bind(periodStart,periodEnd,payDate,Number(existing.id),clientId).run();
+        await recalculatePayrollPeriod(env,clientId,Number(existing.id));
+        await recordPayrollPeriodEvent(env.DB,clientId,Number(existing.id),Number(auth.user.id),'period_range_rebuilt',{period_key:periodKey,period_start:periodStart,period_end:periodEnd,pay_date:payDate,previous:before});
+        return json({ok:true,id:Number(existing.id),reused:true,period:await getPayrollPeriodDetail(env.DB,clientId,Number(existing.id))},200);
+      }catch(error){
+        await env.DB.prepare(`UPDATE payroll_periods SET period_start=?1,period_end=?2,pay_date=?3,status=?4,cutoff_start=?1,cutoff_end=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?5 AND client_id=?6`).bind(before.period_start,before.period_end,before.pay_date,before.status,Number(existing.id),clientId).run().catch(()=>{});
+        return json({error:'คำนวณรอบเงินเดือนไม่สำเร็จ',detail:String(error?.message||error).slice(0,260),code:'PAYROLL_RECALCULATE_FAILED'},500);
+      }
+    }
+
+    const overlap=await env.DB.prepare(`SELECT id,period_key,period_start,period_end,pay_date,status FROM payroll_periods WHERE client_id=?1 AND status!='void' AND period_start<=?2 AND period_end>=?3 LIMIT 1`).bind(clientId,periodEnd,periodStart).first();
+    if(overlap){
+      const replaceable=['draft','review'].includes(String(overlap.status||''));
+      if(!replaceable || !body.replace_overlapping_draft){
+        return json({error:`ช่วงวันที่นี้ทับกับรอบ ${overlap.period_key} (${overlap.period_start} ถึง ${overlap.period_end})`,code:'PAYROLL_PERIOD_OVERLAP',can_replace:replaceable,overlap},409);
+      }
+      await env.DB.prepare(`UPDATE payroll_periods SET status='void',payroll_note=COALESCE(payroll_note,'') || ?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3 AND status IN ('draft','review')`).bind(`\nAUTO-VOID: ถูกแทนที่ตอนสร้างรอบ ${periodKey}`,Number(overlap.id),clientId).run();
+      await recordPayrollPeriodEvent(env.DB,clientId,Number(overlap.id),Number(auth.user.id),'voided_for_cycle_change',{replacement_period_key:periodKey,replacement_start:periodStart,replacement_end:periodEnd});
+    }
+
+    let createdId=0;
     try{
-      const result=await env.DB.prepare(`INSERT INTO payroll_periods (client_id,period_key,period_start,period_end,pay_date,status,created_by_user_id) VALUES (?1,?2,?3,?4,?5,'draft',?6)`).bind(clientId,periodKey,periodStart,periodEnd,payDate,Number(auth.user.id)).run();
-      const id=Number(result.meta.last_row_id);
-      await recalculatePayrollPeriod(env,clientId,id);
-      return json({ok:true,id,period:await getPayrollPeriodDetail(env.DB,clientId,id)},201);
-    }catch(error){ if(/UNIQUE/i.test(String(error?.message||error))) return json({error:'มีรอบเงินเดือนเดือนนี้แล้ว'},409); throw error; }
+      const result=await env.DB.prepare(`INSERT INTO payroll_periods (client_id,period_key,period_start,period_end,pay_date,status,approval_status,cutoff_start,cutoff_end,created_by_user_id) VALUES (?1,?2,?3,?4,?5,'draft','not_required',?3,?4,?6)`).bind(clientId,periodKey,periodStart,periodEnd,payDate,Number(auth.user.id)).run();
+      createdId=Number(result.meta.last_row_id);
+      await recalculatePayrollPeriod(env,clientId,createdId);
+      await recordPayrollPeriodEvent(env.DB,clientId,createdId,Number(auth.user.id),'period_created',{period_key:periodKey,period_start:periodStart,period_end:periodEnd,pay_date:payDate,span_days:spanDays});
+      return json({ok:true,id:createdId,period:await getPayrollPeriodDetail(env.DB,clientId,createdId)},201);
+    }catch(error){
+      if(createdId) await env.DB.prepare(`DELETE FROM payroll_periods WHERE id=?1 AND client_id=?2 AND status='draft'`).bind(createdId,clientId).run().catch(()=>{});
+      if(/UNIQUE/i.test(String(error?.message||error))) return json({error:'มีรอบเงินเดือนเดือนนี้แล้ว',code:'PAYROLL_PERIOD_UNIQUE'},409);
+      return json({error:'คำนวณรอบเงินเดือนไม่สำเร็จ',detail:String(error?.message||error).slice(0,260),code:'PAYROLL_RECALCULATE_FAILED'},500);
+    }
   }
 
   const payrollPeriodMatch=path.match(/^\/api\/payroll\/periods\/(\d+)$/);
@@ -3181,6 +3471,64 @@ async function handleApi(request, env, url, auth, ctx) {
     const detail=await getPayrollPeriodDetail(env.DB,clientId,Number(payrollPeriodMatch[1]));
     if(!detail.period)return json({error:'ไม่พบรอบเงินเดือน'},404);
     return json(detail);
+  }
+
+  if(payrollPeriodMatch && method==='PATCH'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์แก้รอบเงินเดือน'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const id=Number(payrollPeriodMatch[1]);
+    const current=await env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(id,clientId).first();
+    if(!current)return json({error:'ไม่พบรอบเงินเดือน'},404);
+    if(!['draft','review'].includes(String(current.status||'')))return json({error:'แก้ไขได้เฉพาะรอบ Draft หรือรอตรวจเท่านั้น',code:'PAYROLL_PERIOD_EDIT_LOCKED'},409);
+    const body=await safeJson(request);
+    const periodKey=String(body.period_key??current.period_key);
+    const periodStart=String(body.period_start??current.period_start);
+    const periodEnd=String(body.period_end??current.period_end);
+    const payDate=String(body.pay_date??current.pay_date);
+    if(!/^\d{4}-\d{2}$/.test(periodKey))return json({error:'รอบเงินเดือนต้องเป็น YYYY-MM'},400);
+    if(!validPayrollDateKey(periodStart)||!validPayrollDateKey(periodEnd)||!validPayrollDateKey(payDate))return json({error:'วันที่รอบเงินเดือนหรือวันที่จ่ายไม่ถูกต้อง'},400);
+    if(periodStart>periodEnd)return json({error:'วันที่เริ่มรอบต้องไม่เกินวันที่สิ้นสุดรอบ'},400);
+    const spanDays=dateKeysInclusive(periodStart,periodEnd).length;
+    if(spanDays<1||spanDays>62)return json({error:'รอบเงินเดือนต้องมีช่วงเวลา 1–62 วัน'},400);
+    const duplicate=await env.DB.prepare(`SELECT id,period_key,status FROM payroll_periods WHERE client_id=?1 AND period_key=?2 AND id<>?3 LIMIT 1`).bind(clientId,periodKey,id).first();
+    if(duplicate)return json({error:`มีรอบ ${periodKey} อยู่แล้ว`,code:'PAYROLL_PERIOD_KEY_DUPLICATE',existing:duplicate},409);
+    const overlap=await env.DB.prepare(`SELECT id,period_key,period_start,period_end,status FROM payroll_periods WHERE client_id=?1 AND id<>?2 AND status!='void' AND period_start<=?3 AND period_end>=?4 LIMIT 1`).bind(clientId,id,periodEnd,periodStart).first();
+    if(overlap)return json({error:`ช่วงวันที่นี้ทับกับรอบ ${overlap.period_key} (${overlap.period_start} ถึง ${overlap.period_end})`,code:'PAYROLL_PERIOD_OVERLAP',overlap},409);
+    const before={period_key:current.period_key,period_start:current.period_start,period_end:current.period_end,pay_date:current.pay_date,status:current.status,approval_status:current.approval_status,approved_by_user_id:current.approved_by_user_id,approved_at:current.approved_at};
+    try{
+      await env.DB.prepare(`UPDATE payroll_periods SET period_key=?1,period_start=?2,period_end=?3,pay_date=?4,cutoff_start=?2,cutoff_end=?3,status='draft',approval_status='not_required',approved_by_user_id=NULL,approved_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?5 AND client_id=?6`).bind(periodKey,periodStart,periodEnd,payDate,id,clientId).run();
+      await recalculatePayrollPeriod(env,clientId,id);
+      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.period.edit','payroll_period',String(id),{before,after:{period_key:periodKey,period_start:periodStart,period_end:periodEnd,pay_date:payDate,status:'draft'}});
+      await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'period_edited',{before,after:{period_key:periodKey,period_start:periodStart,period_end:periodEnd,pay_date:payDate}});
+      return json({ok:true,id,period:await getPayrollPeriodDetail(env.DB,clientId,id)});
+    }catch(error){
+      await env.DB.prepare(`UPDATE payroll_periods SET period_key=?1,period_start=?2,period_end=?3,pay_date=?4,cutoff_start=?2,cutoff_end=?3,status=?5,approval_status=?6,approved_by_user_id=?7,approved_at=?8,updated_at=CURRENT_TIMESTAMP WHERE id=?9 AND client_id=?10`).bind(before.period_key,before.period_start,before.period_end,before.pay_date,before.status,before.approval_status||'not_required',before.approved_by_user_id||null,before.approved_at||null,id,clientId).run().catch(()=>{});
+      return json({error:'แก้ไขรอบเงินเดือนไม่สำเร็จ',detail:String(error?.message||error).slice(0,260),code:'PAYROLL_PERIOD_EDIT_FAILED'},500);
+    }
+  }
+
+  if(payrollPeriodMatch && method==='DELETE'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ลบรอบเงินเดือน'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const id=Number(payrollPeriodMatch[1]);
+    const current=await env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(id,clientId).first();
+    if(!current)return json({error:'ไม่พบรอบเงินเดือน'},404);
+    if(!['draft','review'].includes(String(current.status||'')))return json({error:'ลบได้เฉพาะรอบ Draft หรือรอตรวจเท่านั้น รอบที่ Lock/ส่งแล้วต้องเก็บเป็นประวัติ',code:'PAYROLL_PERIOD_DELETE_LOCKED'},409);
+    const docs=await env.DB.prepare(`SELECT COUNT(*) AS n FROM payroll_documents WHERE client_id=?1 AND period_id=?2`).bind(clientId,id).first();
+    if(Number(docs?.n||0)>0)return json({error:'รอบนี้มีเอกสาร Payslip แล้ว จึงลบไม่ได้',code:'PAYROLL_PERIOD_HAS_DOCUMENTS'},409);
+    const snapshot={period_key:current.period_key,period_start:current.period_start,period_end:current.period_end,pay_date:current.pay_date,status:current.status,employee_count:current.employee_count,gross_total:current.gross_total,deduction_total:current.deduction_total,net_total:current.net_total};
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.period.delete','payroll_period',String(id),snapshot);
+    try{
+      await env.DB.batch([
+        env.DB.prepare(`DELETE FROM payroll_period_events WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
+        env.DB.prepare(`DELETE FROM payroll_adjustments WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
+        env.DB.prepare(`DELETE FROM payroll_items WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
+        env.DB.prepare(`DELETE FROM payroll_periods WHERE client_id=?1 AND id=?2 AND status IN ('draft','review')`).bind(clientId,id)
+      ]);
+      return json({ok:true,id,deleted:true,period_key:current.period_key});
+    }catch(error){
+      return json({error:'ลบรอบเงินเดือนไม่สำเร็จ',detail:String(error?.message||error).slice(0,260),code:'PAYROLL_PERIOD_DELETE_FAILED'},500);
+    }
   }
 
   const payrollRecalcMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/recalculate$/);
@@ -3204,6 +3552,35 @@ async function handleApi(request, env, url, auth, ctx) {
     return json({ok:true,...await getPayrollPeriodDetail(env.DB,clientId,periodId)});
   }
 
+  const payrollCellMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/cell$/);
+  if(payrollCellMatch && method==='PUT'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์แก้ Payroll'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const periodId=Number(payrollCellMatch[1]); const period=await env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(periodId,clientId).first();
+    if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(!['draft','review'].includes(period.status))return json({error:'แก้ตารางได้เฉพาะ Draft / รอตรวจ'},409);
+    const b=await safeJson(request),employeeId=Number(b.employee_id),category=String(b.category||'').trim(); const amount=Math.max(0,num(b.amount,0));
+    const allowed={commission:['earning',1,0],kpi:['earning',1,0],incentive:['earning',1,0],bonus:['earning',1,0],other:['earning',1,0],other_deduction:['deduction',0,0],tax_add:['deduction',0,0],tax_reduce:['earning',0,0]};
+    if(!allowed[category])return json({error:'คอลัมน์นี้แก้จากตารางไม่ได้'},400); const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+    const [type,taxable,sso]=allowed[category],sourceKey=`grid:${category}`;
+    if(amount<=0)await env.DB.prepare(`DELETE FROM payroll_adjustments WHERE period_id=?1 AND employee_id=?2 AND client_id=?3 AND source_key=?4`).bind(periodId,employeeId,clientId,sourceKey).run();
+    else await env.DB.prepare(`INSERT INTO payroll_adjustments(client_id,period_id,employee_id,adjustment_type,category,amount,taxable,sso_contributable,note,source_key,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'แก้จาก Payroll Grid',?9,?10)
+      ON CONFLICT(period_id,employee_id,source_key) DO UPDATE SET adjustment_type=excluded.adjustment_type,category=excluded.category,amount=excluded.amount,taxable=excluded.taxable,sso_contributable=excluded.sso_contributable,note=excluded.note,created_by_user_id=excluded.created_by_user_id`).bind(clientId,periodId,employeeId,type,category,amount,taxable,sso,sourceKey,Number(auth.user.id)).run();
+    await recalculatePayrollPeriod(env,clientId,periodId); await recordPayrollPeriodEvent(env.DB,clientId,periodId,Number(auth.user.id),'grid_cell_updated',{employee_id:employeeId,category,amount});
+    return json({ok:true,...await getPayrollPeriodDetail(env.DB,clientId,periodId)});
+  }
+
+  const payrollBulkMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/bulk-adjustment$/);
+  if(payrollBulkMatch && method==='POST'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์แก้ Payroll'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const periodId=Number(payrollBulkMatch[1]); const period=await env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(periodId,clientId).first(); if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(!['draft','review'].includes(period.status))return json({error:'แก้ได้เฉพาะ Draft / รอตรวจ'},409);
+    const b=await safeJson(request),ids=[...new Set((Array.isArray(b.employee_ids)?b.employee_ids:[]).map(Number).filter(Boolean))]; if(!ids.length)return json({error:'กรุณาเลือกพนักงานอย่างน้อย 1 คน'},400);
+    const category=String(b.category||'other'),type=b.adjustment_type==='deduction'?'deduction':'earning',amount=Math.max(0,num(b.amount,0)); if(!amount)return json({error:'กรุณาระบุจำนวนเงิน'},400);
+    let applied=0; for(const employeeId of ids){const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)continue; await env.DB.prepare(`INSERT INTO payroll_adjustments(client_id,period_id,employee_id,adjustment_type,category,amount,taxable,sso_contributable,note,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`).bind(clientId,periodId,employeeId,type,category,amount,b.taxable===false?0:1,b.sso_contributable?1:0,b.note||'Bulk adjustment',Number(auth.user.id)).run();applied++;}
+    await recalculatePayrollPeriod(env,clientId,periodId); await recordPayrollPeriodEvent(env.DB,clientId,periodId,Number(auth.user.id),'bulk_adjustment',{category,amount,employees:applied});
+    return json({ok:true,applied,...await getPayrollPeriodDetail(env.DB,clientId,periodId)});
+  }
+
   const payrollAdjustmentDeleteMatch=path.match(/^\/api\/payroll\/adjustments\/(\d+)$/);
   if(payrollAdjustmentDeleteMatch && method==='DELETE'){
     if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ลบรายการเงินเดือน'},403);
@@ -3214,18 +3591,36 @@ async function handleApi(request, env, url, auth, ctx) {
 
   const payrollReviewMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/review$/);
   if(payrollReviewMatch && method==='POST'){
-    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ Review Payroll'},403); const id=Number(payrollReviewMatch[1]);
-    await env.DB.prepare(`UPDATE payroll_periods SET status='review',updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2 AND status='draft'`).bind(id,clientId).run(); return json({ok:true});
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ Review Payroll'},403); await ensurePayrollDefaults(env.DB,clientId); const id=Number(payrollReviewMatch[1]);
+    const settings=await env.DB.prepare(`SELECT * FROM payroll_settings WHERE client_id=?1`).bind(clientId).first();
+    const approval=Number(settings?.require_separate_approver||0)?'pending':'approved';
+    await env.DB.prepare(`UPDATE payroll_periods SET status='review',approval_status=?1,approved_by_user_id=CASE WHEN ?1='approved' THEN ?2 ELSE NULL END,approved_at=CASE WHEN ?1='approved' THEN CURRENT_TIMESTAMP ELSE NULL END,updated_at=CURRENT_TIMESTAMP WHERE id=?3 AND client_id=?4 AND status='draft'`).bind(approval,Number(auth.user.id),id,clientId).run();
+    await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'submitted_for_review',{approval_status:approval});
+    return json({ok:true,approval_status:approval});
+  }
+
+  const payrollApproveMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/approve$/);
+  if(payrollApproveMatch && method==='POST'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์อนุมัติ Payroll'},403); await ensurePayrollDefaults(env.DB,clientId); const id=Number(payrollApproveMatch[1]);
+    const [period,settings]=await Promise.all([env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(id,clientId).first(),env.DB.prepare(`SELECT * FROM payroll_settings WHERE client_id=?1`).bind(clientId).first()]);
+    if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(period.status!=='review')return json({error:'ต้องส่งรอบเข้าตรวจสอบก่อนอนุมัติ'},409);
+    if(Number(settings?.require_separate_approver||0) && Number(period.created_by_user_id||0)===Number(auth.user.id))return json({error:'บริษัทเปิด Maker–Checker ผู้สร้างรอบไม่สามารถเป็นผู้อนุมัติรอบเดียวกันได้'},409);
+    await env.DB.prepare(`UPDATE payroll_periods SET approval_status='approved',approved_by_user_id=?1,approved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(Number(auth.user.id),id,clientId).run();
+    await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'approved',{});
+    return json({ok:true});
   }
 
   const payrollLockMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/lock$/);
   if(payrollLockMatch && method==='POST'){
-    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ Lock Payroll'},403); const id=Number(payrollLockMatch[1]);
-    const period=await env.DB.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(period.status==='published')return json({error:'รอบนี้ Publish แล้ว'},409);
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ Lock Payroll'},403); await ensurePayrollDefaults(env.DB,clientId); const id=Number(payrollLockMatch[1]);
+    const [period,settings]=await Promise.all([env.DB.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(id,clientId).first(),env.DB.prepare('SELECT * FROM payroll_settings WHERE client_id=?1').bind(clientId).first()]);
+    if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(period.status==='published')return json({error:'รอบนี้ Publish แล้ว'},409);
+    if(Number(settings?.require_separate_approver||0) && period.approval_status!=='approved')return json({error:'รอบนี้ยังไม่ได้รับอนุมัติจาก Checker จึง Lock ไม่ได้'},409);
+    const detail=await getPayrollPeriodDetail(env.DB,clientId,id); const blocking=(detail.exceptions||[]).filter(x=>x.severity==='error');
+    if(blocking.length)return json({error:`ยัง Lock ไม่ได้ มี ${blocking.length} รายการที่ต้องแก้ก่อน`,exceptions:blocking},409);
     const count=await env.DB.prepare('SELECT COUNT(*) AS n FROM payroll_items WHERE period_id=?1').bind(id).first(); if(!Number(count?.n||0))return json({error:'ยังไม่มีรายการ Payroll ให้ Lock'},409);
     await env.DB.prepare(`UPDATE payroll_periods SET status='locked',locked_by_user_id=?1,locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(Number(auth.user.id),id,clientId).run();
     await env.DB.prepare(`UPDATE payroll_items SET status='locked',updated_at=CURRENT_TIMESTAMP WHERE period_id=?1`).bind(id).run();
-    const settings=await env.DB.prepare(`SELECT * FROM payroll_settings WHERE client_id=?1`).bind(clientId).first();
     let payslipQueued=false,payslipWarning=null;
     if(Number(settings?.auto_payslip_on_lock ?? 1)===1){
       const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
@@ -3236,7 +3631,21 @@ async function handleApi(request, env, url, auth, ctx) {
       }else payslipWarning='Lock สำเร็จ แต่ยังไม่ได้สร้างสลิปอัตโนมัติ เพราะยังไม่ได้เชื่อม Google Drive';
     }
     await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.lock','payroll_period',String(id),{auto_payslip:payslipQueued});
+    await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'locked',{auto_payslip:payslipQueued});
     return json({ok:true,payslip_queued:payslipQueued,warning:payslipWarning});
+  }
+
+  const payrollUnlockMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/unlock$/);
+  if(payrollUnlockMatch && method==='POST'){
+    if(!['owner','co_owner','hr_admin'].includes(String(auth.role||'')))return json({error:'เฉพาะ Owner / Co-Owner / HR Admin ที่ปลด Lock ได้'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const id=Number(payrollUnlockMatch[1]),b=await safeJson(request); const reason=String(b.reason||'').trim(); if(reason.length<5)return json({error:'กรุณาระบุเหตุผลการปลด Lock อย่างน้อย 5 ตัวอักษร'},400);
+    const period=await env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(id,clientId).first(); if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(period.status!=='locked')return json({error:'ปลด Lock ได้เฉพาะรอบที่ Lock และยังไม่ Publish'},409);
+    const delivered=await env.DB.prepare(`SELECT COUNT(*) n FROM payroll_documents WHERE period_id=?1 AND client_id=?2 AND (email_sent_at IS NOT NULL OR line_notified_at IS NOT NULL)`).bind(id,clientId).first(); if(Number(delivered?.n||0)>0)return json({error:'มี Payslip ถูกส่งให้พนักงานแล้ว จึงปลด Lock ไม่ได้ ให้ทำรอบปรับย้อนหลังแทน'},409);
+    await env.DB.prepare(`UPDATE payroll_periods SET status='review',locked_by_user_id=NULL,locked_at=NULL,approval_status='pending',payroll_note=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(`UNLOCK: ${reason}`,id,clientId).run();
+    await env.DB.prepare(`UPDATE payroll_items SET status='preview',updated_at=CURRENT_TIMESTAMP WHERE period_id=?1`).bind(id).run();
+    await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'unlocked',{reason});
+    return json({ok:true});
   }
 
 
@@ -3259,17 +3668,57 @@ async function handleApi(request, env, url, auth, ctx) {
     if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ Publish Payroll'},403); const id=Number(payrollPublishMatch[1]);
     const period=await env.DB.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(period.status!=='locked')return json({error:'ต้อง Lock Payroll ก่อน Publish'},409);
     const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first(); if(!workspace?.drive_folder_id)return json({error:'กรุณาเชื่อม Google ก่อน Publish Payslip'},409);
+    // Release gate: a payroll period must never become Published while a payslip is missing.
+    // Materialize every payslip first, verify coverage, then publish and notify employees.
+    const build=await publishPayrollPeriod(env,clientId,id,{notify:false});
+    const coverage=await payrollPayslipCoverage(env.DB,clientId,id);
+    if(coverage.missing>0){
+      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.publish_blocked','payroll_period',String(id),coverage);
+      return json({error:'ยังสร้าง Payslip ไม่ครบ จึงยัง Publish ไม่ได้',coverage,failures:build.failures||[]},409);
+    }
     await env.DB.prepare(`UPDATE payroll_periods SET status='published',published_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
     await env.DB.prepare(`UPDATE payroll_items SET status='published',updated_at=CURRENT_TIMESTAMP WHERE period_id=?1`).bind(id).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.publish','payroll_period',String(id),null);
-    const task=publishPayrollPeriod(env,clientId,id).catch(error=>console.error(JSON.stringify({level:'error',event:'payroll_publish_background_failed',period_id:id,message:String(error?.message||error)})));
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.publish','payroll_period',String(id),coverage);
+    await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'published',coverage);
+    const task=notifyPublishedPayrollPeriod(env,clientId,id).catch(error=>console.error(JSON.stringify({level:'error',event:'payroll_publish_notify_failed',period_id:id,message:String(error?.message||error)})));
     if(ctx?.waitUntil)ctx.waitUntil(task); else await task;
-    return json({ok:true,queued:true,message:'กำลังสร้าง Payslip ลง Drive และแจ้งพนักงาน'});
+    return json({ok:true,queued:true,coverage,message:'Publish สำเร็จ Payslip ครบแล้ว และกำลังแจ้งพนักงาน'});
+  }
+
+  const payrollBankExportMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/export\/bank\.csv$/);
+  if(payrollBankExportMatch && method==='GET'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ Export Payroll'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const id=Number(payrollBankExportMatch[1]),detail=await getPayrollPeriodDetail(env.DB,clientId,id); if(!detail.period)return json({error:'ไม่พบรอบเงินเดือน'},404);
+    if(!['locked','published'].includes(detail.period.status))return json({error:'ต้อง Lock รอบก่อน Export ไฟล์ธนาคาร'},409);
+    const rows=[['Employee Code','Employee Name','Bank','Account Name','Account Number','Net Pay','Pay Date','Period']];
+    for(const item of detail.items||[])rows.push([item.employee_code,`${item.first_name||''} ${item.last_name||''}`.trim(),item.bank_name||'',item.bank_account_name||`${item.first_name||''} ${item.last_name||''}`.trim(),item.bank_account_no||'',Number(item.net_pay||0).toFixed(2),detail.period.pay_date,detail.period.period_key]);
+    await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'bank_exported',{rows:Math.max(0,rows.length-1)});
+    return csvDownloadResponse(rows,`Nakna-Payroll-Bank-${detail.period.period_key}.csv`);
+  }
+
+  const payrollAccountingExportMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/export\/accounting\.csv$/);
+  if(payrollAccountingExportMatch && method==='GET'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ Export Payroll'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const id=Number(payrollAccountingExportMatch[1]),detail=await getPayrollPeriodDetail(env.DB,clientId,id); if(!detail.period)return json({error:'ไม่พบรอบเงินเดือน'},404);
+    const gross=(detail.items||[]).reduce((a,x)=>a+Number(x.gross_income||0),0),tax=(detail.items||[]).reduce((a,x)=>a+Number(x.withholding_tax||0),0),sso=(detail.items||[]).reduce((a,x)=>a+Number(x.social_security||0),0),employerSso=(detail.items||[]).reduce((a,x)=>a+Number(x.employer_social_security||0),0),otherDed=(detail.items||[]).reduce((a,x)=>a+Number(x.other_deductions||0)+Number(x.attendance_deduction||0),0),net=(detail.items||[]).reduce((a,x)=>a+Number(x.net_pay||0),0);
+    const rows=[['Date','Period','Account','Description','Debit','Credit'],[detail.period.pay_date,detail.period.period_key,'Salary Expense','Gross payroll',gross.toFixed(2),''],[detail.period.pay_date,detail.period.period_key,'Employer SSO Expense','Employer social security',employerSso.toFixed(2),''],[detail.period.pay_date,detail.period.period_key,'Withholding Tax Payable','Employee withholding tax','',tax.toFixed(2)],[detail.period.pay_date,detail.period.period_key,'Social Security Payable','Employee + Employer social security','',(sso+employerSso).toFixed(2)],[detail.period.pay_date,detail.period.period_key,'Other Payroll Deductions Payable','Attendance / other deductions','',otherDed.toFixed(2)],[detail.period.pay_date,detail.period.period_key,'Salary Payable','Net payroll payable','',net.toFixed(2)]];
+    await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'accounting_exported',{});
+    return csvDownloadResponse(rows,`Nakna-Payroll-Journal-${detail.period.period_key}.csv`);
   }
 
   if(path==='/api/documents' && method==='GET'){
-    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ดูเอกสารพนักงาน'},403); await ensureV100P3Ready(env.DB);
-    const rows=await env.DB.prepare(`SELECT d.*,e.employee_code,e.first_name,e.last_name,e.nickname FROM employee_documents d LEFT JOIN employees e ON e.id=d.employee_id WHERE d.client_id=?1 ORDER BY d.created_at DESC LIMIT 200`).bind(clientId).all();
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ดูเอกสารพนักงาน'},403);
+    await ensureDocumentWorkflowReady(env.DB);
+    const rows=await env.DB.prepare(`SELECT d.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.line_user_id,
+      (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='line_sent') AS line_sent_at,
+      (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='viewed') AS employee_viewed_at,
+      (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='delivery_failed') AS delivery_failed_at,
+      (SELECT ev.detail_json FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='delivery_failed' ORDER BY ev.id DESC LIMIT 1) AS delivery_error_json,
+      (SELECT a.acknowledged_pdf_url FROM document_acknowledgements a WHERE a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version LIMIT 1) AS final_signed_url,
+      (SELECT a.signed_at FROM document_acknowledgements a WHERE a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version LIMIT 1) AS final_signed_at
+      FROM employee_documents d LEFT JOIN employees e ON e.id=d.employee_id WHERE d.client_id=?1 ORDER BY d.created_at DESC LIMIT 200`).bind(clientId).all();
     const payslips=await env.DB.prepare(`SELECT pd.*,e.employee_code,e.first_name,e.last_name,e.nickname,pp.period_key FROM payroll_documents pd JOIN employees e ON e.id=pd.employee_id JOIN payroll_periods pp ON pp.id=pd.period_id WHERE pd.client_id=?1 ORDER BY pd.created_at DESC LIMIT 200`).bind(clientId).all();
     return json({data:rows.results||[],payslips:payslips.results||[]});
   }
@@ -3280,23 +3729,85 @@ async function handleApi(request, env, url, auth, ctx) {
     const document=await generateEmployeeCertificate(env,clientId,employeeId,type,Number(auth.user.id),body.note||null); return json({ok:true,document},201);
   }
 
+  // P8.15 — company-scoped template provisioning. Master definitions never contain tenant data;
+  // each company's templates are provisioned with variables resolved from that company's profile at PDF time.
+  async function ensureCompanyDocumentTemplates(actorUserId){
+    await ensureDocumentWorkflowReady(env.DB);
+    const company=await env.DB.prepare(`SELECT c.id,c.name,o.legal_name,o.tax_id,o.phone,o.address FROM clients c LEFT JOIN company_onboarding o ON o.client_id=c.id WHERE c.id=?1`).bind(clientId).first();
+    if(!company)throw httpError('ไม่พบบริษัท',404);
+    await env.DB.prepare(`INSERT OR IGNORE INTO company_document_settings(client_id,legal_name,tax_id,address,phone) VALUES(?1,?2,?3,?4,?5)`).bind(clientId,company.legal_name||company.name,company.tax_id||null,company.address||null,company.phone||null).run();
+    const defaults=[
+      ['EMP_CERT','หนังสือรับรองการทำงาน','employment_certificate','CERT',1,1,`เรียน {{document.recipient}}\n\n{{company.legal_name}} ขอรับรองว่า {{employee.full_name}} รหัสพนักงาน {{employee.employee_code}} เป็นพนักงานของบริษัท ปัจจุบันดำรงตำแหน่ง {{employee.position}} สังกัด {{employee.department}} โดยเริ่มปฏิบัติงานตั้งแต่วันที่ {{employee.start_date}} จนถึงปัจจุบัน\n\nวัตถุประสงค์ในการออกเอกสาร: {{document.purpose}}\n\nจึงออกหนังสือฉบับนี้ไว้เป็นหลักฐาน`],
+      ['SAL_CERT','หนังสือรับรองเงินเดือน','salary_certificate','SAL',1,1,`เรียน {{document.recipient}}\n\n{{company.legal_name}} ขอรับรองว่า {{employee.full_name}} รหัสพนักงาน {{employee.employee_code}} เป็นพนักงานของบริษัท ตำแหน่ง {{employee.position}} สังกัด {{employee.department}} เริ่มงานวันที่ {{employee.start_date}} และปัจจุบันได้รับเงินเดือนประจำ {{employee.salary}} บาทต่อเดือน\n\nวัตถุประสงค์ในการออกเอกสาร: {{document.purpose}}\n\nจึงออกหนังสือฉบับนี้ไว้เป็นหลักฐาน`],
+      ['PROB_PASS','หนังสือแจ้งผ่านทดลองงาน','probation_pass','PROB',1,1,`เรียน {{employee.full_name}}\nเรื่อง แจ้งผลการผ่านทดลองงาน\n\n{{company.legal_name}} ขอแจ้งให้ทราบว่าท่านผ่านการทดลองงานในตำแหน่ง {{employee.position}} สังกัด {{employee.department}} โดยมีผลตั้งแต่วันที่ {{document.effective_date}} เป็นต้นไป\n\nรายละเอียดเพิ่มเติม: {{document.note}}\n\nโปรดกดรับทราบเอกสารฉบับนี้ในระบบ Nakna HR`],
+      ['SAL_ADJ','หนังสือแจ้งปรับเงินเดือน','salary_adjustment','ADJ',1,1,`เรียน {{employee.full_name}}\nเรื่อง แจ้งปรับเงินเดือน\n\n{{company.legal_name}} ขอแจ้งการปรับเงินเดือนของท่านในตำแหน่ง {{employee.position}} โดยเงินเดือนใหม่เป็น {{document.new_salary}} บาทต่อเดือน มีผลตั้งแต่วันที่ {{document.effective_date}} เป็นต้นไป\n\nรายละเอียดเพิ่มเติม: {{document.note}}\n\nโปรดกดรับทราบเอกสารฉบับนี้ในระบบ Nakna HR`],
+      ['ACK_NOTICE','หนังสือ/ประกาศให้รับทราบ','acknowledgement','ACK',1,1,`เรียน {{employee.full_name}}\nเรื่อง {{document.subject}}\n\n{{document.note}}\n\n{{company.legal_name}} ขอให้ท่านอ่านรายละเอียดข้างต้นและกดรับทราบในระบบ Nakna HR การกดรับทราบหมายถึงได้รับและเห็นเอกสาร ไม่ได้หมายถึงการสละสิทธิ์ในการชี้แจง`],
+      ['WARNING','หนังสือเตือน','warning','WRN',1,1,`เรียน {{employee.full_name}}\nเรื่อง หนังสือเตือน\n\nตาม HR Case เลขที่ {{document.case_number}} บริษัทได้บันทึกเหตุการณ์ หลักฐาน และเปิดโอกาสให้พนักงานชี้แจงแล้ว โดยมีรายละเอียดที่ได้รับอนุมัติให้แจ้งดังนี้\n\n{{document.note}}\n\nโปรดกดรับทราบเอกสารฉบับนี้ พนักงานยังสามารถส่งคำชี้แจงผ่านระบบ Nakna HR ได้ และการรับทราบไม่ถือเป็นการยอมรับข้อกล่าวหา`]
+    ];
+    for(const x of defaults) await env.DB.prepare(`INSERT OR IGNORE INTO document_templates(client_id,code,name,document_type,numbering_prefix,approval_required,acknowledgement_required,body_template,automation_mode,visibility,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'assisted','employee',?9)`).bind(clientId,...x,Number(actorUserId||auth.user.id)).run();
+    return env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 AND active=1 ORDER BY name`).bind(clientId).all();
+  }
+
+  // P8.24 — Company document signature / branding settings.
+  if(path==='/api/document-settings' && method==='GET'){
+    if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูการตั้งค่าเอกสาร'},403);
+    await ensureDocumentWorkflowReady(env.DB);
+    await ensureCompanyDocumentTemplates(Number(auth.user.id));
+    const [settings,asset,company]=await Promise.all([
+      env.DB.prepare(`SELECT * FROM company_document_settings WHERE client_id=?1`).bind(clientId).first(),
+      env.DB.prepare(`SELECT logo_data_url FROM company_assets WHERE client_id=?1`).bind(clientId).first(),
+      env.DB.prepare(`SELECT c.name,o.legal_name,o.tax_id,o.address,o.phone FROM clients c LEFT JOIN company_onboarding o ON o.client_id=c.id WHERE c.id=?1`).bind(clientId).first()
+    ]);
+    return json({data:{...(settings||{}),company_name:company?.legal_name||company?.name||'',logo_data_url:asset?.logo_data_url||''}});
+  }
+
+  if(path==='/api/document-settings' && method==='PUT'){
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์แก้การตั้งค่าเอกสาร'},403);
+    await ensureDocumentWorkflowReady(env.DB);
+    const b=await safeJson(request);
+    const signerName=String(b.signer_name||'').trim().slice(0,180);
+    const signerPosition=String(b.signer_position||'').trim().slice(0,180);
+    const footer=String(b.document_footer||'').trim().slice(0,500);
+    const signature=String(b.signer_signature_data_url||'').trim();
+    if(signature && !/^data:image\/(png|jpeg);base64,/i.test(signature))return json({error:'ลายเซ็น HR รองรับเฉพาะ PNG หรือ JPG'},400);
+    if(signature.length>750000)return json({error:'ไฟล์ลายเซ็น HR มีขนาดใหญ่เกินไป กรุณาใช้ไฟล์ไม่เกินประมาณ 500 KB'},413);
+    const company=await env.DB.prepare(`SELECT c.name,o.legal_name,o.tax_id,o.address,o.phone FROM clients c LEFT JOIN company_onboarding o ON o.client_id=c.id WHERE c.id=?1`).bind(clientId).first();
+    await env.DB.prepare(`INSERT INTO company_document_settings(client_id,legal_name,tax_id,address,phone,signer_name,signer_position,signer_signature_data_url,document_footer,updated_at)
+      VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,CURRENT_TIMESTAMP)
+      ON CONFLICT(client_id) DO UPDATE SET signer_name=excluded.signer_name,signer_position=excluded.signer_position,signer_signature_data_url=excluded.signer_signature_data_url,document_footer=excluded.document_footer,updated_at=CURRENT_TIMESTAMP`)
+      .bind(clientId,company?.legal_name||company?.name||null,company?.tax_id||null,company?.address||null,company?.phone||null,signerName||null,signerPosition||null,signature||null,footer||null).run();
+    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json)
+      SELECT ?1,0,NULL,'user',?2,'document_settings_updated',?3 WHERE 1=1`).bind(clientId,Number(auth.user.id),JSON.stringify({signer_name:signerName||null,signer_position:signerPosition||null,has_signature:Boolean(signature)})).run().catch(()=>{});
+    return json({ok:true});
+  }
+
   // Nakna Document & Evidence System P8.02 — Phase 2-7
   if(path==='/api/document-system/overview' && method==='GET'){
     if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูศูนย์เอกสาร'},403);
-    const [summary,templates,pendingApprovals,pendingAck,cases,expiring]=await env.DB.batch([
-      env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN workflow_status='draft' THEN 1 ELSE 0 END) drafts,SUM(CASE WHEN approval_status='pending' THEN 1 ELSE 0 END) pending_approvals,SUM(CASE WHEN acknowledgement_status='pending' THEN 1 ELSE 0 END) pending_ack FROM employee_documents WHERE client_id=?1 AND COALESCE(status,'active')!='archived'`).bind(clientId),
-      env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 AND active=1 ORDER BY name`).bind(clientId),
-      env.DB.prepare(`SELECT da.*,d.title,d.document_number,e.first_name,e.last_name,e.nickname FROM document_approvals da JOIN employee_documents d ON d.id=da.document_id LEFT JOIN employees e ON e.id=d.employee_id WHERE da.client_id=?1 AND da.status='pending' ORDER BY da.created_at`).bind(clientId),
-      env.DB.prepare(`SELECT a.*,d.title,d.document_number,e.first_name,e.last_name,e.nickname FROM document_acknowledgements a JOIN employee_documents d ON d.id=a.document_id JOIN employees e ON e.id=a.employee_id WHERE a.client_id=?1 AND a.status IN ('pending','viewed') ORDER BY a.created_at`).bind(clientId),
-      env.DB.prepare(`SELECT c.*,e.first_name,e.last_name,e.nickname FROM hr_document_cases c JOIN employees e ON e.id=c.employee_id WHERE c.client_id=?1 AND c.status!='closed' ORDER BY c.created_at DESC LIMIT 50`).bind(clientId),
-      env.DB.prepare(`SELECT d.id,d.title,d.expires_at,e.first_name,e.last_name,e.nickname FROM employee_documents d LEFT JOIN employees e ON e.id=d.employee_id WHERE d.client_id=?1 AND d.expires_at IS NOT NULL AND date(d.expires_at)<=date('now','+30 day') AND COALESCE(d.status,'active')!='archived' ORDER BY d.expires_at`).bind(clientId)
+    await ensureDocumentWorkflowReady(env.DB);
+    await ensureCompanyDocumentTemplates(Number(auth.user.id));
+    const warnings=[];
+    const safeAll=async(label,statement)=>{try{return await statement.all();}catch(error){warnings.push({section:label,message:safeDbErrorDetail(error)});console.warn(JSON.stringify({level:'warn',event:'document_overview_section_failed',section:label,client_id:clientId,message:String(error?.message||error)}));return {results:[]};}};
+    const safeFirst=async(label,statement)=>{try{return await statement.first();}catch(error){warnings.push({section:label,message:safeDbErrorDetail(error)});console.warn(JSON.stringify({level:'warn',event:'document_overview_section_failed',section:label,client_id:clientId,message:String(error?.message||error)}));return {};}};
+    const [summary,templates,pendingApprovals,pendingAck,cases,expiring]=await Promise.all([
+      safeFirst('summary',env.DB.prepare(`SELECT COUNT(*) total,
+        SUM(CASE WHEN workflow_status='draft' THEN 1 ELSE 0 END) drafts,
+        SUM(CASE WHEN approval_status='pending' THEN 1 ELSE 0 END) pending_approvals,
+        SUM(CASE WHEN workflow_status='awaiting_employee_signature' THEN 1 ELSE 0 END) pending_employee_signatures,
+        SUM(CASE WHEN acknowledgement_status IN ('pending','viewed') THEN 1 ELSE 0 END) pending_ack
+        FROM employee_documents WHERE client_id=?1 AND COALESCE(status,'active')!='archived'`).bind(clientId)),
+      safeAll('templates',env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 AND active=1 ORDER BY name`).bind(clientId)),
+      safeAll('approvals',env.DB.prepare(`SELECT da.*,d.title,d.document_number,e.first_name,e.last_name,e.nickname FROM document_approvals da JOIN employee_documents d ON d.id=da.document_id LEFT JOIN employees e ON e.id=d.employee_id WHERE da.client_id=?1 AND da.status='pending' ORDER BY da.created_at`).bind(clientId)),
+      safeAll('acknowledgements',env.DB.prepare(`SELECT a.*,d.title,d.document_number,e.first_name,e.last_name,e.nickname FROM document_acknowledgements a JOIN employee_documents d ON d.id=a.document_id JOIN employees e ON e.id=a.employee_id WHERE a.client_id=?1 AND a.status IN ('pending','viewed') ORDER BY a.created_at`).bind(clientId)),
+      safeAll('cases',env.DB.prepare(`SELECT c.*,e.first_name,e.last_name,e.nickname FROM hr_document_cases c JOIN employees e ON e.id=c.employee_id WHERE c.client_id=?1 AND c.status!='closed' ORDER BY c.created_at DESC LIMIT 50`).bind(clientId)),
+      safeAll('expiring',env.DB.prepare(`SELECT d.id,d.title,d.expires_at,e.first_name,e.last_name,e.nickname FROM employee_documents d LEFT JOIN employees e ON e.id=d.employee_id WHERE d.client_id=?1 AND d.expires_at IS NOT NULL AND date(d.expires_at)<=date('now','+30 day') AND COALESCE(d.status,'active')!='archived' ORDER BY d.expires_at`).bind(clientId))
     ]);
-    return json({summary:summary.results?.[0]||{},templates:templates.results||[],pending_approvals:pendingApprovals.results||[],pending_acknowledgements:pendingAck.results||[],open_cases:cases.results||[],expiring:expiring.results||[]});
+    return json({summary:summary||{},templates:templates.results||[],pending_approvals:pendingApprovals.results||[],pending_acknowledgements:pendingAck.results||[],open_cases:cases.results||[],expiring:expiring.results||[],warnings});
   }
 
   if(path==='/api/document-templates' && method==='GET'){
     if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดู Template'},403);
-    const rows=await env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 ORDER BY active DESC,name`).bind(clientId).all(); return json({data:rows.results||[]});
+    await ensureCompanyDocumentTemplates(Number(auth.user.id)); const rows=await env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 ORDER BY active DESC,name`).bind(clientId).all(); return json({data:rows.results||[]});
   }
   if(path==='/api/document-templates' && method==='POST'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์สร้าง Template'},403); const b=await safeJson(request);
@@ -3308,52 +3819,304 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if(path==='/api/document-templates/seed' && method==='POST'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์'},403);
-    const defaults=[
-      ['EMP_CERT','หนังสือรับรองการทำงาน','employment_certificate','CERT',1,0,'ขอรับรองว่า {{employee.full_name}} ปฏิบัติงานในตำแหน่ง {{employee.position}} แผนก {{employee.department}} ตั้งแต่ {{employee.start_date}}'],
-      ['SAL_CERT','หนังสือรับรองเงินเดือน','salary_certificate','SAL',1,0,'ขอรับรองว่า {{employee.full_name}} ปฏิบัติงานในตำแหน่ง {{employee.position}} และมีเงินเดือนประจำ {{employee.salary}} บาทต่อเดือน'],
-      ['PROB_PASS','หนังสือผ่านทดลองงาน','probation_pass','PROB',1,1,'บริษัทขอแจ้งว่า {{employee.full_name}} ผ่านการทดลองงาน โดยมีผลวันที่ {{document.effective_date}}'],
-      ['SAL_ADJ','หนังสือปรับเงินเดือน','salary_adjustment','ADJ',1,1,'บริษัทขอแจ้งการปรับเงินเดือนของ {{employee.full_name}} โดยมีผลวันที่ {{document.effective_date}}'],
-      ['WARNING','หนังสือเตือน','warning','WRN',1,1,'หนังสือเตือนสำหรับ {{employee.full_name}}\nรายละเอียด: {{document.note}}']
-    ];
-    for(const x of defaults)await env.DB.prepare(`INSERT OR IGNORE INTO document_templates(client_id,code,name,document_type,numbering_prefix,approval_required,acknowledgement_required,body_template,automation_mode,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'assisted',?9)`).bind(clientId,...x,Number(auth.user.id)).run();
-    return json({ok:true});
+    const rows=await ensureCompanyDocumentTemplates(Number(auth.user.id));
+    return json({ok:true,data:rows.results||[]});
   }
 
   if(path==='/api/document-workflows/create' && method==='POST'){
-    if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ออกเอกสาร'},403); const b=await safeJson(request); const employeeId=Number(b.employee_id),templateId=Number(b.template_id);
-    const [employee,tpl]=await Promise.all([getEmployeeForClient(env.DB,employeeId,clientId),env.DB.prepare('SELECT * FROM document_templates WHERE id=?1 AND client_id=?2 AND active=1').bind(templateId,clientId).first()]); if(!employee||!tpl)return json({error:'ไม่พบพนักงานหรือ Template'},404);
-    const year=new Date(Date.now()+7*3600*1000).getUTCFullYear()+543; await env.DB.prepare(`INSERT INTO document_number_sequences(client_id,template_id,buddhist_year,last_number) VALUES(?1,?2,?3,1) ON CONFLICT(client_id,template_id,buddhist_year) DO UPDATE SET last_number=last_number+1`).bind(clientId,templateId,year).run(); const seq=await env.DB.prepare(`SELECT last_number FROM document_number_sequences WHERE client_id=?1 AND template_id=?2 AND buddhist_year=?3`).bind(clientId,templateId,year).first(); const num=`${tpl.numbering_prefix}-${year}-${String(seq.last_number).padStart(4,'0')}`;
-    const workflow=tpl.automation_mode==='automatic'&&!tpl.approval_required?'final':'draft'; const approval=tpl.approval_required?'pending':'not_required';
-    const r=await env.DB.prepare(`INSERT INTO employee_documents(client_id,employee_id,document_type,title,document_date,visibility,note,created_by_user_id,status,version,source,confidentiality,document_number,template_id,workflow_status,approval_status,acknowledgement_required,acknowledgement_status,final_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'active',1,'generated','internal',?9,?10,?11,?12,?13,?14,CASE WHEN ?11='final' THEN CURRENT_TIMESTAMP ELSE NULL END)`).bind(clientId,employeeId,tpl.document_type,tpl.name,dateInBangkok(),tpl.visibility,b.note||null,Number(auth.user.id),num,templateId,workflow,approval,Number(tpl.acknowledgement_required),tpl.acknowledgement_required?'pending':'not_required').run(); const docId=Number(r.meta.last_row_id);
-    if(tpl.approval_required)await env.DB.prepare(`INSERT INTO document_approvals(client_id,document_id,step_no,approver_role,status) VALUES(?1,?2,1,'hr','pending')`).bind(clientId,docId).run();
-    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'draft_created',?5)`).bind(clientId,docId,employeeId,Number(auth.user.id),JSON.stringify({template_id:templateId,document_number:num})).run(); return json({ok:true,id:docId,document_number:num,status:workflow},201);
+    if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ออกเอกสาร'},403);
+    let stage='request';
+    try{
+      const b=await safeJson(request);
+      const employeeId=Number(b.employee_id);
+      if(!employeeId)return json({error:'กรุณาเลือกพนักงาน'},400);
+      stage='employee';
+      const employee=await getEmployeeForClient(env.DB,employeeId,clientId);
+      if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+
+      stage='schema';
+      await ensureDocumentWorkflowReady(env.DB);
+      stage='templates';
+      await ensureCompanyDocumentTemplates(Number(auth.user.id));
+
+      const requestedCode=String(b.template_code||'').trim().toUpperCase()==='POLICY_ACK'?'ACK_NOTICE':String(b.template_code||'').trim().toUpperCase();
+      if(!requestedCode)return json({error:'กรุณาเลือกประเภทเอกสาร'},400);
+      stage='template_lookup';
+      let tpl=null;
+      if(Number(b.template_id)>0)tpl=await env.DB.prepare('SELECT * FROM document_templates WHERE id=?1 AND client_id=?2 AND active=1').bind(Number(b.template_id),clientId).first();
+      if(!tpl)tpl=await env.DB.prepare('SELECT * FROM document_templates WHERE code=?1 AND client_id=?2 AND active=1').bind(requestedCode,clientId).first();
+      if(!tpl)return json({error:'ไม่พบแบบฟอร์มเอกสารของบริษัท',detail:`template_code:${requestedCode}`},404);
+      if(String(tpl.code)==='WARNING')return json({error:'หนังสือเตือนต้องสร้างผ่าน HR Case เพื่อเก็บเหตุการณ์ หลักฐาน และคำชี้แจง'},409);
+
+      const data=(b.data&&typeof b.data==='object'&&!Array.isArray(b.data))?b.data:{};
+      if(String(tpl.code)==='SAL_ADJ'&&!(Number(data.new_salary)>0))return json({error:'กรุณาระบุเงินเดือนใหม่'},400);
+      if(String(tpl.code)==='ACK_NOTICE'&&!String(data.subject||'').trim())return json({error:'กรุณาระบุเรื่องของเอกสาร'},400);
+      if(String(tpl.code)==='ACK_NOTICE'&&!String(data.note||'').trim())return json({error:'กรุณาระบุรายละเอียดที่ต้องการให้พนักงานรับทราบ'},400);
+
+      const documentDate=String(data.issue_date||data.effective_date||dateInBangkok()).slice(0,10);
+      const note=String(data.note||data.purpose||data.subject||'').trim()||null;
+      const year=new Date(Date.now()+7*3600*1000).getUTCFullYear()+543;
+
+      stage='sequence';
+      await env.DB.prepare(`INSERT INTO document_number_sequences(client_id,template_id,buddhist_year,last_number)
+        VALUES(?1,?2,?3,1)
+        ON CONFLICT(client_id,template_id,buddhist_year)
+        DO UPDATE SET last_number=last_number+1`).bind(clientId,Number(tpl.id),year).run();
+      const seq=await env.DB.prepare(`SELECT last_number FROM document_number_sequences WHERE client_id=?1 AND template_id=?2 AND buddhist_year=?3`).bind(clientId,Number(tpl.id),year).first();
+      if(!seq?.last_number)throw new Error('DOCUMENT_SEQUENCE_NOT_CREATED');
+      const num=`${String(tpl.numbering_prefix||'DOC').toUpperCase()}-${year}-${String(seq.last_number).padStart(4,'0')}`;
+
+      const workflow=tpl.automation_mode==='automatic'&&!Number(tpl.approval_required)?'final':'draft';
+      const approval=Number(tpl.approval_required)?'pending':'not_required';
+      stage='document_insert';
+      const r=await env.DB.prepare(`INSERT INTO employee_documents(
+        client_id,employee_id,document_type,title,document_date,visibility,note,data_json,created_by_user_id,
+        status,version,source,confidentiality,document_number,template_id,workflow_status,approval_status,
+        acknowledgement_required,acknowledgement_status,final_at,hr_signature_status,employee_signature_status
+      ) VALUES(
+        ?1,?2,?3,?4,?5,?6,?7,?8,?9,
+        'active',1,'generated','internal',?10,?11,?12,?13,?14,?15,
+        CASE WHEN ?12='final' THEN CURRENT_TIMESTAMP ELSE NULL END,'pending',?16
+      )`).bind(
+        clientId,employeeId,tpl.document_type,tpl.name,documentDate,tpl.visibility||'employee',note,
+        JSON.stringify(data),Number(auth.user.id),num,Number(tpl.id),workflow,approval,
+        Number(tpl.acknowledgement_required||0),Number(tpl.acknowledgement_required)?'pending':'not_required',
+        Number(tpl.acknowledgement_required)?'pending':'not_required'
+      ).run();
+      const docId=Number(r?.meta?.last_row_id||0);
+      if(!docId)throw new Error('DOCUMENT_INSERT_NO_ID');
+
+      stage='workflow_records';
+      const statements=[];
+      if(Number(tpl.approval_required)) statements.push(
+        env.DB.prepare(`INSERT INTO document_approvals(client_id,document_id,step_no,approver_role,status) VALUES(?1,?2,1,'hr','pending')`).bind(clientId,docId)
+      );
+      statements.push(
+        env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json)
+          VALUES(?1,?2,?3,'user',?4,'draft_created',?5)`).bind(
+            clientId,docId,employeeId,Number(auth.user.id),JSON.stringify({template_id:Number(tpl.id),template_code:tpl.code,document_number:num,data})
+          )
+      );
+      await env.DB.batch(statements);
+      const loadCreatedDocument=()=>env.DB.prepare(`SELECT d.*,e.employee_code,e.first_name,e.last_name,e.nickname FROM employee_documents d LEFT JOIN employees e ON e.id=d.employee_id WHERE d.id=?1 AND d.client_id=?2`).bind(docId,clientId).first();
+
+      if(workflow==='final'){
+        stage='auto_finalize';
+        try{
+          const settings=await env.DB.prepare(`SELECT * FROM company_document_settings WHERE client_id=?1`).bind(clientId).first();
+          const signatureDataUrl=String(settings?.signer_signature_data_url||'').trim();
+          const parsed=signatureDataUrl?parsePdfImageDataUrl(signatureDataUrl):null;
+          if(!parsed)throw httpError('Automatic document ต้องตั้งค่าลายเซ็น HR ที่บันทึกไว้ก่อน',409);
+          const signerName=String(settings?.signer_name||auth.user?.name||auth.user?.email||'HR / ผู้มีอำนาจ').trim();
+          const signerPosition=String(settings?.signer_position||auth.role||'ฝ่ายทรัพยากรบุคคล').trim();
+          const signedAt=new Date().toISOString();
+          const signatureSha256=await sha256BytesHex(parsed.bytes);
+          const materialized=await materializeWorkflowDocument(env,clientId,docId,{approver_name:signerName,approver_role:signerPosition,signature_data_url:signatureDataUrl,hr_signed_at:signedAt});
+          const requiresEmployeeSignature=Number(tpl.acknowledgement_required)===1;
+          const nextWorkflow=requiresEmployeeSignature?'awaiting_employee_signature':'final';
+          await env.DB.prepare(`UPDATE employee_documents SET workflow_status=?1,approval_status='approved',hr_signature_status='signed',hr_signed_at=?2,hr_signer_user_id=?3,hr_signer_name=?4,hr_signer_position=?5,hr_signature_method='saved_signature',hr_signature_sha256=?6,employee_signature_status=?7,final_at=CASE WHEN ?1='final' THEN CURRENT_TIMESTAMP ELSE NULL END,updated_at=CURRENT_TIMESTAMP WHERE id=?8 AND client_id=?9`).bind(nextWorkflow,signedAt,Number(auth.user.id),signerName,signerPosition,signatureSha256,requiresEmployeeSignature?'pending':'not_required',docId,clientId).run();
+          if(requiresEmployeeSignature)await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',1)`).bind(clientId,docId,employeeId).run();
+          let delivery=null;
+          if(String(tpl.visibility||'employee')==='employee')delivery=await notifyEmployeeDocumentReady(env,clientId,docId).catch(error=>({ok:false,reason:'push_failed',message:String(error?.message||error)}));
+          await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'system',NULL,'auto_hr_signed',?4)`).bind(clientId,docId,employeeId,JSON.stringify({drive_url:materialized?.drive_url||null,delivery,next_workflow:nextWorkflow,signature_sha256:signatureSha256})).run();
+          const createdDocument=await loadCreatedDocument();
+          return json({ok:true,id:docId,document_number:num,status:nextWorkflow,document:createdDocument,...materialized,delivery},201);
+        }catch(error){
+          await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='pending',hr_signature_status='pending',final_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(docId,clientId).run().catch(()=>{});
+          await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','auto_finalize_failed',?4)`).bind(clientId,docId,employeeId,JSON.stringify({message:String(error?.message||error)})).run().catch(()=>{});
+          const createdDocument=await loadCreatedDocument();
+          return json({ok:true,id:docId,document_number:num,status:'draft',document:createdDocument,warning:'Automatic signature ยังไม่พร้อม เอกสารถูกเก็บเป็น Draft เพื่อให้ HR ตรวจและลงนาม'},201);
+        }
+      }
+      const createdDocument=await loadCreatedDocument();
+      return json({ok:true,id:docId,document_number:num,status:workflow,document:createdDocument},201);
+    }catch(error){
+      const detail=safeDbErrorDetail(error);
+      console.error(JSON.stringify({level:'error',event:'document_draft_create_failed',stage,client_id:clientId,user_id:Number(auth.user?.id||0),message:String(error?.message||error),detail}));
+      return json({error:'สร้าง Draft ไม่สำเร็จ',detail:`${stage}:${detail}`},500);
+    }
   }
 
   const docApprove=path.match(/^\/api\/document-workflows\/(\d+)\/approve$/);
   if(docApprove && method==='POST'){
-    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์อนุมัติ'},403); const id=Number(docApprove[1]); const b=await safeJson(request); const d=await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!d)return json({error:'ไม่พบเอกสาร'},404);
-    await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run();
-    await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
-    if(Number(d.acknowledgement_required))await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version,delivered_at) VALUES(?1,?2,?3,'pending',?4,CURRENT_TIMESTAMP)`).bind(clientId,id,d.employee_id,d.version||1).run();
-    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'approved',?5)`).bind(clientId,id,d.employee_id,Number(auth.user.id),JSON.stringify({note:b.note||null})).run(); return json({ok:true});
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ตรวจและลงนามเอกสาร'},403);
+    await ensureDocumentWorkflowReady(env.DB);
+    const id=Number(docApprove[1]);
+    const b=await safeJson(request);
+    const d=await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if(!d)return json({error:'ไม่พบเอกสาร'},404);
+    if(String(d.approval_status||'')==='approved' && ['awaiting_employee_signature','final'].includes(String(d.workflow_status||''))){
+      return json({ok:true,already_approved:true,workflow_status:d.workflow_status,drive_url:d.drive_url||null,file_name:d.file_name||null});
+    }
+    if(String(d.approval_status||'')!=='pending')return json({error:'เอกสารนี้ไม่ได้อยู่ในสถานะรอ HR ตรวจและลงนาม'},409);
+
+    const docSettings=await env.DB.prepare(`SELECT * FROM company_document_settings WHERE client_id=?1`).bind(clientId).first();
+    const submittedSignature=String(b.signature_data_url||'').trim();
+    const savedSignature=String(docSettings?.signer_signature_data_url||'').trim();
+    const useSaved=Boolean(b.use_saved_signature);
+    const signatureDataUrl=submittedSignature || (useSaved?savedSignature:'');
+    if(!signatureDataUrl)return json({error:'กรุณาลงลายเซ็น HR หรือเลือกใช้ลายเซ็นที่บันทึกไว้ก่อน'},400);
+    if(signatureDataUrl.length>750000)return json({error:'ลายเซ็น HR มีขนาดใหญ่เกินไป กรุณาลงลายเซ็นใหม่'},413);
+    const parsedSignature=parsePdfImageDataUrl(signatureDataUrl);
+    if(!parsedSignature)return json({error:'รูปแบบลายเซ็น HR ไม่ถูกต้อง กรุณาใช้ PNG/JPG หรือลงลายเซ็นใหม่'},400);
+
+    const signerName=String(docSettings?.signer_name||auth.user?.name||auth.user?.email||'HR / ผู้มีอำนาจ').trim();
+    const signerPosition=String(docSettings?.signer_position||auth.role||'ฝ่ายทรัพยากรบุคคล').trim();
+    const signatureMethod=submittedSignature?'drawn_signature':'saved_signature';
+    const signatureSha256=await sha256BytesHex(parsedSignature.bytes);
+    const signedAt=new Date().toISOString();
+
+    let materialized=null;
+    try{
+      materialized=await materializeWorkflowDocument(env,clientId,id,{
+        approver_name:signerName,
+        approver_role:signerPosition,
+        signature_data_url:signatureDataUrl,
+        hr_signed_at:signedAt
+      });
+    }catch(error){
+      const raw=String(error?.message||error||'').trim();
+      let message=raw || 'สร้าง PDF ไม่สำเร็จ';
+      let status=Number(error?.status||0);
+      if(raw.includes('GOOGLE_REAUTH_REQUIRED')){message='Google Drive หมดอายุหรือสิทธิ์ถูกยกเลิก กรุณาไปที่ การเชื่อมต่อ แล้วเชื่อม Google ใหม่';status=409;}
+      else if(raw.includes('Integration encryption key is not configured')){message='ระบบยังตั้งค่ากุญแจสำหรับ Google Integration ไม่ครบ กรุณาตรวจ Worker Secret';status=503;}
+      else if(/font fetch failed/i.test(raw)){message='ระบบโหลดฟอนต์สำหรับสร้าง PDF ไม่สำเร็จ กรุณาลองอีกครั้ง';status=502;}
+      else if(/Google Drive upload failed/i.test(raw)){message=`อัปโหลด PDF ไป Google Drive ไม่สำเร็จ · ${raw}`;status=502;}
+      else if(!status && /Google/.test(raw)){status=502;}
+      console.error(JSON.stringify({level:'error',event:'document_hr_sign_materialize_failed',client_id:clientId,document_id:id,user_id:Number(auth.user.id),message:raw}));
+      return json({error:message,stage:'hr_signature_pdf',document_id:id},status>=400&&status<=599?status:500);
+    }
+
+    const requiresEmployeeSignature=Number(d.acknowledgement_required)===1;
+    const nextWorkflow=requiresEmployeeSignature?'awaiting_employee_signature':'final';
+    const approvalResult=await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run();
+    await env.DB.prepare(`UPDATE employee_documents
+      SET workflow_status=?1,
+          approval_status='approved',
+          hr_signature_status='signed',
+          hr_signed_at=?2,
+          hr_signer_user_id=?3,
+          hr_signer_name=?4,
+          hr_signer_position=?5,
+          hr_signature_method=?6,
+          hr_signature_sha256=?7,
+          employee_signature_status=?8,
+          final_at=CASE WHEN ?1='final' THEN CURRENT_TIMESTAMP ELSE NULL END,
+          updated_at=CURRENT_TIMESTAMP
+      WHERE id=?9 AND client_id=?10`)
+      .bind(nextWorkflow,signedAt,Number(auth.user.id),signerName,signerPosition,signatureMethod,signatureSha256,requiresEmployeeSignature?'pending':'not_required',id,clientId).run();
+
+    if(requiresEmployeeSignature){
+      await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();
+    }
+
+    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json)
+      VALUES(?1,?2,?3,'user',?4,'hr_signed',?5)`)
+      .bind(clientId,id,d.employee_id,Number(auth.user.id),JSON.stringify({
+        note:b.note||null,
+        signer_name:signerName,
+        signer_position:signerPosition,
+        signature_method:signatureMethod,
+        signature_sha256:signatureSha256,
+        signed_at:signedAt,
+        drive_url:materialized?.drive_url||null,
+        file_name:materialized?.file_name||null,
+        approval_changes:Number(approvalResult?.meta?.changes||0),
+        next_workflow:nextWorkflow
+      })).run();
+
+    let delivery=null;
+    if(String(d.visibility||'')==='employee'){
+      delivery=await notifyEmployeeDocumentReady(env,clientId,id).catch(error=>({ok:false,reason:'push_failed',message:String(error?.message||error)}));
+    }
+    if(requiresEmployeeSignature){
+      await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json)
+        VALUES(?1,?2,?3,'system','employee_signature_requested',?4)`)
+        .bind(clientId,id,d.employee_id,JSON.stringify({delivery,document_version:Number(d.version||1)})).run().catch(()=>{});
+    }
+    return json({ok:true,...materialized,delivery,workflow_status:nextWorkflow,hr_signed_at:signedAt,requires_employee_signature:requiresEmployeeSignature});
   }
 
   const docReject=path.match(/^\/api\/document-workflows\/(\d+)\/reject$/);
   if(docReject && method==='POST'){
-    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const id=Number(docReject[1]); const b=await safeJson(request); await env.DB.prepare(`UPDATE document_approvals SET status='rejected',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='rejected',updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run(); return json({ok:true});
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403);
+    const id=Number(docReject[1]); const b=await safeJson(request);
+    await env.DB.prepare(`UPDATE document_approvals SET status='rejected',approver_user_id=?1,note=?2,acted_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4 AND status='pending'`).bind(Number(auth.user.id),b.note||null,id,clientId).run();
+    await env.DB.prepare(`UPDATE employee_documents SET workflow_status='draft',approval_status='rejected',hr_signature_status='pending',hr_signed_at=NULL,hr_signer_user_id=NULL,hr_signer_name=NULL,hr_signer_position=NULL,hr_signature_method=NULL,hr_signature_sha256=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
+    return json({ok:true});
   }
 
   if(path==='/api/document-workflows/bulk-approve' && method==='POST'){
-    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const b=await safeJson(request); const ids=(Array.isArray(b.ids)?b.ids:[]).map(Number).filter(Boolean).slice(0,200); let approved=0; for(const id of ids){const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND approval_status='pending'`).bind(id,clientId).first(); if(!d)continue; await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,acted_at=CURRENT_TIMESTAMP WHERE document_id=?2 AND client_id=?3 AND status='pending'`).bind(Number(auth.user.id),id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET workflow_status='final',approval_status='approved',final_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(id).run(); if(Number(d.acknowledgement_required))await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version,delivered_at) VALUES(?1,?2,?3,'pending',?4,CURRENT_TIMESTAMP)`).bind(clientId,id,d.employee_id,d.version||1).run(); approved++;} return json({ok:true,approved});
+    if(!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์'},403);
+    const b=await safeJson(request);
+    const ids=(Array.isArray(b.ids)?b.ids:[]).map(Number).filter(Boolean).slice(0,200);
+    const settings=await env.DB.prepare(`SELECT * FROM company_document_settings WHERE client_id=?1`).bind(clientId).first();
+    const signatureDataUrl=String(settings?.signer_signature_data_url||'').trim();
+    const parsed=signatureDataUrl?parsePdfImageDataUrl(signatureDataUrl):null;
+    if(!parsed)return json({error:'การลงนามหลายเอกสารต้องตั้งค่าลายเซ็น HR ที่บันทึกไว้ก่อน'},409);
+    const signerName=String(settings?.signer_name||auth.user?.name||auth.user?.email||'HR / ผู้มีอำนาจ').trim();
+    const signerPosition=String(settings?.signer_position||auth.role||'ฝ่ายทรัพยากรบุคคล').trim();
+    const signatureSha256=await sha256BytesHex(parsed.bytes);
+    let approved=0,failed=0;
+    for(const id of ids){
+      const d=await env.DB.prepare(`SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2 AND approval_status='pending'`).bind(id,clientId).first();
+      if(!d)continue;
+      const signedAt=new Date().toISOString();
+      let materialized;
+      try{
+        materialized=await materializeWorkflowDocument(env,clientId,id,{approver_name:signerName,approver_role:signerPosition,signature_data_url:signatureDataUrl,hr_signed_at:signedAt});
+      }catch(error){failed++;continue;}
+      const requiresEmployeeSignature=Number(d.acknowledgement_required)===1;
+      const nextWorkflow=requiresEmployeeSignature?'awaiting_employee_signature':'final';
+      await env.DB.prepare(`UPDATE document_approvals SET status='approved',approver_user_id=?1,acted_at=CURRENT_TIMESTAMP WHERE document_id=?2 AND client_id=?3 AND status='pending'`).bind(Number(auth.user.id),id,clientId).run();
+      await env.DB.prepare(`UPDATE employee_documents SET workflow_status=?1,approval_status='approved',hr_signature_status='signed',hr_signed_at=?2,hr_signer_user_id=?3,hr_signer_name=?4,hr_signer_position=?5,hr_signature_method='saved_signature',hr_signature_sha256=?6,employee_signature_status=?7,final_at=CASE WHEN ?1='final' THEN CURRENT_TIMESTAMP ELSE NULL END,updated_at=CURRENT_TIMESTAMP WHERE id=?8 AND client_id=?9`)
+        .bind(nextWorkflow,signedAt,Number(auth.user.id),signerName,signerPosition,signatureSha256,requiresEmployeeSignature?'pending':'not_required',id,clientId).run();
+      if(requiresEmployeeSignature)await env.DB.prepare(`INSERT OR IGNORE INTO document_acknowledgements(client_id,document_id,employee_id,status,document_version) VALUES(?1,?2,?3,'pending',?4)`).bind(clientId,id,d.employee_id,d.version||1).run();
+      await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'hr_signed',?5)`).bind(clientId,id,d.employee_id,Number(auth.user.id),JSON.stringify({signature_method:'saved_signature',signature_sha256:signatureSha256,signed_at:signedAt,next_workflow:nextWorkflow,drive_url:materialized?.drive_url||null})).run().catch(()=>{});
+      if(String(d.visibility||'')==='employee')await notifyEmployeeDocumentReady(env,clientId,id).catch(()=>({ok:false}));
+      approved++;
+    }
+    return json({ok:true,approved,failed});
   }
 
   const docAck=path.match(/^\/api\/document-workflows\/(\d+)\/acknowledge$/);
   if(docAck && method==='POST'){
-    const id=Number(docAck[1]),b=await safeJson(request); const d=await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!d)return json({error:'ไม่พบเอกสาร'},404); const response=String(b.response_text||'').trim(); const status=response?'responded':'acknowledged'; await env.DB.prepare(`UPDATE document_acknowledgements SET status=?1,viewed_at=COALESCE(viewed_at,CURRENT_TIMESTAMP),acknowledged_at=CURRENT_TIMESTAMP,response_text=?2,updated_at=CURRENT_TIMESTAMP WHERE document_id=?3 AND client_id=?4`).bind(status,response||null,id,clientId).run(); await env.DB.prepare(`UPDATE employee_documents SET acknowledgement_status=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(status,id,clientId).run(); await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,?5,?6)`).bind(clientId,id,d.employee_id,Number(auth.user.id),status,JSON.stringify({response_text:response||null})).run(); return json({ok:true,status});
+    // Dashboard users must never be able to acknowledge on behalf of an employee.
+    return json({error:'การรับทราบต้องดำเนินการจากหน้าพนักงานผ่านลิงก์ส่วนตัวใน LINE'},403);
   }
 
+  if(path==='/api/hr-document-cases' && method==='GET'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดู Case'},403);
+    const rows=await env.DB.prepare(`SELECT c.*,e.employee_code,e.first_name,e.last_name,e.nickname,d.document_number AS warning_document_number,d.workflow_status AS warning_workflow_status,d.acknowledgement_status AS warning_acknowledgement_status FROM hr_document_cases c JOIN employees e ON e.id=c.employee_id LEFT JOIN employee_documents d ON d.id=c.warning_document_id WHERE c.client_id=?1 ORDER BY CASE c.status WHEN 'open' THEN 1 WHEN 'waiting_employee' THEN 2 WHEN 'in_review' THEN 3 ELSE 4 END,c.updated_at DESC LIMIT 200`).bind(clientId).all();
+    return json({data:rows.results||[]});
+  }
   if(path==='/api/hr-document-cases' && method==='POST'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์เปิด Case'},403); const b=await safeJson(request); const employeeId=Number(b.employee_id); if(!await getEmployeeForClient(env.DB,employeeId,clientId))return json({error:'ไม่พบพนักงาน'},404); const y=new Date(Date.now()+7*3600*1000).getUTCFullYear(); const c=await env.DB.prepare(`SELECT COUNT(*) n FROM hr_document_cases WHERE client_id=?1 AND case_number LIKE ?2`).bind(clientId,`NK-${y}-%`).first(); const caseNo=`NK-${y}-${String(Number(c?.n||0)+1).padStart(4,'0')}`; const r=await env.DB.prepare(`INSERT INTO hr_document_cases(client_id,case_number,employee_id,case_type,title,incident_date,description,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)`).bind(clientId,caseNo,employeeId,String(b.case_type||'general'),String(b.title||'HR Case'),b.incident_date||dateInBangkok(),b.description||null,Number(auth.user.id)).run(); await env.DB.prepare(`INSERT INTO hr_document_case_events(client_id,case_id,actor_user_id,event_type,detail) VALUES(?1,?2,?3,'case_created',?4)`).bind(clientId,Number(r.meta.last_row_id),Number(auth.user.id),b.description||null).run(); return json({ok:true,id:Number(r.meta.last_row_id),case_number:caseNo},201);
+  }
+  const docCaseDetail=path.match(/^\/api\/hr-document-cases\/(\d+)$/);
+  if(docCaseDetail && method==='GET'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดู Case'},403); const id=Number(docCaseDetail[1]);
+    const row=await env.DB.prepare(`SELECT c.*,e.employee_code,e.first_name,e.last_name,e.nickname,d.document_number AS warning_document_number,d.workflow_status AS warning_workflow_status,d.acknowledgement_status AS warning_acknowledgement_status FROM hr_document_cases c JOIN employees e ON e.id=c.employee_id LEFT JOIN employee_documents d ON d.id=c.warning_document_id WHERE c.id=?1 AND c.client_id=?2`).bind(id,clientId).first(); if(!row)return json({error:'ไม่พบ Case'},404);
+    const [events,documents]=await env.DB.batch([env.DB.prepare(`SELECT * FROM hr_document_case_events WHERE case_id=?1 ORDER BY created_at,id`).bind(id),env.DB.prepare(`SELECT d.id,d.document_number,d.title,d.workflow_status,d.approval_status,d.acknowledgement_status,d.drive_url,d.version FROM hr_document_case_documents x JOIN employee_documents d ON d.id=x.document_id WHERE x.case_id=?1 ORDER BY d.created_at`).bind(id)]);
+    return json({data:row,events:events.results||[],documents:documents.results||[]});
+  }
+  const caseRequestResponse=path.match(/^\/api\/hr-document-cases\/(\d+)\/request-response$/);
+  if(caseRequestResponse && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์'},403); const id=Number(caseRequestResponse[1]),b=await safeJson(request); const detail=String(b.detail||'กรุณาชี้แจงเหตุการณ์นี้').trim();
+    const c=await env.DB.prepare('SELECT id FROM hr_document_cases WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!c)return json({error:'ไม่พบ Case'},404);
+    await env.DB.batch([env.DB.prepare(`UPDATE hr_document_cases SET status='waiting_employee',employee_response_status='requested',updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId),env.DB.prepare(`INSERT INTO hr_document_case_events(client_id,case_id,actor_user_id,event_type,detail) VALUES(?1,?2,?3,'response_requested',?4)`).bind(clientId,id,Number(auth.user.id),detail)]);
+    await notifyEmployeeCaseResponseRequested(env,clientId,id,detail).catch(error=>console.warn(JSON.stringify({level:'warn',event:'case_response_line_notify_failed',case_id:id,message:String(error?.message||error)})));
+    return json({ok:true});
+  }
+  const caseWarning=path.match(/^\/api\/hr-document-cases\/(\d+)\/warning$/);
+  if(caseWarning && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ออกใบเตือน'},403); const id=Number(caseWarning[1]),b=await safeJson(request);
+    const c=await env.DB.prepare('SELECT * FROM hr_document_cases WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!c)return json({error:'ไม่พบ Case'},404); if(c.warning_document_id)return json({error:'Case นี้มีใบเตือนแล้ว'},409);
+    let tpl=await env.DB.prepare(`SELECT * FROM document_templates WHERE client_id=?1 AND code='WARNING' AND active=1`).bind(clientId).first(); if(!tpl)return json({error:'กรุณาติดตั้ง Template มาตรฐานก่อนออกใบเตือน'},409);
+    const year=new Date(Date.now()+7*3600*1000).getUTCFullYear()+543; await env.DB.prepare(`INSERT INTO document_number_sequences(client_id,template_id,buddhist_year,last_number) VALUES(?1,?2,?3,1) ON CONFLICT(client_id,template_id,buddhist_year) DO UPDATE SET last_number=last_number+1`).bind(clientId,tpl.id,year).run(); const seq=await env.DB.prepare(`SELECT last_number FROM document_number_sequences WHERE client_id=?1 AND template_id=?2 AND buddhist_year=?3`).bind(clientId,tpl.id,year).first(); const num=`${tpl.numbering_prefix}-${year}-${String(seq.last_number).padStart(4,'0')}`;
+    const note=String(b.note||c.description||c.title||'').trim(); const r=await env.DB.prepare(`INSERT INTO employee_documents(client_id,employee_id,document_type,title,document_date,visibility,note,created_by_user_id,status,version,source,confidentiality,document_number,template_id,workflow_status,approval_status,acknowledgement_required,acknowledgement_status,hr_signature_status,employee_signature_status) VALUES(?1,?2,'warning',?3,?4,'employee',?5,?6,'active',1,'generated','confidential',?7,?8,'draft','pending',1,'pending','pending','pending')`).bind(clientId,c.employee_id,`หนังสือเตือน · ${c.title}`,dateInBangkok(),note,Number(auth.user.id),num,tpl.id).run(); const docId=Number(r.meta.last_row_id);
+    await env.DB.batch([env.DB.prepare(`INSERT INTO document_approvals(client_id,document_id,step_no,approver_role,status) VALUES(?1,?2,1,'hr','pending')`).bind(clientId,docId),env.DB.prepare(`INSERT INTO hr_document_case_documents(case_id,document_id) VALUES(?1,?2)`).bind(id,docId),env.DB.prepare(`UPDATE hr_document_cases SET warning_document_id=?1,status='in_review',updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(docId,id,clientId),env.DB.prepare(`INSERT INTO hr_document_case_events(client_id,case_id,actor_user_id,event_type,detail) VALUES(?1,?2,?3,'warning_drafted',?4)`).bind(clientId,id,Number(auth.user.id),num),env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'user',?4,'draft_created',?5)`).bind(clientId,docId,c.employee_id,Number(auth.user.id),JSON.stringify({case_id:id,document_number:num}))]);
+    return json({ok:true,document_id:docId,document_number:num},201);
   }
   const caseEvent=path.match(/^\/api\/hr-document-cases\/(\d+)\/events$/);
   if(caseEvent && method==='POST'){
@@ -3996,9 +4759,16 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
   const candidates = candidatesRes.results || [];
   const requests = requestsRes.results || [];
   await ensureDashboardAttentionReady(db);
-  const [hrCasesOpenRes,attentionReadRes]=await Promise.all([
+  const [hrCasesOpenRes,attentionReadRes,latestPayroll,documentSummary]=await Promise.all([
     includeHrCases ? db.prepare(`SELECT id,created_at FROM hr_cases WHERE client_id=?1 AND status NOT IN ('resolved','closed')`).bind(clientId).all().catch(()=>({results:[]})) : Promise.resolve({results:[]}),
     userId ? db.prepare(`SELECT attention_key,item_key FROM dashboard_attention_reads WHERE client_id=?1 AND user_id=?2`).bind(clientId,Number(userId)).all().catch(()=>({results:[]})) : Promise.resolve({results:[]}),
+    db.prepare(`SELECT id,period_key,period_start,period_end,pay_date,status,employee_count,gross_total,net_total,approval_status FROM payroll_periods WHERE client_id=?1 AND status!='void' ORDER BY period_end DESC,id DESC LIMIT 1`).bind(clientId).first().catch(()=>null),
+    db.prepare(`SELECT
+      COALESCE(SUM(CASE WHEN approval_status='pending' THEN 1 ELSE 0 END),0) AS pending_hr_sign,
+      COALESCE(SUM(CASE WHEN workflow_status='awaiting_employee_signature' THEN 1 ELSE 0 END),0) AS pending_employee_sign,
+      COALESCE(SUM(CASE WHEN workflow_status='final' THEN 1 ELSE 0 END),0) AS final_total
+      FROM employee_documents
+      WHERE client_id=?1 AND COALESCE(status,'active')!='archived'`).bind(clientId).first().catch(()=>({pending_hr_sign:0,pending_employee_sign:0,final_total:0})),
   ]);
   const hrCasesOpen = hrCasesOpenRes.results || [];
   const attentionReadSet=new Set((attentionReadRes.results||[]).map(r=>`${String(r.attention_key)}|${String(r.item_key)}`));
@@ -4072,6 +4842,17 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
     requests: requests.slice(0, 6),
     hr_cases_open: hrCasesOpen.length,
     recent_attendance: attendance.slice(0, 8),
+    payroll: latestPayroll ? {
+      id: Number(latestPayroll.id), period_key: latestPayroll.period_key, period_start: latestPayroll.period_start,
+      period_end: latestPayroll.period_end, pay_date: latestPayroll.pay_date, status: latestPayroll.status,
+      approval_status: latestPayroll.approval_status || 'not_required', employee_count: Number(latestPayroll.employee_count||0),
+      gross_total: Number(latestPayroll.gross_total||0), net_total: Number(latestPayroll.net_total||0)
+    } : null,
+    documents: {
+      pending_hr_sign: Number(documentSummary?.pending_hr_sign||0),
+      pending_employee_sign: Number(documentSummary?.pending_employee_sign||0),
+      final_total: Number(documentSummary?.final_total||0)
+    },
   };
 }
 
@@ -4288,6 +5069,7 @@ async function processLineEvent(event, env, lineCtx) {
     if(['สิทธิ์ลา','วันลา','leave balance'].includes(lower)) return sendLeaveBalance(env,event.replyToken,emp,accessToken);
     if(['วันหยุด','holiday','holidays','วันหยุดบริษัท'].includes(lower)) return sendCompanyHolidays(env,event.replyToken,emp,accessToken);
     if(['คำขอของฉัน','my requests','คำขอ','สถานะคำขอ'].includes(lower)) return sendEmployeeServiceHistory(env,event.replyToken,emp,accessToken);
+    if(['เอกสาร','เอกสารของฉัน','my documents','documents','สลิป','สลิปเงินเดือน'].includes(lower)) return sendEmployeeDocumentsPortal(env,event.replyToken,emp,accessToken);
     if(['เรียน','เรียนรู้','onboarding','learning','kpi','kpi ของฉัน','เป้าหมาย'].includes(lower)) return sendLearningPortal(env,event.replyToken,emp,accessToken);
     if(['แต้ม','คะแนน','ของรางวัล','reward','rewards','points','อันดับ'].includes(lower)) return sendEngagementPortal(env,event.replyToken,emp,accessToken);
     if(['ยืด','ยืดเส้น','พักยืด','stretch','wellness','move'].includes(lower)) return sendWellnessPortal(env,event.replyToken,emp,accessToken);
@@ -4395,6 +5177,7 @@ async function processLineEvent(event, env, lineCtx) {
     if(action==='leave_balance') return sendLeaveBalance(env,event.replyToken,emp,accessToken);
     if(action==='holidays') return sendCompanyHolidays(env,event.replyToken,emp,accessToken);
     if(action==='my_requests') return sendEmployeeServiceHistory(env,event.replyToken,emp,accessToken);
+    if(action==='documents') return sendEmployeeDocumentsPortal(env,event.replyToken,emp,accessToken);
     if(action==='learning') return sendLearningPortal(env,event.replyToken,emp,accessToken);
     if(action==='rewards') return sendEngagementPortal(env,event.replyToken,emp,accessToken);
     if(action==='hr_case'){ return sendHrCaseForm(env,event.replyToken,emp,accessToken); }
@@ -4870,13 +5653,31 @@ async function acceptPublicInvite(request, env, token) {
     console.warn(JSON.stringify({ level: 'warn', event: 'line_bot_info_failed', message: String(error?.message || error) }));
   }
 
-  await safeAudit(env.DB, Number(invite.client_id), 'public_invite', String(employeeId), 'employee.self_onboard', 'employee', String(employeeId), { invite_id: Number(invite.id) });
+  let faceEnrollment={enabled:false,mode:'off',required:false,recommended:false,system_ready:true,token:lineToken,photos_stored:false};
+  try{
+    const faceSettings=await getAttendanceFaceSettings(env,Number(invite.client_id));
+    faceEnrollment={
+      enabled:faceSettings.mode!=='off',
+      mode:faceSettings.mode,
+      required:faceSettings.mode==='required',
+      recommended:faceSettings.mode==='enroll',
+      system_ready:faceSettings.mode==='off'||faceSettings.encryption_ready,
+      token:lineToken,
+      photos_stored:false,
+      template_encrypted:true,
+    };
+  }catch(error){
+    console.warn(JSON.stringify({level:'warn',event:'invite_face_enrollment_status_failed',client_id:Number(invite.client_id),employee_id:employeeId,message:String(error?.message||error)}));
+  }
+
+  await safeAudit(env.DB, Number(invite.client_id), 'public_invite', String(employeeId), 'employee.self_onboard', 'employee', String(employeeId), { invite_id: Number(invite.id), face_mode: faceEnrollment.mode });
   return json({
     ok: true,
     employee: { id: employeeId, employee_code: employeeCode, name: nickname || firstName, company_name: invite.company_name },
     line_connect_url: lineConnectUrl,
     line_command: `JOIN ${lineToken}`,
     line_token_expires_at: lineExpiresAt,
+    face_enrollment: faceEnrollment,
   }, 201);
 }
 
@@ -5148,12 +5949,49 @@ function lineManagementRoleLabel(role){
   return 'ผู้ดูแล';
 }
 
+async function findLineManagementAccessViaEmployeeIdentity(db,providerScope,lineUserId,preferredClientId=null){
+  const preferred=Number(preferredClientId||0);
+  // Important: a LINE-linked employee may have a legacy/synthetic users row while the
+  // real Owner/HR membership lives on the Google/Nakna user that shares the employee email.
+  // Resolve that canonical account without granting access by company membership alone.
+  // The match requires the LINE-linked employee AND the same verified employee email.
+  return db.prepare(`SELECT u.id AS user_id,c.id,c.name,c.code,m.role
+    FROM employees e
+    JOIN users u ON LOWER(u.email)=LOWER(e.email) AND u.status='active'
+    JOIN company_members m ON m.user_id=u.id AND m.client_id=e.client_id AND m.status='active'
+    JOIN clients c ON c.id=m.client_id
+    WHERE e.line_user_id=?1 AND COALESCE(e.line_provider_scope,'default')=?2
+      AND e.status='active' AND e.email IS NOT NULL AND TRIM(e.email)<>''
+      AND m.role IN ('owner','co_owner','hr_admin','hr','payroll_admin','manager','approver')
+    ORDER BY CASE WHEN c.id=?3 THEN 0 ELSE 1 END,m.id DESC LIMIT 1`)
+    .bind(String(lineUserId),String(providerScope||'default'),preferred).first().catch(()=>null);
+}
+
 async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId,preferredClientId=null){
   const providerScope=String(lineCtx?.providerScope||'default');
   let user=await findLineBusinessUser(env.DB,providerScope,lineUserId).catch(()=>null);
+  let memberships=[];
+  let managed=[];
+
+  if(user?.id){
+    memberships=await getLineBusinessMemberships(env.DB,Number(user.id)).catch(()=>[]);
+    managed=memberships.filter(row=>isDashboardAccessRole(row.role));
+  }
+
+  // A common legacy case: LINE is attached to a synthetic employee user, but the
+  // Owner/HR membership belongs to the canonical Google account with the same employee email.
+  // Fall back to that canonical identity before treating the user as employee-only.
+  if(!managed.length){
+    const canonical=await findLineManagementAccessViaEmployeeIdentity(env.DB,providerScope,lineUserId,preferredClientId);
+    if(canonical?.user_id){
+      user=await env.DB.prepare("SELECT * FROM users WHERE id=?1 AND status='active' LIMIT 1").bind(Number(canonical.user_id)).first().catch(()=>null);
+      memberships=user?.id?await getLineBusinessMemberships(env.DB,Number(user.id)).catch(()=>[]):[];
+      managed=memberships.filter(row=>isDashboardAccessRole(row.role));
+    }
+  }
 
   // Legacy employee rows may have LINE linked before the Nakna account layer existed.
-  // Backfill the account on demand so Owner/HR permissions are visible in the same LINE card.
+  // Backfill the account on demand if no user identity exists at all.
   if(!user?.id){
     const params=[String(lineUserId),providerScope];
     let query=`SELECT e.* FROM employees e WHERE e.line_user_id=?1 AND COALESCE(e.line_provider_scope,'default')=?2 AND e.status='active'`;
@@ -5161,12 +5999,12 @@ async function getLineOwnerDashboardAccess(env,lineCtx,lineUserId,preferredClien
     query+=` ORDER BY e.id DESC LIMIT 1`;
     const employeeRow=await env.DB.prepare(query).bind(...params).first().catch(()=>null);
     if(employeeRow) user=await ensureEmployeeNaknaUser(env.DB,employeeRow).catch(()=>null);
+    if(user?.id){
+      memberships=await getLineBusinessMemberships(env.DB,Number(user.id)).catch(()=>[]);
+      managed=memberships.filter(row=>isDashboardAccessRole(row.role));
+    }
   }
-  if(!user?.id) return null;
-
-  const memberships=await getLineBusinessMemberships(env.DB,Number(user.id));
-  const managed=memberships.filter(row=>isDashboardAccessRole(row.role));
-  if(!managed.length) return null;
+  if(!user?.id||!managed.length) return null;
 
   const preferred=Number(preferredClientId||0)>0 ? managed.find(row=>Number(row.id)===Number(preferredClientId)) : null;
   const primary=preferred||managed[0];
@@ -5262,15 +6100,330 @@ async function getQuickAttendanceAccess(db,token){
   return getEmployeePortalAccessFast(db,raw).catch(()=>null);
 }
 
+
+
+function normalizeAttendanceFaceMode(value){
+  const mode=String(value||'off').toLowerCase();
+  return ['off','enroll','required'].includes(mode)?mode:'off';
+}
+function biometricEncryptionKey(env){
+  return env.NAKNA_BIOMETRIC_ENCRYPTION_KEY || integrationEncryptionKey(env) || null;
+}
+async function ensureAttendanceFaceReady(db){
+  if(SCHEMA_READY.has('attendance_face_verification'))return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_face_settings (
+    client_id INTEGER PRIMARY KEY,
+    mode TEXT NOT NULL DEFAULT 'off',
+    verify_checkin INTEGER NOT NULL DEFAULT 1,
+    verify_checkout INTEGER NOT NULL DEFAULT 0,
+    max_distance REAL NOT NULL DEFAULT 0.56,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS employee_face_profiles (
+    client_id INTEGER NOT NULL, employee_id INTEGER NOT NULL, template_encrypted TEXT NOT NULL,
+    model_version TEXT NOT NULL DEFAULT 'face-api-0.22.2', status TEXT NOT NULL DEFAULT 'active',
+    enrolled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, reset_at TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (client_id,employee_id),
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_face_challenges (
+    token_hash TEXT PRIMARY KEY, client_id INTEGER NOT NULL, employee_id INTEGER NOT NULL, purpose TEXT NOT NULL,
+    actions_json TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_face_passes (
+    token_hash TEXT PRIMARY KEY, client_id INTEGER NOT NULL, employee_id INTEGER NOT NULL, action TEXT NOT NULL,
+    model_version TEXT NOT NULL, distance REAL, expires_at TEXT NOT NULL, used_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_face_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER NOT NULL, employee_id INTEGER NOT NULL, work_date TEXT NOT NULL,
+    action TEXT NOT NULL, event_type TEXT NOT NULL, status TEXT NOT NULL, liveness_passed INTEGER NOT NULL DEFAULT 0,
+    distance REAL, threshold REAL, model_version TEXT, detail TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_face_profiles_status ON employee_face_profiles(client_id,status,employee_id)`).run().catch(()=>{});
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_face_challenges_employee ON attendance_face_challenges(client_id,employee_id,expires_at)`).run().catch(()=>{});
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_face_passes_employee ON attendance_face_passes(client_id,employee_id,action,expires_at)`).run().catch(()=>{});
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_face_events_employee_date ON attendance_face_events(client_id,employee_id,work_date,created_at DESC)`).run().catch(()=>{});
+  SCHEMA_READY.add('attendance_face_verification');
+}
+async function getAttendanceFaceSettings(env,clientId,{includeSummary=false}={}){
+  await ensureAttendanceFaceReady(env.DB);
+  let row=await env.DB.prepare(`SELECT mode,verify_checkin,verify_checkout,max_distance,updated_at FROM attendance_face_settings WHERE client_id=?1`).bind(Number(clientId)).first();
+  if(!row) row={mode:'off',verify_checkin:1,verify_checkout:0,max_distance:0.56,updated_at:null};
+  const settings={
+    mode:normalizeAttendanceFaceMode(row.mode),
+    verify_checkin:Boolean(Number(row.verify_checkin??1)),
+    verify_checkout:Boolean(Number(row.verify_checkout||0)),
+    max_distance:Number(row.max_distance||0.56),
+    photos_stored:false,
+    template_encrypted:true,
+    encryption_ready:Boolean(biometricEncryptionKey(env)),
+    model_version:'face-api-0.22.2',
+    updated_at:row.updated_at||null,
+  };
+  if(includeSummary){
+    const [active,enrolled,pending]=await Promise.all([
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM employees WHERE client_id=?1 AND status='active'`).bind(Number(clientId)).first(),
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM employee_face_profiles p JOIN employees e ON e.id=p.employee_id AND e.client_id=p.client_id WHERE p.client_id=?1 AND p.status='active' AND e.status='active'`).bind(Number(clientId)).first(),
+      env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname FROM employees e LEFT JOIN employee_face_profiles p ON p.client_id=e.client_id AND p.employee_id=e.id AND p.status='active' WHERE e.client_id=?1 AND e.status='active' AND p.employee_id IS NULL ORDER BY e.id DESC LIMIT 12`).bind(Number(clientId)).all(),
+    ]);
+    settings.summary={active:Number(active?.n||0),enrolled:Number(enrolled?.n||0),pending:Math.max(0,Number(active?.n||0)-Number(enrolled?.n||0)),pending_people:pending.results||[]};
+  }
+  return settings;
+}
+function attendanceFaceRequiredForAction(settings,action){
+  if(normalizeAttendanceFaceMode(settings?.mode)!=='required')return false;
+  return action==='checkout'?Boolean(settings?.verify_checkout):Boolean(settings?.verify_checkin??true);
+}
+function sanitizeFaceDescriptor(value){
+  if(!Array.isArray(value)||value.length!==128)throw httpError('ข้อมูลใบหน้าไม่ครบ กรุณาสแกนใหม่',400);
+  const out=value.map(Number);
+  if(out.some(n=>!Number.isFinite(n)||Math.abs(n)>10))throw httpError('ข้อมูลใบหน้าไม่ถูกต้อง กรุณาสแกนใหม่',400);
+  return out;
+}
+function faceDistance(a,b){
+  if(!Array.isArray(a)||!Array.isArray(b)||a.length!==b.length)return Infinity;
+  let sum=0;for(let i=0;i<a.length;i++){const d=Number(a[i])-Number(b[i]);sum+=d*d;}return Math.sqrt(sum);
+}
+function faceChallengeActions(){
+  const byte=new Uint8Array(1);crypto.getRandomValues(byte);
+  return byte[0]%2===0?['blink','turn']:['turn','blink'];
+}
+async function createFaceChallenge(db,clientId,employeeId,purpose){
+  await ensureAttendanceFaceReady(db);
+  const token=randomToken(28),hash=await sha256Hex(token),actions=faceChallengeActions();
+  const expires=new Date(Date.now()+3*60*1000).toISOString();
+  await db.prepare(`DELETE FROM attendance_face_challenges WHERE client_id=?1 AND employee_id=?2 AND (datetime(expires_at)<CURRENT_TIMESTAMP OR used_at IS NOT NULL)`).bind(Number(clientId),Number(employeeId)).run().catch(()=>{});
+  await db.prepare(`INSERT INTO attendance_face_challenges(token_hash,client_id,employee_id,purpose,actions_json,expires_at) VALUES(?1,?2,?3,?4,?5,?6)`).bind(hash,Number(clientId),Number(employeeId),String(purpose),JSON.stringify(actions),expires).run();
+  return {token,actions,expires_at:expires};
+}
+async function consumeFaceChallenge(db,clientId,employeeId,rawToken,purpose,liveness){
+  const raw=String(rawToken||'').trim();if(raw.length<20)throw httpError('Face challenge หมดอายุ กรุณาสแกนใหม่',401);
+  const hash=await sha256Hex(raw);
+  const row=await db.prepare(`SELECT * FROM attendance_face_challenges WHERE token_hash=?1 AND client_id=?2 AND employee_id=?3 AND purpose=?4 AND used_at IS NULL AND datetime(expires_at)>CURRENT_TIMESTAMP`).bind(hash,Number(clientId),Number(employeeId),String(purpose)).first();
+  if(!row)throw httpError('Face challenge หมดอายุ กรุณาสแกนใหม่',401);
+  let actions=[];try{actions=JSON.parse(row.actions_json||'[]')}catch{}
+  const live=liveness&&typeof liveness==='object'?liveness:{};
+  for(const action of actions){if(live[action]!==true)throw httpError('ตรวจความเป็นบุคคลจริงไม่ผ่าน กรุณาทำตามคำสั่งบนหน้าจอ',422);}
+  await db.prepare(`UPDATE attendance_face_challenges SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1 AND used_at IS NULL`).bind(hash).run();
+  return {actions};
+}
+async function issueFacePass(db,clientId,employeeId,action,modelVersion,distance=null){
+  const token=randomToken(32),hash=await sha256Hex(token),expires=new Date(Date.now()+3*60*1000).toISOString();
+  await db.prepare(`DELETE FROM attendance_face_passes WHERE client_id=?1 AND employee_id=?2 AND (datetime(expires_at)<CURRENT_TIMESTAMP OR used_at IS NOT NULL)`).bind(Number(clientId),Number(employeeId)).run().catch(()=>{});
+  await db.prepare(`INSERT INTO attendance_face_passes(token_hash,client_id,employee_id,action,model_version,distance,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7)`).bind(hash,Number(clientId),Number(employeeId),String(action),String(modelVersion||'face-api-0.22.2'),distance==null?null:Number(distance),expires).run();
+  return token;
+}
+async function consumeFacePass(db,clientId,employeeId,action,rawToken){
+  const raw=String(rawToken||'').trim();if(raw.length<20)return null;
+  const hash=await sha256Hex(raw);
+  const row=await db.prepare(`SELECT * FROM attendance_face_passes WHERE token_hash=?1 AND client_id=?2 AND employee_id=?3 AND action=?4 AND used_at IS NULL AND datetime(expires_at)>CURRENT_TIMESTAMP`).bind(hash,Number(clientId),Number(employeeId),String(action)).first();
+  if(!row)return null;
+  await db.prepare(`UPDATE attendance_face_passes SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1 AND used_at IS NULL`).bind(hash).run();
+  return row;
+}
+async function writeFaceEvent(db,{clientId,employeeId,action,eventType,status,livenessPassed=false,distance=null,threshold=null,modelVersion='face-api-0.22.2',detail=null}){
+  await ensureAttendanceFaceReady(db);
+  await db.prepare(`INSERT INTO attendance_face_events(client_id,employee_id,work_date,action,event_type,status,liveness_passed,distance,threshold,model_version,detail) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`).bind(Number(clientId),Number(employeeId),dateInBangkok(),String(action||'checkin'),String(eventType||'verify'),String(status||'unknown'),livenessPassed?1:0,distance==null?null:Number(distance),threshold==null?null:Number(threshold),String(modelVersion||'face-api-0.22.2'),detail?String(detail).slice(0,300):null).run().catch(()=>{});
+}
+async function getPublicOnboardingFaceAccess(db,token){
+  const raw=String(token||'').trim();if(raw.length<20)return null;
+  const hash=await sha256Hex(raw);
+  return db.prepare(`SELECT t.employee_id,t.expires_at,t.used_at,e.client_id,e.employee_code,e.first_name,e.last_name,e.nickname,e.status,c.name AS company_name
+    FROM line_join_tokens t
+    JOIN employees e ON e.id=t.employee_id
+    JOIN clients c ON c.id=e.client_id
+    WHERE t.token_hash=?1 AND datetime(t.expires_at)>CURRENT_TIMESTAMP AND e.status='active' LIMIT 1`).bind(hash).first();
+}
+async function getPublicOnboardingFaceStatus(env,token){
+  const access=await getPublicOnboardingFaceAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์ตั้งค่าใบหน้าหมดอายุ กรุณาเชื่อม LINE แล้วลงทะเบียนตอนเช็กอินครั้งแรก'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  const profile=await env.DB.prepare(`SELECT status,enrolled_at,model_version FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  const enrolled=Boolean(profile&&profile.status==='active');
+  return json({ok:true,employee_name:access.nickname||access.first_name||'พนักงาน',company_name:access.company_name||'',mode:settings.mode,enrolled,enrolled_at:enrolled?profile.enrolled_at:null,required:settings.mode==='required'&&!enrolled,recommended:settings.mode==='enroll'&&!enrolled,enabled:settings.mode!=='off',system_ready:settings.mode==='off'||settings.encryption_ready,privacy:{photos_stored:false,daily_photo_upload:false,template_encrypted:true}},200,{'cache-control':'no-store'});
+}
+async function issuePublicOnboardingFaceChallenge(request,env,token){
+  const access=await getPublicOnboardingFaceAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์ตั้งค่าใบหน้าหมดอายุ กรุณาเชื่อม LINE แล้วลงทะเบียนตอนเช็กอินครั้งแรก'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  if(settings.mode==='off')return json({error:'บริษัทนี้ยังไม่ได้เปิด Face Verification'},409,{'cache-control':'no-store'});
+  if(!biometricEncryptionKey(env))return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503,{'cache-control':'no-store'});
+  const current=await env.DB.prepare(`SELECT 1 AS ok FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 AND status='active' LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  if(current)return json({ok:true,already_enrolled:true},200,{'cache-control':'no-store'});
+  const challenge=await createFaceChallenge(env.DB,Number(access.client_id),Number(access.employee_id),'onboard_enroll');
+  return json({ok:true,challenge_token:challenge.token,actions:challenge.actions,expires_at:challenge.expires_at},200,{'cache-control':'no-store'});
+}
+async function enrollPublicOnboardingFace(request,env,token){
+  const access=await getPublicOnboardingFaceAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์ตั้งค่าใบหน้าหมดอายุ กรุณาเชื่อม LINE แล้วลงทะเบียนตอนเช็กอินครั้งแรก'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  if(settings.mode==='off')return json({error:'บริษัทนี้ยังไม่ได้เปิด Face Verification'},409,{'cache-control':'no-store'});
+  const key=biometricEncryptionKey(env);if(!key)return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503,{'cache-control':'no-store'});
+  const body=await safeJson(request);const descriptor=sanitizeFaceDescriptor(body.descriptor);const modelVersion=String(body.model_version||'face-api-0.22.2').slice(0,80);
+  await consumeFaceChallenge(env.DB,Number(access.client_id),Number(access.employee_id),body.challenge_token,'onboard_enroll',body.liveness);
+  const current=await env.DB.prepare(`SELECT status FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  if(current?.status==='active')return json({ok:true,enrolled:true,already_enrolled:true,privacy:{photo_saved:false,template_encrypted:true}},200,{'cache-control':'no-store'});
+  const encrypted=await encryptJson({descriptor,model_version:modelVersion},key);
+  await env.DB.prepare(`INSERT INTO employee_face_profiles(client_id,employee_id,template_encrypted,model_version,status,enrolled_at,reset_at,updated_at) VALUES(?1,?2,?3,?4,'active',CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP) ON CONFLICT(client_id,employee_id) DO UPDATE SET template_encrypted=excluded.template_encrypted,model_version=excluded.model_version,status='active',enrolled_at=CURRENT_TIMESTAMP,reset_at=NULL,updated_at=CURRENT_TIMESTAMP`).bind(Number(access.client_id),Number(access.employee_id),encrypted,modelVersion).run();
+  await writeFaceEvent(env.DB,{clientId:access.client_id,employeeId:access.employee_id,action:'onboarding',eventType:'enroll',status:'passed',livenessPassed:true,modelVersion,detail:'invite_onboarding_template_created_no_photo_storage'});
+  return json({ok:true,enrolled:true,privacy:{photo_saved:false,template_encrypted:true}},200,{'cache-control':'no-store'});
+}
+
+async function getPublicAttendanceFaceStatus(request,env,token,url){
+  const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์เช็กอินหมดอายุ กรุณากดเมนูใน LINE ใหม่อีกครั้ง'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  await ensureAttendanceFaceReady(env.DB);
+  const profile=await env.DB.prepare(`SELECT status,enrolled_at,model_version FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  const action=String(url?.searchParams?.get('action')||'checkin')==='checkout'?'checkout':'checkin';
+  const today=await env.DB.prepare(`SELECT check_in_at,check_out_at FROM attendance WHERE employee_id=?1 AND work_date=?2 LIMIT 1`).bind(Number(access.employee_id),dateInBangkok()).first().catch(()=>null);
+  const alreadyRecorded=action==='checkout'?Boolean(today?.check_out_at):Boolean(today?.check_in_at);
+  const enrolled=Boolean(profile&&profile.status==='active');
+  const required=!alreadyRecorded&&attendanceFaceRequiredForAction(settings,action);
+  return json({ok:true,action,employee_name:access.nickname||access.first_name||'พนักงาน',company_name:access.company_name||'',mode:settings.mode,enrolled,enrolled_at:enrolled?profile.enrolled_at:null,model_version:enrolled?profile.model_version:settings.model_version,verify_required:required&&enrolled,enrollment_required:required&&!enrolled,enrollment_recommended:settings.mode==='enroll'&&!enrolled,already_recorded:alreadyRecorded,system_ready:settings.mode==='off'||settings.encryption_ready,privacy:{photos_stored:false,daily_photo_upload:false,template_encrypted:true}} ,200,{'cache-control':'no-store'});
+}
+async function issuePublicAttendanceFaceChallenge(request,env,token){
+  const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดจาก LINE ใหม่'},401,{'cache-control':'no-store'});
+  const body=await safeJson(request);const purpose=String(body.purpose||'');
+  if(!['enroll','verify_checkin','verify_checkout'].includes(purpose))return json({error:'Face challenge ไม่ถูกต้อง'},400);
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  if(settings.mode==='off')return json({error:'บริษัทนี้ยังไม่ได้เปิด Face Verification'},409);
+  if(!biometricEncryptionKey(env))return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503);
+  const challenge=await createFaceChallenge(env.DB,Number(access.client_id),Number(access.employee_id),purpose);
+  return json({ok:true,challenge_token:challenge.token,actions:challenge.actions,expires_at:challenge.expires_at},200,{'cache-control':'no-store'});
+}
+async function enrollPublicAttendanceFace(request,env,token){
+  const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดจาก LINE ใหม่'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));if(settings.mode==='off')return json({error:'บริษัทนี้ยังไม่ได้เปิด Face Verification'},409);
+  const key=biometricEncryptionKey(env);if(!key)return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503);
+  const body=await safeJson(request);const descriptor=sanitizeFaceDescriptor(body.descriptor);const modelVersion=String(body.model_version||'face-api-0.22.2').slice(0,80);
+  await consumeFaceChallenge(env.DB,Number(access.client_id),Number(access.employee_id),body.challenge_token,'enroll',body.liveness);
+  await ensureAttendanceFaceReady(env.DB);
+  const current=await env.DB.prepare(`SELECT status FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  if(current?.status==='active')return json({error:'บัญชีนี้ลงทะเบียนใบหน้าแล้ว หากต้องการเปลี่ยนให้ HR รีเซ็ตก่อน'},409);
+  const encrypted=await encryptJson({descriptor,model_version:modelVersion},key);
+  await env.DB.prepare(`INSERT INTO employee_face_profiles(client_id,employee_id,template_encrypted,model_version,status,enrolled_at,reset_at,updated_at) VALUES(?1,?2,?3,?4,'active',CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP) ON CONFLICT(client_id,employee_id) DO UPDATE SET template_encrypted=excluded.template_encrypted,model_version=excluded.model_version,status='active',enrolled_at=CURRENT_TIMESTAMP,reset_at=NULL,updated_at=CURRENT_TIMESTAMP`).bind(Number(access.client_id),Number(access.employee_id),encrypted,modelVersion).run();
+  const action=String(body.action||'checkin')==='checkout'?'checkout':'checkin';
+  await writeFaceEvent(env.DB,{clientId:access.client_id,employeeId:access.employee_id,action,eventType:'enroll',status:'passed',livenessPassed:true,modelVersion,detail:'template_created_no_photo_storage'});
+  let verificationToken=null;if(attendanceFaceRequiredForAction(settings,action))verificationToken=await issueFacePass(env.DB,access.client_id,access.employee_id,action,modelVersion,0);
+  return json({ok:true,enrolled:true,verification_token:verificationToken,privacy:{photo_saved:false,template_encrypted:true}},200,{'cache-control':'no-store'});
+}
+async function verifyPublicAttendanceFace(request,env,token){
+  const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดจาก LINE ใหม่'},401,{'cache-control':'no-store'});
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));const key=biometricEncryptionKey(env);if(!key)return json({error:'ระบบเข้ารหัสใบหน้ายังไม่พร้อม กรุณาแจ้ง HR'},503);
+  const body=await safeJson(request);const action=String(body.action||'checkin')==='checkout'?'checkout':'checkin';const purpose=action==='checkout'?'verify_checkout':'verify_checkin';
+  const descriptor=sanitizeFaceDescriptor(body.descriptor);const modelVersion=String(body.model_version||'face-api-0.22.2').slice(0,80);
+  await consumeFaceChallenge(env.DB,Number(access.client_id),Number(access.employee_id),body.challenge_token,purpose,body.liveness);
+  await ensureAttendanceFaceReady(env.DB);
+  const profile=await env.DB.prepare(`SELECT * FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 AND status='active' LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  if(!profile)return json({error:'ยังไม่ได้ลงทะเบียนใบหน้า',code:'FACE_ENROLLMENT_REQUIRED'},428,{'cache-control':'no-store'});
+  let saved;try{saved=await decryptJson(profile.template_encrypted,key);}catch{return json({error:'อ่านข้อมูลใบหน้าไม่สำเร็จ กรุณาให้ HR รีเซ็ตและลงทะเบียนใหม่',code:'FACE_TEMPLATE_UNREADABLE'},500,{'cache-control':'no-store'});}
+  const template=sanitizeFaceDescriptor(saved?.descriptor);const distance=faceDistance(template,descriptor);const threshold=Math.max(0.35,Math.min(0.8,Number(settings?.max_distance||0.56)));
+  const passed=Number.isFinite(distance)&&distance<=threshold;
+  await writeFaceEvent(env.DB,{clientId:access.client_id,employeeId:access.employee_id,action,eventType:'verify',status:passed?'passed':'failed',livenessPassed:true,distance,threshold,modelVersion,detail:passed?'match':'not_match'});
+  if(!passed)return json({error:'ใบหน้าไม่ตรงกับข้อมูลที่ลงทะเบียน กรุณาลองใหม่',code:'FACE_NOT_MATCHED'},422,{'cache-control':'no-store'});
+  const verificationToken=await issueFacePass(env.DB,access.client_id,access.employee_id,action,modelVersion,distance);
+  return json({ok:true,verified:true,verification_token:verificationToken,result:'passed'},200,{'cache-control':'no-store'});
+}
+async function requireAttendanceFacePass(env,access,action,rawToken){
+  const settings=await getAttendanceFaceSettings(env,Number(access.client_id));
+  if(!attendanceFaceRequiredForAction(settings,action))return {required:false,verified:false};
+  await ensureAttendanceFaceReady(env.DB);
+  const profile=await env.DB.prepare(`SELECT 1 AS ok FROM employee_face_profiles WHERE client_id=?1 AND employee_id=?2 AND status='active' LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id)).first();
+  if(!profile)throw httpError('ต้องลงทะเบียนใบหน้าก่อนลงเวลา',428);
+  const pass=await consumeFacePass(env.DB,Number(access.client_id),Number(access.employee_id),action,rawToken);
+  if(!pass)throw httpError('กรุณายืนยันใบหน้าอีกครั้งก่อนลงเวลา',428);
+  return {required:true,verified:true,model_version:pass.model_version,distance:pass.distance};
+}
+
+async function ensureAttendanceGpsDiagnosticsReady(db){
+  if(SCHEMA_READY.has('attendance_gps_diagnostics'))return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_gps_diagnostics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    action TEXT,
+    stage TEXT NOT NULL,
+    attempt INTEGER,
+    outcome TEXT,
+    error_code TEXT,
+    error_message TEXT,
+    accuracy_m REAL,
+    elapsed_ms INTEGER,
+    permission_state TEXT,
+    browser_name TEXT,
+    browser_version TEXT,
+    os_name TEXT,
+    os_version TEXT,
+    line_version TEXT,
+    user_agent TEXT,
+    visibility_state TEXT,
+    is_secure_context INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_attendance_gps_diagnostics_employee ON attendance_gps_diagnostics(client_id,employee_id,created_at DESC)`).run().catch(()=>{});
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_attendance_gps_diagnostics_code ON attendance_gps_diagnostics(client_id,error_code,created_at DESC)`).run().catch(()=>{});
+  SCHEMA_READY.add('attendance_gps_diagnostics');
+}
+function gpsDiagText(value,max=500){
+  if(value==null)return null;
+  return String(value).replace(/[\u0000-\u001f\u007f]/g,' ').slice(0,max);
+}
+function gpsDiagInt(value){
+  const n=Number(value);return Number.isFinite(n)?Math.round(n):null;
+}
+function gpsDiagNumber(value){
+  const n=Number(value);return Number.isFinite(n)?n:null;
+}
+async function writeAttendanceGpsDiagnostic(db,access,payload={}){
+  if(!access?.client_id||!access?.employee_id)return;
+  await ensureAttendanceGpsDiagnosticsReady(db);
+  const row={
+    action:gpsDiagText(payload.action,20),stage:gpsDiagText(payload.stage||'unknown',60)||'unknown',attempt:gpsDiagInt(payload.attempt),
+    outcome:gpsDiagText(payload.outcome,30),error_code:gpsDiagText(payload.error_code,80),error_message:gpsDiagText(payload.error_message,500),
+    accuracy_m:gpsDiagNumber(payload.accuracy_m),elapsed_ms:gpsDiagInt(payload.elapsed_ms),permission_state:gpsDiagText(payload.permission_state,30),
+    browser_name:gpsDiagText(payload.browser_name,80),browser_version:gpsDiagText(payload.browser_version,40),os_name:gpsDiagText(payload.os_name,50),
+    os_version:gpsDiagText(payload.os_version,40),line_version:gpsDiagText(payload.line_version,40),user_agent:gpsDiagText(payload.user_agent,500),
+    visibility_state:gpsDiagText(payload.visibility_state,30),is_secure_context:payload.is_secure_context===false?0:1,
+  };
+  await db.prepare(`INSERT INTO attendance_gps_diagnostics (
+    client_id,employee_id,action,stage,attempt,outcome,error_code,error_message,accuracy_m,elapsed_ms,permission_state,
+    browser_name,browser_version,os_name,os_version,line_version,user_agent,visibility_state,is_secure_context
+  ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)`)
+    .bind(Number(access.client_id),Number(access.employee_id),row.action,row.stage,row.attempt,row.outcome,row.error_code,row.error_message,
+      row.accuracy_m,row.elapsed_ms,row.permission_state,row.browser_name,row.browser_version,row.os_name,row.os_version,row.line_version,row.user_agent,
+      row.visibility_state,row.is_secure_context).run();
+  console.log(JSON.stringify({level:'info',event:'attendance_gps_diagnostic',client_id:Number(access.client_id),employee_id:Number(access.employee_id),
+    action:row.action,stage:row.stage,attempt:row.attempt,outcome:row.outcome,error_code:row.error_code,accuracy_m:row.accuracy_m,elapsed_ms:row.elapsed_ms,
+    browser:row.browser_name,os:row.os_name,line_version:row.line_version}));
+}
+async function submitQuickAttendanceGpsLog(request,env,token){
+  const access=await getQuickAttendanceAccess(env.DB,token);
+  if(!access)return json({error:'ลิงก์เช็กอินหมดอายุ'},401,{'cache-control':'no-store'});
+  const body=await safeJson(request);
+  try{await writeAttendanceGpsDiagnostic(env.DB,access,body||{});}catch(error){
+    console.error(JSON.stringify({level:'warn',event:'attendance_gps_diagnostic_write_failed',message:String(error?.message||error)}));
+  }
+  return json({ok:true},200,{'cache-control':'no-store'});
+}
+
 async function getLineMenuManagementAccessFast(env,lineCtx,lineUserId,preferredClientId=null){
   const providerScope=String(lineCtx?.providerScope||'default');
   const preferred=Number(preferredClientId||0);
   const key=`${providerScope}:${String(lineUserId)}:${preferred}`;
   const cached=lineMenuCacheGet(LINE_MENU_ACCESS_CACHE,key,LINE_MENU_ACCESS_TTL_MS);
   if(cached!==null) return cached;
-  // Fast path: one read-only query, no schema migration checks and no login-token writes.
-  // The expensive one-time Dashboard login URL is generated only after the user taps it.
-  const row=await env.DB.prepare(`SELECT u.id AS user_id,c.id,c.name,c.code,m.role
+  // Fast path: direct LINE identity on the canonical Owner/HR user.
+  let row=await env.DB.prepare(`SELECT u.id AS user_id,c.id,c.name,c.code,m.role
     FROM users u
     JOIN company_members m ON m.user_id=u.id AND m.status='active'
     JOIN clients c ON c.id=m.client_id
@@ -5278,6 +6431,12 @@ async function getLineMenuManagementAccessFast(env,lineCtx,lineUserId,preferredC
       AND u.status='active' AND m.role IN ('owner','co_owner','hr_admin','hr','payroll_admin','manager','approver')
     ORDER BY CASE WHEN c.id=?3 THEN 0 ELSE 1 END,m.id DESC LIMIT 1`)
     .bind(String(lineUserId),providerScope,preferred).first().catch(()=>null);
+
+  // Fallback for accounts that used the employee LINE flow before Owner/HR LINE identity
+  // was unified with the Google account. This restores the Dashboard button in the
+  // employee menu while still requiring an exact employee-email match to the member user.
+  if(!row) row=await findLineManagementAccessViaEmployeeIdentity(env.DB,providerScope,lineUserId,preferred);
+
   if(!row){
     LINE_MENU_ACCESS_CACHE.set(key,{at:Date.now(),value:null});
     return null;
@@ -5305,8 +6464,8 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const leaveFormUrl=portalToken?`${base}/leave.html?token=${encodeURIComponent(portalToken)}`:null;
   const hrCaseFormUrl=portalToken?`${base}/hr-case.html?token=${encodeURIComponent(portalToken)}`:null;
   const attendanceAccessToken=attendanceToken||portalToken||null;
-  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=7.79`:null;
-  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=7.79`:null;
+  const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=P8.23-GPS1`:null;
+  const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=P8.23-GPS1`:null;
   const wellnessUrl=portalToken?`${base}/wellness.html?token=${encodeURIComponent(portalToken)}`:null;
   return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,wellnessUrl,NAKNA_RUNTIME_RELEASE);
 }
@@ -5320,7 +6479,7 @@ async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='c
     if(!token) throw new Error('สร้างลิงก์ Quick Attendance ไม่สำเร็จ');
     const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
     const normalized=action==='checkout'?'checkout':'checkin';
-    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=7.79`;
+    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=P8.23-GPS1`;
     return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
   }catch(e){
     return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
@@ -5345,7 +6504,20 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
   const access=await getQuickAttendanceAccess(env.DB,token);
   if(!access)return json({error:'ลิงก์เช็กอินหมดอายุ กรุณากดเมนูใน LINE ใหม่อีกครั้ง'},401);
   const body=await safeJson(request);
+  const action=routeAction==='check-out'?'checkout':'checkin';
+  let faceVerification={required:false,verified:false};
+  try{
+    const today=await env.DB.prepare(`SELECT check_in_at,check_out_at FROM attendance WHERE employee_id=?1 AND work_date=?2 LIMIT 1`).bind(Number(access.employee_id),dateInBangkok()).first().catch(()=>null);
+    const alreadyRecorded=action==='checkout'?Boolean(today?.check_out_at):Boolean(today?.check_in_at);
+    if(!alreadyRecorded) faceVerification=await requireAttendanceFacePass(env,access,action,body.face_verification_token);
+  }catch(error){
+    return json({error:error?.message||'กรุณายืนยันใบหน้าก่อนลงเวลา',code:'FACE_VERIFICATION_REQUIRED'},Number(error?.status||428),{'cache-control':'no-store'});
+  }
   const lat=Number(body.latitude),lng=Number(body.longitude),accuracy=Number(body.accuracy||0);
+  const gpsMeta=body?.gps_meta&&typeof body.gps_meta==='object'?body.gps_meta:{};
+  const receiptDiag={...gpsMeta,action:routeAction==='check-out'?'checkout':'checkin',stage:'server_fix_received',outcome:'success',accuracy_m:Number.isFinite(accuracy)?Math.round(accuracy):null,elapsed_ms:gpsMeta?.acquisition_ms};
+  const receiptLog=writeAttendanceGpsDiagnostic(env.DB,access,receiptDiag).catch(error=>console.error(JSON.stringify({level:'warn',event:'attendance_gps_server_receipt_log_failed',message:String(error?.message||error)})));
+  if(ctx?.waitUntil)ctx.waitUntil(receiptLog);
   const positionTimestamp=body.position_timestamp?Date.parse(String(body.position_timestamp)):NaN;
   if(Number.isFinite(positionTimestamp)&&Math.abs(Date.now()-positionTimestamp)>120000){
     return json({error:'GPS ที่ได้รับเป็นตำแหน่งเก่า กรุณาเปิด Location แล้วกดลองใหม่',code:'STALE_LOCATION_FIX'},422);
@@ -5356,7 +6528,6 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
   if(Number.isFinite(accuracy)&&accuracy>1200){
     return json({error:'ตำแหน่งยังไม่แม่นยำ กรุณารอสักครู่แล้วลองใหม่',code:'LOW_LOCATION_ACCURACY',accuracy_m:Math.round(accuracy)},422);
   }
-  const action=routeAction==='check-out'?'checkout':'checkin';
   const roundedAccuracy=Number.isFinite(accuracy)?Math.round(accuracy):null;
   try{
     // P7.74: resolve the submitted place BEFORE writing attendance so the DB,
@@ -5366,6 +6537,9 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
       ? await checkIn(env.DB,Number(access.employee_id),lat,lng,'line_quick',locationMeta)
       : await checkOut(env.DB,Number(access.employee_id),lat,lng,'line_quick',locationMeta);
     const enriched={...result,source_title:result.source_title||locationMeta?.title||null,source_address:result.source_address||locationMeta?.address||null,accuracy_m:roundedAccuracy};
+    if(faceVerification?.verified){
+      await writeFaceEvent(env.DB,{clientId:access.client_id,employeeId:access.employee_id,action,eventType:'attendance_gate',status:'passed',livenessPassed:true,distance:faceVerification.distance,modelVersion:faceVerification.model_version||'face-api-0.22.2',detail:'attendance_saved'});
+    }
     // Do not return success until we have attempted the LINE confirmation. The
     // attendance row is already committed, so a LINE failure never loses time data.
     const notification=await notifyQuickAttendanceLine(env,access,action,enriched);
@@ -5375,6 +6549,7 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
       company_name:access.company_name||'',
       accuracy_m:roundedAccuracy,
       notification,
+      face_verification:faceVerification,
       result:enriched,
     },200,{'cache-control':'no-store'});
   }catch(e){
@@ -5396,6 +6571,7 @@ async function submitQuickAttendance(request,env,token,routeAction,ctx){
           company_name:access.company_name||'',
           accuracy_m:roundedAccuracy,
           notification,
+          face_verification:faceVerification,
           result:saved,
           current_position:currentPosition,
           message:action==='checkin'?'วันนี้มีเช็กอินอยู่แล้ว ระบบไม่ได้บันทึกซ้ำ':'วันนี้มีเช็กเอาต์อยู่แล้ว ระบบไม่ได้บันทึกซ้ำ',
@@ -5548,7 +6724,64 @@ async function issueLineWebLoginLink(env,userId,{clientId=null,purpose='business
   await env.DB.prepare(`INSERT INTO line_web_login_tokens (token_hash,user_id,client_id,purpose,expires_at) VALUES (?1,?2,?3,?4,?5)`)
     .bind(tokenHash,Number(userId),clientId?Number(clientId):null,String(purpose),expiresAt).run();
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
+  // Dashboard/workspace links now open the app shell first, then exchange the
+  // one-time LINE token with fetch(). This removes the old auth-endpoint -> 302
+  // -> full-page reload chain that was especially slow inside LINE iOS.
+  if(['dashboard','workspace_access'].includes(String(purpose||''))){
+    return `${base}/?line_login=${encodeURIComponent(token)}&entry=${encodeURIComponent(String(purpose||'dashboard'))}`;
+  }
   return `${base}/auth/line/start?token=${encodeURIComponent(token)}`;
+}
+
+async function finishInlineLineSession(request,env){
+  // This endpoint intentionally does not redirect. The root app is already
+  // painted in LINE WebView; we only set the session cookies and continue boot.
+  const body=await safeJson(request);
+  const token=String(body.token||'').trim();
+  if(token.length<20) return json({error:'LINE_TOKEN_INVALID'},400);
+  const tokenHash=await sha256Hex(token);
+  let row;
+  try{
+    row=await env.DB.prepare(`SELECT t.*,u.status AS user_status FROM line_web_login_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=?1 AND t.used_at IS NULL`).bind(tokenHash).first();
+  }catch(error){
+    // Schema is migration-managed; this fallback only repairs old workspaces.
+    await ensureV100P7Ready(env.DB);
+    row=await env.DB.prepare(`SELECT t.*,u.status AS user_status FROM line_web_login_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=?1 AND t.used_at IS NULL`).bind(tokenHash).first();
+  }
+  if(!row||row.user_status!=='active'||new Date(row.expires_at).getTime()<=Date.now()){
+    if(row) await env.DB.prepare(`UPDATE line_web_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(tokenHash).run().catch(()=>{});
+    return json({error:'LINE_TOKEN_EXPIRED'},401);
+  }
+  let selectedClientId=row.client_id?Number(row.client_id):null;
+  if(selectedClientId){
+    const membership=await env.DB.prepare(`SELECT role FROM company_members WHERE user_id=?1 AND client_id=?2 AND status='active'`).bind(Number(row.user_id),selectedClientId).first();
+    if(!membership) selectedClientId=null;
+  }
+  const sessionToken=randomToken(40);
+  const sessionHash=await sha256Hex(sessionToken);
+  const sessionExpiresAt=new Date(Date.now()+30*24*60*60*1000).toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE line_web_login_tokens SET used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(tokenHash),
+    env.DB.prepare(`INSERT INTO auth_sessions (token_hash,user_id,selected_client_id,expires_at) VALUES (?1,?2,?3,?4)`).bind(sessionHash,Number(row.user_id),selectedClientId,sessionExpiresAt),
+  ]);
+  const purpose=String(row.purpose||'dashboard');
+  const cookies=[sessionCookie(sessionToken),clearCookie('nakna_setup_mode')];
+  if(selectedClientId) cookies.push(companyCookie(selectedClientId));
+  // Return /api/me-equivalent data in the same response. The LINE entry path
+  // can therefore paint the authenticated shell without an extra auth request.
+  const memberships=await getMemberships(env.DB,Number(row.user_id));
+  const activeMembership=memberships.find(x=>Number(x.id)===Number(selectedClientId))||memberships[0]||null;
+  const user=await env.DB.prepare(`SELECT id,google_sub,email,name,picture_url,locale,line_user_id,line_provider_scope,auth_provider FROM users WHERE id=?1`).bind(Number(row.user_id)).first();
+  const me={
+    user:publicUser(user||{id:Number(row.user_id)}),
+    companies:memberships,
+    active_company_id:selectedClientId||activeMembership?.id||null,
+    active_role:activeMembership?.role||null,
+    is_primary_owner:Boolean(activeMembership?.is_primary_owner),
+    setup_mode:null,
+    claimable_company:null,
+  };
+  return jsonWithCookies({ok:true,purpose,selected_client_id:selectedClientId,workspace_joined:purpose==='workspace_access',me},200,cookies);
 }
 
 async function finishLineWebLogin(request,env){
@@ -5753,17 +6986,65 @@ function canManagePayroll(role){ return canManagePayrollWorkspaceRole(role); }
 
 function roundMoney(value){ return Math.round((Number(value||0)+Number.EPSILON)*100)/100; }
 
+async function recordPayrollPeriodEvent(db,clientId,periodId,actorUserId,eventType,detail={}){
+  try{
+    await db.prepare(`INSERT INTO payroll_period_events(client_id,period_id,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,?4,?5)`)
+      .bind(Number(clientId),Number(periodId),actorUserId?Number(actorUserId):null,String(eventType),JSON.stringify(detail||{})).run();
+  }catch(error){console.warn(JSON.stringify({level:'warn',event:'payroll_period_event_failed',period_id:Number(periodId),type:String(eventType),message:String(error?.message||error)}));}
+}
+
+function payrollExceptionRows(period,items,settings){
+  const threshold=Math.max(0,Number(settings?.variance_warning_pct||30));
+  const rows=[];
+  for(const item of items||[]){
+    const name=`${item.nickname||item.first_name||''} ${item.last_name||''}`.trim()||item.employee_code||`#${item.employee_id}`;
+    const push=(code,severity,title,detail)=>rows.push({code,severity,employee_id:Number(item.employee_id),employee_name:name,title,detail});
+    if(Number(item.base_salary||0)<=0)push('MISSING_SALARY','error','ยังไม่ได้ตั้งฐานเงินเดือน','ต้องตั้งเงินเดือนก่อน Lock รอบ');
+    if(!String(item.bank_account_no||'').trim())push('MISSING_BANK','warning','ยังไม่มีบัญชีธนาคาร','ควรกรอกบัญชีก่อนสร้างไฟล์โอนเงิน');
+    if(Number(item.net_pay||0)<=0 && Number(item.gross_income||0)>0)push('NON_POSITIVE_NET','error','ยอดรับสุทธิไม่มากกว่า 0',`Gross ${roundMoney(item.gross_income)} / หัก ${roundMoney(item.total_deductions)}`);
+    if(Number(item.prior_net_pay||0)>0 && Math.abs(Number(item.variance_pct||0))>=threshold)push('NET_VARIANCE','warning',`Net ต่างจากเดือนก่อน ${Number(item.variance_pct||0).toFixed(1)}%`,`เดือนก่อน ${roundMoney(item.prior_net_pay)} → เดือนนี้ ${roundMoney(item.net_pay)}`);
+    if(Number(item.attendance_deduction||0)>Math.max(1000,Number(item.base_salary||0)*0.2))push('HIGH_ATTENDANCE_DEDUCTION','warning','หัก Attendance สูงผิดปกติ',`หัก ${roundMoney(item.attendance_deduction)} บาท`);
+  }
+  return rows;
+}
+
+function csvCell(value){
+  const text=String(value??'');
+  return /[",\n\r]/.test(text)?`"${text.replace(/"/g,'""')}"`:text;
+}
+function csvDownloadResponse(rows,fileName){
+  const bom='\ufeff';
+  const body=bom+rows.map(row=>row.map(csvCell).join(',')).join('\r\n');
+  return new Response(body,{status:200,headers:{'content-type':'text/csv; charset=utf-8','content-disposition':`attachment; filename="${fileName}"`,'cache-control':'no-store'}});
+}
+
 async function getPayrollPeriodDetail(db,clientId,periodId){
   const period=await db.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(Number(periodId),Number(clientId)).first();
-  if(!period)return {period:null,items:[],adjustments:[]};
-  const [items,adjustments,documents]=await db.batch([
-    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,d.name AS department_name,pos.name AS position_name,pp.bank_name,pp.bank_account_no
+  if(!period)return {period:null,items:[],adjustments:[],documents:[],exceptions:[],timeline:[]};
+  const [items,adjustments,documents,events,settings,components]=await db.batch([
+    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.start_date,e.end_date,d.name AS department_name,pos.name AS position_name,pp.bank_name,pp.bank_account_name,pp.bank_account_no,pp.payroll_note,pp.tax_enabled AS employee_tax_enabled,pp.social_security_enabled AS employee_sso_enabled
       FROM payroll_items pi JOIN employees e ON e.id=pi.employee_id LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions pos ON pos.id=e.position_id LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id
       WHERE pi.period_id=?1 AND pi.client_id=?2 ORDER BY e.first_name,e.last_name`).bind(Number(periodId),Number(clientId)),
     db.prepare(`SELECT a.*,e.employee_code,e.first_name,e.last_name,e.nickname FROM payroll_adjustments a JOIN employees e ON e.id=a.employee_id WHERE a.period_id=?1 AND a.client_id=?2 ORDER BY a.employee_id,a.id`).bind(Number(periodId),Number(clientId)),
     db.prepare(`SELECT * FROM payroll_documents WHERE period_id=?1 AND client_id=?2`).bind(Number(periodId),Number(clientId)),
+    db.prepare(`SELECT pe.*,u.name AS actor_name,u.email AS actor_email FROM payroll_period_events pe LEFT JOIN users u ON u.id=pe.actor_user_id WHERE pe.period_id=?1 AND pe.client_id=?2 ORDER BY pe.created_at DESC,pe.id DESC LIMIT 120`).bind(Number(periodId),Number(clientId)),
+    db.prepare(`SELECT * FROM payroll_settings WHERE client_id=?1`).bind(Number(clientId)),
+    db.prepare(`SELECT * FROM payroll_component_definitions WHERE client_id=?1 AND active=1 ORDER BY display_order,id`).bind(Number(clientId)),
   ]);
-  return {period,items:items.results||[],adjustments:adjustments.results||[],documents:documents.results||[]};
+  const itemRows=items.results||[];
+  const settingRow=settings.results?.[0]||{};
+  return {period,items:itemRows,adjustments:adjustments.results||[],documents:documents.results||[],timeline:events.results||[],components:components.results||[],settings:settingRow,exceptions:payrollExceptionRows(period,itemRows,settingRow)};
+}
+
+function validPayrollDateKey(value){
+  const v=String(value||''); if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return false;
+  const [y,m,d]=v.split('-').map(Number); if(!y||m<1||m>12||d<1||d>31)return false;
+  const date=new Date(Date.UTC(y,m-1,d)); return date.getUTCFullYear()===y&&date.getUTCMonth()===m-1&&date.getUTCDate()===d;
+}
+function payrollCycleDateFromPeriodKey(periodKey,monthOffset=0,day=1){
+  const [year,month]=String(periodKey||'').split('-').map(Number); const anchor=new Date(Date.UTC(year,month-1+Number(monthOffset||0),1));
+  const y=anchor.getUTCFullYear(),m=anchor.getUTCMonth(); const last=new Date(Date.UTC(y,m+1,0)).getUTCDate(); const requested=Number(day||0); const d=requested<=0?last:Math.min(last,Math.max(1,requested));
+  return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
 }
 
 function dateKeysInclusive(startDate,endDate){
@@ -5799,7 +7080,7 @@ async function effectivePayrollRules(db,clientId,period){
   const rows=(await db.prepare(`SELECT * FROM payroll_rule_versions WHERE (client_id=?1 OR client_id IS NULL) AND effective_from<=?2 AND (effective_to IS NULL OR effective_to>=?3) ORDER BY CASE WHEN client_id=?1 THEN 0 ELSE 1 END,effective_from DESC`).bind(Number(clientId),period.period_end,period.period_start).all()).results||[];
   const first=(key)=>rows.find(r=>r.rule_key===key);
   let tax={expense_rate:0.5,expense_cap:100000,personal_allowance:60000,brackets:[{up_to:150000,rate:0},{up_to:300000,rate:.05},{up_to:500000,rate:.10},{up_to:750000,rate:.15},{up_to:1000000,rate:.20},{up_to:2000000,rate:.25},{up_to:5000000,rate:.30},{up_to:null,rate:.35}]};
-  let sso={employee_rate:.05,wage_floor:1650,wage_ceiling:17500};
+  let sso={employee_rate:.05,employer_rate:.05,wage_floor:1650,wage_ceiling:17500};
   try{if(first('thai_personal_income_tax'))tax={...tax,...JSON.parse(first('thai_personal_income_tax').config_json)}}catch{}
   try{if(first('thai_social_security'))sso={...sso,...JSON.parse(first('thai_social_security').config_json)}}catch{}
   return {tax,sso,tax_version:first('thai_personal_income_tax')?.version||'TH-2026',sso_version:first('thai_social_security')?.version||'SSO-2026-2028'};
@@ -5811,7 +7092,7 @@ async function recalculatePayrollPeriod(env,clientId,periodId){
   if(['locked','published','void'].includes(period.status))throw httpError('รอบ Payroll นี้ Lock แล้ว',409);
   await ensureV100P5Ready(db);
   await materializePointCashRewardsForPayroll(db,Number(clientId),period);
-  const [client,settings,employeesRes,schedulesRes,holidaysRes,attendanceRes,leavesRes,adjustmentsRes,profilesRes,ytdRes]=await Promise.all([
+  const [client,settings,employeesRes,schedulesRes,holidaysRes,attendanceRes,leavesRes,adjustmentsRes,profilesRes,ytdRes,recurringRes,priorRes]=await Promise.all([
     getClient(db,clientId),
     db.prepare('SELECT * FROM payroll_settings WHERE client_id=?1').bind(Number(clientId)).first(),
     db.prepare(`SELECT e.* FROM employees e WHERE e.client_id=?1 AND e.start_date<=?2 AND (e.end_date IS NULL OR e.end_date>=?3) AND COALESCE(e.people_status,'employee') NOT IN ('candidate') ORDER BY e.id`).bind(Number(clientId),period.period_end,period.period_start).all(),
@@ -5821,12 +7102,15 @@ async function recalculatePayrollPeriod(env,clientId,periodId){
     db.prepare(`SELECT lr.*,lp.code AS policy_code,lp.name AS policy_name FROM leave_requests lr LEFT JOIN leave_policies lp ON lp.id=lr.policy_id WHERE lr.client_id=?1 AND lr.status='approved' AND lr.end_date>=?2 AND lr.start_date<=?3`).bind(Number(clientId),period.period_start,period.period_end).all(),
     db.prepare('SELECT * FROM payroll_adjustments WHERE client_id=?1 AND period_id=?2').bind(Number(clientId),Number(periodId)).all(),
     db.prepare('SELECT * FROM employee_payroll_profiles WHERE client_id=?1').bind(Number(clientId)).all(),
-    db.prepare(`SELECT pi.employee_id,SUM(MAX(0,pi.gross_income-pi.attendance_deduction)) AS ytd_taxable,SUM(pi.withholding_tax) AS ytd_tax,SUM(pi.social_security) AS ytd_sso
+    db.prepare(`SELECT pi.employee_id,SUM(MAX(0,pi.gross_income-pi.attendance_deduction)) AS ytd_taxable,SUM(pi.gross_income) AS ytd_gross,SUM(pi.withholding_tax) AS ytd_tax,SUM(pi.social_security) AS ytd_sso
       FROM payroll_items pi JOIN payroll_periods pp ON pp.id=pi.period_id WHERE pi.client_id=?1 AND pp.period_start>=?2 AND pp.period_end<?3 AND pp.status IN ('locked','published') GROUP BY pi.employee_id`).bind(Number(clientId),`${period.period_key.slice(0,4)}-01-01`,period.period_start).all(),
+    db.prepare(`SELECT epc.*,d.code,d.name,d.component_type,d.category,d.taxable,d.sso_contributable FROM employee_payroll_components epc JOIN payroll_component_definitions d ON d.id=epc.component_id WHERE epc.client_id=?1 AND epc.active=1 AND d.active=1 AND (epc.effective_from IS NULL OR epc.effective_from<=?2) AND (epc.effective_to IS NULL OR epc.effective_to>=?3) ORDER BY d.display_order,d.id`).bind(Number(clientId),period.period_end,period.period_start).all(),
+    db.prepare(`SELECT pi.employee_id,pi.net_pay FROM payroll_items pi WHERE pi.period_id=(SELECT id FROM payroll_periods WHERE client_id=?1 AND period_end<?2 AND status IN ('locked','published') ORDER BY period_end DESC,id DESC LIMIT 1)`).bind(Number(clientId),period.period_start).all(),
   ]);
   const rules=await effectivePayrollRules(db,clientId,period); const employees=employeesRes.results||[]; const schedules=schedulesRes.results||[]; const holidays=new Map((holidaysRes.results||[]).map(h=>[h.holiday_date,h]));
-  const attendance=new Map((attendanceRes.results||[]).map(a=>[`${a.employee_id}:${a.work_date}`,a])); const profiles=new Map((profilesRes.results||[]).map(p=>[Number(p.employee_id),p])); const ytd=new Map((ytdRes.results||[]).map(r=>[Number(r.employee_id),r]));
+  const attendance=new Map((attendanceRes.results||[]).map(a=>[`${a.employee_id}:${a.work_date}`,a])); const profiles=new Map((profilesRes.results||[]).map(p=>[Number(p.employee_id),p])); const ytd=new Map((ytdRes.results||[]).map(r=>[Number(r.employee_id),r])); const priorNet=new Map((priorRes.results||[]).map(r=>[Number(r.employee_id),Number(r.net_pay||0)]));
   const adjustmentsByEmployee=new Map(); for(const a of adjustmentsRes.results||[]){const list=adjustmentsByEmployee.get(Number(a.employee_id))||[];list.push(a);adjustmentsByEmployee.set(Number(a.employee_id),list);}
+  const recurringByEmployee=new Map(); for(const c of recurringRes.results||[]){const list=recurringByEmployee.get(Number(c.employee_id))||[];list.push(c);recurringByEmployee.set(Number(c.employee_id),list);}
   const leaveByEmployeeDate=new Map();
   for(const leave of leavesRes.results||[]){
     const from=leave.start_date<period.period_start?period.period_start:leave.start_date; const to=leave.end_date>period.period_end?period.period_end:leave.end_date;
@@ -5845,16 +7129,19 @@ async function recalculatePayrollPeriod(env,clientId,periodId){
       if(date<=cutoff && !att?.check_in_at){ const leave=leaveByEmployeeDate.get(`${employee.id}:${date}`); if(!leave || String(leave.policy_code||'').toLowerCase().includes('unpaid')) absentDays+=leave&&leave.start_date===leave.end_date&&['am','pm','half'].includes(String(leave.day_part||''))?.5:1; }
     }
     let attendanceDeduction=0; if(Number(settings?.absence_deduction_enabled))attendanceDeduction+=roundMoney((salary/divisor)*absentDays); if(Number(settings?.late_deduction_enabled))attendanceDeduction+=roundMoney(lateMinutes*Number(settings?.late_deduction_per_minute||0));
-    let overtime=0,commission=0,incentive=0,allowance=0,bonus=0,otherEarnings=0,otherDeductions=0,taxableAdjustments=0,ssoAdjustments=0,taxManualAdjust=0;
-    for(const a of adjustmentsByEmployee.get(Number(employee.id))||[]){const amt=Number(a.amount||0); const category=String(a.category||'other'); if(category==='tax_add'){taxManualAdjust+=amt;continue;} if(category==='tax_reduce'){taxManualAdjust-=amt;continue;} if(a.adjustment_type==='deduction'){otherDeductions+=amt;continue;} if(Number(a.taxable))taxableAdjustments+=amt;if(Number(a.sso_contributable))ssoAdjustments+=amt; switch(category){case'overtime':overtime+=amt;break;case'commission':commission+=amt;break;case'kpi':otherEarnings+=amt;break;case'incentive':incentive+=amt;break;case'allowance':allowance+=amt;break;case'bonus':bonus+=amt;break;default:otherEarnings+=amt;}}
-    const gross=roundMoney(prorated+overtime+commission+incentive+allowance+bonus+otherEarnings); const taxableMonthly=Math.max(0,roundMoney(prorated+taxableAdjustments-attendanceDeduction));
-    let sso=0; if(Number(settings?.social_security_enabled)&&Number(profile.social_security_enabled??1)){const contributable=Math.max(Number(rules.sso.wage_floor||0),Math.min(Number(rules.sso.wage_ceiling||17500),Math.max(0,prorated+ssoAdjustments))); if(prorated>0)sso=roundMoney(contributable*Number(rules.sso.employee_rate||.05));}
+    let overtime=0,commission=0,kpi=0,incentive=0,allowance=0,bonus=0,otherEarnings=0,otherDeductions=0,taxableAdjustments=0,ssoAdjustments=0,taxManualAdjust=0;
+    let recurringEarnings=0,recurringDeductions=0,recurringTaxable=0,recurringSso=0; const recurringItems=[];
+    for(const c of recurringByEmployee.get(Number(employee.id))||[]){const amt=Math.max(0,Number(c.amount||0)); if(!amt)continue; recurringItems.push({code:c.code,name:c.name,type:c.component_type,amount:amt,taxable:Boolean(Number(c.taxable)),sso_contributable:Boolean(Number(c.sso_contributable))}); if(c.component_type==='deduction')recurringDeductions+=amt; else {recurringEarnings+=amt;if(Number(c.taxable))recurringTaxable+=amt;if(Number(c.sso_contributable))recurringSso+=amt;}}
+    for(const a of adjustmentsByEmployee.get(Number(employee.id))||[]){const amt=Number(a.amount||0); const category=String(a.category||'other'); if(category==='tax_add'){taxManualAdjust+=amt;continue;} if(category==='tax_reduce'){taxManualAdjust-=amt;continue;} if(a.adjustment_type==='deduction'){otherDeductions+=amt;continue;} if(Number(a.taxable))taxableAdjustments+=amt;if(Number(a.sso_contributable))ssoAdjustments+=amt; switch(category){case'overtime':overtime+=amt;break;case'commission':commission+=amt;break;case'kpi':kpi+=amt;break;case'incentive':incentive+=amt;break;case'allowance':allowance+=amt;break;case'bonus':bonus+=amt;break;default:otherEarnings+=amt;}}
+    const gross=roundMoney(prorated+recurringEarnings+overtime+commission+kpi+incentive+allowance+bonus+otherEarnings); const taxableMonthly=Math.max(0,roundMoney(prorated+recurringTaxable+taxableAdjustments-attendanceDeduction));
+    let sso=0,employerSso=0; if(Number(settings?.social_security_enabled)&&Number(profile.social_security_enabled??1)){const contributable=Math.max(Number(rules.sso.wage_floor||0),Math.min(Number(rules.sso.wage_ceiling||17500),Math.max(0,prorated+recurringSso+ssoAdjustments))); if(prorated>0){sso=roundMoney(contributable*Number(rules.sso.employee_rate||.05));if(Number(settings?.employer_social_security_enabled??1))employerSso=roundMoney(contributable*Number(rules.sso.employer_rate??rules.sso.employee_rate??.05));}}
     let withholding=0; if(Number(settings?.tax_enabled)&&Number(profile.tax_enabled??1)){
       if(profile.monthly_tax_override!=null)withholding=Math.max(0,roundMoney(profile.monthly_tax_override)); else {const prior=ytd.get(Number(employee.id))||{}; const projectedIncome=Number(prior.ytd_taxable||0)+taxableMonthly*monthsRemaining; const projectedSso=Number(prior.ytd_sso||0)+sso*monthsRemaining; const expense=Math.min(projectedIncome*Number(rules.tax.expense_rate||.5),Number(rules.tax.expense_cap||100000)); const personal=Math.max(0,Number(profile.personal_allowance??rules.tax.personal_allowance??60000)); const extra=Math.max(0,Number(profile.extra_annual_deductions||0)); const netTaxable=Math.max(0,projectedIncome-expense-personal-extra-projectedSso); const annualTax=payrollTaxFromBrackets(netTaxable,rules.tax.brackets); withholding=roundMoney(Math.max(0,annualTax-Number(prior.ytd_tax||0))/monthsRemaining);}
     }
     withholding=Math.max(0,roundMoney(withholding+taxManualAdjust));
-    const deductions=roundMoney(attendanceDeduction+sso+withholding+otherDeductions); const netPay=roundMoney(Math.max(0,gross-deductions)); const breakdown={scheduled_days:scheduledDays,active_calendar_days:activeCalendarDays,tax_rule:rules.tax_version,sso_rule:rules.sso_version,taxable_monthly:taxableMonthly};
-    statements.push(db.prepare(`INSERT INTO payroll_items (client_id,period_id,employee_id,base_salary,prorated_salary,absent_days,late_minutes,attendance_deduction,overtime,commission,incentive,allowance,bonus,other_earnings,gross_income,social_security,withholding_tax,other_deductions,total_deductions,net_pay,breakdown_json,calculation_note,status) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,'preview')`).bind(Number(clientId),Number(periodId),Number(employee.id),salary,prorated,absentDays,lateMinutes,attendanceDeduction,overtime,commission,incentive,allowance,bonus,otherEarnings,gross,sso,withholding,otherDeductions,deductions,netPay,JSON.stringify(breakdown),'ภาษีเป็นประมาณการรายเดือนแบบ annualized; HR/Payroll ต้องตรวจสอบก่อน Lock'));
+    otherDeductions=roundMoney(otherDeductions+recurringDeductions);
+    const deductions=roundMoney(attendanceDeduction+sso+withholding+otherDeductions); const netPay=roundMoney(Math.max(0,gross-deductions)); const prior=priorNet.get(Number(employee.id))||0; const variancePct=prior>0?roundMoney(((netPay-prior)/prior)*100):0; const priorYtd=ytd.get(Number(employee.id))||{}; const ytdGross=roundMoney(Number(priorYtd.ytd_gross||0)+gross),ytdTax=roundMoney(Number(priorYtd.ytd_tax||0)+withholding),ytdSso=roundMoney(Number(priorYtd.ytd_sso||0)+sso); const employerCost=roundMoney(gross+employerSso); const payableDays=fullPeriod?divisor:Math.min(divisor,activeCalendarDays); const breakdown={scheduled_days:scheduledDays,active_calendar_days:activeCalendarDays,payable_days:payableDays,salary_mode:fullPeriod?'full':'prorated',kpi,period_days:dates.length,tax_rule:rules.tax_version,sso_rule:rules.sso_version,taxable_monthly:taxableMonthly,recurring_components:recurringItems};
+    statements.push(db.prepare(`INSERT INTO payroll_items (client_id,period_id,employee_id,base_salary,prorated_salary,absent_days,late_minutes,attendance_deduction,overtime,commission,incentive,allowance,bonus,other_earnings,gross_income,social_security,withholding_tax,other_deductions,total_deductions,net_pay,breakdown_json,calculation_note,status,employer_social_security,employer_cost,prior_net_pay,variance_pct,ytd_gross,ytd_tax,ytd_sso) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,'preview',?23,?24,?25,?26,?27,?28,?29)`).bind(Number(clientId),Number(periodId),Number(employee.id),salary,prorated,absentDays,lateMinutes,attendanceDeduction,overtime,commission,incentive,allowance,bonus,roundMoney(otherEarnings+recurringEarnings),gross,sso,withholding,otherDeductions,deductions,netPay,JSON.stringify(breakdown),'ภาษีเป็นประมาณการรายเดือนแบบ annualized; HR/Payroll ต้องตรวจสอบก่อน Lock',employerSso,employerCost,prior,variancePct,ytdGross,ytdTax,ytdSso));
     totals.gross+=gross;totals.deductions+=deductions;totals.net+=netPay;totals.count++;
   }
   statements.push(db.prepare(`UPDATE payroll_periods SET employee_count=?1,gross_total=?2,deduction_total=?3,net_total=?4,updated_at=CURRENT_TIMESTAMP WHERE id=?5 AND client_id=?6`).bind(totals.count,roundMoney(totals.gross),roundMoney(totals.deductions),roundMoney(totals.net),Number(periodId),Number(clientId)));
@@ -5873,8 +7160,9 @@ async function makePayrollPdf({client,employee,period,item,fontBytes,title='ส�
   const empName=`${employee.first_name||''} ${employee.last_name||''}`.trim(); page.drawText(empName,{x:42,y:height-148,size:15,font,color:dark}); page.drawText(`${employee.employee_code||''}  ·  ${period.period_key}`,{x:42,y:height-168,size:9,font,color:muted});
   const money=v=>`${Number(v||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2})} บาท`; let y=height-214;
   const row=(label,value,{bold=false}={})=>{page.drawText(label,{x:48,y,size:9,font,color:muted});page.drawText(value,{x:360,y,size:bold?11:9,font,color:bold?dark:dark});y-=27;page.drawLine({start:{x:48,y:y+13},end:{x:548,y:y+13},thickness:.6,color:border});};
-  page.drawText('รายได้',{x:42,y,size:12,font,color:teal});y-=28; row('เงินเดือนตามรอบ',money(item.prorated_salary)); if(Number(item.overtime))row('OT',money(item.overtime)); if(Number(item.commission))row('Commission',money(item.commission)); if(Number(item.incentive))row('Incentive',money(item.incentive)); if(Number(item.allowance))row('Allowance',money(item.allowance)); if(Number(item.bonus))row('Bonus',money(item.bonus)); if(Number(item.other_earnings))row('รายได้อื่น',money(item.other_earnings)); row('รายได้รวม',money(item.gross_income),{bold:true});
-  y-=12;page.drawText('รายการหัก',{x:42,y,size:12,font,color:teal});y-=28; if(Number(item.attendance_deduction))row(`Attendance (${Number(item.absent_days||0)} วัน / สาย ${Number(item.late_minutes||0)} นาที)`,money(item.attendance_deduction)); row('ประกันสังคม',money(item.social_security)); row('ภาษีหัก ณ ที่จ่าย (ประมาณการ)',money(item.withholding_tax)); if(Number(item.other_deductions))row('รายการหักอื่น',money(item.other_deductions)); row('หักรวม',money(item.total_deductions),{bold:true});
+  let breakdown={};try{breakdown=typeof item.breakdown_json==='string'?JSON.parse(item.breakdown_json||'{}'):(item.breakdown_json||{});}catch{} const recurring=Array.isArray(breakdown.recurring_components)?breakdown.recurring_components:[]; const recurringEarn=recurring.filter(x=>x.type!=='deduction').reduce((a,x)=>a+Number(x.amount||0),0); const recurringDeduct=recurring.filter(x=>x.type==='deduction').reduce((a,x)=>a+Number(x.amount||0),0);
+  page.drawText('รายได้',{x:42,y,size:12,font,color:teal});y-=28; row('เงินเดือนตามรอบ',money(item.prorated_salary)); for(const c of recurring.filter(x=>x.type!=='deduction'))row(String(c.name||'รายได้ประจำ'),money(c.amount)); if(Number(item.overtime))row('OT',money(item.overtime)); if(Number(item.commission))row('Commission',money(item.commission)); if(Number(breakdown.kpi||0))row('KPI',money(breakdown.kpi)); if(Number(item.incentive))row('Incentive',money(item.incentive)); if(Number(item.allowance))row('Allowance',money(item.allowance)); if(Number(item.bonus))row('Bonus',money(item.bonus)); const residualOther=Math.max(0,Number(item.other_earnings||0)-recurringEarn); if(residualOther)row('รายได้อื่น',money(residualOther)); row('รายได้รวม',money(item.gross_income),{bold:true});
+  y-=12;page.drawText('รายการหัก',{x:42,y,size:12,font,color:teal});y-=28; if(Number(item.attendance_deduction))row(`Attendance (${Number(item.absent_days||0)} วัน / สาย ${Number(item.late_minutes||0)} นาที)`,money(item.attendance_deduction)); row('ประกันสังคม',money(item.social_security)); row('ภาษีหัก ณ ที่จ่าย (ประมาณการ)',money(item.withholding_tax)); for(const c of recurring.filter(x=>x.type==='deduction'))row(String(c.name||'รายการหักประจำ'),money(c.amount)); const residualDeduct=Math.max(0,Number(item.other_deductions||0)-recurringDeduct); if(residualDeduct)row('รายการหักอื่น',money(residualDeduct)); row('หักรวม',money(item.total_deductions),{bold:true});
   y-=8;page.drawRectangle({x:42,y:y-12,width:506,height:58,color:soft,borderColor:border,borderWidth:1});page.drawText('รับสุทธิ',{x:58,y:y+10,size:12,font,color:dark});page.drawText(money(item.net_pay),{x:350,y:y+7,size:18,font,color:teal});
   page.drawText('เอกสารนี้สร้างจากข้อมูล Payroll ของบริษัท กรุณาติดต่อ HR หากข้อมูลไม่ถูกต้อง',{x:42,y:38,size:7.5,font,color:muted}); return new Uint8Array(await pdf.save());
 }
@@ -5898,11 +7186,14 @@ function buildPayslipReadyFlex(employee,period,netPay,shareUrl){
 async function publishPayrollPeriod(env,clientId,periodId,{notify=true}={}){
   await ensureV100P3Ready(env.DB); const db=env.DB; const detail=await getPayrollPeriodDetail(db,clientId,periodId); if(!detail.period)throw new Error('Payroll period not found'); const client=await getClient(db,clientId); const workspace=await db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(); if(!workspace)throw new Error('Google not connected');
   const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const fontBytes=await fetchNaknaPdfFont(env); const payrollRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Payroll'); const periodFolder=await ensureDriveChildFolder(accessToken,payrollRoot,detail.period.period_key); const lineCtx=await getEffectiveLineContextForClient(env,clientId); const canEmail=String(workspace.scopes||'').includes('gmail.send');
+  const failures=[]; let generated=0, reused=0;
   for(const item of detail.items){
     try{
       const employee=await db.prepare('SELECT * FROM employees WHERE id=?1 AND client_id=?2').bind(Number(item.employee_id),Number(clientId)).first(); if(!employee)continue; const pdfBytes=await makePayrollPdf({client,employee,period:detail.period,item,fontBytes}); const fileName=`Payslip-${detail.period.period_key}-${employee.employee_code}.pdf`; const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:periodFolder,fileName,contentType:'application/pdf',bytes:pdfBytes}); const digest=await crypto.subtle.digest('SHA-256',pdfBytes); const sha=[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join(''); const token=randomToken(32),tokenHash=await sha256Hex(token); const existing=await db.prepare(`SELECT * FROM payroll_documents WHERE period_id=?1 AND employee_id=?2 AND document_type='payslip'`).bind(Number(periodId),Number(employee.id)).first();
+      if(existing?.drive_file_id && Number(existing.payroll_item_id)===Number(item.id)){ reused++; continue; }
       if(existing){await db.prepare(`UPDATE payroll_documents SET payroll_item_id=?1,file_name=?2,drive_file_id=?3,drive_url=?4,sha256=?5,share_token_hash=?6,share_token_value=?7,created_at=CURRENT_TIMESTAMP WHERE id=?8`).bind(Number(item.id),fileName,uploaded.id,uploaded.webViewLink||null,sha,tokenHash,token,Number(existing.id)).run();}
       else await db.prepare(`INSERT INTO payroll_documents (client_id,period_id,payroll_item_id,employee_id,file_name,drive_file_id,drive_url,sha256,share_token_hash,share_token_value) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`).bind(Number(clientId),Number(periodId),Number(item.id),Number(employee.id),fileName,uploaded.id,uploaded.webViewLink||null,sha,tokenHash,token).run();
+      generated++;
       const shareUrl=`${env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev'}/payslip/${token}`;
       let emailSent=false,lineSent=false;
       if(notify){
@@ -5910,13 +7201,244 @@ async function publishPayrollPeriod(env,clientId,periodId,{notify=true}={}){
         if(employee.line_user_id&&lineCtx?.accessToken){try{await pushLineMessages(lineCtx.accessToken,employee.line_user_id,[buildPayslipReadyFlex(employee,detail.period,item.net_pay,shareUrl)]);lineSent=true;}catch{}}
       }
       await db.prepare(`UPDATE payroll_documents SET email_sent_at=CASE WHEN ?1=1 THEN CURRENT_TIMESTAMP ELSE email_sent_at END,line_notified_at=CASE WHEN ?2=1 THEN CURRENT_TIMESTAMP ELSE line_notified_at END WHERE period_id=?3 AND employee_id=?4`).bind(emailSent?1:0,lineSent?1:0,Number(periodId),Number(employee.id)).run();
-    }catch(error){console.error(JSON.stringify({level:'error',event:'payslip_generate_failed',period_id:periodId,employee_id:item.employee_id,message:String(error?.message||error)}));}
+    }catch(error){const message=String(error?.message||error);failures.push({employee_id:Number(item.employee_id),message:message.slice(0,240)});console.error(JSON.stringify({level:'error',event:'payslip_generate_failed',period_id:periodId,employee_id:item.employee_id,message}));}
   }
-  return {ok:true};
+  return {ok:failures.length===0,generated,reused,failures};
+}
+
+async function payrollPayslipCoverage(db,clientId,periodId){
+  const item=await db.prepare(`SELECT COUNT(*) AS n FROM payroll_items WHERE client_id=?1 AND period_id=?2`).bind(Number(clientId),Number(periodId)).first();
+  const docs=await db.prepare(`SELECT COUNT(*) AS n FROM payroll_documents WHERE client_id=?1 AND period_id=?2 AND document_type='payslip' AND drive_file_id IS NOT NULL AND sha256 IS NOT NULL`).bind(Number(clientId),Number(periodId)).first();
+  const total=Number(item?.n||0), ready=Number(docs?.n||0);
+  return {total,ready,missing:Math.max(0,total-ready)};
+}
+
+async function notifyPublishedPayrollPeriod(env,clientId,periodId){
+  const db=env.DB; const detail=await getPayrollPeriodDetail(db,clientId,periodId); if(!detail.period)throw new Error('Payroll period not found');
+  const client=await getClient(db,clientId); const workspace=await db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(); if(!workspace)throw new Error('Google not connected');
+  const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const lineCtx=await getEffectiveLineContextForClient(env,clientId); const canEmail=String(workspace.scopes||'').includes('gmail.send');
+  let notified=0; const failures=[];
+  for(const item of detail.items){
+    try{
+      const employee=await db.prepare('SELECT * FROM employees WHERE id=?1 AND client_id=?2').bind(Number(item.employee_id),Number(clientId)).first(); if(!employee)continue;
+      const doc=await db.prepare(`SELECT * FROM payroll_documents WHERE client_id=?1 AND period_id=?2 AND employee_id=?3 AND document_type='payslip'`).bind(Number(clientId),Number(periodId),Number(employee.id)).first(); if(!doc?.drive_file_id||!doc?.share_token_value)throw new Error('Payslip document missing');
+      const shareUrl=`${env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev'}/payslip/${doc.share_token_value}`; let emailSent=Boolean(doc.email_sent_at), lineSent=Boolean(doc.line_notified_at);
+      if(employee.email&&canEmail&&!emailSent){ const response=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(doc.drive_file_id)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}}); if(response.ok){const bytes=new Uint8Array(await response.arrayBuffer()); await sendGmailAttachment(accessToken,{to:employee.email,subject:`สลิปเงินเดือน ${detail.period.period_key} · ${client.name}`,html:`<div style="font-family:Arial,sans-serif"><h2>สลิปเงินเดือน ${detail.period.period_key}</h2><p>สวัสดี ${employee.nickname||employee.first_name}</p><p>สลิปเงินเดือนของคุณพร้อมแล้ว</p><p><a href="${shareUrl}">ดูสลิปเงินเดือน</a></p><p>— Nakna HR</p></div>`,fileName:doc.file_name,contentType:'application/pdf',bytes}); emailSent=true;} }
+      if(employee.line_user_id&&lineCtx?.accessToken&&!lineSent){await pushLineMessages(lineCtx.accessToken,employee.line_user_id,[buildPayslipReadyFlex(employee,detail.period,item.net_pay,shareUrl)]);lineSent=true;}
+      await db.prepare(`UPDATE payroll_documents SET email_sent_at=CASE WHEN ?1=1 THEN COALESCE(email_sent_at,CURRENT_TIMESTAMP) ELSE email_sent_at END,line_notified_at=CASE WHEN ?2=1 THEN COALESCE(line_notified_at,CURRENT_TIMESTAMP) ELSE line_notified_at END WHERE id=?3`).bind(emailSent?1:0,lineSent?1:0,Number(doc.id)).run(); notified++;
+    }catch(error){failures.push({employee_id:Number(item.employee_id),message:String(error?.message||error).slice(0,240)});}
+  }
+  return {ok:failures.length===0,notified,failures};
 }
 
 async function serveSharedPayrollDocument(env,token){
   const hash=await sha256Hex(token); const row=await env.DB.prepare(`SELECT pd.*,pp.period_key,e.employee_code FROM payroll_documents pd JOIN payroll_periods pp ON pp.id=pd.period_id JOIN employees e ON e.id=pd.employee_id WHERE pd.share_token_hash=?1`).bind(hash).first(); if(!row)return new Response('Payslip not found',{status:404}); const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(row.client_id)).first(); if(!workspace)return new Response('Document storage unavailable',{status:503}); const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const response=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(row.drive_file_id)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}}); if(!response.ok)return new Response('Payslip not found',{status:404}); const headers=new Headers({'content-type':'application/pdf','cache-control':'private, no-store','content-disposition':`inline; filename="${row.file_name}"`,'x-robots-tag':'noindex,nofollow'}); return new Response(response.body,{headers});
+}
+
+function parsePdfImageDataUrl(dataUrl){
+  const value=String(dataUrl||'').trim();
+  const m=value.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
+  if(!m)return null;
+  try{
+    const binary=atob(m[2]);
+    const bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    return {type:m[1].toLowerCase()==='png'?'png':'jpeg',bytes};
+  }catch{return null;}
+}
+
+async function embedPdfImageDataUrl(pdf,dataUrl){
+  const parsed=parsePdfImageDataUrl(dataUrl); if(!parsed)return null;
+  try{return parsed.type==='png'?await pdf.embedPng(parsed.bytes):await pdf.embedJpg(parsed.bytes);}catch{return null;}
+}
+
+function fitPdfImage(image,maxWidth,maxHeight){
+  const w=Number(image?.width||1),h=Number(image?.height||1),ratio=Math.min(maxWidth/w,maxHeight/h,1);
+  return {width:w*ratio,height:h*ratio};
+}
+
+async function sha256BytesHex(bytes){
+  const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
+  const digest=await crypto.subtle.digest('SHA-256',data);
+  return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+function thaiDocumentDate(value){
+  const raw=String(value||'').slice(0,10); const parts=raw.split('-').map(Number);
+  if(parts.length!==3||!parts[0]||!parts[1]||!parts[2])return raw||dateInBangkok();
+  const months=['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+  return `${parts[2]} ${months[parts[1]-1]||''} ${parts[0]+543}`;
+}
+
+function drawSignatureCard(page,{x,y,width=238,height=126,label,name,position,dateText='',font,dark,muted,teal,line,soft,signatureImage=null,statusText='',helperText=''}){
+  page.drawRectangle({x,y,width,height,color:rgb(1,1,1),borderColor:line,borderWidth:.8});
+  page.drawRectangle({x,y:y+height-31,width,height:31,color:soft});
+  page.drawText(label,{x:x+14,y:y+height-20,size:8.6,font,color:teal,maxWidth:width-28});
+  const signatureAreaY=y+53;
+  if(signatureImage){
+    const fit=fitPdfImage(signatureImage,Math.min(width-54,138),48);
+    page.drawImage(signatureImage,{x:x+(width-fit.width)/2,y:signatureAreaY,width:fit.width,height:fit.height});
+  }else if(statusText){
+    const safeStatus=String(statusText).slice(0,90);
+    const statusWidth=Math.min(font.widthOfTextAtSize(safeStatus,7.6),width-36);
+    page.drawText(safeStatus,{x:x+(width-statusWidth)/2,y:signatureAreaY+17,size:7.6,font,color:muted,maxWidth:width-36});
+  }
+  page.drawLine({start:{x:x+22,y:y+48},end:{x:x+width-22,y:y+48},thickness:.75,color:muted,opacity:.55});
+  if(name)page.drawText(String(name).slice(0,62),{x:x+14,y:y+32,size:8.5,font,color:dark,maxWidth:width-28});
+  if(position)page.drawText(String(position).slice(0,68),{x:x+14,y:y+19,size:7.2,font,color:muted,maxWidth:width-28});
+  if(dateText)page.drawText(String(dateText).slice(0,80),{x:x+14,y:y+7,size:6.8,font,color:muted,maxWidth:width-28});
+  if(helperText)page.drawText(String(helperText).slice(0,100),{x:x+14,y:y-13,size:6.6,font,color:muted,maxWidth:width-28});
+}
+
+function thaiDocumentDateTime(value){
+  try{
+    const d=new Date(value); if(Number.isNaN(d.getTime()))return String(value||'');
+    return d.toLocaleString('th-TH',{timeZone:'Asia/Bangkok',day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+  }catch{return String(value||'');}
+}
+
+async function materializeWorkflowDocument(env,clientId,documentId,approvalContext={}){
+  const db=env.DB;
+  const row=await db.prepare(`SELECT d.*,t.body_template,t.name AS template_name,t.code AS template_code,e.employee_code,e.first_name,e.last_name,e.nickname,e.start_date,dep.name AS department_name,pos.name AS position_name FROM employee_documents d JOIN document_templates t ON t.id=d.template_id JOIN employees e ON e.id=d.employee_id LEFT JOIN departments dep ON dep.id=e.department_id LEFT JOIN positions pos ON pos.id=e.position_id WHERE d.id=?1 AND d.client_id=?2`).bind(Number(documentId),Number(clientId)).first();
+  if(!row)throw httpError('ไม่พบข้อมูลเอกสารสำหรับสร้าง PDF',404);
+  if(row.drive_file_id&&row.file_name)return {drive_url:row.drive_url||null,file_name:row.file_name};
+  const [client,profile,workspace,docSettings,onboarding,asset]=await Promise.all([
+    getClient(db,clientId),
+    db.prepare('SELECT * FROM employee_payroll_profiles WHERE employee_id=?1').bind(Number(row.employee_id)).first(),
+    db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(),
+    db.prepare('SELECT * FROM company_document_settings WHERE client_id=?1').bind(Number(clientId)).first(),
+    db.prepare('SELECT legal_name,tax_id,address,phone FROM company_onboarding WHERE client_id=?1').bind(Number(clientId)).first(),
+    db.prepare('SELECT logo_data_url FROM company_assets WHERE client_id=?1').bind(Number(clientId)).first()
+  ]);
+  if(!workspace)throw httpError('บริษัทนี้ยังไม่ได้เชื่อม Google Drive กรุณาไปที่ การเชื่อมต่อ → Google Workspace ก่อนอนุมัติเอกสาร',409);
+  if(!workspace.drive_folder_id)throw httpError('เชื่อม Google แล้ว แต่ยังไม่พบโฟลเดอร์ Drive ของบริษัท กรุณา Sync/เชื่อม Google ใหม่',409);
+  const fullName=`${row.first_name||''} ${row.last_name||''}`.trim();
+  let docData={}; try{docData=JSON.parse(row.data_json||'{}')||{};}catch{docData={};}
+  const vars={
+    '{{employee.full_name}}':fullName,'{{employee.employee_code}}':row.employee_code||'-','{{employee.position}}':row.position_name||'-','{{employee.department}}':row.department_name||'-','{{employee.start_date}}':row.start_date||'-','{{employee.salary}}':Number(profile?.base_salary||0).toLocaleString('th-TH',{minimumFractionDigits:2}),
+    '{{company.name}}':client?.name||'','{{company.legal_name}}':docSettings?.legal_name||onboarding?.legal_name||client?.name||'','{{company.tax_id}}':docSettings?.tax_id||onboarding?.tax_id||'-','{{company.address}}':docSettings?.address||onboarding?.address||'-','{{company.phone}}':docSettings?.phone||onboarding?.phone||'-','{{company.signer_name}}':docSettings?.signer_name||approvalContext?.approver_name||'','{{company.signer_position}}':docSettings?.signer_position||approvalContext?.approver_role||'HR','{{document.date}}':docData.issue_date||row.document_date||dateInBangkok(),'{{document.effective_date}}':docData.effective_date||row.document_date||dateInBangkok(),'{{document.number}}':row.document_number||'','{{document.note}}':docData.note||row.note||'-','{{document.purpose}}':docData.purpose||row.note||'ใช้เป็นหลักฐานตามคำขอของพนักงาน','{{document.subject}}':docData.subject||row.note||'แจ้งเพื่อทราบ','{{document.recipient}}':docData.recipient||'ผู้เกี่ยวข้อง','{{document.new_salary}}':Number(docData.new_salary||profile?.base_salary||0).toLocaleString('th-TH',{minimumFractionDigits:2}),'{{document.case_number}}':docData.case_number||'-'
+  };
+  let body=String(row.body_template||row.note||''); for(const [key,value] of Object.entries(vars))body=body.split(key).join(String(value));
+
+  const fontBytes=await fetchNaknaPdfFont(env); const pdf=await PDFDocument.create(); pdf.setProducer('Nakna HR'); pdf.setSubject('NAKNA_SIGNATURE_LAYOUT_V3'); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(fontBytes,{subset:true});
+  const dark=rgb(18/255,60/255,74/255),teal=rgb(4/255,135/255,138/255),muted=rgb(107/255,120/255,122/255),line=rgb(224/255,232/255,230/255),soft=rgb(247/255,250/255,249/255);
+  const logo=await embedPdfImageDataUrl(pdf,asset?.logo_data_url||'');
+  const hrSignatureDataUrl=String(approvalContext?.signature_data_url||docSettings?.signer_signature_data_url||'').trim();
+  if(!hrSignatureDataUrl)throw httpError('กรุณาลงลายเซ็น HR ก่อนสร้างเอกสารฉบับลงนาม',400);
+  const hrSignature=await embedPdfImageDataUrl(pdf,hrSignatureDataUrl);
+  if(!hrSignature)throw httpError('ลายเซ็น HR ไม่สามารถใช้สร้าง PDF ได้ กรุณาลงลายเซ็นใหม่',400);
+  const companyName=String(docSettings?.legal_name||onboarding?.legal_name||client?.name||'');
+  const issueDate=docData.issue_date||row.document_date||dateInBangkok();
+  const hrSignedAt=String(approvalContext?.hr_signed_at||new Date().toISOString());
+  const signerName=String(docSettings?.signer_name||approvalContext?.approver_name||'HR / ผู้มีอำนาจ').trim();
+  const signerPosition=String(docSettings?.signer_position||approvalContext?.approver_role||'ฝ่ายทรัพยากรบุคคล / ผู้มีอำนาจลงนาม').trim();
+  const pageSize=[595.28,841.89];
+  let page=null,y=0;
+  const addPage=()=>{
+    page=pdf.addPage(pageSize); const {width,height}=page.getSize();
+    page.drawRectangle({x:0,y:height-118,width,height:118,color:soft});
+    if(logo){const fit=fitPdfImage(logo,58,58);page.drawImage(logo,{x:48,y:height-84,width:fit.width,height:fit.height});}
+    const textX=logo?120:48;
+    page.drawText(companyName,{x:textX,y:height-50,size:12,font,color:dark,maxWidth:350});
+    const address=String(docSettings?.address||onboarding?.address||'').trim(); const phone=String(docSettings?.phone||onboarding?.phone||'').trim(); const tax=String(docSettings?.tax_id||onboarding?.tax_id||'').trim();
+    const meta=[address,tax?`เลขประจำตัวผู้เสียภาษี ${tax}`:'',phone?`โทร ${phone}`:''].filter(Boolean).join('  ·  ');
+    if(meta)for(const [i,l] of wrapTextSimple(meta,82).slice(0,2).entries())page.drawText(l,{x:textX,y:height-69-(i*12),size:7.5,font,color:muted,maxWidth:420});
+    page.drawLine({start:{x:48,y:height-102},end:{x:547,y:height-102},thickness:.8,color:line});
+    y=height-145; return page;
+  };
+  addPage();
+  const title=String(row.title||row.template_name||'เอกสารพนักงาน'); const titleWidth=font.widthOfTextAtSize(title,19); page.drawText(title,{x:Math.max(48,(595.28-titleWidth)/2),y,size:19,font,color:dark}); y-=31;
+  const docMeta=`เลขที่ ${row.document_number||'-'}    วันที่ ${thaiDocumentDate(issueDate)}`; const metaWidth=font.widthOfTextAtSize(docMeta,8.5); page.drawText(docMeta,{x:Math.max(48,(595.28-metaWidth)/2),y,size:8.5,font,color:muted}); y-=36;
+  const bodyLines=[]; for(const paragraph of String(body).split(/\n+/)){const wrapped=wrapTextSimple(paragraph||' ',77);bodyLines.push(...wrapped,'');}
+  for(const lineTextValue of bodyLines){
+    if(y<255){addPage();}
+    if(lineTextValue)page.drawText(lineTextValue,{x:58,y,size:10.5,font,color:dark,maxWidth:480});
+    y-=lineTextValue?21:10;
+  }
+  // P8.25 — Two-party signature composition. Reserve a balanced signature zone on every standard employee document.
+  if(y<430)addPage();
+  const employeeSignatureLabel=['EMP_CERT','SAL_CERT'].includes(String(row.template_code||''))?'พนักงานผู้รับเอกสาร':'พนักงานผู้รับทราบ';
+  const acknowledgementCopy=['WARNING','ACK_NOTICE'].includes(String(row.template_code||''))
+    ?'การลงชื่อรับทราบเป็นหลักฐานว่าได้รับและเห็นเอกสาร ไม่ถือเป็นการยอมรับข้อกล่าวหาหรือสละสิทธิ์ในการชี้แจง'
+    :'ลายเซ็นทั้งสองฝ่ายใช้ยืนยันการออกเอกสารและการได้รับเอกสาร โดยเก็บวัน เวลา และ Version ไว้ใน Evidence Timeline';
+  page.drawLine({start:{x:48,y:414},end:{x:547,y:414},thickness:.8,color:line});
+  page.drawText('การลงนามและหลักฐานการรับเอกสาร',{x:48,y:394,size:10,font,color:dark});
+  page.drawText(acknowledgementCopy,{x:48,y:378,size:6.9,font,color:muted,maxWidth:499});
+  drawSignatureCard(page,{x:48,y:226,width:238,height:132,label:'ฝ่าย HR / ผู้มีอำนาจลงนาม',name:signerName,position:signerPosition,dateText:`ลงนาม ${thaiDocumentDateTime(hrSignedAt)}`,font,dark,muted,teal,line,soft,signatureImage:hrSignature,statusText:'ลงนามโดยผู้มีสิทธิ์ใน Nakna HR'});
+  drawSignatureCard(page,{x:309,y:226,width:238,height:132,label:employeeSignatureLabel,name:fullName,position:row.position_name||'พนักงาน',dateText:'รอลงลายเซ็นผ่าน LINE / Employee Portal',font,dark,muted,teal,line,soft,statusText:'รอลายเซ็นพนักงาน'});
+  page.drawText(`Document ID ${row.id} · Version ${row.version||1} · ออกเอกสาร ${thaiDocumentDate(issueDate)}`,{x:48,y:52,size:7.1,font,color:muted});
+  page.drawText(String(docSettings?.document_footer||'เอกสารฉบับนี้จัดทำและเก็บประวัติผ่านระบบ Nakna HR'),{x:48,y:37,size:7.1,font,color:muted,maxWidth:499});
+
+  const bytes=new Uint8Array(await pdf.save());
+  let accessToken;
+  try{accessToken=await getWorkspaceGoogleAccessToken(env,workspace);}catch(error){
+    const raw=String(error?.message||error||'');
+    if(raw.includes('GOOGLE_REAUTH_REQUIRED'))throw httpError('Google Drive หมดอายุหรือสิทธิ์ถูกยกเลิก กรุณาเชื่อม Google ใหม่',409);
+    if(raw.includes('Integration encryption key is not configured'))throw httpError('Worker ยังไม่ได้ตั้งค่า Integration encryption key',503);
+    throw error;
+  }
+  const docsRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Employee Documents');
+  const empFolder=await ensureDriveChildFolder(accessToken,docsRoot,`${row.employee_code} - ${row.nickname||row.first_name}`);
+  const safeNo=String(row.document_number||`DOC-${row.id}`).replace(/[^A-Za-z0-9ก-๙_-]/g,'_');
+  const fileName=`${safeNo}-${row.employee_code}.pdf`;
+  const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:empFolder,fileName,contentType:'application/pdf',bytes});
+  const sha=await sha256BytesHex(bytes);
+  await db.prepare(`UPDATE employee_documents SET file_name=?1,storage_provider='google_drive',drive_file_id=?2,drive_url=?3,content_type='application/pdf',sha256=?4,updated_at=CURRENT_TIMESTAMP WHERE id=?5 AND client_id=?6`).bind(fileName,uploaded.id,uploaded.webViewLink||null,sha,Number(documentId),Number(clientId)).run();
+  await db.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','pdf_materialized',?4)`).bind(Number(clientId),Number(documentId),Number(row.employee_id),JSON.stringify({file_name:fileName,sha256:sha,drive_file_id:uploaded.id,signer_name:signerName,signature_image:Boolean(hrSignature)})).run();
+  return {drive_url:uploaded.webViewLink||null,file_name:fileName,sha256:sha};
+}
+
+async function materializeAcknowledgedDocumentCopy(env,{document,ack,access,signatureDataUrl,responseText}){
+  const db=env.DB;
+  const workspace=await db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(document.client_id)).first();
+  if(!workspace?.drive_folder_id)throw httpError('Google Drive ของบริษัทยังไม่พร้อมสำหรับเก็บลายเซ็นรับทราบ',409);
+  const parsed=parsePdfImageDataUrl(signatureDataUrl); if(!parsed)throw httpError('กรุณาลงลายเซ็นรับทราบใหม่อีกครั้ง',400);
+  if(parsed.bytes.length>450000)throw httpError('ลายเซ็นมีขนาดใหญ่เกินไป กรุณาลงลายเซ็นใหม่',413);
+  const accessToken=await getWorkspaceGoogleAccessToken(env,workspace);
+  const source=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(document.drive_file_id)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}});
+  if(!source.ok)throw httpError('ไม่สามารถเปิดเอกสารต้นฉบับเพื่อบันทึกลายเซ็นได้',502);
+  const originalBytes=new Uint8Array(await source.arrayBuffer());
+  const pdf=await PDFDocument.load(originalBytes); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(await fetchNaknaPdfFont(env),{subset:true});
+  const signatureImage=parsed.type==='png'?await pdf.embedPng(parsed.bytes):await pdf.embedJpg(parsed.bytes);
+  const pages=pdf.getPages(); let page=pages[pages.length-1]; const dark=rgb(18/255,60/255,74/255),teal=rgb(4/255,135/255,138/255),muted=rgb(107/255,120/255,122/255),white=rgb(1,1,1),line=rgb(224/255,232/255,230/255);
+  const signedName=`${access.first_name||''} ${access.last_name||''}`.trim()||access.nickname||access.employee_code||'พนักงาน';
+  const signedAt=new Date().toISOString();
+  const subject=String(pdf.getSubject?.()||'');
+  const layoutV2=subject.includes('NAKNA_SIGNATURE_LAYOUT_V2')||subject.includes('NAKNA_SIGNATURE_LAYOUT_V3');
+  const layoutV1=subject.includes('NAKNA_SIGNATURE_LAYOUT_V1');
+  if(layoutV2){
+    const employeeSignatureLabel=['employment_certificate','salary_certificate'].includes(String(document.document_type||''))?'พนักงานผู้รับเอกสาร':'พนักงานผู้รับทราบ';
+    drawSignatureCard(page,{x:309,y:226,width:238,height:132,label:employeeSignatureLabel,name:signedName,position:access.employee_code?`รหัสพนักงาน ${access.employee_code}`:'พนักงาน',dateText:`ลงลายเซ็น ${thaiDocumentDateTime(signedAt)}`,font,dark,muted,teal,line,soft:rgb(247/255,250/255,249/255),signatureImage,statusText:'',helperText:responseText?'มีคำชี้แจงแนบใน Evidence Timeline':''});
+  }else if(layoutV1){
+    page.drawRectangle({x:322,y:82,width:225,height:113,color:white});
+    page.drawText('พนักงานผู้รับทราบ',{x:322,y:172,size:8.5,font,color:teal});
+    const fit=fitPdfImage(signatureImage,130,47); page.drawImage(signatureImage,{x:322+(225-fit.width)/2,y:118,width:fit.width,height:fit.height});
+    page.drawLine({start:{x:334,y:113},end:{x:535,y:113},thickness:.7,color:muted,opacity:.55});
+    page.drawText(signedName,{x:334,y:97,size:8.5,font,color:dark,maxWidth:201});
+    page.drawText(`ลงชื่อรับทราบ ${thaiDocumentDateTime(signedAt)}`,{x:334,y:83,size:6.8,font,color:muted,maxWidth:201});
+    if(responseText)page.drawText('มีคำชี้แจงแนบใน Evidence Timeline',{x:334,y:70,size:6.6,font,color:muted,maxWidth:201});
+  }else{
+    page=pdf.addPage([595.28,841.89]);
+    page.drawText('หลักฐานการลงชื่อรับทราบ',{x:48,y:780,size:20,font,color:dark});
+    page.drawText(`เอกสาร ${document.document_number||document.id} · Version ${document.version||1}`,{x:48,y:753,size:8.5,font,color:muted});
+    page.drawLine({start:{x:48,y:733},end:{x:547,y:733},thickness:.8,color:line});
+    page.drawText('พนักงานผู้รับทราบ',{x:48,y:690,size:9,font,color:teal});
+    const fit=fitPdfImage(signatureImage,180,70); page.drawImage(signatureImage,{x:48,y:585,width:fit.width,height:fit.height});
+    page.drawLine({start:{x:48,y:574},end:{x:270,y:574},thickness:.8,color:muted});
+    page.drawText(signedName,{x:48,y:555,size:10,font,color:dark});
+    page.drawText(`ลงชื่อรับทราบ ${thaiDocumentDateTime(signedAt)}`,{x:48,y:536,size:8,font,color:muted});
+    if(responseText){page.drawText('มีคำชี้แจงแนบใน Evidence Timeline',{x:48,y:508,size:8,font,color:muted});}
+    page.drawText('เอกสารต้นฉบับยังถูกเก็บแยกจากฉบับรับทราบเพื่อรักษาประวัติหลักฐาน',{x:48,y:64,size:7.5,font,color:muted});
+  }
+  const signedBytes=new Uint8Array(await pdf.save());
+  const sourceMeta=await googleApiJson(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(document.drive_file_id)}?fields=parents,name`,accessToken);
+  const folderId=sourceMeta?.parents?.[0]||workspace.drive_folder_id;
+  const sigName=`signature-${document.document_number||document.id}-v${document.version||1}.png`.replace(/[^A-Za-z0-9ก-๙._-]/g,'_');
+  const signatureUpload=await uploadGoogleDriveFile(accessToken,{folderId,fileName:sigName,contentType:parsed.type==='png'?'image/png':'image/jpeg',bytes:parsed.bytes});
+  const originalName=String(document.file_name||`document-${document.id}.pdf`).replace(/\.pdf$/i,'');
+  const signedFileName=`${originalName}-FINAL.pdf`;
+  const signedUpload=await uploadGoogleDriveFile(accessToken,{folderId,fileName:signedFileName,contentType:'application/pdf',bytes:signedBytes});
+  return {signedAt,signerName:signedName,signatureDriveFileId:signatureUpload.id,signatureUrl:signatureUpload.webViewLink||null,signatureSha256:await sha256BytesHex(parsed.bytes),signedPdfDriveFileId:signedUpload.id,signedPdfUrl:signedUpload.webViewLink||null,signedPdfSha256:await sha256BytesHex(signedBytes)};
 }
 
 async function generateEmployeeCertificate(env,clientId,employeeId,type,userId,note){
@@ -6408,6 +7930,110 @@ async function issueEmployeePortalToken(db,clientId,employeeId){
 async function getEmployeePortalAccess(db,token){
   const hash=await sha256Hex(token); const row=await db.prepare(`SELECT t.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.department_id,e.position_id,e.people_status,e.status,c.name AS company_name FROM learning_access_tokens t JOIN employees e ON e.id=t.employee_id JOIN clients c ON c.id=t.client_id WHERE t.token_hash=?1 AND datetime(t.expires_at)>CURRENT_TIMESTAMP AND e.status='active'`).bind(hash).first();
   if(!row)return null; await db.prepare(`UPDATE learning_access_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE token_hash=?1`).bind(hash).run(); return row;
+}
+
+
+async function getPublicEmployeeDocuments(env,token){
+  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดเมนูจาก LINE ใหม่'},401);
+  const rows=(await env.DB.prepare(`SELECT d.id,d.document_type,d.title,d.document_number,d.document_date,d.final_at,d.version,d.workflow_status,d.approval_status,
+      d.hr_signature_status,d.hr_signed_at,d.hr_signer_name,d.hr_signer_position,d.employee_signature_status,d.employee_signed_at,
+      d.acknowledgement_required,d.acknowledgement_status,d.file_name,d.drive_url,
+      a.status AS ack_status,a.delivered_at,a.viewed_at,a.acknowledged_at,a.response_text,a.signer_name,a.signature_method,a.signed_at,a.acknowledged_pdf_url,
+      CASE WHEN a.acknowledged_pdf_drive_file_id IS NOT NULL THEN 1 ELSE 0 END AS has_signed_copy,
+      (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='line_sent') AS line_sent_at,
+      (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='viewed') AS employee_viewed_at
+    FROM employee_documents d
+    LEFT JOIN document_acknowledgements a ON a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version
+    WHERE d.client_id=?1 AND d.employee_id=?2 AND d.visibility='employee'
+      AND d.workflow_status IN ('awaiting_employee_signature','final')
+      AND COALESCE(d.status,'active')!='archived'
+    ORDER BY COALESCE(d.final_at,d.hr_signed_at,d.created_at) DESC,d.id DESC LIMIT 200`).bind(Number(access.client_id),Number(access.employee_id)).all()).results||[];
+  let cases=[];
+  try{cases=(await env.DB.prepare(`SELECT id,case_number,case_type,title,incident_date,description,status,employee_response_status,employee_response_text,employee_responded_at,created_at FROM hr_document_cases WHERE client_id=?1 AND employee_id=?2 AND employee_response_status IN ('requested','responded') ORDER BY updated_at DESC,id DESC LIMIT 50`).bind(Number(access.client_id),Number(access.employee_id)).all()).results||[];}catch(error){console.warn(JSON.stringify({level:'warn',event:'public_document_cases_unavailable',client_id:Number(access.client_id),message:String(error?.message||error)}));}
+  return json({employee:{id:access.employee_id,name:access.nickname||access.first_name,full_name:`${access.first_name||''} ${access.last_name||''}`.trim(),company_name:access.company_name},documents:rows,cases});
+}
+
+async function respondPublicHrDocumentCase(request,env,token,caseId){
+  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดเมนูจาก LINE ใหม่'},401);
+  const row=await env.DB.prepare(`SELECT * FROM hr_document_cases WHERE id=?1 AND client_id=?2 AND employee_id=?3 AND employee_response_status='requested' AND status='waiting_employee'`).bind(Number(caseId),Number(access.client_id),Number(access.employee_id)).first();
+  if(!row)return json({error:'ไม่พบรายการที่รอคำชี้แจง หรือรายการนี้ตอบแล้ว'},404);
+  const body=await safeJson(request),response=String(body.response_text||'').trim().slice(0,5000); if(!response)return json({error:'กรุณาระบุคำชี้แจง'},400);
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE hr_document_cases SET employee_response_status='responded',employee_response_text=?1,employee_responded_at=CURRENT_TIMESTAMP,status='in_review',updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3 AND employee_id=?4 AND employee_response_status='requested'`).bind(response,Number(caseId),Number(access.client_id),Number(access.employee_id)),
+    env.DB.prepare(`INSERT INTO hr_document_case_events(client_id,case_id,actor_employee_id,event_type,detail) VALUES(?1,?2,?3,'employee_response',?4)`).bind(Number(access.client_id),Number(caseId),Number(access.employee_id),response)
+  ]);
+  return json({ok:true,status:'responded'});
+}
+
+async function getPublicEmployeeDocumentFile(env,token,documentId){
+  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return new Response('Link expired',{status:401});
+  const d=await env.DB.prepare(`SELECT d.*,a.status AS ack_status,a.acknowledged_pdf_drive_file_id,a.acknowledged_pdf_url FROM employee_documents d LEFT JOIN document_acknowledgements a ON a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version WHERE d.id=?1 AND d.client_id=?2 AND d.employee_id=?3 AND d.visibility='employee' AND d.workflow_status IN ('awaiting_employee_signature','final') AND COALESCE(d.status,'active')!='archived'`).bind(Number(documentId),Number(access.client_id),Number(access.employee_id)).first();
+  if(!d?.drive_file_id)return new Response('Document not found',{status:404});
+  await env.DB.prepare(`UPDATE document_acknowledgements SET status=CASE WHEN status='pending' THEN 'viewed' ELSE status END,viewed_at=COALESCE(viewed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE document_id=?1 AND employee_id=?2 AND document_version=?3`).bind(Number(d.id),Number(access.employee_id),Number(d.version||1)).run();
+  await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES(?1,?2,?3,'employee',NULL,'viewed',?4)`).bind(Number(access.client_id),Number(d.id),Number(access.employee_id),JSON.stringify({version:Number(d.version||1)})).run().catch(()=>{});
+  const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(access.client_id)).first(); if(!workspace)return new Response('Storage unavailable',{status:503});
+  const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const fileId=d.acknowledged_pdf_drive_file_id||d.drive_file_id; const signed=Boolean(d.acknowledged_pdf_drive_file_id);
+  const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}}); if(!r.ok)return new Response('Document unavailable',{status:r.status});
+  const baseName=String(d.file_name||'document.pdf').replace(/\.pdf$/i,''); const fileName=signed?`${baseName}-FINAL.pdf`:d.file_name||'document.pdf';
+  const headers=new Headers({'content-type':'application/pdf','cache-control':'private, no-store','content-disposition':`inline; filename*=UTF-8''${encodeURIComponent(fileName)}`,'x-robots-tag':'noindex,nofollow'}); return new Response(r.body,{headers});
+}
+
+async function acknowledgePublicEmployeeDocument(request,env,token,documentId){
+  const access=await getEmployeePortalAccess(env.DB,token); if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิดเมนูจาก LINE ใหม่'},401);
+  const d=await env.DB.prepare(`SELECT * FROM employee_documents
+    WHERE id=?1 AND client_id=?2 AND employee_id=?3 AND visibility='employee'
+      AND workflow_status IN ('awaiting_employee_signature','final')
+      AND acknowledgement_required=1
+      AND COALESCE(status,'active')!='archived'`)
+    .bind(Number(documentId),Number(access.client_id),Number(access.employee_id)).first();
+  if(!d)return json({error:'ไม่พบเอกสารที่ต้องลงนาม/รับทราบ'},404);
+  if(String(d.hr_signature_status||'signed')!=='signed')return json({error:'เอกสารนี้ยังรอลายเซ็นจาก HR'},409);
+
+  const body=await safeJson(request),response=String(body.response_text||'').trim().slice(0,5000),signatureDataUrl=String(body.signature_data_url||'').trim();
+  if(!/^data:image\/(png|jpeg);base64,/i.test(signatureDataUrl))return json({error:'กรุณาลงลายเซ็นก่อนยืนยัน'},400);
+  if(signatureDataUrl.length>750000)return json({error:'ลายเซ็นมีขนาดใหญ่เกินไป กรุณาลงลายเซ็นใหม่'},413);
+  const status=response?'responded':'acknowledged';
+  const ack=await env.DB.prepare(`SELECT * FROM document_acknowledgements WHERE document_id=?1 AND employee_id=?2 AND document_version=?3`).bind(Number(d.id),Number(access.employee_id),Number(d.version||1)).first();
+  if(!ack)return json({error:'เอกสารนี้ยังไม่ได้ถูกส่งให้ลงนาม'},409);
+  if(['acknowledged','responded'].includes(String(ack.status)))return json({ok:true,status:ack.status,already:true,signed_copy_url:ack.acknowledged_pdf_url||null});
+
+  let evidence;
+  try{evidence=await materializeAcknowledgedDocumentCopy(env,{document:d,ack,access,signatureDataUrl,responseText:response});}
+  catch(error){
+    console.error(JSON.stringify({level:'error',event:'document_employee_signature_failed',client_id:Number(access.client_id),document_id:Number(d.id),employee_id:Number(access.employee_id),message:String(error?.message||error)}));
+    return json({error:error?.message||'บันทึกลายเซ็นพนักงานไม่สำเร็จ'},Number(error?.status||500));
+  }
+
+  await env.DB.prepare(`UPDATE document_acknowledgements SET status=?1,viewed_at=COALESCE(viewed_at,CURRENT_TIMESTAMP),acknowledged_at=CURRENT_TIMESTAMP,response_text=?2,signer_name=?3,signature_method='drawn_signature',signature_sha256=?4,signature_drive_file_id=?5,signature_url=?6,signature_user_agent=?7,signed_at=?8,acknowledged_pdf_drive_file_id=?9,acknowledged_pdf_url=?10,acknowledged_pdf_sha256=?11,updated_at=CURRENT_TIMESTAMP WHERE id=?12`)
+    .bind(status,response||null,evidence.signerName,evidence.signatureSha256,evidence.signatureDriveFileId,evidence.signatureUrl,String(request.headers.get('user-agent')||'').slice(0,500),evidence.signedAt,evidence.signedPdfDriveFileId,evidence.signedPdfUrl,evidence.signedPdfSha256,Number(ack.id)).run();
+
+  await env.DB.prepare(`UPDATE employee_documents
+    SET acknowledgement_status=?1,
+        employee_signature_status='signed',
+        employee_signed_at=?2,
+        workflow_status='final',
+        final_at=COALESCE(final_at,CURRENT_TIMESTAMP),
+        updated_at=CURRENT_TIMESTAMP
+    WHERE id=?3 AND client_id=?4`)
+    .bind(status,evidence.signedAt,Number(d.id),Number(access.client_id)).run();
+
+  await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json)
+    VALUES(?1,?2,?3,'employee',NULL,'employee_signed',?4)`)
+    .bind(Number(access.client_id),Number(d.id),Number(access.employee_id),JSON.stringify({
+      version:Number(d.version||1),
+      acknowledgement_status:status,
+      response_text:response||null,
+      signature_method:'drawn_signature',
+      signature_sha256:evidence.signatureSha256,
+      signed_pdf_sha256:evidence.signedPdfSha256,
+      signed_at:evidence.signedAt
+    })).run();
+  await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json)
+    VALUES(?1,?2,?3,'system','finalized',?4)`)
+    .bind(Number(access.client_id),Number(d.id),Number(access.employee_id),JSON.stringify({version:Number(d.version||1),signed_pdf_url:evidence.signedPdfUrl||null})).run().catch(()=>{});
+
+  const delivery=await notifyEmployeeDocumentFinalized(env,Number(access.client_id),Number(d.id)).catch(error=>({ok:false,message:String(error?.message||error)}));
+  return json({ok:true,status,workflow_status:'final',signed_copy_url:evidence.signedPdfUrl,delivery});
 }
 
 async function getPublicLearningPortal(env,token){
@@ -7071,6 +8697,7 @@ async function ensureV100P2Ready(db){
   await ensureColumns(db,'leave_policies',[['available_during_probation','INTEGER NOT NULL DEFAULT 0']]);
   await ensureColumns(db,'line_integrations',[['rich_menu_id','TEXT'],['rich_menu_updated_at','TEXT']]);
   await ensureColumns(db,'hr_cases',[['category','TEXT'],['contact_preference','TEXT']]);
+  await ensureColumns(db,'hr_document_cases',[['warning_document_id','INTEGER'],['employee_response_status',"TEXT NOT NULL DEFAULT 'not_requested'"],['employee_response_text','TEXT'],['employee_responded_at','TEXT']]).catch(()=>{});
   await ensureColumns(db,'broadcasts',[['requires_ack','INTEGER NOT NULL DEFAULT 0'],['ack_due_at','TEXT']]);
   await ensureColumns(db,'broadcast_deliveries',[['acknowledged_at','TEXT'],['last_reminded_at','TEXT']]);
   await db.prepare(`CREATE TABLE IF NOT EXISTS hr_case_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,case_id INTEGER NOT NULL,file_name TEXT NOT NULL,content_type TEXT,file_size INTEGER,storage_provider TEXT,drive_file_id TEXT,drive_url TEXT,storage_key TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,FOREIGN KEY (case_id) REFERENCES hr_cases(id) ON DELETE CASCADE)`).run();
@@ -7088,6 +8715,159 @@ async function ensureV100P3Ready(db){
   }
   await db.prepare(`ALTER TABLE payroll_settings ADD COLUMN auto_payslip_on_lock INTEGER NOT NULL DEFAULT 1`).run().catch(()=>{});
   SCHEMA_READY.add('p3');
+}
+
+async function ensureDocumentFoundationReady(db){
+  if(SCHEMA_READY.has('doc-foundation')) return;
+  await ensureV100P3Ready(db);
+  await ensureColumns(db,'employee_documents',[
+    ['status',"TEXT NOT NULL DEFAULT 'active'"],
+    ['version','INTEGER NOT NULL DEFAULT 1'],
+    ['source',"TEXT NOT NULL DEFAULT 'upload'"],
+    ['confidentiality',"TEXT NOT NULL DEFAULT 'internal'"],
+    ['sha256','TEXT'],
+    ['archived_at','TEXT'],
+    ['supersedes_document_id','INTEGER']
+  ]);
+  await db.prepare(`CREATE TABLE IF NOT EXISTS employee_document_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,document_id INTEGER NOT NULL,employee_id INTEGER,
+    actor_type TEXT NOT NULL DEFAULT 'user',actor_user_id INTEGER,event_type TEXT NOT NULL,detail_json TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (document_id) REFERENCES employee_documents(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL,
+    FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_employee_document_events_doc ON employee_document_events(client_id,document_id,created_at)`).run().catch(()=>{});
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_employee_documents_status ON employee_documents(client_id,status,employee_id,created_at)`).run().catch(()=>{});
+  SCHEMA_READY.add('doc-foundation');
+}
+
+
+// P8.18 — Runtime document workflow schema guard.
+// Document creation must not depend on an operator remembering to run 0022/0025/0026 manually.
+// Migrations remain the source of truth, but this guard makes the SaaS self-healing for existing tenants.
+async function ensureDocumentWorkflowReady(db){
+  if(SCHEMA_READY.has('doc-workflow')) return;
+  await ensureDocumentFoundationReady(db);
+
+  await ensureColumns(db,'employee_documents',[
+    ['document_number','TEXT'],
+    ['template_id','INTEGER'],
+    ['workflow_status',"TEXT NOT NULL DEFAULT 'final'"],
+    ['approval_status',"TEXT NOT NULL DEFAULT 'not_required'"],
+    ['acknowledgement_required','INTEGER NOT NULL DEFAULT 0'],
+    ['acknowledgement_status',"TEXT NOT NULL DEFAULT 'not_required'"],
+    ['final_at','TEXT'],
+    ['sent_at','TEXT'],
+    ['data_json','TEXT'],
+    ['hr_signature_status',"TEXT NOT NULL DEFAULT 'not_required'"],
+    ['hr_signed_at','TEXT'],
+    ['hr_signer_user_id','INTEGER'],
+    ['hr_signer_name','TEXT'],
+    ['hr_signer_position','TEXT'],
+    ['hr_signature_method','TEXT'],
+    ['hr_signature_sha256','TEXT'],
+    ['employee_signature_status',"TEXT NOT NULL DEFAULT 'not_required'"],
+    ['employee_signed_at','TEXT']
+  ]);
+
+  await db.prepare(`CREATE TABLE IF NOT EXISTS document_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    document_type TEXT NOT NULL,
+    description TEXT,
+    body_template TEXT NOT NULL DEFAULT '',
+    numbering_prefix TEXT NOT NULL DEFAULT 'DOC',
+    automation_mode TEXT NOT NULL DEFAULT 'assisted',
+    approval_required INTEGER NOT NULL DEFAULT 1,
+    acknowledgement_required INTEGER NOT NULL DEFAULT 0,
+    visibility TEXT NOT NULL DEFAULT 'employee',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by_user_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
+  )`).run();
+  await ensureColumns(db,'document_templates',[
+    ['description','TEXT'],['body_template',"TEXT NOT NULL DEFAULT ''"],
+    ['numbering_prefix',"TEXT NOT NULL DEFAULT 'DOC'"],
+    ['automation_mode',"TEXT NOT NULL DEFAULT 'assisted'"],
+    ['approval_required','INTEGER NOT NULL DEFAULT 1'],
+    ['acknowledgement_required','INTEGER NOT NULL DEFAULT 0'],
+    ['visibility',"TEXT NOT NULL DEFAULT 'employee'"],
+    ['active','INTEGER NOT NULL DEFAULT 1'],['created_by_user_id','INTEGER'],
+    ['created_at','TEXT'],['updated_at','TEXT']
+  ]);
+  await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS ux_document_templates_client_code ON document_templates(client_id,code)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_document_templates_client ON document_templates(client_id,active,document_type)`).run().catch(()=>{});
+
+  await db.prepare(`CREATE TABLE IF NOT EXISTS document_number_sequences (
+    client_id INTEGER NOT NULL,
+    template_id INTEGER NOT NULL,
+    buddhist_year INTEGER NOT NULL,
+    last_number INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(client_id,template_id,buddhist_year)
+  )`).run();
+
+  await db.prepare(`CREATE TABLE IF NOT EXISTS document_approvals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    document_id INTEGER NOT NULL,
+    step_no INTEGER NOT NULL DEFAULT 1,
+    approver_role TEXT,
+    approver_user_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending',
+    note TEXT,
+    acted_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_document_approvals_pending ON document_approvals(client_id,status,created_at)`).run().catch(()=>{});
+
+  await db.prepare(`CREATE TABLE IF NOT EXISTS document_acknowledgements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    document_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    delivered_at TEXT,
+    viewed_at TEXT,
+    acknowledged_at TEXT,
+    response_text TEXT,
+    response_file_url TEXT,
+    document_version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(document_id,employee_id,document_version),
+    FOREIGN KEY(document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_document_ack_pending ON document_acknowledgements(client_id,status,employee_id)`).run().catch(()=>{});
+  await ensureColumns(db,'document_acknowledgements',[
+    ['signer_name','TEXT'],['signature_method','TEXT'],['signature_sha256','TEXT'],['signature_drive_file_id','TEXT'],['signature_url','TEXT'],['signature_user_agent','TEXT'],['signed_at','TEXT'],
+    ['acknowledged_pdf_drive_file_id','TEXT'],['acknowledged_pdf_url','TEXT'],['acknowledged_pdf_sha256','TEXT']
+  ]);
+
+  await db.prepare(`CREATE TABLE IF NOT EXISTS company_document_settings (
+    client_id INTEGER PRIMARY KEY,
+    legal_name TEXT,
+    tax_id TEXT,
+    address TEXT,
+    phone TEXT,
+    signer_name TEXT,
+    signer_position TEXT,
+    document_footer TEXT,
+    numbering_style TEXT NOT NULL DEFAULT 'PREFIX-BE-SEQ',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
+  )`).run();
+  await ensureColumns(db,'company_document_settings',[
+    ['signer_signature_data_url','TEXT']
+  ]);
+
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_employee_documents_template_workflow ON employee_documents(client_id,template_id,workflow_status,created_at)`).run().catch(()=>{});
+  SCHEMA_READY.add('doc-workflow');
 }
 
 async function ensureV100P4Ready(db){
@@ -7168,13 +8948,54 @@ async function ensurePhase5Defaults(db,clientId){
   await snapshotCompanyUsage(db,id,dateInBangkok());
 }
 
-async function ensurePayrollDefaults(db, clientId){
+async function ensurePayrollControlCenterReady(db){
+  const key='payroll-control-p900'; if(SCHEMA_READY.has(key))return;
   await ensureV100P3Ready(db);
+  const alters=[
+    `ALTER TABLE payroll_settings ADD COLUMN attendance_cutoff_day INTEGER NOT NULL DEFAULT 25`,
+    `ALTER TABLE payroll_settings ADD COLUMN commission_cutoff_day INTEGER NOT NULL DEFAULT 25`,
+    `ALTER TABLE payroll_settings ADD COLUMN variance_warning_pct REAL NOT NULL DEFAULT 30`,
+    `ALTER TABLE payroll_settings ADD COLUMN require_separate_approver INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_settings ADD COLUMN employer_social_security_enabled INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE payroll_settings ADD COLUMN cycle_start_day INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE payroll_settings ADD COLUMN cycle_start_month_offset INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_settings ADD COLUMN cycle_end_day INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_settings ADD COLUMN cycle_end_month_offset INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_periods ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'not_required'`,
+    `ALTER TABLE payroll_periods ADD COLUMN approved_by_user_id INTEGER`,
+    `ALTER TABLE payroll_periods ADD COLUMN approved_at TEXT`,
+    `ALTER TABLE payroll_periods ADD COLUMN cutoff_start TEXT`,
+    `ALTER TABLE payroll_periods ADD COLUMN cutoff_end TEXT`,
+    `ALTER TABLE payroll_periods ADD COLUMN payroll_note TEXT`,
+    `ALTER TABLE payroll_adjustments ADD COLUMN source_key TEXT`,
+    `ALTER TABLE payroll_items ADD COLUMN employer_social_security REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_items ADD COLUMN employer_cost REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_items ADD COLUMN prior_net_pay REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_items ADD COLUMN variance_pct REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_items ADD COLUMN ytd_gross REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_items ADD COLUMN ytd_tax REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE payroll_items ADD COLUMN ytd_sso REAL NOT NULL DEFAULT 0`
+  ];
+  for(const sql of alters)await db.prepare(sql).run().catch(()=>{});
+  await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_adjustments_grid_source ON payroll_adjustments(period_id,employee_id,source_key)`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS payroll_component_definitions(id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,code TEXT NOT NULL,name TEXT NOT NULL,component_type TEXT NOT NULL CHECK(component_type IN ('earning','deduction')),category TEXT NOT NULL DEFAULT 'other',taxable INTEGER NOT NULL DEFAULT 1,sso_contributable INTEGER NOT NULL DEFAULT 0,recurring_default INTEGER NOT NULL DEFAULT 1,display_order INTEGER NOT NULL DEFAULT 100,active INTEGER NOT NULL DEFAULT 1,created_by_user_id INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(client_id,code),FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_payroll_components_client ON payroll_component_definitions(client_id,active,display_order)`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS employee_payroll_components(id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,component_id INTEGER NOT NULL,amount REAL NOT NULL DEFAULT 0,effective_from TEXT,effective_to TEXT,note TEXT,active INTEGER NOT NULL DEFAULT 1,created_by_user_id INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(employee_id,component_id,effective_from),FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE,FOREIGN KEY(component_id) REFERENCES payroll_component_definitions(id) ON DELETE CASCADE,FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_employee_payroll_components_effective ON employee_payroll_components(client_id,employee_id,active,effective_from,effective_to)`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS payroll_period_events(id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,period_id INTEGER NOT NULL,actor_user_id INTEGER,event_type TEXT NOT NULL,detail_json TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,FOREIGN KEY(period_id) REFERENCES payroll_periods(id) ON DELETE CASCADE,FOREIGN KEY(actor_user_id) REFERENCES users(id) ON DELETE SET NULL)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_payroll_period_events ON payroll_period_events(period_id,created_at,id)`).run();
+  SCHEMA_READY.add(key);
+}
+
+async function ensurePayrollDefaults(db, clientId){
+  await ensurePayrollControlCenterReady(db);
   await db.prepare(`INSERT OR IGNORE INTO payroll_settings (client_id) VALUES (?1)`).bind(Number(clientId)).run();
   const taxConfig = JSON.stringify({expense_rate:0.5,expense_cap:100000,personal_allowance:60000,brackets:[{up_to:150000,rate:0},{up_to:300000,rate:0.05},{up_to:500000,rate:0.10},{up_to:750000,rate:0.15},{up_to:1000000,rate:0.20},{up_to:2000000,rate:0.25},{up_to:5000000,rate:0.30},{up_to:null,rate:0.35}]});
-  const ssoConfig = JSON.stringify({employee_rate:0.05,wage_floor:1650,wage_ceiling:17500});
+  const ssoConfig = JSON.stringify({employee_rate:0.05,employer_rate:0.05,wage_floor:1650,wage_ceiling:17500});
   await db.prepare(`INSERT OR IGNORE INTO payroll_rule_versions (client_id,rule_key,version,effective_from,config_json,source_note,is_system) VALUES (?1,'thai_personal_income_tax','TH-2026','2026-01-01',?2,'กรมสรรพากร: เงินได้ ม.40(1) ค่าใช้จ่าย 50% สูงสุด 100,000 บาท; อัตราภาษี 0-35%',1)`).bind(Number(clientId),taxConfig).run();
   await db.prepare(`INSERT OR IGNORE INTO payroll_rule_versions (client_id,rule_key,version,effective_from,effective_to,config_json,source_note,is_system) VALUES (?1,'thai_social_security','SSO-2026-2028','2026-01-01','2028-12-31',?2,'เพดานค่าจ้างประกันสังคมช่วง พ.ศ. 2569-2571 = 17,500 บาท',1)`).bind(Number(clientId),ssoConfig).run();
+  const defaults=[['POSITION_ALLOWANCE','ค่าตำแหน่ง','earning','allowance',1,1,10],['TRAVEL_ALLOWANCE','ค่าเดินทาง','earning','allowance',1,0,20],['PHONE_ALLOWANCE','ค่าโทรศัพท์','earning','allowance',1,0,30]];
+  for(const [code,name,type,category,taxable,sso,order] of defaults) await db.prepare(`INSERT OR IGNORE INTO payroll_component_definitions(client_id,code,name,component_type,category,taxable,sso_contributable,recurring_default,display_order,active) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,1)`).bind(Number(clientId),code,name,type,category,taxable,sso,order).run();
 }
 
 function lineSessionKey(providerScope,lineUserId){return `${providerScope||'default'}:${lineUserId}`;}
@@ -7945,6 +9766,123 @@ function buildEmployeeStatusFlex(emp,a){
   }
   return {type:'flex',altText:'สถานะวันนี้',contents:lineBubble({eyebrow:'ATTENDANCE',title:'สถานะวันนี้',subtitle:emp.nickname||emp.first_name,status,statusTone:tone,body:[lineInfoCard(rows,tone)]})};
 }
+async function buildEmployeeDocumentsUrl(env,clientId,employeeId){
+  const token=await issueEmployeePortalToken(env.DB,Number(clientId),Number(employeeId));
+  const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
+  return `${base}/documents.html?token=${encodeURIComponent(token)}`;
+}
+async function sendEmployeeDocumentsPortal(env,replyToken,emp,accessToken){
+  const url=await buildEmployeeDocumentsUrl(env,Number(emp.client_id),Number(emp.id));
+  const counts=await env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN acknowledgement_status IN ('pending','viewed') THEN 1 ELSE 0 END) pending FROM employee_documents WHERE client_id=?1 AND employee_id=?2 AND visibility='employee' AND workflow_status IN ('awaiting_employee_signature','final') AND COALESCE(status,'active')!='archived'`).bind(Number(emp.client_id),Number(emp.id)).first();
+  return replyLineMessages(accessToken,replyToken,[{type:'flex',altText:'เอกสารของฉัน',contents:lineBubble({eyebrow:'MY DOCUMENTS',title:'เอกสารของฉัน',subtitle:emp.nickname||emp.first_name,body:[lineInfoCard([lineInfoRow('เอกสาร',`${Number(counts?.total||0)} ฉบับ`),lineInfoRow('รอลงนาม / รับทราบ',`${Number(counts?.pending||0)} ฉบับ`,Number(counts?.pending||0)?LINE_CI.warning:LINE_CI.success)]),lineText('ดูเอกสาร สลิป ลายเซ็น และหลักฐานการรับทราบของคุณได้จากที่นี่','xs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดเอกสารของฉัน',{type:'uri',label:'เปิดเอกสารของฉัน',uri:url})]})}]);
+}
+async function notifyEmployeeCaseResponseRequested(env,clientId,caseId,detail){
+  const row=await env.DB.prepare(`SELECT c.id,c.case_number,c.title,c.employee_id,e.first_name,e.nickname,e.line_user_id,e.line_provider_scope FROM hr_document_cases c JOIN employees e ON e.id=c.employee_id WHERE c.id=?1 AND c.client_id=?2`).bind(Number(caseId),Number(clientId)).first();
+  if(!row?.line_user_id)return false;
+  const accessToken=await getAccessTokenForProviderScope(env,Number(clientId),row.line_provider_scope); if(!accessToken)return false;
+  const url=await buildEmployeeDocumentsUrl(env,clientId,Number(row.employee_id));
+  const body=[lineInfoCard([lineInfoRow('เรื่อง',row.title),lineInfoRow('เลขที่',row.case_number)]),lineText(String(detail||'HR ขอคำชี้แจงจากคุณ').slice(0,500),'xs',LINE_CI.muted)];
+  await pushLineMessages(accessToken,row.line_user_id,[{type:'flex',altText:`HR ขอคำชี้แจง: ${row.title}`,contents:lineBubble({eyebrow:'HR CASE',title:'HR ขอคำชี้แจงจากคุณ',subtitle:row.nickname||row.first_name,status:'รอคำชี้แจง',statusTone:'warning',body,footer:[linePrimaryButton('เปิดและชี้แจง',{type:'uri',label:'เปิดและชี้แจง',uri:url})]})}]);
+  return true;
+}
+
+async function notifyEmployeeDocumentReady(env,clientId,documentId,{reminder=false}={}){
+  const row=await env.DB.prepare(`SELECT d.*,e.first_name,e.nickname,e.line_user_id,e.line_provider_scope
+    FROM employee_documents d JOIN employees e ON e.id=d.employee_id
+    WHERE d.id=?1 AND d.client_id=?2 AND d.visibility='employee'
+      AND d.workflow_status IN ('awaiting_employee_signature','final')`)
+    .bind(Number(documentId),Number(clientId)).first();
+  if(!row)return {ok:false,reason:'not_eligible'};
+  const record=async(eventType,detail={})=>env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system',?4,?5)`).bind(Number(clientId),Number(documentId),Number(row.employee_id),eventType,JSON.stringify({version:Number(row.version||1),reminder:Boolean(reminder),...detail})).run().catch(()=>{});
+  if(!row.line_user_id){await record('delivery_failed',{reason:'line_not_connected'});return {ok:false,reason:'line_not_connected'};}
+  const accessToken=await getAccessTokenForProviderScope(env,Number(clientId),row.line_provider_scope);
+  if(!accessToken){await record('delivery_failed',{reason:'line_access_unavailable'});return {ok:false,reason:'line_access_unavailable'};}
+  const url=await buildEmployeeDocumentsUrl(env,clientId,Number(row.employee_id));
+  const awaitingSignature=String(row.workflow_status||'')==='awaiting_employee_signature';
+  const completed=String(row.workflow_status||'')==='final' && ['acknowledged','responded'].includes(String(row.acknowledgement_status||''));
+  const title=reminder
+    ? (awaitingSignature?'เตือน: เอกสารรอลายเซ็น':'เตือน: มีเอกสารรอดำเนินการ')
+    : awaitingSignature
+      ? 'HR ลงนามแล้ว · รอลายเซ็นคุณ'
+      : completed
+        ? 'เอกสาร Final พร้อมใช้งาน'
+        : 'มีเอกสารใหม่จากบริษัท';
+  const text=awaitingSignature
+    ? 'กรุณาตรวจสอบเอกสารที่ HR ลงนามแล้ว จากนั้นลงลายเซ็นของคุณเพื่อให้เอกสารสมบูรณ์'
+    : completed
+      ? 'เอกสารฉบับนี้ลงนามครบแล้ว คุณสามารถเปิดดูฉบับ Final ได้ตลอดเวลา'
+      : Number(row.acknowledgement_required)
+        ? 'กรุณาเปิดอ่านและดำเนินการตามที่ระบุในระบบ'
+        : 'HR ออกเอกสารให้คุณแล้ว สามารถเปิดดูได้ทันที';
+  const status=awaitingSignature?'รอลายเซ็นคุณ':completed?'Final':'พร้อมเปิดดู';
+  const statusTone=awaitingSignature?'warning':'success';
+  const buttonLabel=awaitingSignature?'ตรวจสอบและลงนาม':'เปิดเอกสารของฉัน';
+  try{
+    await pushLineMessages(accessToken,row.line_user_id,[{type:'flex',altText:`${title}: ${row.title}`,contents:lineBubble({
+      eyebrow:awaitingSignature?'SIGNATURE REQUIRED':(reminder?'REMINDER':'DOCUMENT'),
+      title,subtitle:row.nickname||row.first_name,status,statusTone,
+      body:[lineInfoCard([lineInfoRow('เอกสาร',row.title),row.document_number?lineInfoRow('เลขที่',row.document_number):null,row.hr_signed_at?lineInfoRow('HR ลงนาม',formatBangkokTime(row.hr_signed_at)):null].filter(Boolean)),lineText(text,'xs',LINE_CI.muted)],
+      footer:[linePrimaryButton(buttonLabel,{type:'uri',label:buttonLabel,uri:url})]
+    })}]);
+    if(Number(row.acknowledgement_required)){
+      await env.DB.prepare(`UPDATE document_acknowledgements SET delivered_at=COALESCE(delivered_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE document_id=?1 AND employee_id=?2 AND document_version=?3`).bind(Number(documentId),Number(row.employee_id),Number(row.version||1)).run().catch(()=>{});
+    }
+    const sentAt=new Date().toISOString(); await record(reminder?'reminder_sent':'line_sent',{sent_at:sentAt,workflow_status:row.workflow_status});
+    return {ok:true,reason:'sent',sent_at:sentAt};
+  }catch(error){
+    const message=String(error?.message||error||'ส่ง LINE ไม่สำเร็จ'); await record('delivery_failed',{reason:'push_failed',message});
+    console.warn(JSON.stringify({level:'warn',event:'employee_document_delivery_failed',client_id:Number(clientId),document_id:Number(documentId),message}));
+    return {ok:false,reason:'push_failed',message};
+  }
+}
+
+async function notifyEmployeeDocumentFinalized(env,clientId,documentId){
+  const row=await env.DB.prepare(`SELECT d.*,e.first_name,e.nickname,e.line_user_id,e.line_provider_scope,
+      a.acknowledged_pdf_url,a.signed_at
+    FROM employee_documents d
+    JOIN employees e ON e.id=d.employee_id
+    LEFT JOIN document_acknowledgements a ON a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version
+    WHERE d.id=?1 AND d.client_id=?2 AND d.visibility='employee' AND d.workflow_status='final'`)
+    .bind(Number(documentId),Number(clientId)).first();
+  if(!row?.line_user_id)return {ok:false,reason:'line_not_connected'};
+  const accessToken=await getAccessTokenForProviderScope(env,Number(clientId),row.line_provider_scope);
+  if(!accessToken)return {ok:false,reason:'line_access_unavailable'};
+  const url=await buildEmployeeDocumentsUrl(env,clientId,Number(row.employee_id));
+  try{
+    await pushLineMessages(accessToken,row.line_user_id,[{type:'flex',altText:`ลงนามครบแล้ว: ${row.title}`,contents:lineBubble({
+      eyebrow:'DOCUMENT FINAL',
+      title:'ลงนามครบแล้ว',
+      subtitle:row.nickname||row.first_name,
+      status:'Final',statusTone:'success',
+      body:[
+        lineInfoCard([lineInfoRow('เอกสาร',row.title),row.document_number?lineInfoRow('เลขที่',row.document_number):null,row.signed_at?lineInfoRow('พนักงานลงนาม',formatBangkokTime(row.signed_at)):null].filter(Boolean)),
+        lineText('เอกสารฉบับ Final ที่มีหลักฐานการลงนามครบถูกเก็บไว้ในแฟ้มเอกสารของคุณแล้ว','xs',LINE_CI.muted)
+      ],
+      footer:[linePrimaryButton('เปิดฉบับ Final',{type:'uri',label:'เปิดฉบับ Final',uri:url})]
+    })}]);
+    await env.DB.prepare(`INSERT INTO employee_document_events(client_id,document_id,employee_id,actor_type,event_type,detail_json) VALUES(?1,?2,?3,'system','final_line_sent',?4)`)
+      .bind(Number(clientId),Number(documentId),Number(row.employee_id),JSON.stringify({sent_at:new Date().toISOString(),final_pdf_url:row.acknowledged_pdf_url||null})).run().catch(()=>{});
+    return {ok:true};
+  }catch(error){
+    return {ok:false,reason:'push_failed',message:String(error?.message||error)};
+  }
+}
+
+async function runDocumentEvidenceAutomation(env){
+  // Runs once daily from the existing 08:00 Bangkok cron branch.
+  const settings=(await env.DB.prepare(`SELECT * FROM document_automation_settings WHERE enabled=1 AND remind_pending_ack=1`).all()).results||[];
+  let sent=0;
+  for(const st of settings){
+    const days=Math.max(1,Number(st.ack_reminder_days||3));
+    const rows=(await env.DB.prepare(`SELECT a.id,a.document_id,a.employee_id,a.last_reminded_at,a.reminder_count FROM document_acknowledgements a JOIN employee_documents d ON d.id=a.document_id WHERE a.client_id=?1 AND a.status IN ('pending','viewed') AND d.workflow_status IN ('awaiting_employee_signature','final') AND d.visibility='employee' AND datetime(COALESCE(a.delivered_at,a.created_at))<=datetime('now',?2) AND (a.last_reminded_at IS NULL OR datetime(a.last_reminded_at)<=datetime('now',?2)) LIMIT 200`).bind(Number(st.client_id),`-${days} days`).all()).results||[];
+    for(const a of rows){
+      const delivery=await notifyEmployeeDocumentReady(env,Number(st.client_id),Number(a.document_id),{reminder:true}).catch(()=>({ok:false}));
+      if(delivery?.ok){await env.DB.prepare(`UPDATE document_acknowledgements SET last_reminded_at=CURRENT_TIMESTAMP,reminder_count=COALESCE(reminder_count,0)+1,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(a.id)).run(); sent++;}
+    }
+  }
+  return {sent};
+}
+
 async function sendHrCaseForm(env,replyToken,emp,accessToken){
   const token=await issueEmployeePortalToken(env.DB,Number(emp.client_id),Number(emp.id));
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
@@ -9509,6 +11447,12 @@ function redirectResponse(location, cookies = []) {
   const headers = new Headers({ location });
   for (const cookie of cookies) headers.append('Set-Cookie', cookie);
   return new Response(null, { status: 302, headers });
+}
+
+function jsonWithCookies(data,status=200,cookies=[]){
+  const headers=new Headers(JSON_HEADERS);
+  for(const cookie of cookies) headers.append('Set-Cookie',cookie);
+  return new Response(JSON.stringify(data),{status,headers});
 }
 
 function getCookie(request, name) {
