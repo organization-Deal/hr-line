@@ -3189,3 +3189,42 @@ button.nakna-mutation-pending:not(.icon-btn):not(.close-btn)::after,a.nakna-muta
   .payroll-manual-input-wrap .payroll-manual-input{min-width:0;width:100%}
   .payroll-auto-reset{height:32px}
 }
+
+/* P9.23 — Saved payroll review Excel */
+.payroll-export-panel{margin:18px 0;padding:18px;border:1px solid #d7e7e5;border-radius:20px;background:#fff;box-shadow:0 8px 28px rgba(14,67,70,.045)}
+.payroll-export-panel.is-stale{border-color:#efdca8;background:#fffdf8}
+.payroll-export-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px}
+.payroll-export-head>div{display:flex;align-items:center;gap:12px;min-width:0}
+.payroll-export-head strong{display:block;color:#173e43;font-size:15px;line-height:1.25}
+.payroll-export-head small{display:block;color:#7b8e90;font-size:12px;margin-top:3px;line-height:1.45}
+.payroll-export-panel.is-stale .payroll-export-head small{color:#9a7120}
+.payroll-export-badge{display:inline-grid;place-items:center;min-width:54px;height:36px;padding:0 10px;border-radius:10px;background:#e8f6f3;color:#04878a;font-weight:800;font-size:12px;letter-spacing:.08em}
+.payroll-export-new{white-space:nowrap}
+.payroll-export-latest{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;border:1px solid #e1eceb;border-radius:15px;background:#fbfdfd}
+.payroll-export-file{min-width:0;display:flex;flex-direction:column;gap:4px}
+.payroll-export-file strong{font-size:13px;color:#173e43;word-break:break-word}
+.payroll-export-file span{font-size:12px;color:#6f8284}
+.payroll-export-file small{font-size:11px}
+.payroll-export-file small.ready{color:#32846b}
+.payroll-export-file small.warning{color:#a86d17}
+.payroll-export-latest .primary-btn{flex:0 0 auto;width:auto;min-width:150px;margin:0}
+.payroll-export-history{margin-top:10px;border-top:1px solid #edf2f1;padding-top:10px}
+.payroll-export-history>summary{cursor:pointer;color:#607779;font-size:12px;font-weight:700;list-style:none;display:flex;align-items:center;gap:6px}
+.payroll-export-history>summary::-webkit-details-marker{display:none}
+.payroll-export-history>summary span{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:#eef6f5;color:#537173;font-size:10px}
+.payroll-export-history>div{display:grid;gap:8px;margin-top:10px}
+.payroll-export-history article{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:12px;background:#f7faf9}
+.payroll-export-history article span{min-width:0;display:flex;flex-direction:column;gap:2px}
+.payroll-export-history article strong{font-size:12px;color:#294c50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:520px}
+.payroll-export-history article small{font-size:10px;color:#819092}
+.payroll-export-history article button{border:0;background:transparent;color:#04878a;font-weight:700;cursor:pointer;padding:6px 8px}
+@media(max-width:720px){
+  .payroll-export-panel{padding:14px;border-radius:18px}
+  .payroll-export-head{align-items:flex-start}
+  .payroll-export-head>div{align-items:flex-start}
+  .payroll-export-badge{min-width:48px;height:32px}
+  .payroll-export-new{padding:9px 11px;font-size:12px}
+  .payroll-export-latest{align-items:stretch;flex-direction:column;padding:13px}
+  .payroll-export-latest .primary-btn{width:100%;min-width:0}
+  .payroll-export-history article strong{max-width:210px}
+}
