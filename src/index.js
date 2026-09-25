@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.18-FACE-LIVENESS';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.18-FACE-LIVENESS';
-const NAKNA_RUNTIME_FEATURE = 'attendance-face-verification-no-photo-storage';
+const NAKNA_RUNTIME_RELEASE = 'P9.22-PAYROLL-MANUAL-OVERRIDE';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.22-PAYROLL-MANUAL-OVERRIDE';
+const NAKNA_RUNTIME_FEATURE = 'payroll-editable-days-and-period-salary';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -3553,6 +3553,7 @@ async function handleApi(request, env, url, auth, ctx) {
       await env.DB.batch([
         env.DB.prepare(`DELETE FROM payroll_period_events WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
         env.DB.prepare(`DELETE FROM payroll_adjustments WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
+        env.DB.prepare(`DELETE FROM payroll_item_overrides WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
         env.DB.prepare(`DELETE FROM payroll_items WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
         env.DB.prepare(`DELETE FROM payroll_periods WHERE client_id=?1 AND id=?2 AND status IN ('draft','review')`).bind(clientId,id)
       ]);
@@ -3589,9 +3590,39 @@ async function handleApi(request, env, url, auth, ctx) {
     await ensurePayrollDefaults(env.DB,clientId);
     const periodId=Number(payrollCellMatch[1]); const period=await env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(periodId,clientId).first();
     if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(!['draft','review'].includes(period.status))return json({error:'แก้ตารางได้เฉพาะ Draft / รอตรวจ'},409);
-    const b=await safeJson(request),employeeId=Number(b.employee_id),category=String(b.category||'').trim(); const amount=Math.max(0,num(b.amount,0));
+    const b=await safeJson(request),employeeId=Number(b.employee_id),category=String(b.category||'').trim();
+    const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+    if(category==='payable_days'||category==='prorated_salary'){
+      const reset=Boolean(b.reset);
+      if(category==='payable_days'){
+        const payrollSettings=await env.DB.prepare('SELECT daily_rate_divisor FROM payroll_settings WHERE client_id=?1').bind(clientId).first();
+        const divisor=Math.max(1,Number(payrollSettings?.daily_rate_divisor||30));
+        if(reset){
+          await env.DB.prepare(`UPDATE payroll_item_overrides SET payable_days_override=NULL,updated_by_user_id=?1,updated_at=CURRENT_TIMESTAMP WHERE client_id=?2 AND period_id=?3 AND employee_id=?4`).bind(Number(auth.user.id),clientId,periodId,employeeId).run();
+        }else{
+          const raw=Number(b.amount); if(!Number.isFinite(raw)||raw<0||raw>divisor)return json({error:`วันคิดเงินต้องอยู่ระหว่าง 0 ถึง ${divisor} วัน`},400);
+          const days=Math.round(raw*100)/100;
+          await env.DB.prepare(`INSERT INTO payroll_item_overrides(client_id,period_id,employee_id,payable_days_override,prorated_salary_override,updated_by_user_id) VALUES(?1,?2,?3,?4,NULL,?5)
+            ON CONFLICT(period_id,employee_id) DO UPDATE SET payable_days_override=excluded.payable_days_override,prorated_salary_override=NULL,updated_by_user_id=excluded.updated_by_user_id,updated_at=CURRENT_TIMESTAMP`).bind(clientId,periodId,employeeId,days,Number(auth.user.id)).run();
+        }
+      }else{
+        if(reset){
+          await env.DB.prepare(`UPDATE payroll_item_overrides SET prorated_salary_override=NULL,updated_by_user_id=?1,updated_at=CURRENT_TIMESTAMP WHERE client_id=?2 AND period_id=?3 AND employee_id=?4`).bind(Number(auth.user.id),clientId,periodId,employeeId).run();
+        }else{
+          const raw=Number(b.amount); if(!Number.isFinite(raw)||raw<0)return json({error:'เงินเดือนรอบนี้ต้องเป็น 0 หรือมากกว่า'},400);
+          const salaryOverride=roundMoney(raw);
+          await env.DB.prepare(`INSERT INTO payroll_item_overrides(client_id,period_id,employee_id,prorated_salary_override,updated_by_user_id) VALUES(?1,?2,?3,?4,?5)
+            ON CONFLICT(period_id,employee_id) DO UPDATE SET prorated_salary_override=excluded.prorated_salary_override,updated_by_user_id=excluded.updated_by_user_id,updated_at=CURRENT_TIMESTAMP`).bind(clientId,periodId,employeeId,salaryOverride,Number(auth.user.id)).run();
+        }
+      }
+      await env.DB.prepare(`DELETE FROM payroll_item_overrides WHERE client_id=?1 AND period_id=?2 AND employee_id=?3 AND payable_days_override IS NULL AND prorated_salary_override IS NULL`).bind(clientId,periodId,employeeId).run();
+      await recalculatePayrollPeriod(env,clientId,periodId);
+      await recordPayrollPeriodEvent(env.DB,clientId,periodId,Number(auth.user.id),'salary_override_updated',{employee_id:employeeId,category,reset,value:reset?null:Number(b.amount)});
+      return json({ok:true,...await getPayrollPeriodDetail(env.DB,clientId,periodId)});
+    }
+    const amount=Math.max(0,num(b.amount,0));
     const allowed={commission:['earning',1,0],kpi:['earning',1,0],incentive:['earning',1,0],bonus:['earning',1,0],other:['earning',1,0],other_deduction:['deduction',0,0],tax_add:['deduction',0,0],tax_reduce:['earning',0,0]};
-    if(!allowed[category])return json({error:'คอลัมน์นี้แก้จากตารางไม่ได้'},400); const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee)return json({error:'ไม่พบพนักงาน'},404);
+    if(!allowed[category])return json({error:'คอลัมน์นี้แก้จากตารางไม่ได้'},400);
     const [type,taxable,sso]=allowed[category],sourceKey=`grid:${category}`;
     if(amount<=0)await env.DB.prepare(`DELETE FROM payroll_adjustments WHERE period_id=?1 AND employee_id=?2 AND client_id=?3 AND source_key=?4`).bind(periodId,employeeId,clientId,sourceKey).run();
     else await env.DB.prepare(`INSERT INTO payroll_adjustments(client_id,period_id,employee_id,adjustment_type,category,amount,taxable,sso_contributable,note,source_key,created_by_user_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'แก้จาก Payroll Grid',?9,?10)
@@ -7206,8 +7237,10 @@ async function getPayrollPeriodDetail(db,clientId,periodId){
   const period=await db.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(Number(periodId),Number(clientId)).first();
   if(!period)return {period:null,items:[],adjustments:[],documents:[],exceptions:[],timeline:[]};
   const [items,adjustments,documents,events,settings,components]=await db.batch([
-    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.start_date,e.end_date,d.name AS department_name,pos.name AS position_name,pp.bank_name,pp.bank_account_name,pp.bank_account_no,pp.payroll_note,pp.tax_enabled AS employee_tax_enabled,pp.social_security_enabled AS employee_sso_enabled
+    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.start_date,e.end_date,d.name AS department_name,pos.name AS position_name,pp.bank_name,pp.bank_account_name,pp.bank_account_no,pp.payroll_note,pp.tax_enabled AS employee_tax_enabled,pp.social_security_enabled AS employee_sso_enabled,
+      po.payable_days_override,po.prorated_salary_override,po.updated_at AS payroll_override_updated_at
       FROM payroll_items pi JOIN employees e ON e.id=pi.employee_id LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions pos ON pos.id=e.position_id LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id
+      LEFT JOIN payroll_item_overrides po ON po.period_id=pi.period_id AND po.employee_id=pi.employee_id AND po.client_id=pi.client_id
       WHERE pi.period_id=?1 AND pi.client_id=?2 ORDER BY e.first_name,e.last_name`).bind(Number(periodId),Number(clientId)),
     db.prepare(`SELECT a.*,e.employee_code,e.first_name,e.last_name,e.nickname FROM payroll_adjustments a JOIN employees e ON e.id=a.employee_id WHERE a.period_id=?1 AND a.client_id=?2 ORDER BY a.employee_id,a.id`).bind(Number(periodId),Number(clientId)),
     db.prepare(`SELECT * FROM payroll_documents WHERE period_id=?1 AND client_id=?2`).bind(Number(periodId),Number(clientId)),
@@ -7276,7 +7309,7 @@ async function recalculatePayrollPeriod(env,clientId,periodId){
   if(['locked','published','void'].includes(period.status))throw httpError('รอบ Payroll นี้ Lock แล้ว',409);
   await ensureV100P5Ready(db);
   await materializePointCashRewardsForPayroll(db,Number(clientId),period);
-  const [client,settings,employeesRes,schedulesRes,holidaysRes,attendanceRes,leavesRes,adjustmentsRes,profilesRes,ytdRes,recurringRes,priorRes]=await Promise.all([
+  const [client,settings,employeesRes,schedulesRes,holidaysRes,attendanceRes,leavesRes,adjustmentsRes,profilesRes,ytdRes,recurringRes,overridesRes,priorRes]=await Promise.all([
     getClient(db,clientId),
     db.prepare('SELECT * FROM payroll_settings WHERE client_id=?1').bind(Number(clientId)).first(),
     db.prepare(`SELECT e.* FROM employees e WHERE e.client_id=?1 AND e.start_date<=?2 AND (e.end_date IS NULL OR e.end_date>=?3) AND COALESCE(e.people_status,'employee') NOT IN ('candidate') ORDER BY e.id`).bind(Number(clientId),period.period_end,period.period_start).all(),
@@ -7289,10 +7322,11 @@ async function recalculatePayrollPeriod(env,clientId,periodId){
     db.prepare(`SELECT pi.employee_id,SUM(MAX(0,pi.gross_income-pi.attendance_deduction)) AS ytd_taxable,SUM(pi.gross_income) AS ytd_gross,SUM(pi.withholding_tax) AS ytd_tax,SUM(pi.social_security) AS ytd_sso
       FROM payroll_items pi JOIN payroll_periods pp ON pp.id=pi.period_id WHERE pi.client_id=?1 AND pp.period_start>=?2 AND pp.period_end<?3 AND pp.status IN ('locked','published') GROUP BY pi.employee_id`).bind(Number(clientId),`${period.period_key.slice(0,4)}-01-01`,period.period_start).all(),
     db.prepare(`SELECT epc.*,d.code,d.name,d.component_type,d.category,d.taxable,d.sso_contributable FROM employee_payroll_components epc JOIN payroll_component_definitions d ON d.id=epc.component_id WHERE epc.client_id=?1 AND epc.active=1 AND d.active=1 AND (epc.effective_from IS NULL OR epc.effective_from<=?2) AND (epc.effective_to IS NULL OR epc.effective_to>=?3) ORDER BY d.display_order,d.id`).bind(Number(clientId),period.period_end,period.period_start).all(),
+    db.prepare(`SELECT * FROM payroll_item_overrides WHERE client_id=?1 AND period_id=?2`).bind(Number(clientId),Number(periodId)).all(),
     db.prepare(`SELECT pi.employee_id,pi.net_pay FROM payroll_items pi WHERE pi.period_id=(SELECT id FROM payroll_periods WHERE client_id=?1 AND period_end<?2 AND status IN ('locked','published') ORDER BY period_end DESC,id DESC LIMIT 1)`).bind(Number(clientId),period.period_start).all(),
   ]);
   const rules=await effectivePayrollRules(db,clientId,period); const employees=employeesRes.results||[]; const schedules=schedulesRes.results||[]; const holidays=new Map((holidaysRes.results||[]).map(h=>[h.holiday_date,h]));
-  const attendance=new Map((attendanceRes.results||[]).map(a=>[`${a.employee_id}:${a.work_date}`,a])); const profiles=new Map((profilesRes.results||[]).map(p=>[Number(p.employee_id),p])); const ytd=new Map((ytdRes.results||[]).map(r=>[Number(r.employee_id),r])); const priorNet=new Map((priorRes.results||[]).map(r=>[Number(r.employee_id),Number(r.net_pay||0)]));
+  const attendance=new Map((attendanceRes.results||[]).map(a=>[`${a.employee_id}:${a.work_date}`,a])); const profiles=new Map((profilesRes.results||[]).map(p=>[Number(p.employee_id),p])); const ytd=new Map((ytdRes.results||[]).map(r=>[Number(r.employee_id),r])); const priorNet=new Map((priorRes.results||[]).map(r=>[Number(r.employee_id),Number(r.net_pay||0)])); const overrides=new Map((overridesRes.results||[]).map(r=>[Number(r.employee_id),r]));
   const adjustmentsByEmployee=new Map(); for(const a of adjustmentsRes.results||[]){const list=adjustmentsByEmployee.get(Number(a.employee_id))||[];list.push(a);adjustmentsByEmployee.set(Number(a.employee_id),list);}
   const recurringByEmployee=new Map(); for(const c of recurringRes.results||[]){const list=recurringByEmployee.get(Number(c.employee_id))||[];list.push(c);recurringByEmployee.set(Number(c.employee_id),list);}
   const leaveByEmployeeDate=new Map();
@@ -7305,7 +7339,15 @@ async function recalculatePayrollPeriod(env,clientId,periodId){
   for(const employee of employees){
     const profile=profiles.get(Number(employee.id))||{}; const salary=Math.max(0,Number(profile.base_salary||0)); const divisor=Math.max(1,Number(settings?.daily_rate_divisor||30));
     const activeStart=employee.start_date>period.period_start?employee.start_date:period.period_start; const activeEnd=employee.end_date&&employee.end_date<period.period_end?employee.end_date:period.period_end; const activeCalendarDays=dateKeysInclusive(activeStart,activeEnd).length;
-    const fullPeriod=activeStart===period.period_start&&activeEnd===period.period_end; const prorated=fullPeriod?salary:Math.min(salary,roundMoney((salary/divisor)*activeCalendarDays));
+    const fullPeriod=activeStart===period.period_start&&activeEnd===period.period_end;
+    const autoPayableDays=fullPeriod?divisor:Math.min(divisor,activeCalendarDays);
+    const manual=overrides.get(Number(employee.id))||{};
+    const hasPayableDaysOverride=manual.payable_days_override!==null&&manual.payable_days_override!==undefined;
+    const hasProratedSalaryOverride=manual.prorated_salary_override!==null&&manual.prorated_salary_override!==undefined;
+    const payableDays=hasPayableDaysOverride?Math.max(0,Math.min(divisor,Number(manual.payable_days_override||0))):autoPayableDays;
+    const autoProrated=fullPeriod?salary:Math.min(salary,roundMoney((salary/divisor)*activeCalendarDays));
+    const dayAdjustedProrated=Math.min(salary,roundMoney((salary/divisor)*payableDays));
+    const prorated=hasProratedSalaryOverride?Math.max(0,roundMoney(Number(manual.prorated_salary_override||0))):(hasPayableDaysOverride?dayAdjustedProrated:autoProrated);
     let absentDays=0,lateMinutes=0,scheduledDays=0;
     for(const date of dates){
       if(date<activeStart||date>activeEnd)continue; const schedule=payrollScheduleFor(employee,date,schedules,holidays,client); if(!schedule.is_workday)continue; scheduledDays++;
@@ -7324,7 +7366,7 @@ async function recalculatePayrollPeriod(env,clientId,periodId){
     }
     withholding=Math.max(0,roundMoney(withholding+taxManualAdjust));
     otherDeductions=roundMoney(otherDeductions+recurringDeductions);
-    const deductions=roundMoney(attendanceDeduction+sso+withholding+otherDeductions); const netPay=roundMoney(Math.max(0,gross-deductions)); const prior=priorNet.get(Number(employee.id))||0; const variancePct=prior>0?roundMoney(((netPay-prior)/prior)*100):0; const priorYtd=ytd.get(Number(employee.id))||{}; const ytdGross=roundMoney(Number(priorYtd.ytd_gross||0)+gross),ytdTax=roundMoney(Number(priorYtd.ytd_tax||0)+withholding),ytdSso=roundMoney(Number(priorYtd.ytd_sso||0)+sso); const employerCost=roundMoney(gross+employerSso); const payableDays=fullPeriod?divisor:Math.min(divisor,activeCalendarDays); const breakdown={scheduled_days:scheduledDays,active_calendar_days:activeCalendarDays,payable_days:payableDays,salary_mode:fullPeriod?'full':'prorated',kpi,period_days:dates.length,tax_rule:rules.tax_version,sso_rule:rules.sso_version,taxable_monthly:taxableMonthly,recurring_components:recurringItems};
+    const deductions=roundMoney(attendanceDeduction+sso+withholding+otherDeductions); const netPay=roundMoney(Math.max(0,gross-deductions)); const prior=priorNet.get(Number(employee.id))||0; const variancePct=prior>0?roundMoney(((netPay-prior)/prior)*100):0; const priorYtd=ytd.get(Number(employee.id))||{}; const ytdGross=roundMoney(Number(priorYtd.ytd_gross||0)+gross),ytdTax=roundMoney(Number(priorYtd.ytd_tax||0)+withholding),ytdSso=roundMoney(Number(priorYtd.ytd_sso||0)+sso); const employerCost=roundMoney(gross+employerSso); const salaryMode=hasProratedSalaryOverride?'manual_salary':hasPayableDaysOverride?'manual_days':fullPeriod?'full':'prorated'; const breakdown={scheduled_days:scheduledDays,active_calendar_days:activeCalendarDays,payable_days:payableDays,auto_payable_days:autoPayableDays,auto_prorated_salary:autoProrated,salary_mode:salaryMode,manual_payable_days:hasPayableDaysOverride,manual_prorated_salary:hasProratedSalaryOverride,kpi,period_days:dates.length,tax_rule:rules.tax_version,sso_rule:rules.sso_version,taxable_monthly:taxableMonthly,recurring_components:recurringItems};
     statements.push(db.prepare(`INSERT INTO payroll_items (client_id,period_id,employee_id,base_salary,prorated_salary,absent_days,late_minutes,attendance_deduction,overtime,commission,incentive,allowance,bonus,other_earnings,gross_income,social_security,withholding_tax,other_deductions,total_deductions,net_pay,breakdown_json,calculation_note,status,employer_social_security,employer_cost,prior_net_pay,variance_pct,ytd_gross,ytd_tax,ytd_sso) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,'preview',?23,?24,?25,?26,?27,?28,?29)`).bind(Number(clientId),Number(periodId),Number(employee.id),salary,prorated,absentDays,lateMinutes,attendanceDeduction,overtime,commission,incentive,allowance,bonus,roundMoney(otherEarnings+recurringEarnings),gross,sso,withholding,otherDeductions,deductions,netPay,JSON.stringify(breakdown),'ภาษีเป็นประมาณการรายเดือนแบบ annualized; HR/Payroll ต้องตรวจสอบก่อน Lock',employerSso,employerCost,prior,variancePct,ytdGross,ytdTax,ytdSso));
     totals.gross+=gross;totals.deductions+=deductions;totals.net+=netPay;totals.count++;
   }
@@ -9170,6 +9212,23 @@ async function ensurePayrollControlCenterReady(db){
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_employee_payroll_components_effective ON employee_payroll_components(client_id,employee_id,active,effective_from,effective_to)`).run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS payroll_period_events(id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,period_id INTEGER NOT NULL,actor_user_id INTEGER,event_type TEXT NOT NULL,detail_json TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,FOREIGN KEY(period_id) REFERENCES payroll_periods(id) ON DELETE CASCADE,FOREIGN KEY(actor_user_id) REFERENCES users(id) ON DELETE SET NULL)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_payroll_period_events ON payroll_period_events(period_id,created_at,id)`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS payroll_item_overrides(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    period_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    payable_days_override REAL,
+    prorated_salary_override REAL,
+    updated_by_user_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(period_id,employee_id),
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY(period_id) REFERENCES payroll_periods(id) ON DELETE CASCADE,
+    FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+    FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_payroll_item_overrides_period ON payroll_item_overrides(client_id,period_id,employee_id)`).run();
   SCHEMA_READY.add(key);
 }
 
