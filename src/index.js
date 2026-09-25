@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.17-DASHBOARD-LINK';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.17-DASHBOARD-LINK';
+const NAKNA_RUNTIME_RELEASE = 'P9.18-FACE-LIVENESS';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.18-FACE-LIVENESS';
 const NAKNA_RUNTIME_FEATURE = 'attendance-face-verification-no-photo-storage';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -1727,7 +1727,7 @@ export default {
     }
     // P7.93: once per day at 12:30 Asia/Bangkok, notify only employees who are
     // scheduled to work and still have no check-in. Already checked-in staff,
-    // approved leave, holidays/non-workdays, later shifts, and duplicate sends are skipped.
+    // leave requests (approved/pending/awaiting evidence), holidays/non-workdays, later shifts, and duplicate sends are skipped.
     if(clock.time===MISSING_CHECKIN_REMINDER_TIME){
       jobs.push(runMissingCheckinReminderAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'missing_checkin_reminder_failed',message:String(error?.message||error)}))));
     }
@@ -6328,8 +6328,10 @@ function faceDistance(a,b){
   let sum=0;for(let i=0;i<a.length;i++){const d=Number(a[i])-Number(b[i]);sum+=d*d;}return Math.sqrt(sum);
 }
 function faceChallengeActions(){
-  const byte=new Uint8Array(1);crypto.getRandomValues(byte);
-  return byte[0]%2===0?['blink']:['turn'];
+  // P9.18: natural blinks are too short for face-api inference inside iOS/LINE
+  // WebViews and can be missed between frames. A small head turn persists long
+  // enough to be detected reliably, so it is the default liveness gesture.
+  return ['turn'];
 }
 async function createFaceChallenge(db,clientId,employeeId,purpose){
   await ensureAttendanceFaceReady(db);
@@ -8563,7 +8565,7 @@ function buildMissingCheckinReminderFlex(customMessage=MISSING_CHECKIN_REMINDER_
         lineInfoRow('เวลาแจ้งเตือน','12:30 น.',LINE_CI.primaryDark),
         lineInfoRow('สถานะ','ยังไม่มีเวลาเช็กอินวันนี้',LINE_CI.warning)
       ],'teal'),
-      lineText('นากนะส่งข้อความนี้เฉพาะวันที่มีตารางงาน และจะไม่ส่งให้คนที่เช็กอินแล้ว','xs',LINE_CI.muted)
+      lineText('นากนะส่งข้อความนี้เฉพาะวันที่มีตารางงาน และจะไม่ส่งให้คนที่เช็กอินแล้วหรือมีรายการลาในวันนี้','xs',LINE_CI.muted)
     ],
     footer:[linePrimaryButton('เช็กอินตอนนี้',{type:'postback',label:'เช็กอินตอนนี้',data:'action=checkin'})]
   })};
@@ -8614,11 +8616,13 @@ async function runMissingCheckinReminderAutomation(env){
         AND e.line_user_id IS NOT NULL AND trim(e.line_user_id)<>''
         AND NOT EXISTS (
           SELECT 1 FROM attendance a
-          WHERE a.client_id=e.client_id AND a.employee_id=e.id AND a.work_date=?2 AND a.check_in_at IS NOT NULL
+          WHERE a.client_id=e.client_id AND a.employee_id=e.id AND a.work_date=?2
+            AND (a.check_in_at IS NOT NULL OR a.status IN ('leave','holiday'))
         )
         AND NOT EXISTS (
           SELECT 1 FROM leave_requests lr
-          WHERE lr.client_id=e.client_id AND lr.employee_id=e.id AND lr.status='approved'
+          WHERE lr.client_id=e.client_id AND lr.employee_id=e.id
+            AND lr.status IN ('approved','pending','awaiting_evidence')
             AND lr.start_date<=?2 AND lr.end_date>=?2
         )
         AND NOT EXISTS (
