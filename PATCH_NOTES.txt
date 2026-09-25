@@ -1,32 +1,37 @@
-NAKNA HR — P9.22 PAYROLL EDITABLE DAYS / PERIOD SALARY
+Nakna HR — P9.23 Payroll Review Excel
+=====================================
 
-สิ่งที่แก้
-- ตอนสร้าง/คำนวณรอบ Payroll ระบบยังคำนวณ “วันคิดเงิน” และ “เงินเดือนรอบนี้” อัตโนมัติเหมือนเดิม
-- HR สามารถแก้ “วันคิดเงิน” รายคนได้ในรอบ Draft / Review
-- เมื่อแก้วันคิดเงิน ระบบคำนวณเงินเดือนรอบนี้ใหม่จาก ฐานเงินเดือน ÷ ตัวหารรายวัน × วันที่แก้
-- HR สามารถแก้ “เงินเดือนรอบนี้” เป็นยอดเฉพาะรอบได้โดยตรง
-- เมื่อแก้วันหรือยอดเงินเดือน ระบบคำนวณ Gross / ภาษี / ประกันสังคม / Net Pay / ต้นทุนบริษัทใหม่ทันที
-- ค่าที่แก้เป็น override เฉพาะรอบ ไม่แก้ฐานเงินเดือนของพนักงาน
-- กด Auto เพื่อยกเลิกค่าที่ HR แก้และกลับไปใช้ค่าที่ระบบคำนวณ
-- การกดคำนวณรอบใหม่จะไม่ลบค่า override
-- รอบ Locked / Published ยังคงแก้ไม่ได้
+สิ่งที่เพิ่ม
+- กด "ตรวจสอบรอบเงินเดือน" แล้วระบบสร้างไฟล์ .xlsx อัตโนมัติ
+- ไฟล์ถูกบันทึกเป็น immutable snapshot ในระบบ ดาวน์โหลดซ้ำได้ภายหลัง
+- Sheet "โอนเงิน": รหัส/ชื่อพนักงาน, ธนาคาร, ชื่อบัญชี, เลขบัญชี, Net Pay, วันที่จ่าย, รอบเงินเดือน
+- เลขบัญชีบันทึกเป็น Text เพื่อรักษาเลข 0 ด้านหน้า
+- Sheet "รายละเอียด Payroll": รายละเอียดเงินเดือน/รายการหัก/Net/ต้นทุนบริษัท
+- Sheet "สรุปรอบ": ยอดรวมและข้อมูลรอบ
+- แถวที่ข้อมูลธนาคารไม่ครบถูก Highlight และแสดงจำนวนในหน้า Payroll
+- ถ้ามีการแก้ Payroll หลังสร้าง Excel ระบบขึ้นสถานะว่าไฟล์เก่าและให้กด "สร้างไฟล์ล่าสุด"
+- มีประวัติไฟล์ก่อนหน้าในรอบเดียวกัน
+- Excel ที่สร้างตอน Review จะดาวน์โหลดทันที; ถ้า browser/WebView ไม่ยอมดาวน์โหลด ไฟล์ยังอยู่ในระบบให้กดซ้ำได้
 
-ไฟล์ที่เปลี่ยน
+ไฟล์ที่เปลี่ยน/เพิ่ม
 - src/index.js
 - public/app.js
 - public/styles.css
-- migrations/0034_payroll_item_overrides.sql
+- migrations/0035_payroll_review_exports.sql
 
-ฐานแพ็ก
-- รวมการแก้ก่อนหน้า P9.21/P9.20/P9.19 ที่อยู่ในไฟล์ปัจจุบันแล้ว
+ติดตั้ง
+1) วางไฟล์ตาม path ทับโปรเจกต์ P9.22
+2) แนะนำให้รัน: npx wrangler d1 migrations apply DB --remote
+   หมายเหตุ: โค้ดมี lazy schema fallback สำหรับ payroll_exports อยู่แล้ว แต่ควรรัน migration เพื่อให้ schema history ตรงกัน
+3) รัน: npm run check
+4) Deploy: npx wrangler deploy
 
-การติดตั้ง
-1. วางไฟล์ในแพ็กทับไฟล์เดิมตาม path
-2. Deploy Worker ตามปกติ
-3. ตาราง payroll_item_overrides จะถูก ensure อัตโนมัติเมื่อเปิดใช้งาน Payroll
-   ไฟล์ migration แนบไว้สำหรับประวัติ repo / fresh install
-
-Validation
+ตรวจแล้ว
 - npm run check: PASS
-- SQLite migration + UPSERT smoke: PASS
-- npm run migration:smoke ของ repo เดิมรันไม่ได้เพราะ package.json อ้าง scripts/migration-smoke.mjs แต่ไฟล์ดังกล่าวไม่มีในฐานโปรเจกต์
+- migration 0035 SQL syntax: PASS (SQLite smoke)
+- XLSX ZIP/XML structure: PASS
+- XLSX import/อ่านค่าได้ 3 sheets: PASS
+- เลขบัญชีถูกเขียนใน XML เป็น inline string/text เพื่อรักษา leading zero
+
+หมายเหตุ
+- npm run migration:smoke ของ source package เดิมรันไม่ได้ เพราะ package ต้นทางไม่มี scripts/migration-smoke.mjs (ไม่ใช่ error จาก patch นี้)
