@@ -1,14 +1,16 @@
-Nakna P9.20 — Checkout toggle click fix
+Nakna P9.21 — Leave Reminder Skip Fix
 
-แก้ปัญหาเมาส์ขึ้นเครื่องหมายห้าม (🚫) และกดสวิตช์ "ตรวจตอนเช็กเอาต์ด้วย" ไม่ได้
+แก้ระบบแจ้งเตือนคนที่ยังไม่เช็กอินเวลา 12:30 น.
 
-Changes
-- ไม่ disable สวิตช์เมื่อ Face Verification mode = off
-- ไม่ disable สวิตช์ระหว่าง autosave
-- ถ้ากดซ้ำระหว่างกำลังบันทึก ระบบจะจำค่าล่าสุดและบันทึกต่อให้อัตโนมัติ
-- ยังคง disable เฉพาะช่วงที่การตั้งค่า Face Verification ยังโหลดไม่เสร็จเท่านั้น
+สิ่งที่แก้
+- ไม่ส่ง Reminder ให้พนักงานที่มีคำขอลาครอบคลุมวันปัจจุบัน
+- ครอบคลุมสถานะ approved, pending และ awaiting_evidence
+- เพิ่ม fallback ตรวจ attendance.status = leave/holiday เพื่อกันกรณีข้อมูลวันลาถูก sync เข้า Attendance แล้ว
+- พนักงานที่เช็กอินแล้ว / วันหยุดบริษัท / ไม่มีตารางงาน / กะเริ่มหลัง 12:30 / เคยส่งเตือนแล้ว ยังคงถูกข้ามเหมือนเดิม
+- ยกเลิก/ปฏิเสธคำขอลาแล้ว (cancelled/rejected) จะกลับมาเข้าเงื่อนไขแจ้งเตือนได้ตามปกติ
 
-Files changed
-- public/app.js
+ไฟล์ที่แก้
+- src/index.js
 
-No DB migration required.
+ไม่ต้อง Migration Database
+ทดสอบ npm run check ผ่าน
