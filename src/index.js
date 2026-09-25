@@ -3552,6 +3552,7 @@ async function handleApi(request, env, url, auth, ctx) {
     try{
       await env.DB.batch([
         env.DB.prepare(`DELETE FROM payroll_period_events WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
+        env.DB.prepare(`DELETE FROM payroll_exports WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
         env.DB.prepare(`DELETE FROM payroll_adjustments WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
         env.DB.prepare(`DELETE FROM payroll_item_overrides WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
         env.DB.prepare(`DELETE FROM payroll_items WHERE client_id=?1 AND period_id=?2`).bind(clientId,id),
@@ -3653,12 +3654,49 @@ async function handleApi(request, env, url, auth, ctx) {
 
   const payrollReviewMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/review$/);
   if(payrollReviewMatch && method==='POST'){
-    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ Review Payroll'},403); await ensurePayrollDefaults(env.DB,clientId); const id=Number(payrollReviewMatch[1]);
-    const settings=await env.DB.prepare(`SELECT * FROM payroll_settings WHERE client_id=?1`).bind(clientId).first();
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ Review Payroll'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const id=Number(payrollReviewMatch[1]);
+    const [settings,current]=await Promise.all([
+      env.DB.prepare(`SELECT * FROM payroll_settings WHERE client_id=?1`).bind(clientId).first(),
+      env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(id,clientId).first()
+    ]);
+    if(!current)return json({error:'ไม่พบรอบเงินเดือน'},404);
+    if(current.status!=='draft')return json({error:'รอบนี้ถูกส่งตรวจไปแล้ว',code:'PAYROLL_ALREADY_REVIEWED'},409);
     const approval=Number(settings?.require_separate_approver||0)?'pending':'approved';
     await env.DB.prepare(`UPDATE payroll_periods SET status='review',approval_status=?1,approved_by_user_id=CASE WHEN ?1='approved' THEN ?2 ELSE NULL END,approved_at=CASE WHEN ?1='approved' THEN CURRENT_TIMESTAMP ELSE NULL END,updated_at=CURRENT_TIMESTAMP WHERE id=?3 AND client_id=?4 AND status='draft'`).bind(approval,Number(auth.user.id),id,clientId).run();
     await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'submitted_for_review',{approval_status:approval});
-    return json({ok:true,approval_status:approval});
+    try{
+      const exportFile=await createPayrollReviewExport(env.DB,clientId,id,Number(auth.user.id));
+      return json({ok:true,approval_status:approval,export:{id:Number(exportFile.id),file_name:exportFile.file_name,row_count:Number(exportFile.row_count||0),net_total:Number(exportFile.net_total||0),missing_bank_count:Number(exportFile.missing_bank_count||0),created_at:exportFile.created_at,download_url:exportFile.download_url}});
+    }catch(error){
+      console.error(JSON.stringify({level:'error',event:'payroll_review_export_failed',period_id:id,message:String(error?.message||error)}));
+      return json({ok:true,approval_status:approval,export:null,export_warning:'ส่งตรวจสำเร็จ แต่สร้างไฟล์ Excel ไม่สำเร็จ กรุณากดสร้างไฟล์ใหม่จากรอบเงินเดือน'});
+    }
+  }
+
+  const payrollReviewExportCreateMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/review-export$/);
+  if(payrollReviewExportCreateMatch && method==='POST'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์สร้างไฟล์ Payroll'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const id=Number(payrollReviewExportCreateMatch[1]);
+    const period=await env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(id,clientId).first();
+    if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404);
+    if(!['review','locked','published'].includes(String(period.status||'')))return json({error:'กรุณากดตรวจสอบรอบเงินเดือนก่อนสร้าง Excel',code:'PAYROLL_REVIEW_REQUIRED'},409);
+    const exportFile=await createPayrollReviewExport(env.DB,clientId,id,Number(auth.user.id));
+    return json({ok:true,export:{id:Number(exportFile.id),file_name:exportFile.file_name,row_count:Number(exportFile.row_count||0),net_total:Number(exportFile.net_total||0),missing_bank_count:Number(exportFile.missing_bank_count||0),created_at:exportFile.created_at,download_url:exportFile.download_url}},201);
+  }
+
+  const payrollSavedExportDownloadMatch=path.match(/^\/api\/payroll\/exports\/(\d+)\/download\.xlsx$/);
+  if(payrollSavedExportDownloadMatch && method==='GET'){
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ดาวน์โหลด Payroll'},403);
+    await ensurePayrollDefaults(env.DB,clientId);
+    const exportId=Number(payrollSavedExportDownloadMatch[1]);
+    const saved=await env.DB.prepare(`SELECT * FROM payroll_exports WHERE id=?1 AND client_id=?2`).bind(exportId,clientId).first();
+    if(!saved)return json({error:'ไม่พบไฟล์ Excel ที่บันทึกไว้'},404);
+    let snapshot;try{snapshot=JSON.parse(saved.snapshot_json||'{}');}catch{return json({error:'ข้อมูลไฟล์ Excel เสียหาย'},500);}
+    const bytes=buildPayrollReviewXlsx(snapshot);
+    return payrollXlsxDownloadResponse(bytes,saved.file_name||`Nakna-Payroll-${exportId}.xlsx`);
   }
 
   const payrollApproveMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/approve$/);
@@ -7233,10 +7271,113 @@ function csvDownloadResponse(rows,fileName){
   return new Response(body,{status:200,headers:{'content-type':'text/csv; charset=utf-8','content-disposition':`attachment; filename="${fileName}"`,'cache-control':'no-store'}});
 }
 
+function xlsxXmlEscape(value){
+  return String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+function xlsxColumnName(index){
+  let n=Number(index||0),out='';
+  while(n>0){n--;out=String.fromCharCode(65+(n%26))+out;n=Math.floor(n/26);}
+  return out||'A';
+}
+function xlsxCellXml(ref,cell){
+  const meta=(cell&&typeof cell==='object'&&!Array.isArray(cell))?cell:{v:cell};
+  const style=meta.s!=null?` s="${Number(meta.s)}"`:'';
+  if(meta.t==='n' || typeof meta.v==='number'){
+    const n=Number(meta.v||0);
+    return `<c r="${ref}"${style}><v>${Number.isFinite(n)?n:0}</v></c>`;
+  }
+  const text=xlsxXmlEscape(meta.v??'');
+  return `<c r="${ref}" t="inlineStr"${style}><is><t xml:space="preserve">${text}</t></is></c>`;
+}
+function xlsxWorksheetXml(rows,{widths=[],freezeRows=1,autoFilter=true}={}){
+  const maxCols=Math.max(1,...rows.map(r=>r.length));
+  const rowXml=rows.map((row,ri)=>`<row r="${ri+1}">${row.map((cell,ci)=>xlsxCellXml(`${xlsxColumnName(ci+1)}${ri+1}`,cell)).join('')}</row>`).join('');
+  const cols=widths.length?`<cols>${widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${Math.max(6,Number(w||10))}" customWidth="1"/>`).join('')}</cols>`:'';
+  const pane=freezeRows>0?`<sheetViews><sheetView workbookViewId="0"><pane ySplit="${freezeRows}" topLeftCell="A${freezeRows+1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>`:`<sheetViews><sheetView workbookViewId="0"/></sheetViews>`;
+  const filter=autoFilter&&rows.length?`<autoFilter ref="A1:${xlsxColumnName(maxCols)}${rows.length}"/>`:'';
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${pane}<sheetFormatPr defaultRowHeight="18"/>${cols}<sheetData>${rowXml}</sheetData>${filter}</worksheet>`;
+}
+function xlsxStylesXml(){
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="3"><font><sz val="11"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/><family val="2"/></font><font><b/><color rgb="FF173E43"/><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF04878A"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF4D6"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEAF7F5"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD9E5E3"/></left><right style="thin"><color rgb="FFD9E5E3"/></right><top style="thin"><color rgb="FFD9E5E3"/></top><bottom style="thin"><color rgb="FFD9E5E3"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="8"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"><alignment horizontal="right"/></xf><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="4" fontId="2" fillId="4" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="center"/></xf><xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="left"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+}
+function xlsxU16(value){const a=new Uint8Array(2);new DataView(a.buffer).setUint16(0,Number(value)>>>0,true);return a;}
+function xlsxU32(value){const a=new Uint8Array(4);new DataView(a.buffer).setUint32(0,Number(value)>>>0,true);return a;}
+function xlsxConcat(parts){const size=parts.reduce((n,p)=>n+p.length,0),out=new Uint8Array(size);let offset=0;for(const p of parts){out.set(p,offset);offset+=p.length;}return out;}
+let XLSX_CRC_TABLE=null;
+function xlsxCrc32(bytes){
+  if(!XLSX_CRC_TABLE){XLSX_CRC_TABLE=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);XLSX_CRC_TABLE[n]=c>>>0;}}
+  let crc=0xFFFFFFFF;for(const b of bytes)crc=XLSX_CRC_TABLE[(crc^b)&255]^(crc>>>8);return (crc^0xFFFFFFFF)>>>0;
+}
+function xlsxDosDateTime(date=new Date()){
+  const y=Math.max(1980,date.getFullYear()),m=date.getMonth()+1,d=date.getDate(),h=date.getHours(),min=date.getMinutes(),sec=Math.floor(date.getSeconds()/2);
+  return {time:((h<<11)|(min<<5)|sec)&0xFFFF,date:(((y-1980)<<9)|(m<<5)|d)&0xFFFF};
+}
+function xlsxZipStore(files){
+  const enc=new TextEncoder(),locals=[],centrals=[];let offset=0;const dt=xlsxDosDateTime();
+  for(const file of files){
+    const nameBytes=enc.encode(file.name),data=typeof file.data==='string'?enc.encode(file.data):file.data,crc=xlsxCrc32(data),flags=0x0800;
+    const local=xlsxConcat([xlsxU32(0x04034b50),xlsxU16(20),xlsxU16(flags),xlsxU16(0),xlsxU16(dt.time),xlsxU16(dt.date),xlsxU32(crc),xlsxU32(data.length),xlsxU32(data.length),xlsxU16(nameBytes.length),xlsxU16(0),nameBytes,data]);
+    locals.push(local);
+    const central=xlsxConcat([xlsxU32(0x02014b50),xlsxU16(20),xlsxU16(20),xlsxU16(flags),xlsxU16(0),xlsxU16(dt.time),xlsxU16(dt.date),xlsxU32(crc),xlsxU32(data.length),xlsxU32(data.length),xlsxU16(nameBytes.length),xlsxU16(0),xlsxU16(0),xlsxU16(0),xlsxU16(0),xlsxU32(0),xlsxU32(offset),nameBytes]);
+    centrals.push(central);offset+=local.length;
+  }
+  const centralData=xlsxConcat(centrals),localData=xlsxConcat(locals);
+  const end=xlsxConcat([xlsxU32(0x06054b50),xlsxU16(0),xlsxU16(0),xlsxU16(files.length),xlsxU16(files.length),xlsxU32(centralData.length),xlsxU32(localData.length),xlsxU16(0)]);
+  return xlsxConcat([localData,centralData,end]);
+}
+function payrollReviewExportSnapshot(detail){
+  const period=detail.period||{};
+  const rows=(detail.items||[]).map(item=>{
+    let breakdown={};try{breakdown=JSON.parse(item.breakdown_json||'{}')||{};}catch{}
+    return {
+      employee_id:Number(item.employee_id||0),employee_code:String(item.employee_code||''),employee_name:`${item.first_name||''} ${item.last_name||''}`.trim(),nickname:String(item.nickname||''),department_name:String(item.department_name||''),position_name:String(item.position_name||''),start_date:String(item.start_date||''),bank_name:String(item.bank_name||''),bank_account_name:String(item.bank_account_name||`${item.first_name||''} ${item.last_name||''}`.trim()),bank_account_no:String(item.bank_account_no||''),base_salary:roundMoney(item.base_salary),payable_days:Number(breakdown.payable_days??breakdown.active_calendar_days??0),prorated_salary:roundMoney(item.prorated_salary),commission:roundMoney(item.commission),incentive:roundMoney(item.incentive),allowance:roundMoney(item.allowance),bonus:roundMoney(item.bonus),other_earnings:roundMoney(item.other_earnings),gross_income:roundMoney(item.gross_income),attendance_deduction:roundMoney(item.attendance_deduction),social_security:roundMoney(item.social_security),withholding_tax:roundMoney(item.withholding_tax),other_deductions:roundMoney(item.other_deductions),total_deductions:roundMoney(item.total_deductions),net_pay:roundMoney(item.net_pay),employer_cost:roundMoney(item.employer_cost||item.gross_income)
+    };
+  });
+  return {version:1,created_at:new Date().toISOString(),period:{id:Number(period.id||0),period_key:String(period.period_key||''),period_start:String(period.period_start||''),period_end:String(period.period_end||''),pay_date:String(period.pay_date||''),status:String(period.status||''),source_updated_at:String(period.updated_at||'')},totals:{employee_count:rows.length,gross_total:roundMoney(period.gross_total),deduction_total:roundMoney(Number(period.gross_total||0)-Number(period.net_total||0)),net_total:roundMoney(period.net_total)},missing_bank_count:rows.filter(x=>!x.bank_name||!x.bank_account_no).length,rows};
+}
+function buildPayrollReviewXlsx(snapshot){
+  const p=snapshot.period||{},rows=snapshot.rows||[];
+  const transfer=[[
+    {v:'ลำดับ',s:1},{v:'รหัสพนักงาน',s:1},{v:'ชื่อพนักงาน',s:1},{v:'ธนาคาร',s:1},{v:'ชื่อบัญชี',s:1},{v:'เลขบัญชี',s:1},{v:'ยอดโอนสุทธิ',s:1},{v:'วันที่จ่าย',s:1},{v:'รอบเงินเดือน',s:1},{v:'หมายเหตุ',s:1}
+  ]];
+  rows.forEach((x,i)=>{const missing=!x.bank_name||!x.bank_account_no;transfer.push([{v:i+1,t:'n',s:6},{v:x.employee_code},{v:x.employee_name},{v:x.bank_name,s:missing?5:0},{v:x.bank_account_name},{v:x.bank_account_no,s:missing?5:7},{v:x.net_pay,t:'n',s:2},{v:p.pay_date},{v:p.period_key},{v:missing?'ข้อมูลบัญชีไม่ครบ':'' ,s:missing?5:0}]);});
+  transfer.push([{v:''},{v:''},{v:''},{v:''},{v:''},{v:'รวมยอดโอน',s:3},{v:rows.reduce((a,x)=>a+Number(x.net_pay||0),0),t:'n',s:4},{v:''},{v:''},{v:''}]);
+  const detail=[['รหัสพนักงาน','ชื่อพนักงาน','ชื่อเล่น','แผนก','ตำแหน่ง','วันที่เริ่มงาน','ฐานเงินเดือน','วันคิดเงิน','เงินเดือนรอบนี้','Commission','Incentive','Allowance','Bonus','รายได้อื่น','Gross','ขาด/สาย','ประกันสังคม','ภาษีหัก ณ ที่จ่าย','หักอื่น','หักรวม','Net Pay','ต้นทุนบริษัท','ธนาคาร','ชื่อบัญชี','เลขบัญชี'].map(v=>({v,s:1}))];
+  rows.forEach(x=>detail.push([{v:x.employee_code},{v:x.employee_name},{v:x.nickname},{v:x.department_name},{v:x.position_name},{v:x.start_date},{v:x.base_salary,t:'n',s:2},{v:x.payable_days,t:'n'},{v:x.prorated_salary,t:'n',s:2},{v:x.commission,t:'n',s:2},{v:x.incentive,t:'n',s:2},{v:x.allowance,t:'n',s:2},{v:x.bonus,t:'n',s:2},{v:x.other_earnings,t:'n',s:2},{v:x.gross_income,t:'n',s:2},{v:x.attendance_deduction,t:'n',s:2},{v:x.social_security,t:'n',s:2},{v:x.withholding_tax,t:'n',s:2},{v:x.other_deductions,t:'n',s:2},{v:x.total_deductions,t:'n',s:2},{v:x.net_pay,t:'n',s:2},{v:x.employer_cost,t:'n',s:2},{v:x.bank_name},{v:x.bank_account_name},{v:x.bank_account_no,s:7}]));
+  const summary=[[{v:'สรุปรอบเงินเดือน',s:1},{v:'รายละเอียด',s:1}],[{v:'รอบเงินเดือน',s:3},{v:p.period_key}],[{v:'ช่วงรอบ',s:3},{v:`${p.period_start} ถึง ${p.period_end}`}],[{v:'วันที่จ่าย',s:3},{v:p.pay_date}],[{v:'จำนวนพนักงาน',s:3},{v:Number(snapshot.totals?.employee_count||rows.length),t:'n'}],[{v:'Gross Payroll',s:3},{v:Number(snapshot.totals?.gross_total||0),t:'n',s:2}],[{v:'รายการหัก',s:3},{v:Number(snapshot.totals?.deduction_total||0),t:'n',s:2}],[{v:'ยอดโอนสุทธิ',s:3},{v:Number(snapshot.totals?.net_total||0),t:'n',s:4}],[{v:'บัญชีไม่ครบ',s:3},{v:Number(snapshot.missing_bank_count||0),t:'n'}],[{v:'สร้างไฟล์เมื่อ',s:3},{v:String(snapshot.created_at||'')}]];
+  const files=[
+    {name:'[Content_Types].xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`},
+    {name:'_rels/.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
+    {name:'xl/workbook.xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="โอนเงิน" sheetId="1" r:id="rId1"/><sheet name="รายละเอียด Payroll" sheetId="2" r:id="rId2"/><sheet name="สรุปรอบ" sheetId="3" r:id="rId3"/></sheets></workbook>`},
+    {name:'xl/_rels/workbook.xml.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
+    {name:'xl/styles.xml',data:xlsxStylesXml()},
+    {name:'xl/worksheets/sheet1.xml',data:xlsxWorksheetXml(transfer,{widths:[8,16,28,16,28,22,18,16,16,24],freezeRows:1,autoFilter:true})},
+    {name:'xl/worksheets/sheet2.xml',data:xlsxWorksheetXml(detail,{widths:[16,28,14,20,20,16,16,14,18,16,16,16,16,16,16,16,16,18,16,16,16,18,16,28,22],freezeRows:1,autoFilter:true})},
+    {name:'xl/worksheets/sheet3.xml',data:xlsxWorksheetXml(summary,{widths:[24,34],freezeRows:1,autoFilter:false})}
+  ];
+  return xlsxZipStore(files);
+}
+function payrollXlsxDownloadResponse(bytes,fileName){
+  const safe=String(fileName||'Nakna-Payroll.xlsx').replace(/[^A-Za-z0-9._-]/g,'_');
+  return new Response(bytes,{status:200,headers:{'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','content-disposition':`attachment; filename="${safe}"`,'cache-control':'no-store','x-content-type-options':'nosniff'}});
+}
+async function createPayrollReviewExport(db,clientId,periodId,userId){
+  const detail=await getPayrollPeriodDetail(db,clientId,periodId);
+  if(!detail.period)throw new Error('ไม่พบรอบเงินเดือน');
+  const snapshot=payrollReviewExportSnapshot(detail),stamp=new Date().toISOString().replace(/[-:TZ.]/g,'').slice(0,14),fileName=`Nakna-Payroll-Transfer-${detail.period.period_key}-${stamp}.xlsx`;
+  const result=await db.prepare(`INSERT INTO payroll_exports(client_id,period_id,export_type,file_name,snapshot_json,row_count,net_total,missing_bank_count,source_updated_at,created_by_user_id) VALUES(?1,?2,'review_xlsx',?3,?4,?5,?6,?7,?8,?9)`).bind(Number(clientId),Number(periodId),fileName,JSON.stringify(snapshot),Number(snapshot.totals.employee_count||0),Number(snapshot.totals.net_total||0),Number(snapshot.missing_bank_count||0),snapshot.period.source_updated_at||null,userId?Number(userId):null).run();
+  const id=Number(result.meta.last_row_id);
+  await recordPayrollPeriodEvent(db,clientId,periodId,userId,'review_excel_created',{export_id:id,file_name:fileName,rows:snapshot.rows.length,missing_bank_count:snapshot.missing_bank_count,net_total:snapshot.totals.net_total});
+  const row=await db.prepare(`SELECT pe.*,u.name AS created_by_name,u.email AS created_by_email FROM payroll_exports pe LEFT JOIN users u ON u.id=pe.created_by_user_id WHERE pe.id=?1 AND pe.client_id=?2`).bind(id,Number(clientId)).first();
+  return {...row,download_url:`/api/payroll/exports/${id}/download.xlsx`};
+}
+
+
 async function getPayrollPeriodDetail(db,clientId,periodId){
+  await ensurePayrollControlCenterReady(db);
   const period=await db.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(Number(periodId),Number(clientId)).first();
-  if(!period)return {period:null,items:[],adjustments:[],documents:[],exceptions:[],timeline:[]};
-  const [items,adjustments,documents,events,settings,components]=await db.batch([
+  if(!period)return {period:null,items:[],adjustments:[],documents:[],exceptions:[],timeline:[],exports:[]};
+  const [items,adjustments,documents,events,settings,components,exports]=await db.batch([
     db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.start_date,e.end_date,d.name AS department_name,pos.name AS position_name,pp.bank_name,pp.bank_account_name,pp.bank_account_no,pp.payroll_note,pp.tax_enabled AS employee_tax_enabled,pp.social_security_enabled AS employee_sso_enabled,
       po.payable_days_override,po.prorated_salary_override,po.updated_at AS payroll_override_updated_at
       FROM payroll_items pi JOIN employees e ON e.id=pi.employee_id LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions pos ON pos.id=e.position_id LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id
@@ -7247,10 +7388,11 @@ async function getPayrollPeriodDetail(db,clientId,periodId){
     db.prepare(`SELECT pe.*,u.name AS actor_name,u.email AS actor_email FROM payroll_period_events pe LEFT JOIN users u ON u.id=pe.actor_user_id WHERE pe.period_id=?1 AND pe.client_id=?2 ORDER BY pe.created_at DESC,pe.id DESC LIMIT 120`).bind(Number(periodId),Number(clientId)),
     db.prepare(`SELECT * FROM payroll_settings WHERE client_id=?1`).bind(Number(clientId)),
     db.prepare(`SELECT * FROM payroll_component_definitions WHERE client_id=?1 AND active=1 ORDER BY display_order,id`).bind(Number(clientId)),
+    db.prepare(`SELECT pe.id,pe.period_id,pe.export_type,pe.file_name,pe.row_count,pe.net_total,pe.missing_bank_count,pe.source_updated_at,pe.created_at,pe.created_by_user_id,u.name AS created_by_name,u.email AS created_by_email FROM payroll_exports pe LEFT JOIN users u ON u.id=pe.created_by_user_id WHERE pe.period_id=?1 AND pe.client_id=?2 ORDER BY pe.created_at DESC,pe.id DESC LIMIT 20`).bind(Number(periodId),Number(clientId)),
   ]);
   const itemRows=items.results||[];
   const settingRow=settings.results?.[0]||{};
-  return {period,items:itemRows,adjustments:adjustments.results||[],documents:documents.results||[],timeline:events.results||[],components:components.results||[],settings:settingRow,exceptions:payrollExceptionRows(period,itemRows,settingRow)};
+  return {period,items:itemRows,adjustments:adjustments.results||[],documents:documents.results||[],timeline:events.results||[],components:components.results||[],exports:exports.results||[],settings:settingRow,exceptions:payrollExceptionRows(period,itemRows,settingRow)};
 }
 
 function validPayrollDateKey(value){
@@ -9229,6 +9371,24 @@ async function ensurePayrollControlCenterReady(db){
     FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
   )`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_payroll_item_overrides_period ON payroll_item_overrides(client_id,period_id,employee_id)`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS payroll_exports(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    period_id INTEGER NOT NULL,
+    export_type TEXT NOT NULL DEFAULT 'review_xlsx',
+    file_name TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    row_count INTEGER NOT NULL DEFAULT 0,
+    net_total REAL NOT NULL DEFAULT 0,
+    missing_bank_count INTEGER NOT NULL DEFAULT 0,
+    source_updated_at TEXT,
+    created_by_user_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY(period_id) REFERENCES payroll_periods(id) ON DELETE CASCADE,
+    FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_payroll_exports_period ON payroll_exports(client_id,period_id,created_at,id)`).run();
   SCHEMA_READY.add(key);
 }
 
