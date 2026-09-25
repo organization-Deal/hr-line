@@ -1,0 +1,15 @@
+NAKNA P9.19 — FACE CHECKOUT TOGGLE FIX
+
+Fixed: Attendance > Face Verification > "ตรวจตอนเช็กเอาต์ด้วย" could snap back / appear impossible to turn off.
+
+Changes
+- public/app.js
+  - Optimistic state update before autosave so the toggle cannot be overwritten by stale state during PATCH.
+  - Robust boolean normalization (false/0/"0" are treated as OFF).
+  - Autosave accepts the exact desired checkout value from the change event.
+- public/styles.css
+  - Makes the checkbox itself cover the full switch hit area.
+  - Prevents the decorative slider span from intercepting pointer/touch events.
+
+No DB migration required.
+Validated with: npm run check
