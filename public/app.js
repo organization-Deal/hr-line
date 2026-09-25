@@ -3867,11 +3867,14 @@ function bindAttendanceFaceControls(){
   const copy=$('#attendanceFaceCopyInstructionBtn');
   if(mode) mode.onchange=()=>{ updateAttendanceFaceModeHint(); saveAttendanceFaceSettings({silentSuccess:true}); };
   if(checkout) checkout.onchange=()=>{
-    // Keep the UI value as the source of truth while the autosave request is in flight.
-    // Previously a re-render could restore the old server value before PATCH finished,
-    // making the switch look like it could not be turned off.
+    // P9.20: checkout preference must always be clickable, even when Face mode is OFF
+    // or another autosave is still in flight. Keep the latest click and flush it next.
     const desired=Boolean(checkout.checked);
     state.peopleCore={...(state.peopleCore||{}),attendance_face:{...(state.peopleCore?.attendance_face||{}),verify_checkout:desired}};
+    if(state.attendanceFaceSaving){
+      state.attendanceFaceQueuedCheckout=desired;
+      return;
+    }
     saveAttendanceFaceSettings({silentSuccess:true,verifyCheckoutOverride:desired});
   };
   if(remind) remind.onclick=sendAttendanceFaceEnrollmentReminders;
@@ -3944,7 +3947,9 @@ function renderAttendanceFaceSettings(){
   if(modeSelect&&!state.attendanceFaceSaving)modeSelect.value=mode;
   if(checkout&&!state.attendanceFaceSaving)checkout.checked=attendanceFaceBool(settings.verify_checkout);
   if(modeSelect)modeSelect.disabled=Boolean(state.attendanceFaceSaving);
-  if(checkout)checkout.disabled=Boolean(state.attendanceFaceSaving)||mode==='off';
+  // P9.20: do not lock this preference just because Face mode is OFF or autosaving.
+  // A disabled checkbox shows the browser's 🚫 cursor and made the control feel broken.
+  if(checkout)checkout.disabled=false;
   const summary=settings.summary||{};const active=Number(summary.active||0),enrolled=Number(summary.enrolled||0),pending=Math.max(0,Number(summary.pending??active-enrolled));
   if($('#attendanceFaceReadyCount'))$('#attendanceFaceReadyCount').textContent=`${enrolled}/${active}`;
   if($('#attendanceFacePendingCount'))$('#attendanceFacePendingCount').textContent=String(pending);
@@ -3984,7 +3989,7 @@ function renderAttendanceFaceSettings(){
 function updateAttendanceFaceModeHint(){
   if(!state.attendanceFaceLoaded && typeof state.peopleCore?.attendance_face?.mode!=='string')return;
   const mode=String($('#attendanceFaceMode')?.value||'off');
-  const checkout=$('#attendanceFaceCheckoutToggle');if(checkout)checkout.disabled=state.attendanceFaceSaving||mode==='off';
+  const checkout=$('#attendanceFaceCheckoutToggle');if(checkout)checkout.disabled=false;
   const status=$('#attendanceFaceStatus');if(!status||state.attendanceFaceSaving)return;
   if(mode==='required')status.textContent='กำลังเปิดโหมดบังคับ · คนที่ยังไม่มีใบหน้าจะลงทะเบียนก่อนเช็กอินครั้งถัดไป';
   else if(mode==='enroll')status.textContent='กำลังเปิดช่วงลงทะเบียน · พนักงานยังสามารถเช็กอินได้ตามปกติ';
@@ -4022,9 +4027,19 @@ async function saveAttendanceFaceSettings({silentSuccess=true,verifyCheckoutOver
     renderAttendanceFaceSettings();
     toast(error.message||'บันทึก Face Verification ไม่สำเร็จ',true);
   }finally{
+    const queuedCheckout=typeof state.attendanceFaceQueuedCheckout==='boolean'
+      ? state.attendanceFaceQueuedCheckout
+      : null;
+    state.attendanceFaceQueuedCheckout=null;
     state.attendanceFaceSaving=false;
     if(button)setButtonBusy(button,false);
     renderAttendanceFaceSettings();
+
+    // If the user clicked again while the previous PATCH was saving, immediately persist
+    // the last intent instead of ignoring the click or showing a disabled cursor.
+    if(queuedCheckout!==null && queuedCheckout!==attendanceFaceBool(state.peopleCore?.attendance_face?.verify_checkout)){
+      queueMicrotask(()=>saveAttendanceFaceSettings({silentSuccess:true,verifyCheckoutOverride:queuedCheckout}));
+    }
   }
 }
 
