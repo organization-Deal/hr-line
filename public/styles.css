@@ -3152,3 +3152,18 @@ button.nakna-mutation-pending:not(.icon-btn):not(.close-btn)::after,a.nakna-muta
 
 /* P9.15.3 hard guarantee: attendance Face card is never collapsed by stale responsive rules. */
 .settings-category-panel[data-settings-category="attendance"] #attendanceFaceCard{display:block!important;visibility:visible!important;opacity:1!important}
+
+
+/* P9.19 — reliable switch hit-area on desktop/mobile/WebView */
+.switch input{
+  inset:0;
+  width:100%;
+  height:100%;
+  margin:0;
+  cursor:pointer;
+  z-index:2;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+.switch span{pointer-events:none;}
+.switch input:disabled{cursor:not-allowed;}

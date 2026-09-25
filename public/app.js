@@ -3852,6 +3852,12 @@ function ensureAttendanceFaceCard(){
 
 
 let attendanceFaceSettingsFetchPromise=null;
+function attendanceFaceBool(value){
+  if(value===true||value===1)return true;
+  if(value===false||value===0||value==null)return false;
+  const normalized=String(value).trim().toLowerCase();
+  return ['1','true','yes','on'].includes(normalized);
+}
 function bindAttendanceFaceControls(){
   ensureAttendanceFaceCard();
   const mode=$('#attendanceFaceMode');
@@ -3860,7 +3866,14 @@ function bindAttendanceFaceControls(){
   const self=$('#attendanceFaceSelfTestBtn');
   const copy=$('#attendanceFaceCopyInstructionBtn');
   if(mode) mode.onchange=()=>{ updateAttendanceFaceModeHint(); saveAttendanceFaceSettings({silentSuccess:true}); };
-  if(checkout) checkout.onchange=()=>saveAttendanceFaceSettings({silentSuccess:true});
+  if(checkout) checkout.onchange=()=>{
+    // Keep the UI value as the source of truth while the autosave request is in flight.
+    // Previously a re-render could restore the old server value before PATCH finished,
+    // making the switch look like it could not be turned off.
+    const desired=Boolean(checkout.checked);
+    state.peopleCore={...(state.peopleCore||{}),attendance_face:{...(state.peopleCore?.attendance_face||{}),verify_checkout:desired}};
+    saveAttendanceFaceSettings({silentSuccess:true,verifyCheckoutOverride:desired});
+  };
   if(remind) remind.onclick=sendAttendanceFaceEnrollmentReminders;
   if(self) self.onclick=openAttendanceFaceSelfTest;
   if(copy) copy.onclick=copyAttendanceFaceInstructions;
@@ -3929,7 +3942,7 @@ function renderAttendanceFaceSettings(){
     return;
   }
   if(modeSelect&&!state.attendanceFaceSaving)modeSelect.value=mode;
-  if(checkout&&!state.attendanceFaceSaving)checkout.checked=Boolean(settings.verify_checkout);
+  if(checkout&&!state.attendanceFaceSaving)checkout.checked=attendanceFaceBool(settings.verify_checkout);
   if(modeSelect)modeSelect.disabled=Boolean(state.attendanceFaceSaving);
   if(checkout)checkout.disabled=Boolean(state.attendanceFaceSaving)||mode==='off';
   const summary=settings.summary||{};const active=Number(summary.active||0),enrolled=Number(summary.enrolled||0),pending=Math.max(0,Number(summary.pending??active-enrolled));
@@ -3957,7 +3970,7 @@ function renderAttendanceFaceSettings(){
   if(status){
     if(state.attendanceFaceSaving)status.textContent='กำลังบันทึกการตั้งค่า…';
     else if(mode!=='off'&&!settings.encryption_ready)status.textContent='ยังไม่พร้อม · ต้องตั้งกุญแจเข้ารหัสข้อมูลชีวมิติ';
-    else if(mode==='required')status.textContent=`เปิดใช้งาน · ${enrolled}/${active} คนลงทะเบียนแล้ว${settings.verify_checkout?' · ตรวจทั้งเข้าและออก':' · ตรวจตอนเช็กอิน'}`;
+    else if(mode==='required')status.textContent=`เปิดใช้งาน · ${enrolled}/${active} คนลงทะเบียนแล้ว${attendanceFaceBool(settings.verify_checkout)?' · ตรวจทั้งเข้าและออก':' · ตรวจตอนเช็กอิน'}`;
     else if(mode==='enroll')status.textContent=`ช่วงลงทะเบียน · พนักงานยังเช็กอินได้ตามปกติ · พร้อมแล้ว ${enrolled}/${active} คน`;
     else status.textContent='ปิดใช้งาน · ระบบเช็กอินใช้ GPS ตามเดิม';
   }
@@ -3977,17 +3990,24 @@ function updateAttendanceFaceModeHint(){
   else if(mode==='enroll')status.textContent='กำลังเปิดช่วงลงทะเบียน · พนักงานยังสามารถเช็กอินได้ตามปกติ';
   else status.textContent='กำลังปิด Face Verification · ใช้กฎ GPS/Work Location ตามเดิม';
 }
-async function saveAttendanceFaceSettings({silentSuccess=true}={}){
+async function saveAttendanceFaceSettings({silentSuccess=true,verifyCheckoutOverride=null}={}){
   const button=$('#attendanceFaceSaveBtn'),modeSelect=$('#attendanceFaceMode'),checkout=$('#attendanceFaceCheckoutToggle');
   if(!modeSelect||!checkout||state.attendanceFaceSaving)return;
   const previous={...(state.peopleCore?.attendance_face||{})};
-  const draft={mode:String(modeSelect.value||'off'),verify_checkout:Boolean(checkout.checked)};
+  const desiredCheckout=verifyCheckoutOverride===null?Boolean(checkout.checked):Boolean(verifyCheckoutOverride);
+  const draft={mode:String(modeSelect.value||'off'),verify_checkout:desiredCheckout};
+
+  // Optimistic state: do this before any render so the switch can never snap back
+  // to the stale value while autosave is running.
+  state.peopleCore={...(state.peopleCore||{}),attendance_face:{...previous,...draft}};
   state.attendanceFaceSaving=true;
   if(button)setButtonBusy(button,true,'กำลังบันทึก…');
   renderAttendanceFaceSettings();
   try{
     const result=await api('/api/attendance-face-settings',{method:'PATCH',body:JSON.stringify(draft),silentStatus:true});
-    state.peopleCore.attendance_face=result.settings||{...previous,...draft};
+    const saved=result.settings||{...previous,...draft};
+    saved.verify_checkout=attendanceFaceBool(saved.verify_checkout);
+    state.peopleCore.attendance_face=saved;
     state.attendanceFaceLoaded=true;
     state.attendanceFaceSavedAt=Date.now();
     state.attendanceFaceRolloutStatus='';
