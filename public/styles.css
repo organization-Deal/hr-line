@@ -3167,3 +3167,25 @@ button.nakna-mutation-pending:not(.icon-btn):not(.close-btn)::after,a.nakna-muta
 }
 .switch span{pointer-events:none;}
 .switch input:disabled{cursor:not-allowed;}
+
+
+/* Nakna P9.22 — editable payroll days / period salary */
+.payroll-manual-input-wrap{display:grid;grid-template-columns:minmax(78px,1fr) auto;align-items:center;gap:5px;min-width:112px}
+.payroll-manual-input-wrap .payroll-manual-input{width:100%;min-width:78px;background:#fffdf7;border-color:#eadfc2}
+.payroll-manual-input-wrap .payroll-manual-input.salary{min-width:104px}
+.payroll-manual-input-wrap.is-overridden .payroll-manual-input{border-color:#d8b55a;background:#fff8e8;box-shadow:inset 0 0 0 1px rgba(216,181,90,.08)}
+.payroll-manual-input-wrap.is-derived .payroll-manual-input{border-color:#9fcfc6;background:#f4fbf9}
+.payroll-auto-reset{height:27px;padding:0 7px;border:1px solid #dcc98f;border-radius:7px;background:#fffaf0;color:#87691d;font:700 8px/1 var(--font-en);cursor:pointer}
+.payroll-auto-reset:hover{background:#fff3d6}
+.payroll-auto-hint{white-space:nowrap;color:#91a09d!important;font-size:7px!important;font-weight:600}
+.payroll-salary-override-cell{background:#fffdf8!important}
+.payroll-salary-override-cell>small{margin-top:4px}
+.payroll-salary-mode.manual{background:#fff0ca;color:#8b681b}
+.payroll-mobile-quick-edit-v2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.payroll-mobile-quick-edit-v2 .payroll-manual-input-wrap{min-width:0}
+.payroll-mobile-quick-edit-v2 .payroll-manual-input{height:42px;font-size:14px}
+@media(max-width:720px){
+  .payroll-manual-input-wrap{grid-template-columns:minmax(0,1fr) auto}
+  .payroll-manual-input-wrap .payroll-manual-input{min-width:0;width:100%}
+  .payroll-auto-reset{height:32px}
+}
