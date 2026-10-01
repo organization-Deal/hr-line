@@ -57,3 +57,12 @@ h1{margin:0;font-size:27px;line-height:1.25;color:var(--teal-dark);letter-spacin
   .face-copy{margin-top:14px}.face-copy strong{font-size:16px}.face-copy p{font-size:13px}.primary-btn{min-height:56px;border-radius:16px;font-size:16px;margin-top:14px}
   .face-privacy{font-size:10.5px}.privacy-note{font-size:10px;margin-top:16px}
 }
+
+
+/* P9.24 · Retroactive check-in request */
+.retro-panel{margin:20px 0 0;padding:22px;border:1px solid #cfe5df;border-radius:24px;background:linear-gradient(180deg,#fbfffe 0%,#f3fbf8 100%);box-shadow:0 14px 34px rgba(22,84,82,.07);text-align:left}
+.retro-head{text-align:left}.retro-kicker{display:block;margin-bottom:6px;color:#0b8b88;font-size:11px;font-weight:800;letter-spacing:.16em}.retro-head h2{margin:0;color:#123f49;font-size:23px;line-height:1.2}.retro-head p{margin:8px 0 0;color:#667b7e;font-size:14px;line-height:1.6}
+.retro-date-card{display:grid;grid-template-columns:1.2fr 1fr .65fr;gap:10px;margin:18px 0;padding:14px;border-radius:18px;background:#eaf7f3}.retro-date-card div{min-width:0}.retro-date-card span{display:block;color:#78908f;font-size:11px}.retro-date-card strong{display:block;margin-top:4px;color:#123f49;font-size:14px;line-height:1.35}
+.retro-field{display:block;margin-top:14px}.retro-field>span{display:block;margin-bottom:7px;color:#234b52;font-size:13px;font-weight:700}.retro-field b{color:#b44436}.retro-field input,.retro-field textarea{box-sizing:border-box;width:100%;border:1px solid #cedfdb;border-radius:14px;background:#fff;color:#163e46;font:inherit;outline:none}.retro-field input{height:50px;padding:0 14px}.retro-field textarea{padding:13px 14px;resize:vertical;min-height:96px}.retro-field input:focus,.retro-field textarea:focus{border-color:#158f8c;box-shadow:0 0 0 3px rgba(21,143,140,.1)}.retro-field small{display:block;margin-top:6px;color:#859594;font-size:11px;line-height:1.45}
+.retro-panel .primary-btn{margin-top:18px}.retro-footnote{margin:10px 0 0;text-align:center;color:#829392;font-size:11px}.retro-rejected{margin:0 0 12px;padding:11px 13px;border-radius:13px;background:#fff0ed;color:#9c4037;font-size:12px;line-height:1.5}
+@media(max-width:560px){.retro-panel{margin:14px -4px 0;padding:18px;border-radius:20px}.retro-head h2{font-size:20px}.retro-date-card{grid-template-columns:1fr 1fr}.retro-date-card div:last-child{grid-column:1/-1}.retro-field textarea{min-height:88px}}

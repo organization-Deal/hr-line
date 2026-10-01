@@ -416,6 +416,14 @@
           <div class="attendance-center-actions"><span class="badge badge-success"><span class="status-dot"></span> LINE + GPS พร้อมใช้งาน</span><button class="secondary-btn" type="button" data-settings-sidebar-open="attendance">ตั้งค่า Work Location</button></div>
         </div>
 
+        <article id="attendanceRetroApprovalPanel" class="panel attendance-retro-approval-panel hidden">
+          <div class="panel-head attendance-retro-approval-head">
+            <div><p class="kicker">RETRO CHECK-IN APPROVAL</p><h3>คำขอเช็กอินย้อนหลัง</h3><p class="panel-subtitle">พนักงานที่ลืมเช็กอินจะต้องระบุเวลาและสาเหตุก่อน ระบบจะยังไม่แก้ Attendance จนกว่า HR จะอนุมัติ</p></div>
+            <span id="attendanceRetroApprovalCount" class="badge badge-warning">0 รายการ</span>
+          </div>
+          <div id="attendanceRetroApprovalList" class="attendance-retro-approval-list"></div>
+        </article>
+
         <article class="panel team-worklog-panel attendance-worklog-panel">
           <div class="panel-head team-worklog-head attendance-worklog-head">
             <div>

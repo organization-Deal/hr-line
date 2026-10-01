@@ -32,6 +32,7 @@ const state = {
   employees: [],
   candidates: [],
   attendance: [],
+  attendanceRetroRequests: [],
   leaves: [],
   leaveMonthlyReport: null,
   requests: [],
@@ -2031,13 +2032,39 @@ async function loadTeamWorkLog(){
   syncTeamWorkLogControls();
   const body=$('#teamWorkLogBody'); if(body) body.innerHTML=`<tr><td colspan="7"><div class="leave-report-empty">กำลังโหลดเวลาเข้างานของทีม…</div></td></tr>`;
   try{
-    state.teamWorkLog=await api(`/api/team-work-log?${params.toString()}`,{timeoutMs:15000});
-    renderTeamWorkLog();
+    const canApproveRetro=['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));
+    const [workLog,retro]=await Promise.all([
+      api(`/api/team-work-log?${params.toString()}`,{timeoutMs:15000}),
+      canApproveRetro?api('/api/attendance-retro-requests?status=pending',{timeoutMs:12000}).catch(()=>({data:[]})):Promise.resolve({data:[]})
+    ]);
+    state.teamWorkLog=workLog;state.attendanceRetroRequests=retro?.data||[];
+    renderAttendanceRetroRequests();renderTeamWorkLog();
   }catch(e){if(body) body.innerHTML=`<tr><td colspan="7"><div class="leave-report-empty">${escapeHtml(e.message||'โหลดข้อมูลไม่สำเร็จ')}</div></td></tr>`;}
 }
+function renderAttendanceRetroRequests(){
+  const panel=$('#attendanceRetroApprovalPanel');if(!panel)return;
+  const canApprove=['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));
+  const rows=state.attendanceRetroRequests||[];panel.classList.toggle('hidden',!canApprove);
+  if(!canApprove)return;
+  $('#attendanceRetroApprovalCount').textContent=`${rows.length.toLocaleString('th-TH')} รายการ`;
+  $('#attendanceRetroApprovalCount').className=`badge ${rows.length?'badge-warning':'badge-success'}`;
+  $('#attendanceRetroApprovalList').innerHTML=rows.length?rows.map(r=>`
+    <article class="attendance-retro-request-card">
+      <div class="attendance-retro-person"><span>${escapeHtml((r.nickname||r.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml(r.nickname||r.first_name||'—')} ${escapeHtml(r.last_name||'')}</strong><small>${escapeHtml(r.employee_code||'')} · ${escapeHtml(r.department_name||'ยังไม่ระบุแผนก')}</small></div></div>
+      <div class="attendance-retro-request-meta"><div><span>วันที่ขอย้อนหลัง</span><strong>${formatDate(r.work_date)}</strong></div><div><span>เวลาเข้างานที่แจ้ง</span><strong>${escapeHtml(r.requested_check_in_time||'—')} น.</strong></div><div class="wide"><span>สาเหตุ</span><strong>${escapeHtml(r.reason||'—')}</strong></div></div>
+      <div class="attendance-retro-actions"><button class="secondary-btn compact-btn danger-soft" type="button" onclick="window.decideAttendanceRetro(${Number(r.id)},'reject',this)">ไม่อนุมัติ</button><button class="primary-btn compact-btn" type="button" onclick="window.decideAttendanceRetro(${Number(r.id)},'approve',this)">อนุมัติย้อนหลัง</button></div>
+    </article>`).join(''):`<div class="attendance-retro-empty"><span>✓</span><div><strong>ไม่มีคำขอค้างอนุมัติ</strong><small>คำขอเช็กอินย้อนหลังใหม่จะแสดงตรงนี้</small></div></div>`;
+}
+window.decideAttendanceRetro=async(id,decision,button)=>{
+  let reason='';if(decision==='reject'){reason=prompt('เหตุผลที่ไม่อนุมัติ (พนักงานจะเห็นข้อความนี้)')||'';if(!reason.trim())return;}
+  const old=button?.textContent;if(button){button.disabled=true;button.textContent=decision==='approve'?'กำลังอนุมัติ…':'กำลังบันทึก…';}
+  try{await api(`/api/attendance-retro-requests/${Number(id)}/${decision}`,{method:'POST',body:JSON.stringify({reason:reason.trim()})});toast(decision==='approve'?'อนุมัติเช็กอินย้อนหลังแล้ว':'ไม่อนุมัติคำขอแล้ว');await loadTeamWorkLog();refreshDashboardSoon(80);}catch(e){toast(e.message||'ดำเนินการไม่สำเร็จ',true);}finally{if(button){button.disabled=false;button.textContent=old;}}
+};
+
 function workLogStatus(row){
   if(row.is_future) return '<span class="worklog-status future">ยังไม่ถึงวัน</span>';
   if(row.approved_leave && !row.check_in_at) return '<span class="worklog-status leave">ลา</span>';
+  if(row.check_in_at && String(row.attendance_source||'')==='retro_approved') return '<span class="worklog-status retro">ย้อนหลัง · HR อนุมัติ</span>';
   if(row.check_in_at && Number(row.late_minutes||0)>0) return `<span class="worklog-status warn">สาย ${Number(row.late_minutes)} นาที</span>`;
   if(row.check_in_at) return '<span class="worklog-status ok">มาทำงาน</span>';
   if(row.is_workday===false)return `<span class="worklog-status future">${row.holiday_name?'วันหยุดบริษัท':'วันหยุด'}</span>`;
@@ -2092,8 +2119,9 @@ function workLogMatrixCell(r){
     const place=workLogPlace(r,'checkin');
     const workLocation=String(r.checkin_location_name||'').trim();
     const late=Number(r.late_minutes||0)>0;
+    const retroApproved=String(r.attendance_source||'')==='retro_approved';
     parts.push(`<div class="worklog-line"><span>เข้า</span><strong class="${late?'late':''}">${time(r.check_in_at)}</strong></div>`);
-    parts.push(`<div class="worklog-check-state ${outside?'outside':late?'late':'inside'}">${outside?'นอกพื้นที่':late?`สาย ${Number(r.late_minutes)} นาที`:'ในพื้นที่ · ตรงเวลา'}</div>`);
+    parts.push(retroApproved?'<div class="worklog-check-state retro">ย้อนหลัง · HR อนุมัติ</div>':`<div class="worklog-check-state ${outside?'outside':late?'late':'inside'}">${outside?'นอกพื้นที่':late?`สาย ${Number(r.late_minutes)} นาที`:'ในพื้นที่ · ตรงเวลา'}</div>`);
     if(r.checkin_face_verified)parts.push('<div class="worklog-face-chip">✓ Face Verify</div>');
     parts.push(`<div class="worklog-place" title="${escapeHtml(place)}">📍 ${escapeHtml(place)}</div>`);
     if(workLocation){
@@ -2115,8 +2143,10 @@ function workLogMatrixCell(r){
     }
   }
 
-  // Pending leave does not excuse attendance yet. Keep the missing signal visible.
-  if(!r.check_in_at&&!r.approved_leave&&!r.is_future&&r.is_workday!==false){
+  // Pending retro request keeps the day unresolved until HR approves, but show why it is waiting.
+  if(!r.check_in_at&&r.retro_request_status==='pending'){
+    parts.push(`<div class="worklog-retro-pending">↶ รอ HR อนุมัติย้อนหลัง · ${escapeHtml(r.retro_requested_check_in_time||'—')} น.</div>`);
+  }else if(!r.check_in_at&&!r.approved_leave&&!r.is_future&&r.is_workday!==false){
     parts.push('<div class="worklog-missing-note">ยังไม่เช็กอิน</div>');
   }
   if(!parts.length)return `<div class="worklog-day-card missing"><small>ยังไม่เช็กอิน</small></div>`;
@@ -2147,6 +2177,7 @@ window.openWorkLogDetail=async(employeeId,workDate)=>{
       return `<section class="worklog-point-card empty"><div class="worklog-point-head"><div><span>${label}</span><strong>${isCheckout?'ยังไม่เช็กเอาต์':'ยังไม่เช็กอิน'}</strong></div><span class="worklog-point-badge neutral">—</span></div></section>`;
     }
     const outside=Boolean(item.outside_geofence);
+    const retroactive=Boolean(item.retroactive)||String(item.source||'')==='retro_approved';
     const place=pointPlace(item);
     const address=item.actual_address&&item.actual_address!==item.actual_title?item.actual_address:null;
     const workName=item.work_location?.name||item.location_name||'ไม่ได้จับคู่ Work Location';
@@ -2154,12 +2185,12 @@ window.openWorkLogDetail=async(employeeId,workDate)=>{
     const radius=item.work_location?.radius_m??item.location_radius_m??null;
     const map=(item.lat!=null&&item.lng!=null)?`<a class="worklog-map-btn ${isCheckout?'secondary':''}" href="https://www.google.com/maps?q=${Number(item.lat)},${Number(item.lng)}" target="_blank" rel="noopener">📍 ดูจุด${label}บนแผนที่</a>`:'';
     const nearby=item.nearby_name?`<small class="worklog-nearby">Landmark: ${escapeHtml(`${item.nearby_relation||'ใกล้'} ${item.nearby_name}`)}${item.nearby_distance_text?` · ${escapeHtml(item.nearby_distance_text)}`:''}</small>`:'';
-    const badgeClass=outside?'outside':(kind==='checkin'&&Number(lateMinutes||0)>0?'late':'inside');
+    const badgeClass=retroactive?'retro':outside?'outside':(kind==='checkin'&&Number(lateMinutes||0)>0?'late':'inside');
     return `<section class="worklog-point-card ${outside?'outside':'inside'}">
-      <div class="worklog-point-head"><div><span>${label}</span><strong>${item.time?time(item.time):'—'}</strong></div><span class="worklog-point-badge ${badgeClass}">${escapeHtml(pointStatus(item,kind,lateMinutes))}</span></div>
+      <div class="worklog-point-head"><div><span>${label}</span><strong>${item.time?time(item.time):'—'}</strong></div><span class="worklog-point-badge ${badgeClass}">${escapeHtml(retroactive?'ย้อนหลัง · HR อนุมัติ':pointStatus(item,kind,lateMinutes))}</span></div>
       <div class="worklog-point-place"><span>จุดที่${label}จริง</span><strong>📍 ${escapeHtml(place)}</strong>${address?`<small>${escapeHtml(address)}</small>`:''}${nearby}</div>
       <div class="worklog-detail-grid compact">
-        <div><span>สถานะพื้นที่</span><strong>${outside?'นอก Work Location':'อยู่ใน Work Location'}</strong></div>
+        <div><span>สถานะพื้นที่</span><strong>${retroactive?'ไม่ใช้ GPS · คำขอย้อนหลัง':outside?'นอก Work Location':'อยู่ใน Work Location'}</strong></div>
         <div><span>GPS</span><strong>${item.accuracy_m!=null?`±${Math.round(Number(item.accuracy_m))} ม.`:'—'}</strong></div>
         <div><span>Work Location ที่ระบบเทียบ</span><strong>${escapeHtml(workName)}</strong>${workAddress?`<small>${escapeHtml(workAddress)}</small>`:''}</div>
         <div><span>ระยะจาก Work Location</span><strong>${workLogDistanceLabel(item.distance_m)||'—'}</strong></div>

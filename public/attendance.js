@@ -11,6 +11,8 @@ let faceStatus=null;
 let faceVerificationToken=null;
 let faceStream=null;
 let faceModelsReady=false;
+let retroStatus=null;
+let retroSubmitting=false;
 const FACE_MODEL_VERSION='face-api-0.22.2';
 const FACE_MODEL_URL='https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
 if(standaloneFaceFlow){
@@ -34,6 +36,7 @@ function setLoading(message){
   $('#permissionHint').classList.add('hidden');
   $('#detailCard').classList.add('hidden');
   if(!faceFlowBusy){$('#facePanel')?.classList.add('hidden');document.body.classList.remove('face-mode');}
+  if(!retroSubmitting)$('#retroPanel')?.classList.add('hidden');
   const d=$('#diagnosticText'); if(d){d.textContent='';d.classList.add('hidden');}
 }
 function setError(message,{permission=false,code='',detail=''}={}){
@@ -45,6 +48,7 @@ function setError(message,{permission=false,code='',detail=''}={}){
   $('#retryBtn').textContent='ลองใหม่';
   $('#permissionHint').classList.toggle('hidden',!permission);
   $('#facePanel')?.classList.add('hidden');
+  $('#retroPanel')?.classList.add('hidden');
   document.body.classList.remove('face-mode');
   stopFaceCamera();
   const d=$('#diagnosticText');
@@ -218,45 +222,52 @@ function faceMotionMetrics(face){
 }
 async function waitForLivenessAction(action,timeoutMs=12000){
   const started=Date.now();
-  let baselineEar=null,baselineNose=null,closed=false;
+  let baselineEar=null,baselineNose=null,closedSince=0;
   const earSamples=[],noseSamples=[];
   while(Date.now()-started<timeoutMs){
     try{
       const face=await detectFaces();const m=faceMotionMetrics(face);
       if(baselineEar==null||baselineNose==null){
         earSamples.push(m.ear);noseSamples.push(m.noseOffset);
-        if(earSamples.length>=5){
+        if(earSamples.length>=4){
           const sortedEar=[...earSamples].sort((a,b)=>a-b);baselineEar=sortedEar[Math.floor(sortedEar.length/2)];
           baselineNose=noseSamples.reduce((sum,v)=>sum+v,0)/noseSamples.length;
         }
-        $('#faceCameraState').textContent='มองตรงนิ่ง ๆ 1 วินาที';
-        await sleep(120);continue;
+        $('#faceCameraState').textContent='มองตรงนิ่ง ๆ แป๊บเดียว';
+        await sleep(90);continue;
       }
       if(action==='blink'){
-        const closeThreshold=Math.max(0.11,baselineEar*0.72);
-        const reopenThreshold=Math.max(closeThreshold+0.025,baselineEar*0.86);
-        if(m.ear<closeThreshold)closed=true;
-        if(closed&&m.ear>reopenThreshold)return true;
-        $('#faceCameraState').textContent='กระพริบตาตามปกติ 1 ครั้ง';
+        // Backward compatibility for an already-issued pre-P9.18 challenge.
+        // Hold-close is intentionally accepted because a natural blink can be
+        // shorter than a face-api inference frame in iOS/LINE WebViews.
+        const closeThreshold=Math.max(0.105,baselineEar*0.78);
+        const reopenThreshold=Math.max(closeThreshold+0.018,baselineEar*0.88);
+        if(m.ear<closeThreshold){if(!closedSince)closedSince=Date.now();}
+        else if(closedSince&&m.ear>reopenThreshold&&Date.now()-closedSince>=180)return true;
+        else if(m.ear>reopenThreshold)closedSince=0;
+        $('#faceCameraState').textContent='หลับตาค้างสั้น ๆ แล้วลืมตา';
       }else{
-        if(Math.abs(m.noseOffset-baselineNose)>0.13)return true;
-        $('#faceCameraState').textContent='หันหน้าไปซ้ายหรือขวาเล็กน้อย';
+        // Head turn is much easier to catch than a blink because the pose lasts
+        // across several inference frames. 0.10 still needs an intentional turn
+        // but does not force the user to rotate their head too far.
+        if(Math.abs(m.noseOffset-baselineNose)>0.10)return true;
+        $('#faceCameraState').textContent='หันหน้าไปซ้ายหรือขวานิดเดียว';
       }
     }catch(error){$('#faceCameraState').textContent=error.message||'ให้ใบหน้าอยู่ในภาพ';}
-    await sleep(120);
+    await sleep(90);
   }
-  throw Object.assign(new Error(action==='blink'?'ยังจับจังหวะกระพริบตาไม่ได้ กดลองอีกครั้ง':'ยังจับการหันหน้าไม่ได้ กดลองอีกครั้ง'),{faceCode:'LIVENESS_FAILED'});
+  throw Object.assign(new Error(action==='blink'?'ยังจับการหลับตาไม่ได้ กดลองอีกครั้ง':'ยังจับการหันหน้าไม่ได้ กดลองอีกครั้ง'),{faceCode:'LIVENESS_FAILED'});
 }
 async function runLiveness(actions){
   setFaceStep('live','active');
   const result={blink:false,turn:false};
   for(const action of actions||[]){
-    $('#faceInstruction').textContent=action==='blink'?'มองตรง แล้วกระพริบตาตามปกติ 1 ครั้ง':'มองตรงก่อน แล้วหันหน้าไปซ้ายหรือขวาเล็กน้อย';
+    $('#faceInstruction').textContent=action==='blink'?'หลับตาค้างสั้น ๆ แล้วลืมตา':'มองตรงก่อน แล้วหันหน้าไปด้านข้างนิดเดียว';
     $('#faceCameraState').textContent=$('#faceInstruction').textContent;
     await waitForLivenessAction(action);
     result[action]=true;
-    $('#faceCameraState').textContent=action==='blink'?'ตรวจการกระพริบตาแล้ว ✓':'ตรวจการหันหน้าแล้ว ✓';
-    await sleep(450);
+    $('#faceCameraState').textContent=action==='blink'?'ตรวจการหลับตาแล้ว ✓':'ตรวจการหันหน้าแล้ว ✓';
+    await sleep(300);
   }
   setFaceStep('live','done');
   return result;
@@ -293,6 +304,37 @@ async function fetchFaceStatus(){
   }
   return data;
 }
+function formatRetroDate(dateKey){
+  try{return new Intl.DateTimeFormat('th-TH',{weekday:'short',day:'numeric',month:'short',year:'numeric',timeZone:'Asia/Bangkok'}).format(new Date(`${dateKey}T12:00:00+07:00`));}catch{return dateKey||'—';}
+}
+async function fetchRetroStatus(){
+  const response=await fetch(`/api/public/attendance/${encodeURIComponent(token)}/retro-status`,{headers:{accept:'application/json'},cache:'no-store'});
+  const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'ตรวจรายการเช็กอินย้อนหลังไม่สำเร็จ');return data;
+}
+function showRetroPanel(status){
+  retroStatus=status||{};const days=retroStatus.missing_days||[],day=days[0];if(!day)return false;
+  stopFaceCamera();document.body.classList.remove('face-mode');$('#facePanel')?.classList.add('hidden');$('#detailCard')?.classList.add('hidden');$('#retryBtn')?.classList.add('hidden');
+  $('#stateIcon').className='state-icon';$('#stateIcon').textContent='↶';$('#title').textContent='เช็กอินย้อนหลังให้ครบก่อน';$('#message').textContent='พบวันทำงานก่อนหน้าที่ยังไม่มีเช็กอิน กรุณาส่งสาเหตุให้ HR อนุมัติ';
+  $('#retroDateText').textContent=formatRetroDate(day.work_date);$('#retroScheduleText').textContent=`${day.scheduled_start||'—'} – ${day.scheduled_end||'—'}`;$('#retroQueueText').textContent=`1 / ${days.length}`;
+  $('#retroCheckinTime').value=day.scheduled_start||'09:00';$('#retroReason').value='';
+  const rejected=$('#retroRejectedNote');if(day.last_rejected_reason){rejected.textContent=`คำขอก่อนหน้าไม่อนุมัติ: ${day.last_rejected_reason}`;rejected.classList.remove('hidden');}else rejected.classList.add('hidden');
+  $('#retroPanel').dataset.workDate=day.work_date;$('#retroPanel').classList.remove('hidden');return true;
+}
+async function submitRetroRequest(){
+  if(retroSubmitting)return;const panel=$('#retroPanel'),workDate=String(panel?.dataset?.workDate||''),checkInTime=String($('#retroCheckinTime')?.value||''),reason=String($('#retroReason')?.value||'').trim();
+  if(!checkInTime)return alert('กรุณาระบุเวลาเข้างานจริง');if(reason.length<3)return alert('กรุณาระบุสาเหตุที่ไม่ได้เช็กอินอย่างน้อย 3 ตัวอักษร');
+  retroSubmitting=true;const btn=$('#retroSubmitBtn');btn.disabled=true;btn.textContent='กำลังส่งให้ HR…';
+  try{
+    const response=await fetch(`/api/public/attendance/${encodeURIComponent(token)}/retro-request`,{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},cache:'no-store',body:JSON.stringify({work_date:workDate,check_in_time:checkInTime,reason})});
+    const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'ส่งคำขอย้อนหลังไม่สำเร็จ');
+    retroStatus=await fetchRetroStatus();
+    if(retroStatus.requires_action && (retroStatus.missing_days||[]).length){showRetroPanel(retroStatus);return;}
+    panel.classList.add('hidden');$('#stateIcon').className='state-icon success';$('#stateIcon').textContent='✓';$('#title').textContent='ส่งคำขอย้อนหลังแล้ว';$('#message').textContent='คำขอถูกส่งให้ HR อนุมัติแล้ว · กำลังพาไปเช็กอินวันนี้ต่อ';
+    await new Promise(r=>setTimeout(r,650));await prepareAttendanceFlow({skipRetro:true});
+  }catch(error){alert(error.message||'ส่งคำขอไม่สำเร็จ');}
+  finally{retroSubmitting=false;btn.disabled=false;btn.textContent='ส่งให้ HR อนุมัติ';}
+}
+
 function setStandaloneFaceDone(title,message){
   stopFaceCamera();document.body.classList.remove('face-mode');
   $('#facePanel')?.classList.add('hidden');
@@ -351,10 +393,15 @@ async function performFaceFlow(){
     $('#facePanel')?.classList.remove('is-running');$('#facePanel')?.classList.add('is-error');$('#faceCameraState').textContent=error.message||'สแกนใบหน้าไม่สำเร็จ';$('#faceInstruction').textContent='ถือมือถือห่างประมาณช่วงแขน แล้วกดลองอีกครั้ง';button.textContent='ลองสแกนอีกครั้ง';button.disabled=false;
   }finally{faceFlowBusy=false;}
 }
-async function prepareAttendanceFlow(){
+async function prepareAttendanceFlow({skipRetro=false}={}){
   if(facePreparing||busy||faceFlowBusy)return;facePreparing=true;
   try{
     if(!token){setError('ลิงก์ไม่ถูกต้อง กรุณาเปิดจาก LINE ใหม่อีกครั้ง',{code:'INVALID_TOKEN'});return;}
+    if(!standaloneFaceFlow&&action==='checkin'&&!skipRetro){
+      setLoading('กำลังตรวจว่ามีวันก่อนหน้าที่ยังไม่ได้เช็กอินหรือไม่…');
+      retroStatus=await fetchRetroStatus();
+      if(retroStatus.requires_action&&showRetroPanel(retroStatus))return;
+    }
     setLoading(standaloneFaceFlow?'กำลังตรวจสถานะ Face Verification…':'กำลังตรวจเงื่อนไขการยืนยันตัวตน…');
     faceStatus=await fetchFaceStatus();
 
@@ -648,6 +695,7 @@ async function submit(){
   }finally{busy=false;}
 }
 
+$('#retroSubmitBtn')?.addEventListener('click',submitRetroRequest);
 $('#retryBtn').addEventListener('click',()=>{faceVerificationToken=null;prepareAttendanceFlow();});
 $('#faceStartBtn').addEventListener('click',performFaceFlow);
 $('#faceSkipBtn').addEventListener('click',()=>{stopFaceCamera();$('#facePanel').classList.add('hidden');document.body.classList.remove('face-mode');submit();});

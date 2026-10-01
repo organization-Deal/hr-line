@@ -3228,3 +3228,13 @@ button.nakna-mutation-pending:not(.icon-btn):not(.close-btn)::after,a.nakna-muta
   .payroll-export-latest .primary-btn{width:100%;min-width:0}
   .payroll-export-history article strong{max-width:210px}
 }
+
+
+/* P9.24 · Attendance retro approval */
+.attendance-retro-approval-panel{margin-bottom:20px;border-color:#d8e8e3;background:linear-gradient(180deg,#fff 0%,#fbfefd 100%)}
+.attendance-retro-approval-head{align-items:flex-start}.attendance-retro-approval-list{display:grid;gap:12px}
+.attendance-retro-request-card{display:grid;grid-template-columns:minmax(230px,1fr) minmax(340px,1.65fr) auto;gap:18px;align-items:center;padding:16px 18px;border:1px solid #dbe9e5;border-radius:18px;background:#fff}
+.attendance-retro-person{display:flex;align-items:center;gap:11px;min-width:0}.attendance-retro-person>span{display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border-radius:14px;background:#e7f6f2;color:#0d8885;font-weight:800}.attendance-retro-person strong,.attendance-retro-person small{display:block}.attendance-retro-person strong{color:#153f49}.attendance-retro-person small{margin-top:3px;color:#8a9999;font-size:11px}
+.attendance-retro-request-meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;padding:12px 14px;border-radius:14px;background:#f5faf8}.attendance-retro-request-meta .wide{grid-column:1/-1}.attendance-retro-request-meta span{display:block;color:#8b9a98;font-size:10px}.attendance-retro-request-meta strong{display:block;margin-top:3px;color:#294d53;font-size:12px;line-height:1.45}.attendance-retro-actions{display:flex;gap:8px;justify-content:flex-end}.danger-soft{border-color:#efd3ce!important;color:#a44b40!important;background:#fff7f5!important}.attendance-retro-empty{display:flex;align-items:center;gap:12px;padding:18px;border:1px dashed #cae4dc;border-radius:17px;background:#f6fcf9}.attendance-retro-empty>span{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:#e0f5ea;color:#20815c;font-weight:800}.attendance-retro-empty strong,.attendance-retro-empty small{display:block}.attendance-retro-empty small{margin-top:3px;color:#879694}
+.worklog-status.retro,.worklog-check-state.retro,.worklog-point-badge.retro{background:#eef0ff!important;color:#5858a8!important;border-color:#dfe0fb!important}.worklog-retro-pending{margin-top:6px;padding:6px 8px;border-radius:9px;background:#fff7e7;color:#a76b14;font-size:10px;font-weight:700;line-height:1.35}
+@media(max-width:900px){.attendance-retro-request-card{grid-template-columns:1fr}.attendance-retro-actions{justify-content:stretch}.attendance-retro-actions button{flex:1}}
