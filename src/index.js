@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.22-PAYROLL-MANUAL-OVERRIDE';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.22-PAYROLL-MANUAL-OVERRIDE';
-const NAKNA_RUNTIME_FEATURE = 'payroll-editable-days-and-period-salary';
+const NAKNA_RUNTIME_RELEASE = 'P9.24-RETRO-CHECKIN-APPROVAL';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.24-RETRO-CHECKIN-APPROVAL';
+const NAKNA_RUNTIME_FEATURE = 'retroactive-checkin-request-and-hr-approval';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -1648,6 +1648,15 @@ export default {
         return await submitQuickAttendanceGpsLog(request, env, publicAttendanceGpsLogMatch[1]);
       }
 
+      const publicAttendanceRetroMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{20,})\/(retro-status|retro-request)$/);
+      if (publicAttendanceRetroMatch) {
+        await ensureV100P1Ready(env.DB);
+        await ensureAttendanceRetroReady(env.DB);
+        if (publicAttendanceRetroMatch[2] === 'retro-status' && request.method === 'GET') return await getPublicAttendanceRetroStatus(env, publicAttendanceRetroMatch[1]);
+        if (publicAttendanceRetroMatch[2] === 'retro-request' && request.method === 'POST') return await submitPublicAttendanceRetroRequest(request, env, publicAttendanceRetroMatch[1]);
+        return json({error:'Method not allowed',code:'ATTENDANCE_RETRO_METHOD_NOT_ALLOWED'},405,{'cache-control':'no-store'});
+      }
+
       const publicAttendanceMatch = url.pathname.match(/^\/api\/public\/attendance\/([A-Za-z0-9_-]{20,})\/(check-in|check-out)$/);
       if (publicAttendanceMatch && request.method === 'POST') {
         await ensureV100P1Ready(env.DB);
@@ -2514,6 +2523,66 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
 
+  if (path === '/api/attendance-retro-requests' && method === 'GET') {
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูคำขอลงเวลาย้อนหลัง'},403);
+    await ensureAttendanceRetroReady(env.DB);
+    const url=new URL(request.url);
+    const wanted=String(url.searchParams.get('status')||'pending').trim();
+    const allowed=new Set(['pending','approved','rejected','all']);
+    const status=allowed.has(wanted)?wanted:'pending';
+    const where=status==='all'?'' :' AND r.status=?2';
+    const stmt=env.DB.prepare(`SELECT r.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.line_user_id,e.line_provider_scope,d.name AS department_name,p.name AS position_name,u.name AS decided_by_name,u.email AS decided_by_email
+      FROM attendance_retro_requests r JOIN employees e ON e.id=r.employee_id AND e.client_id=r.client_id
+      LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id
+      LEFT JOIN users u ON u.id=r.decided_by_user_id
+      WHERE r.client_id=?1${where} ORDER BY CASE WHEN r.status='pending' THEN 0 ELSE 1 END,r.work_date DESC,r.created_at DESC LIMIT 120`);
+    const rows=status==='all'?(await stmt.bind(clientId).all()).results||[]:(await stmt.bind(clientId,status).all()).results||[];
+    return json({data:rows,pending_count:rows.filter(x=>x.status==='pending').length});
+  }
+
+  const attendanceRetroDecisionMatch=path.match(/^\/api\/attendance-retro-requests\/(\d+)\/(approve|reject)$/);
+  if(attendanceRetroDecisionMatch && method==='POST'){
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์อนุมัติลงเวลาย้อนหลัง'},403);
+    await ensureAttendanceRetroReady(env.DB);
+    const id=Number(attendanceRetroDecisionMatch[1]);
+    const decision=attendanceRetroDecisionMatch[2];
+    const body=await safeJson(request);
+    const reason=String(body.reason||'').trim().slice(0,500);
+    const row=await env.DB.prepare(`SELECT r.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.line_user_id,e.line_provider_scope,e.department_id,e.status AS employee_status,c.work_start,c.work_end,c.late_grace_minutes
+      FROM attendance_retro_requests r JOIN employees e ON e.id=r.employee_id AND e.client_id=r.client_id JOIN clients c ON c.id=r.client_id
+      WHERE r.id=?1 AND r.client_id=?2 LIMIT 1`).bind(id,clientId).first();
+    if(!row)return json({error:'ไม่พบคำขอลงเวลาย้อนหลัง'},404);
+    if(row.status!=='pending')return json({error:'คำขอนี้ไม่ได้อยู่ในสถานะรออนุมัติแล้ว'},409);
+    if(decision==='reject'){
+      await env.DB.prepare(`UPDATE attendance_retro_requests SET status='rejected',decision_reason=?1,decided_by_user_id=?2,decided_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?3 AND client_id=?4 AND status='pending'`).bind(reason||null,Number(auth.user.id),id,clientId).run();
+      await audit(env.DB,clientId,'web',String(auth.user.id),'attendance.retro_reject','attendance_retro_request',String(id),{employee_id:Number(row.employee_id),work_date:row.work_date,reason:reason||null});
+      await notifyAttendanceRetroDecision(env,row,'rejected',reason).catch(()=>{});
+      return json({ok:true,status:'rejected'});
+    }
+    if(String(row.work_date)>=dateInBangkok())return json({error:'อนุมัติย้อนหลังได้เฉพาะวันที่ผ่านไปแล้ว'},409);
+    const leave=await env.DB.prepare(`SELECT id,status FROM leave_requests WHERE client_id=?1 AND employee_id=?2 AND start_date<=?3 AND end_date>=?3 AND status IN ('approved','pending','awaiting_evidence') LIMIT 1`).bind(clientId,Number(row.employee_id),row.work_date).first();
+    if(leave)return json({error:'วันที่นี้มีรายการลาอยู่แล้ว กรุณาจัดการรายการลาก่อน'},409);
+    const existing=await env.DB.prepare(`SELECT id,check_in_at FROM attendance WHERE client_id=?1 AND employee_id=?2 AND work_date=?3 LIMIT 1`).bind(clientId,Number(row.employee_id),row.work_date).first();
+    if(existing?.check_in_at)return json({error:'วันที่นี้มีเช็กอินในระบบแล้ว ไม่ได้เขียนทับข้อมูลเดิม'},409);
+    await ensureAttendanceSourceColumns(env.DB);
+    const employeeForSchedule=await env.DB.prepare(`SELECT e.*,c.work_start,c.work_end,c.late_grace_minutes FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.client_id=?2`).bind(Number(row.employee_id),clientId).first();
+    const schedule=await resolveEffectiveWorkSchedule(env.DB,employeeForSchedule,row.work_date);
+    if(!schedule.is_workday)return json({error:'วันที่นี้ไม่ใช่วันทำงานตามตารางปัจจุบัน'},409);
+    const requestedAt=bangkokLocalTimeIso(row.work_date,row.requested_check_in_time);
+    if(!requestedAt)return json({error:'เวลาเช็กอินย้อนหลังไม่ถูกต้อง'},400);
+    const lateMinutes=calculateLateMinutes(new Date(requestedAt),schedule.start_time,Number(schedule.late_grace_minutes||0));
+    const attendanceStatus=lateMinutes>0?'late':'present';
+    const note=`เช็กอินย้อนหลัง (HR อนุมัติ) · เหตุผล: ${String(row.reason||'').trim()}`.slice(0,900);
+    await env.DB.prepare(`INSERT INTO attendance(client_id,employee_id,work_date,check_in_at,source,status,late_minutes,note,checkin_source_title,scheduled_start,scheduled_end,schedule_source)
+      VALUES(?1,?2,?3,?4,'retro_approved',?5,?6,?7,'เช็กอินย้อนหลัง · HR อนุมัติ',?8,?9,?10)
+      ON CONFLICT(employee_id,work_date) DO UPDATE SET check_in_at=excluded.check_in_at,source='retro_approved',status=excluded.status,late_minutes=excluded.late_minutes,note=excluded.note,checkin_source_title=excluded.checkin_source_title,scheduled_start=excluded.scheduled_start,scheduled_end=excluded.scheduled_end,schedule_source=excluded.schedule_source,updated_at=CURRENT_TIMESTAMP`).bind(clientId,Number(row.employee_id),row.work_date,requestedAt,attendanceStatus,lateMinutes,note,schedule.start_time||null,schedule.end_time||null,schedule.source||'retro').run();
+    const applied=await env.DB.prepare(`SELECT id FROM attendance WHERE client_id=?1 AND employee_id=?2 AND work_date=?3 LIMIT 1`).bind(clientId,Number(row.employee_id),row.work_date).first();
+    await env.DB.prepare(`UPDATE attendance_retro_requests SET status='approved',decision_reason=?1,decided_by_user_id=?2,decided_at=CURRENT_TIMESTAMP,applied_attendance_id=?3,updated_at=CURRENT_TIMESTAMP WHERE id=?4 AND client_id=?5 AND status='pending'`).bind(reason||null,Number(auth.user.id),applied?.id?Number(applied.id):null,id,clientId).run();
+    await audit(env.DB,clientId,'web',String(auth.user.id),'attendance.retro_approve','attendance_retro_request',String(id),{employee_id:Number(row.employee_id),work_date:row.work_date,requested_check_in_time:row.requested_check_in_time,late_minutes:lateMinutes,attendance_id:applied?.id||null});
+    await notifyAttendanceRetroDecision(env,row,'approved',reason).catch(()=>{});
+    return json({ok:true,status:'approved',attendance_id:applied?.id||null,check_in_at:requestedAt,late_minutes:lateMinutes});
+  }
+
   if (path === '/api/team-work-log/location-detail' && method === 'GET') {
     await ensureAttendanceSourceColumns(env.DB);
     await ensureAttendanceFaceReady(env.DB);
@@ -2559,6 +2628,7 @@ async function handleApi(request, env, url, auth, ctx) {
         nearby_name:meta?.nearby_name||null,nearby_distance_m:meta?.nearby_distance_m??null,nearby_distance_text:meta?.nearby_distance_text||null,nearby_relation:meta?.nearby_relation||null,
         work_location:wl?{id:Number(wl.id),name:wl.name,address:wl.address||null,radius_m:radius}:null,
         distance_m:distance,outside_geofence:outside,inside_work_location:Boolean(wl&&!outside),
+        source:row.source||null,retroactive:String(row.source||'')==='retro_approved',
       };
     };
     const [checkin,checkout,faceEvents]=await Promise.all([
@@ -2573,6 +2643,7 @@ async function handleApi(request, env, url, auth, ctx) {
   if (path === '/api/team-work-log' && method === 'GET') {
     await ensureAttendanceSourceColumns(env.DB);
     await ensureAttendanceFaceReady(env.DB);
+    await ensureAttendanceRetroReady(env.DB);
     const url = new URL(request.url);
     const modeRaw = String(url.searchParams.get('mode') || 'today').trim();
     const mode = ['today','day','week','month','range'].includes(modeRaw) ? modeRaw : 'today';
@@ -2607,7 +2678,7 @@ async function handleApi(request, env, url, auth, ctx) {
       if(days>366)return json({error:'เลือกช่วงวันที่ได้สูงสุด 366 วัน'},400);
       anchor=start;
     }
-    const [employeeRes,attendanceRes,workLocationRes,leaveRes,scheduleRes,holidayRes,client,faceEventsRes] = await Promise.all([
+    const [employeeRes,attendanceRes,workLocationRes,leaveRes,scheduleRes,holidayRes,client,faceEventsRes,retroRes] = await Promise.all([
       env.DB.prepare(`SELECT e.id,e.id AS employee_id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,e.position_id,e.start_date,e.end_date,d.name AS department_name,p.name AS position_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id WHERE e.client_id=?1 AND e.status='active' ORDER BY e.first_name,e.id`).bind(clientId).all(),
       env.DB.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 ORDER BY work_date,employee_id`).bind(clientId,start,end).all(),
       env.DB.prepare(`SELECT id,name,address,radius_m FROM work_locations WHERE client_id=?1`).bind(clientId).all(),
@@ -2616,7 +2687,9 @@ async function handleApi(request, env, url, auth, ctx) {
       env.DB.prepare(`SELECT * FROM company_holidays WHERE client_id=?1 AND holiday_date BETWEEN ?2 AND ?3`).bind(clientId,start,end).all(),
       getClient(env.DB,clientId),
       env.DB.prepare(`SELECT employee_id,work_date,action,status,liveness_passed,model_version,created_at FROM attendance_face_events WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 AND event_type='attendance_gate' AND status='passed' ORDER BY id DESC`).bind(clientId,start,end).all(),
+      env.DB.prepare(`SELECT id,employee_id,work_date,requested_check_in_time,reason,status,created_at FROM attendance_retro_requests WHERE client_id=?1 AND work_date BETWEEN ?2 AND ?3 AND status='pending' ORDER BY id DESC`).bind(clientId,start,end).all(),
     ]);
+    const retroMap=new Map();for(const rr of (retroRes.results||[])){const k=`${Number(rr.employee_id)}|${rr.work_date}`;if(!retroMap.has(k))retroMap.set(k,rr);}
     const faceEventMap=new Map();for(const event of (faceEventsRes.results||[])){const key=`${Number(event.employee_id)}|${event.work_date}|${event.action}`;if(!faceEventMap.has(key))faceEventMap.set(key,event);}
     const attendanceMap = new Map((attendanceRes.results||[]).map(r=>[`${Number(r.employee_id)}|${r.work_date}`,r]));
     const workLocationMap = new Map((workLocationRes.results||[]).map(r=>[Number(r.id),r]));
@@ -2660,7 +2733,9 @@ async function handleApi(request, env, url, auth, ctx) {
         const checkoutActualAddress=checkoutSourceAddress&&checkoutSourceAddress!==String(checkoutWorkLocation?.address||'').trim()?checkoutSourceAddress:null;
         const checkinFace=faceEventMap.get(`${Number(e.id)}|${date}|checkin`)||null;
         const checkoutFace=faceEventMap.get(`${Number(e.id)}|${date}|checkout`)||null;
-        rows.push({...e,work_date:date,day_label:dayNames[dateObj.getUTCDay()],check_in_at:a.check_in_at||null,check_out_at:a.check_out_at||null,attendance_status:a.status||null,late_minutes:Number(a.late_minutes||0),
+        const retro=retroMap.get(`${Number(e.id)}|${date}`)||null;
+        rows.push({...e,work_date:date,day_label:dayNames[dateObj.getUTCDay()],check_in_at:a.check_in_at||null,check_out_at:a.check_out_at||null,attendance_status:a.status||null,attendance_source:a.source||null,late_minutes:Number(a.late_minutes||0),
+          retro_request_id:retro?.id?Number(retro.id):null,retro_request_status:retro?.status||null,retro_requested_check_in_time:retro?.requested_check_in_time||null,retro_reason:retro?.reason||null,
           checkin_face_verified:Boolean(checkinFace),checkin_face_verified_at:checkinFace?.created_at||null,checkout_face_verified:Boolean(checkoutFace),checkout_face_verified_at:checkoutFace?.created_at||null,
           checkin_location_name:checkinWorkLocation?.name||a.checkin_location_name||null,checkin_work_location_address:checkinWorkLocation?.address||null,checkin_location_radius_m:checkinRadius,
           checkin_source_title:checkinSourceTitle||null,checkin_source_address:checkinSourceAddress||null,checkin_actual_title:checkinActualTitle,checkin_actual_address:checkinActualAddress,
@@ -6716,6 +6791,101 @@ async function getEmployeePortalAccessFast(db,token){
     JOIN clients c ON c.id=t.client_id
     WHERE t.token_hash=?1 AND datetime(t.expires_at)>CURRENT_TIMESTAMP AND e.status='active'`)
     .bind(hash).first();
+}
+
+async function ensureAttendanceRetroReady(db){
+  if(SCHEMA_READY.has('attendance_retro_requests'))return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS attendance_retro_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,work_date TEXT NOT NULL,
+    requested_check_in_time TEXT NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',decision_reason TEXT,
+    decided_by_user_id INTEGER,decided_at TEXT,applied_attendance_id INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+    FOREIGN KEY (decided_by_user_id) REFERENCES users(id) ON DELETE SET NULL,FOREIGN KEY (applied_attendance_id) REFERENCES attendance(id) ON DELETE SET NULL
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_attendance_retro_client_status ON attendance_retro_requests(client_id,status,created_at DESC)`).run().catch(()=>{});
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_attendance_retro_employee_date ON attendance_retro_requests(client_id,employee_id,work_date,created_at DESC)`).run().catch(()=>{});
+  await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_retro_pending_unique ON attendance_retro_requests(client_id,employee_id,work_date) WHERE status='pending'`).run().catch(()=>{});
+  SCHEMA_READY.add('attendance_retro_requests');
+}
+function shiftAttendanceDateKey(dateKey,delta){
+  const [y,m,d]=String(dateKey).split('-').map(Number);const dt=new Date(Date.UTC(y,m-1,d));dt.setUTCDate(dt.getUTCDate()+Number(delta||0));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-${String(dt.getUTCDate()).padStart(2,'0')}`;
+}
+function bangkokLocalTimeIso(workDate,timeText){
+  const t=String(timeText||'').trim();if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)||!/^\d{4}-\d{2}-\d{2}$/.test(String(workDate||'')))return null;
+  const d=new Date(`${workDate}T${t}:00+07:00`);return Number.isFinite(d.getTime())?d.toISOString():null;
+}
+async function attendanceRetroStatusForAccess(db,access){
+  await ensureAttendanceRetroReady(db);
+  const today=dateInBangkok();
+  const employee=await db.prepare(`SELECT e.*,c.work_start,c.work_end,c.late_grace_minutes FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.client_id=?2 AND e.status='active' LIMIT 1`).bind(Number(access.employee_id),Number(access.client_id)).first();
+  if(!employee)return {today,requires_action:false,missing_days:[],pending_requests:[],today_checked_in:false};
+  const todayRow=await db.prepare(`SELECT check_in_at FROM attendance WHERE client_id=?1 AND employee_id=?2 AND work_date=?3 LIMIT 1`).bind(Number(access.client_id),Number(access.employee_id),today).first();
+  const todayCheckedIn=Boolean(todayRow?.check_in_at);
+  const lookbackStart=shiftAttendanceDateKey(today,-7),yesterday=shiftAttendanceDateKey(today,-1);
+  const start=employee.start_date&&String(employee.start_date)>lookbackStart?String(employee.start_date):lookbackStart;
+  const [attendanceRes,scheduleRes,holidayRes,leaveRes,requestRes]=await Promise.all([
+    db.prepare(`SELECT work_date,check_in_at FROM attendance WHERE client_id=?1 AND employee_id=?2 AND work_date BETWEEN ?3 AND ?4 ORDER BY work_date`).bind(Number(access.client_id),Number(access.employee_id),start,yesterday).all(),
+    db.prepare(`SELECT * FROM work_schedule_rules WHERE client_id=?1`).bind(Number(access.client_id)).all(),
+    db.prepare(`SELECT * FROM company_holidays WHERE client_id=?1 AND holiday_date BETWEEN ?2 AND ?3`).bind(Number(access.client_id),start,yesterday).all(),
+    db.prepare(`SELECT id,start_date,end_date,status FROM leave_requests WHERE client_id=?1 AND employee_id=?2 AND start_date<=?4 AND end_date>=?3 AND status IN ('approved','pending','awaiting_evidence')`).bind(Number(access.client_id),Number(access.employee_id),start,yesterday).all(),
+    db.prepare(`SELECT * FROM attendance_retro_requests WHERE client_id=?1 AND employee_id=?2 AND work_date BETWEEN ?3 AND ?4 ORDER BY id DESC`).bind(Number(access.client_id),Number(access.employee_id),start,yesterday).all(),
+  ]);
+  const attendanceMap=new Map((attendanceRes.results||[]).map(r=>[String(r.work_date),r]));
+  const schedules=scheduleRes.results||[],holidayMap=new Map((holidayRes.results||[]).map(r=>[String(r.holiday_date),r]));
+  const leaves=leaveRes.results||[],requests=requestRes.results||[];
+  const pendingByDate=new Map(),lastRejectedByDate=new Map();
+  for(const r of requests){const k=String(r.work_date);if(r.status==='pending'&&!pendingByDate.has(k))pendingByDate.set(k,r);if(r.status==='rejected'&&!lastRejectedByDate.has(k))lastRejectedByDate.set(k,r);}
+  const dates=[];for(let d=start;d<=yesterday;d=shiftAttendanceDateKey(d,1))dates.push(d);
+  const lastChecked=[...(attendanceRes.results||[])].filter(r=>r.check_in_at).map(r=>String(r.work_date)).sort().pop()||null;
+  let candidateDates=lastChecked?dates.filter(d=>d>lastChecked):[];
+  if(!lastChecked){
+    for(let i=dates.length-1;i>=0;i--){const sch=payrollScheduleFor(employee,dates[i],schedules,holidayMap,employee);if(sch.is_workday){candidateDates=[dates[i]];break;}}
+  }
+  const missing=[];
+  for(const d of candidateDates){
+    const schedule=payrollScheduleFor(employee,d,schedules,holidayMap,employee);if(!schedule.is_workday)continue;
+    if(attendanceMap.get(d)?.check_in_at)continue;
+    if(leaves.some(l=>d>=String(l.start_date)&&d<=String(l.end_date)))continue;
+    if(pendingByDate.has(d))continue;
+    const rejected=lastRejectedByDate.get(d)||null;
+    missing.push({work_date:d,scheduled_start:schedule.start_time||employee.work_start||'09:00',scheduled_end:schedule.end_time||employee.work_end||'18:00',schedule_source:schedule.source||'company_default',last_rejected_reason:rejected?.decision_reason||null,last_rejected_at:rejected?.decided_at||null});
+    if(missing.length>=5)break;
+  }
+  const pending=[...pendingByDate.values()].map(r=>({id:Number(r.id),work_date:r.work_date,requested_check_in_time:r.requested_check_in_time,reason:r.reason,status:r.status,created_at:r.created_at}));
+  return {today,today_checked_in:todayCheckedIn,requires_action:!todayCheckedIn&&missing.length>0,missing_days:missing,pending_requests:pending};
+}
+async function getPublicAttendanceRetroStatus(env,token){
+  const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์เช็กอินหมดอายุ กรุณากดเมนูใน LINE ใหม่อีกครั้ง'},401,{'cache-control':'no-store'});
+  const data=await attendanceRetroStatusForAccess(env.DB,access);return json({ok:true,...data},200,{'cache-control':'no-store'});
+}
+async function submitPublicAttendanceRetroRequest(request,env,token){
+  const access=await getQuickAttendanceAccess(env.DB,token);if(!access)return json({error:'ลิงก์เช็กอินหมดอายุ กรุณากดเมนูใน LINE ใหม่อีกครั้ง'},401,{'cache-control':'no-store'});
+  const body=await safeJson(request),workDate=String(body.work_date||'').trim(),checkInTime=String(body.check_in_time||'').trim(),reason=String(body.reason||'').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(workDate))return json({error:'วันที่ย้อนหลังไม่ถูกต้อง'},400,{'cache-control':'no-store'});
+  if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(checkInTime))return json({error:'กรุณาระบุเวลาเข้างานจริง'},400,{'cache-control':'no-store'});
+  if(reason.length<3)return json({error:'กรุณาระบุสาเหตุที่ไม่ได้เช็กอินอย่างน้อย 3 ตัวอักษร'},400,{'cache-control':'no-store'});
+  const status=await attendanceRetroStatusForAccess(env.DB,access);const missed=status.missing_days.find(x=>x.work_date===workDate);
+  if(!missed)return json({error:'วันที่นี้ไม่อยู่ในรายการที่ต้องลงเวลาย้อนหลัง หรือมีคำขออยู่แล้ว'},409,{'cache-control':'no-store'});
+  try{
+    const result=await env.DB.prepare(`INSERT INTO attendance_retro_requests(client_id,employee_id,work_date,requested_check_in_time,reason,status) VALUES(?1,?2,?3,?4,?5,'pending')`).bind(Number(access.client_id),Number(access.employee_id),workDate,checkInTime,reason.slice(0,500)).run();
+    await audit(env.DB,Number(access.client_id),'line',String(access.employee_id),'attendance.retro_request','attendance_retro_request',String(result.meta.last_row_id),{work_date:workDate,requested_check_in_time:checkInTime,reason:reason.slice(0,500)});
+    return json({ok:true,id:Number(result.meta.last_row_id),status:'pending',work_date:workDate,requested_check_in_time:checkInTime,message:'ส่งคำขอให้ HR อนุมัติแล้ว'},201,{'cache-control':'no-store'});
+  }catch(error){
+    if(String(error?.message||'').toLowerCase().includes('unique'))return json({error:'วันที่นี้มีคำขอรอ HR อนุมัติอยู่แล้ว'},409,{'cache-control':'no-store'});
+    throw error;
+  }
+}
+async function notifyAttendanceRetroDecision(env,row,status,note=''){
+  if(!row?.line_user_id)return false;let token=null;
+  try{token=await getAccessTokenForProviderScope(env,Number(row.client_id),row.line_provider_scope||'default');}catch{}
+  if(!token){try{token=(await getEffectiveLineContextForClient(env,Number(row.client_id)))?.accessToken||null;}catch{}}
+  if(!token)return false;
+  const approved=status==='approved';
+  const message=approved
+    ? `วันที่ ${row.work_date} เวลา ${row.requested_check_in_time} ถูกบันทึกเป็นเช็กอินย้อนหลังเรียบร้อย${note?` · หมายเหตุ HR: ${note}`:''}`
+    : `คำขอวันที่ ${row.work_date} เวลา ${row.requested_check_in_time} ไม่ได้รับการอนุมัติ${note?` · เหตุผล: ${note}`:''}`;
+  return pushLineMessagesReliable(token,row.line_user_id,[buildSimpleNoticeFlex(approved?'อนุมัติเช็กอินย้อนหลังแล้ว':'คำขอเช็กอินย้อนหลังไม่ผ่าน',message,approved?'success':'error')]);
 }
 
 async function submitQuickAttendance(request,env,token,routeAction,ctx){
