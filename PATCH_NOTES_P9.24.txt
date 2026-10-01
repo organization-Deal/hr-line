@@ -1,0 +1,25 @@
+Nakna P9.24 · Retroactive Check-in + HR Approval
+
+Flow
+1) พนักงานกดเช็กอินวันใหม่
+2) ระบบตรวจวันทำงานก่อนหน้าที่ยังไม่มีเช็กอิน (ข้ามวันหยุด / วันลา / วันที่มีคำขอค้าง)
+3) ถ้าพบ จะบังคับกรอกเวลาเข้างานจริง + สาเหตุ
+4) ส่งเป็นคำขอ pending โดยยังไม่แก้ Attendance
+5) ส่งครบแล้วจึงไปเช็กอินของวันนี้ต่อ
+6) HR / Owner เปิด Attendance Center แล้วกดอนุมัติหรือไม่อนุมัติ
+7) เมื่ออนุมัติ ระบบสร้าง/อัปเดต Attendance ของวันย้อนหลัง source=retro_approved และคำนวณสายจากเวลาที่พนักงานแจ้ง
+8) พนักงานได้รับผลผ่าน LINE
+
+Files changed
+- migrations/0036_attendance_retro_requests.sql
+- src/index.js
+- public/attendance.html
+- public/attendance.js
+- public/attendance.css
+- public/index.html
+- public/app.js
+- public/styles.css
+
+Deploy
+npx wrangler d1 migrations apply DB --remote
+npx wrangler deploy
