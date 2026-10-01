@@ -11,7 +11,7 @@ let faceStatus=null;
 let faceVerificationToken=null;
 let faceStream=null;
 let faceModelsReady=false;
-let retroStatus=null;
+const retroPageMode=!standaloneFaceFlow&&String(params.get('retro')||'')==='1';
 let retroSubmitting=false;
 const FACE_MODEL_VERSION='face-api-0.22.2';
 const FACE_MODEL_URL='https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
@@ -307,32 +307,60 @@ async function fetchFaceStatus(){
 function formatRetroDate(dateKey){
   try{return new Intl.DateTimeFormat('th-TH',{weekday:'short',day:'numeric',month:'short',year:'numeric',timeZone:'Asia/Bangkok'}).format(new Date(`${dateKey}T12:00:00+07:00`));}catch{return dateKey||'—';}
 }
-async function fetchRetroStatus(){
-  const response=await fetch(`/api/public/attendance/${encodeURIComponent(token)}/retro-status`,{headers:{accept:'application/json'},cache:'no-store'});
-  const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'ตรวจรายการเช็กอินย้อนหลังไม่สำเร็จ');return data;
+function bangkokDateKey(offsetDays=0){
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+  const pick=t=>Number(parts.find(x=>x.type===t)?.value||0);
+  const d=new Date(Date.UTC(pick('year'),pick('month')-1,pick('day')+Number(offsetDays||0)));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
 }
-function showRetroPanel(status){
-  retroStatus=status||{};const days=retroStatus.missing_days||[],day=days[0];if(!day)return false;
-  stopFaceCamera();document.body.classList.remove('face-mode');$('#facePanel')?.classList.add('hidden');$('#detailCard')?.classList.add('hidden');$('#retryBtn')?.classList.add('hidden');
-  $('#stateIcon').className='state-icon';$('#stateIcon').textContent='↶';$('#title').textContent='เช็กอินย้อนหลังให้ครบก่อน';$('#message').textContent='พบวันทำงานก่อนหน้าที่ยังไม่มีเช็กอิน กรุณาส่งสาเหตุให้ HR อนุมัติ';
-  $('#retroDateText').textContent=formatRetroDate(day.work_date);$('#retroScheduleText').textContent=`${day.scheduled_start||'—'} – ${day.scheduled_end||'—'}`;$('#retroQueueText').textContent=`1 / ${days.length}`;
-  $('#retroCheckinTime').value=day.scheduled_start||'09:00';$('#retroReason').value='';
-  const rejected=$('#retroRejectedNote');if(day.last_rejected_reason){rejected.textContent=`คำขอก่อนหน้าไม่อนุมัติ: ${day.last_rejected_reason}`;rejected.classList.remove('hidden');}else rejected.classList.add('hidden');
-  $('#retroPanel').dataset.workDate=day.work_date;$('#retroPanel').classList.remove('hidden');return true;
+function openRetroMode(){
+  if(standaloneFaceFlow)return;
+  stopFaceCamera();
+  const url=new URL(location.href);
+  url.searchParams.set('action','checkin');
+  url.searchParams.set('retro','1');
+  location.href=url.toString();
+}
+function closeRetroMode(){
+  const url=new URL(location.href);
+  url.searchParams.delete('retro');
+  url.searchParams.set('action','checkin');
+  location.href=url.toString();
+}
+function showManualRetroPanel(){
+  stopFaceCamera();document.body.classList.remove('face-mode');
+  $('#facePanel')?.classList.add('hidden');$('#detailCard')?.classList.add('hidden');$('#retryBtn')?.classList.add('hidden');
+  $('#permissionHint')?.classList.add('hidden');$('#retroOpenBtn')?.classList.add('hidden');$('#retroOpenHint')?.classList.add('hidden');
+  $('#stateIcon').className='state-icon';$('#stateIcon').textContent='↶';
+  $('#title').textContent='เช็กอินย้อนหลัง';
+  $('#message').textContent='เลือกวันที่และเวลาเข้างานจริง พร้อมระบุสาเหตุ จากนั้นส่งให้ HR ตรวจสอบ';
+  const yesterday=bangkokDateKey(-1),dateInput=$('#retroWorkDate');
+  if(dateInput){dateInput.max=yesterday;if(!dateInput.value)dateInput.value=yesterday;dateInput.disabled=false;}
+  const timeInput=$('#retroCheckinTime');if(timeInput){if(!timeInput.value)timeInput.value='09:00';timeInput.disabled=false;}
+  const reason=$('#retroReason');if(reason){reason.value='';reason.disabled=false;}
+  const btn=$('#retroSubmitBtn');if(btn){btn.disabled=false;btn.textContent='ส่งให้ HR อนุมัติ';}
+  $('#retroPanel')?.classList.remove('hidden');
 }
 async function submitRetroRequest(){
-  if(retroSubmitting)return;const panel=$('#retroPanel'),workDate=String(panel?.dataset?.workDate||''),checkInTime=String($('#retroCheckinTime')?.value||''),reason=String($('#retroReason')?.value||'').trim();
-  if(!checkInTime)return alert('กรุณาระบุเวลาเข้างานจริง');if(reason.length<3)return alert('กรุณาระบุสาเหตุที่ไม่ได้เช็กอินอย่างน้อย 3 ตัวอักษร');
+  if(retroSubmitting)return;
+  const workDate=String($('#retroWorkDate')?.value||'').trim(),checkInTime=String($('#retroCheckinTime')?.value||'').trim(),reason=String($('#retroReason')?.value||'').trim();
+  if(!workDate)return alert('กรุณาเลือกวันที่ลืมเช็กอิน');
+  if(workDate>=bangkokDateKey(0))return alert('เช็กอินย้อนหลังต้องเป็นวันที่ผ่านไปแล้ว');
+  if(!checkInTime)return alert('กรุณาระบุเวลาเข้างานจริง');
+  if(reason.length<3)return alert('กรุณาระบุสาเหตุหรือปัญหาที่ไม่ได้เช็กอินอย่างน้อย 3 ตัวอักษร');
   retroSubmitting=true;const btn=$('#retroSubmitBtn');btn.disabled=true;btn.textContent='กำลังส่งให้ HR…';
+  let sent=false;
   try{
     const response=await fetch(`/api/public/attendance/${encodeURIComponent(token)}/retro-request`,{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},cache:'no-store',body:JSON.stringify({work_date:workDate,check_in_time:checkInTime,reason})});
     const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'ส่งคำขอย้อนหลังไม่สำเร็จ');
-    retroStatus=await fetchRetroStatus();
-    if(retroStatus.requires_action && (retroStatus.missing_days||[]).length){showRetroPanel(retroStatus);return;}
-    panel.classList.add('hidden');$('#stateIcon').className='state-icon success';$('#stateIcon').textContent='✓';$('#title').textContent='ส่งคำขอย้อนหลังแล้ว';$('#message').textContent='คำขอถูกส่งให้ HR อนุมัติแล้ว · กำลังพาไปเช็กอินวันนี้ต่อ';
-    await new Promise(r=>setTimeout(r,650));await prepareAttendanceFlow({skipRetro:true});
+    sent=true;
+    $('#retroWorkDate').disabled=true;$('#retroCheckinTime').disabled=true;$('#retroReason').disabled=true;
+    $('#stateIcon').className='state-icon success';$('#stateIcon').textContent='✓';
+    $('#title').textContent='ส่งให้ HR แล้ว';
+    $('#message').textContent=`${formatRetroDate(workDate)} เวลา ${checkInTime} น. · Attendance จะถูกบันทึกเมื่อ HR อนุมัติ`;
+    btn.textContent='ส่งให้ HR แล้ว ✓';
   }catch(error){alert(error.message||'ส่งคำขอไม่สำเร็จ');}
-  finally{retroSubmitting=false;btn.disabled=false;btn.textContent='ส่งให้ HR อนุมัติ';}
+  finally{retroSubmitting=false;if(!sent){btn.disabled=false;btn.textContent='ส่งให้ HR อนุมัติ';}}
 }
 
 function setStandaloneFaceDone(title,message){
@@ -393,15 +421,10 @@ async function performFaceFlow(){
     $('#facePanel')?.classList.remove('is-running');$('#facePanel')?.classList.add('is-error');$('#faceCameraState').textContent=error.message||'สแกนใบหน้าไม่สำเร็จ';$('#faceInstruction').textContent='ถือมือถือห่างประมาณช่วงแขน แล้วกดลองอีกครั้ง';button.textContent='ลองสแกนอีกครั้ง';button.disabled=false;
   }finally{faceFlowBusy=false;}
 }
-async function prepareAttendanceFlow({skipRetro=false}={}){
+async function prepareAttendanceFlow(){
   if(facePreparing||busy||faceFlowBusy)return;facePreparing=true;
   try{
     if(!token){setError('ลิงก์ไม่ถูกต้อง กรุณาเปิดจาก LINE ใหม่อีกครั้ง',{code:'INVALID_TOKEN'});return;}
-    if(!standaloneFaceFlow&&action==='checkin'&&!skipRetro){
-      setLoading('กำลังตรวจว่ามีวันก่อนหน้าที่ยังไม่ได้เช็กอินหรือไม่…');
-      retroStatus=await fetchRetroStatus();
-      if(retroStatus.requires_action&&showRetroPanel(retroStatus))return;
-    }
     setLoading(standaloneFaceFlow?'กำลังตรวจสถานะ Face Verification…':'กำลังตรวจเงื่อนไขการยืนยันตัวตน…');
     faceStatus=await fetchFaceStatus();
 
@@ -696,8 +719,14 @@ async function submit(){
 }
 
 $('#retroSubmitBtn')?.addEventListener('click',submitRetroRequest);
+$('#retroOpenBtn')?.addEventListener('click',openRetroMode);
+$('#retroBackBtn')?.addEventListener('click',closeRetroMode);
 $('#retryBtn').addEventListener('click',()=>{faceVerificationToken=null;prepareAttendanceFlow();});
 $('#faceStartBtn').addEventListener('click',performFaceFlow);
 $('#faceSkipBtn').addEventListener('click',()=>{stopFaceCamera();$('#facePanel').classList.add('hidden');document.body.classList.remove('face-mode');submit();});
 window.addEventListener('pagehide',stopFaceCamera);
-window.addEventListener('pageshow',()=>{if(!busy)prepareAttendanceFlow();},{once:true});
+window.addEventListener('pageshow',()=>{
+  if(standaloneFaceFlow){$('#retroOpenBtn')?.classList.add('hidden');$('#retroOpenHint')?.classList.add('hidden');}
+  if(retroPageMode){showManualRetroPanel();return;}
+  if(!busy)prepareAttendanceFlow();
+},{once:true});

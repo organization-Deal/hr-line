@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f7fbfa" />
   <meta name="robots" content="noindex,nofollow" />
   <title>นากนะ · ลงเวลา</title>
-  <link rel="stylesheet" href="/attendance.css?v=P9.24-RETRO-CHECKIN" />
+  <link rel="stylesheet" href="/attendance.css?v=P9.25-MANUAL-RETRO" />
 </head>
 <body>
   <main class="quick-shell">
@@ -22,20 +22,16 @@
 
       <section id="retroPanel" class="retro-panel hidden" aria-live="polite">
         <div class="retro-head">
-          <span class="retro-kicker">MISSED CHECK-IN</span>
-          <h2>มีวันที่ยังไม่ได้เช็กอิน</h2>
-          <p>ก่อนเช็กอินวันนี้ กรุณาส่งคำขอลงเวลาย้อนหลังให้ HR ตรวจสอบก่อน</p>
+          <span class="retro-kicker">RETRO CHECK-IN</span>
+          <h2>เช็กอินย้อนหลัง</h2>
+          <p>ใช้เมนูนี้เมื่อ HR แจ้งให้ส่งข้อมูลย้อนหลัง ระบบจะไม่ตรวจหรือบังคับจากวันก่อนหน้าอัตโนมัติ</p>
         </div>
-        <div class="retro-date-card">
-          <div><span>วันที่</span><strong id="retroDateText">—</strong></div>
-          <div><span>เวลางาน</span><strong id="retroScheduleText">—</strong></div>
-          <div><span>รายการ</span><strong id="retroQueueText">1 / 1</strong></div>
-        </div>
-        <div id="retroRejectedNote" class="retro-rejected hidden"></div>
-        <label class="retro-field"><span>เวลาเข้างานจริง</span><input id="retroCheckinTime" type="time" required /></label>
-        <label class="retro-field"><span>สาเหตุที่ไม่ได้เช็กอิน <b>*</b></span><textarea id="retroReason" rows="4" maxlength="500" placeholder="เช่น ลืมกดเช็กอินตอนถึงออฟฟิศ / มือถือมีปัญหา" required></textarea><small>คำขอนี้ยังไม่แก้ Attendance จนกว่า HR จะอนุมัติ</small></label>
+        <label class="retro-field"><span>วันที่ลืมเช็กอิน <b>*</b></span><input id="retroWorkDate" type="date" required /></label>
+        <label class="retro-field"><span>เวลาเข้างานจริง <b>*</b></span><input id="retroCheckinTime" type="time" required /></label>
+        <label class="retro-field"><span>สาเหตุ / ปัญหาที่ไม่ได้เช็กอิน <b>*</b></span><textarea id="retroReason" rows="4" maxlength="500" placeholder="เช่น ลืมกดเช็กอิน / มือถือมีปัญหา / อินเทอร์เน็ตใช้งานไม่ได้" required></textarea><small>หลังส่งแล้ว Attendance จะยังไม่เปลี่ยน จนกว่า HR จะกดอนุมัติ</small></label>
         <button id="retroSubmitBtn" class="primary-btn" type="button">ส่งให้ HR อนุมัติ</button>
-        <p class="retro-footnote">ส่งคำขอครบแล้ว ระบบจะพาไปเช็กอินของวันนี้ต่อทันที</p>
+        <button id="retroBackBtn" class="retro-back-btn" type="button">กลับไปเช็กอินวันนี้</button>
+        <p class="retro-footnote">HR จะเป็นผู้ตรวจวันที่ เวลา และเหตุผลก่อนบันทึกย้อนหลังเข้าระบบ</p>
       </section>
 
       <section id="facePanel" class="face-panel hidden" aria-live="polite">
@@ -68,12 +64,14 @@
       </div>
 
       <button id="retryBtn" class="primary-btn hidden" type="button">ลองใหม่</button>
+      <button id="retroOpenBtn" class="retro-open-btn" type="button">ลืมเช็กอิน? ส่งเช็กอินย้อนหลัง</button>
+      <p id="retroOpenHint" class="retro-open-hint">ใช้เมื่อ HR แจ้งให้ส่งข้อมูลย้อนหลัง</p>
       <p id="permissionHint" class="permission-hint hidden">ถ้ามือถือถามสิทธิ์ Location หรือ Camera ให้เลือก “อนุญาตขณะใช้งาน” แล้วกดลองใหม่</p>
       <p id="diagnosticText" class="privacy-note hidden"></p>
-      <p class="privacy-note">นากนะใช้กล้องและตำแหน่งเฉพาะตอนที่คุณกดลงเวลา ไม่ติดตามเบื้องหลัง และไม่เก็บรูปใบหน้าประจำวัน · P9.24 · Face Verification + เช็กอินย้อนหลัง</p>
+      <p class="privacy-note">นากนะใช้กล้องและตำแหน่งเฉพาะตอนที่คุณกดลงเวลา ไม่ติดตามเบื้องหลัง และไม่เก็บรูปใบหน้าประจำวัน · P9.25 · Face Verification + เช็กอินย้อนหลังแบบกดเอง</p>
     </section>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" defer></script>
-  <script src="/attendance.js?v=P9.24-RETRO-CHECKIN" defer></script>
+  <script src="/attendance.js?v=P9.25-MANUAL-RETRO" defer></script>
 </body>
 </html>
