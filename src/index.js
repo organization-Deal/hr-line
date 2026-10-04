@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.25-MANUAL-RETRO-CHECKIN';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.25-MANUAL-RETRO-CHECKIN';
-const NAKNA_RUNTIME_FEATURE = 'retroactive-checkin-request-and-hr-approval';
+const NAKNA_RUNTIME_RELEASE = 'P9.27-HR-DAILY-1300';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.27-HR-DAILY-1300';
+const NAKNA_RUNTIME_FEATURE = 'daily-hr-attendance-and-pending-work-summary';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -16,6 +16,7 @@ const LINE_MENU_TOKEN_TTL_MS = 10 * 60 * 1000;
 const LINE_MENU_ACCESS_TTL_MS = 60 * 1000;
 const MISSING_CHECKIN_REMINDER_TIME = '12:30';
 const MISSING_CHECKIN_REMINDER_DEFAULT_MESSAGE = 'ตอนนี้ 12:30 น. หากเข้าทำงานแล้ว กรุณาเช็กอิน';
+const DAILY_HR_STATUS_TIME = '13:00';
 
 const INIT_SCHEMA_SQL = String.raw`CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1739,6 +1740,11 @@ export default {
     // leave requests (approved/pending/awaiting evidence), holidays/non-workdays, later shifts, and duplicate sends are skipped.
     if(clock.time===MISSING_CHECKIN_REMINDER_TIME){
       jobs.push(runMissingCheckinReminderAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'missing_checkin_reminder_failed',message:String(error?.message||error)}))));
+    }
+    // P9.27: every day at 13:00 Asia/Bangkok send HR-only operational snapshot.
+    // It summarizes today's attendance plus HR work still waiting for action.
+    if(clock.time===DAILY_HR_STATUS_TIME){
+      jobs.push(sendDailyHrStatusSummary(env).catch(error=>console.error(JSON.stringify({level:'error',event:'hr_daily_status_failed',message:String(error?.message||error)}))));
     }
     await Promise.all(jobs);
   },
@@ -4977,6 +4983,7 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
   const late = attendance.filter(a => a.status === 'late').length;
   const onLeave = employees.filter(e => onLeaveTodayIds.has(Number(e.id))).length;
   const expectedToday=employees.filter(employeeExpected);
+  const scheduledPresent=expectedToday.filter(e=>Boolean(attendanceByEmployee.get(Number(e.id))?.check_in_at)).length;
   const missingEmployees = expectedToday.filter(e=>!attendanceByEmployee.get(Number(e.id))?.check_in_at&&!onLeaveTodayIds.has(Number(e.id)));
   const missing = missingEmployees.length;
 
@@ -5009,7 +5016,8 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
   return {
     client: { id: client.id, name: client.name, work_start: client.work_start, timezone: client.timezone },
     today,
-    summary: { employees: employees.length, scheduled_today: expectedToday.length, present, late, leave: onLeave, missing, holiday_name: holidayToday?.name || null },
+    summary: { employees: employees.length, scheduled_today: expectedToday.length, scheduled_present: scheduledPresent, present, late, leave: onLeave, missing, holiday_name: holidayToday?.name || null },
+    missing_employees: missingEmployees.slice(0,20).map(e=>({id:Number(e.id),name:displayName(e),department:e.department_name||null,position:e.position_name||null})),
     attention,
     birthdays,
     probation,
@@ -6761,9 +6769,12 @@ async function buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp){
   const attendanceAccessToken=attendanceToken||portalToken||null;
   const quickCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkin&v=P9.16-FACE`:null;
   const quickCheckOutUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&action=checkout&v=P9.16-FACE`:null;
+  // P9.26: expose the manual retro check-in flow directly on the LINE employee menu.
+  // P9.25 already supported ?retro=1 inside attendance.html, but the menu card never rendered a button for it.
+  const retroCheckInUrl=attendanceAccessToken?`${base}/attendance.html?token=${encodeURIComponent(attendanceAccessToken)}&retro=1&v=P9.26-RETRO`:null;
   const wellnessUrl=portalToken?`${base}/wellness.html?token=${encodeURIComponent(portalToken)}`:null;
   const faceManageUrl=attendanceAccessToken&&normalizeAttendanceFaceMode(faceSettings?.mode)!=='off'?`${base}/face?token=${encodeURIComponent(attendanceAccessToken)}&face=manage&v=P9.16`:null;
-  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,wellnessUrl,faceManageUrl,NAKNA_RUNTIME_RELEASE);
+  return buildEmployeeMenuFlex(emp,ownerAccess,leaveFormUrl,hrCaseFormUrl,quickCheckInUrl,quickCheckOutUrl,wellnessUrl,faceManageUrl,retroCheckInUrl,NAKNA_RUNTIME_RELEASE);
 }
 
 
@@ -10195,7 +10206,7 @@ function buildWelcomeFlex(name,company){
     footer:[linePrimaryButton('เปิดเมนูพนักงาน',{type:'postback',label:'เปิดเมนูพนักงาน',data:'action=menu'})]
   })};
 }
-function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null,quickCheckInUrl=null,quickCheckOutUrl=null,wellnessUrl=null,faceManageUrl=null,runtimeRelease=NAKNA_RUNTIME_RELEASE){
+function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseFormUrl=null,quickCheckInUrl=null,quickCheckOutUrl=null,wellnessUrl=null,faceManageUrl=null,retroCheckInUrl=null,runtimeRelease=NAKNA_RUNTIME_RELEASE){
   const name=emp.nickname||emp.first_name;
   const hasManagement=Boolean(ownerAccess?.primary);
   const managementCompany=ownerAccess?.primary?.name||emp.company_name||'';
@@ -10213,6 +10224,7 @@ function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseForm
       lineText(`Quick Attendance · ${runtimeRelease}`,'xxs',LINE_CI.primary,'bold'),
       linePrimaryButton('📍  เช็กอิน',quickCheckInUrl?{type:'uri',label:'เช็กอิน',uri:quickCheckInUrl}:{type:'postback',label:'เช็กอิน',data:'action=quick_attendance_unavailable&mode=checkin'}),
       lineSecondaryButton('🏠  เช็กเอาต์',quickCheckOutUrl?{type:'uri',label:'เช็กเอาต์',uri:quickCheckOutUrl}:{type:'postback',label:'เช็กเอาต์',data:'action=quick_attendance_unavailable&mode=checkout'}),
+      lineSecondaryButton('🕘  ลืมเช็กอิน / ย้อนหลัง',retroCheckInUrl?{type:'uri',label:'เช็กอินย้อนหลัง',uri:retroCheckInUrl}:{type:'postback',label:'เช็กอินย้อนหลัง',data:'action=quick_attendance_unavailable&mode=retro'},'#FFF7E8'),
       ...(faceManageUrl?[lineSecondaryButton('👤  ใบหน้า & การยืนยันตัวตน',{type:'uri',label:'ใบหน้า & การยืนยัน',uri:faceManageUrl},'#EEF9F5')]:[]),
       lineSecondaryButton('🏖  ขอลางาน',leaveFormUrl?{type:'uri',label:'ขอลางาน',uri:leaveFormUrl}:{type:'postback',label:'ขอลางาน',data:'action=leave_menu'},'#F1F7F5'),
       lineSecondaryButton('📅  สิทธิ์ลา',{type:'postback',label:'สิทธิ์ลา',data:'action=leave_balance'},'#F7F9F8'),
@@ -10629,6 +10641,161 @@ async function pushLineMessagesReliable(accessToken,to,messages){
   if(await pushLineMessages(accessToken,to,messages))return true;
   await new Promise(resolve=>setTimeout(resolve,180));
   return pushLineMessages(accessToken,to,messages);
+}
+
+async function ensureDailyHrStatusReady(db){
+  if(SCHEMA_READY.has('daily_hr_status'))return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS hr_daily_status_logs (
+    client_id INTEGER NOT NULL,
+    summary_date TEXT NOT NULL,
+    summary_time TEXT NOT NULL,
+    recipient_count INTEGER NOT NULL DEFAULT 0,
+    sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(client_id,summary_date,summary_time),
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
+  )`).run();
+  SCHEMA_READY.add('daily_hr_status');
+}
+
+async function getDailyHrLineRecipients(db,clientId){
+  const result=await db.prepare(`
+    SELECT DISTINCT e.id,e.line_user_id,COALESCE(e.line_provider_scope,'default') AS line_provider_scope,
+      e.first_name,e.last_name,e.nickname,e.email
+    FROM employees e
+    LEFT JOIN departments d ON d.id=e.department_id AND d.client_id=e.client_id
+    LEFT JOIN positions p ON p.id=e.position_id AND p.client_id=e.client_id
+    LEFT JOIN users u ON e.email IS NOT NULL AND TRIM(e.email)<>'' AND LOWER(TRIM(u.email))=LOWER(TRIM(e.email)) AND u.status='active'
+    LEFT JOIN company_members cm ON cm.client_id=e.client_id AND cm.user_id=u.id AND cm.status='active'
+    WHERE e.client_id=?1 AND e.status='active'
+      AND e.line_user_id IS NOT NULL AND TRIM(e.line_user_id)<>''
+      AND (
+        UPPER(COALESCE(d.code,''))='HR'
+        OR LOWER(COALESCE(d.name,'')) LIKE '%human resource%'
+        OR LOWER(COALESCE(d.name,'')) LIKE '%ทรัพยากรบุคคล%'
+        OR LOWER(COALESCE(p.name,'')) LIKE '%hr%'
+        OR LOWER(COALESCE(p.name,'')) LIKE '%human resource%'
+        OR LOWER(COALESCE(cm.role,'')) IN ('hr','hr_admin')
+        OR EXISTS (
+          SELECT 1 FROM employee_permissions ep
+          WHERE ep.client_id=e.client_id AND ep.employee_id=e.id AND ep.permission_key='hr_request.approve'
+        )
+      )
+    ORDER BY e.id
+  `).bind(Number(clientId)).all();
+  return result.results||[];
+}
+
+function dashboardAttentionTotal(dashboard,key){
+  const row=(dashboard?.attention||[]).find(x=>String(x.key)===String(key));
+  return Number(row?.total_count??row?.count??0);
+}
+
+function buildDailyHrStatusFlex(client,dashboard,retroPending=0){
+  const summary=dashboard?.summary||{};
+  const scheduled=Number(summary.scheduled_today||0);
+  const checkedIn=Number(summary.scheduled_present??summary.present??0);
+  const missing=Number(summary.missing||0);
+  const leaveToday=Number(summary.leave||0);
+  const late=Number(summary.late||0);
+  const active=Number(summary.employees||0);
+  const pendingLeave=dashboardAttentionTotal(dashboard,'leave_pending');
+  const hrRequests=dashboardAttentionTotal(dashboard,'request');
+  const hrCases=Number(dashboard?.hr_cases_open||dashboardAttentionTotal(dashboard,'hr_private')||0);
+  const pendingHrSign=Number(dashboard?.documents?.pending_hr_sign||0);
+  const pendingEmployeeSign=Number(dashboard?.documents?.pending_employee_sign||0);
+  const pendingTotal=pendingLeave+Number(retroPending||0)+hrRequests+hrCases+pendingHrSign+pendingEmployeeSign;
+  const missingNames=(dashboard?.missing_employees||[]).map(x=>x.name).filter(Boolean);
+  const missingPreview=missingNames.slice(0,8);
+  const missingMore=Math.max(0,missing-missingPreview.length);
+  const status=summary.holiday_name
+    ? `วันหยุด · ${summary.holiday_name}`
+    : missing>0 ? `ยังขาด ${missing} คน` : (scheduled>0?'ทีมมาครบตามข้อมูล':'ไม่มีตารางวันนี้');
+  const statusTone=missing>0?'warning':'success';
+  const body=[
+    lineInfoCard([
+      lineInfoRow('พนักงาน Active',`${active} คน`),
+      lineInfoRow('มีตารางวันนี้',`${scheduled} คน`),
+      lineInfoRow('เช็กอินแล้ว',`${checkedIn}/${scheduled || 0} คน`,missing>0?LINE_CI.primaryDark:LINE_CI.success),
+      lineInfoRow('ลาวันนี้',`${leaveToday} คน`),
+      lineInfoRow('มาสาย',`${late} คน`,late>0?LINE_CI.warning:LINE_CI.text),
+      lineInfoRow('ยังไม่เช็กอิน',`${missing} คน`,missing>0?LINE_CI.error:LINE_CI.success),
+    ],missing>0?'warning':'teal')
+  ];
+  if(summary.holiday_name){
+    body.push(lineInfoCard([lineText(`วันนี้เป็นวันหยุดบริษัท: ${summary.holiday_name}`,'sm',LINE_CI.primaryDark,'bold')],'teal'));
+  }else if(missing>0){
+    body.push(lineInfoCard([
+      lineText('คนที่ยังไม่เช็กอิน','xxs',LINE_CI.muted,'bold'),
+      lineText(`${missingPreview.join(' · ')}${missingMore?` · +${missingMore} คน`:''}`,'sm',LINE_CI.text,'bold')
+    ],'warning'));
+  }else if(scheduled>0){
+    body.push(lineInfoCard([lineText('ตามข้อมูลในระบบ ตอนนี้ไม่มีพนักงานตามตารางที่ยังขาดเช็กอิน','sm',LINE_CI.success,'bold')],'success'));
+  }
+  body.push(lineText('งาน HR ที่ยังค้าง','xs',LINE_CI.primaryDark,'bold'));
+  if(pendingTotal>0){
+    body.push(lineInfoCard([
+      lineInfoRow('ใบลารอจัดการ',`${pendingLeave} รายการ`,pendingLeave?LINE_CI.warning:LINE_CI.text),
+      lineInfoRow('เช็กอินย้อนหลัง',`${Number(retroPending||0)} รายการ`,retroPending?LINE_CI.warning:LINE_CI.text),
+      lineInfoRow('HR Request',`${hrRequests} รายการ`,hrRequests?LINE_CI.warning:LINE_CI.text),
+      lineInfoRow('แจ้งเรื่องส่วนตัวถึง HR',`${hrCases} เรื่อง`,hrCases?LINE_CI.error:LINE_CI.text),
+      lineInfoRow('เอกสารรอ HR เซ็น',`${pendingHrSign} ฉบับ`,pendingHrSign?LINE_CI.warning:LINE_CI.text),
+      lineInfoRow('เอกสารรอพนักงานเซ็น',`${pendingEmployeeSign} ฉบับ`,pendingEmployeeSign?LINE_CI.warning:LINE_CI.text),
+    ],'neutral'));
+  }else{
+    body.push(lineInfoCard([lineText('ไม่มีคำขอหรือเอกสารค้างที่ระบบตรวจพบ','sm',LINE_CI.success,'bold')],'success'));
+  }
+  body.push(lineText('สรุป Attendance ใช้ตารางงาน วันหยุดบริษัท ใบลาที่อนุมัติ และข้อมูลเช็กอินที่มีอยู่ในระบบ ณ เวลา 13:00 น.','xxs',LINE_CI.muted));
+  return {type:'flex',altText:`สรุป HR 13:00 · ${client.name}`,contents:lineBubble({
+    eyebrow:'NAKNA · HR DAILY',
+    title:'สรุปทีม 13:00 น.',
+    subtitle:`${client.name} · ${formatThaiShortDate(dashboard.today)}`,
+    status,statusTone,body,
+    footer:[linePrimaryButton('เปิด HR Dashboard',{type:'postback',label:'เปิด HR Dashboard',data:'action=owner_dashboard'})]
+  })};
+}
+
+async function sendDailyHrStatusSummary(env){
+  const clock=bangkokClock();
+  if(clock.time!==DAILY_HR_STATUS_TIME)return {sent:0,clients:0,skipped:true,time:clock.time};
+  await ensureDailyHrStatusReady(env.DB);
+  await ensureAttendanceRetroRequestsReady(env.DB);
+  const clients=(await env.DB.prepare('SELECT id,name FROM clients ORDER BY id').all()).results||[];
+  let clientCount=0,recipientCount=0,sent=0,failed=0;
+  for(const client of clients){
+    const cid=Number(client.id);
+    const already=await env.DB.prepare(`SELECT 1 AS ok FROM hr_daily_status_logs WHERE client_id=?1 AND summary_date=?2 AND summary_time=?3 LIMIT 1`).bind(cid,clock.date,DAILY_HR_STATUS_TIME).first();
+    if(already)continue;
+    const recipients=await getDailyHrLineRecipients(env.DB,cid);
+    if(!recipients.length)continue;
+    const [dashboard,retroRow]=await Promise.all([
+      getDashboard(env.DB,cid,{includeHrCases:true}),
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM attendance_retro_requests WHERE client_id=?1 AND status='pending'`).bind(cid).first().catch(()=>({n:0}))
+    ]);
+    const message=buildDailyHrStatusFlex(client,dashboard,Number(retroRow?.n||0));
+    const groups=new Map();
+    for(const row of recipients){
+      const scope=String(row.line_provider_scope||'default');
+      if(!groups.has(scope))groups.set(scope,[]);
+      groups.get(scope).push(row);
+    }
+    let sentForClient=0;
+    for(const [scope,rows] of groups.entries()){
+      const token=await getAccessTokenForProviderScope(env,cid,scope).catch(()=>null);
+      if(!token){failed+=rows.length;continue;}
+      for(let i=0;i<rows.length;i+=500){
+        const chunk=rows.slice(i,i+500);
+        const ok=await multicastLineMessages(token,chunk.map(r=>r.line_user_id),[message]);
+        if(ok){sent+=chunk.length;sentForClient+=chunk.length;}else failed+=chunk.length;
+      }
+    }
+    recipientCount+=recipients.length;
+    clientCount++;
+    if(sentForClient>0){
+      await env.DB.prepare(`INSERT OR REPLACE INTO hr_daily_status_logs(client_id,summary_date,summary_time,recipient_count,sent_at) VALUES(?1,?2,?3,?4,CURRENT_TIMESTAMP)`).bind(cid,clock.date,DAILY_HR_STATUS_TIME,sentForClient).run();
+    }
+  }
+  console.log(JSON.stringify({level:'info',event:'hr_daily_status_complete',date:clock.date,time:clock.time,clients:clientCount,recipients:recipientCount,sent,failed}));
+  return {date:clock.date,time:clock.time,clients:clientCount,recipients:recipientCount,sent,failed};
 }
 
 async function sendDailyHrBrief(env) {
