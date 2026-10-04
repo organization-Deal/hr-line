@@ -1,0 +1,22 @@
+Nakna P9.27 — HR Daily 13:00 Summary
+
+เปลี่ยนจากฐาน P9.26
+
+สิ่งที่เพิ่ม
+- เวลา 13:00 น. Asia/Bangkok ทุกวัน ส่งสรุปสถานะทีมเข้า LINE เฉพาะ HR
+- สรุป: Active, มีตารางวันนี้, เช็กอินแล้ว, ลาวันนี้, มาสาย, ยังไม่เช็กอิน
+- ถ้ายังไม่เช็กอิน แสดงรายชื่อสูงสุด 8 คนใน Card
+- งาน HR ค้าง: ใบลา, เช็กอินย้อนหลัง, HR Request, แจ้งเรื่องส่วนตัว, เอกสารรอ HR/พนักงานเซ็น
+- ปุ่ม เปิด HR Dashboard จาก Card
+- ป้องกันส่งซ้ำในวันเดียวกันด้วย hr_daily_status_logs (สร้างอัตโนมัติ ไม่ต้อง migration)
+- ผู้รับเป็น HR เท่านั้น: แผนก/ตำแหน่ง HR, role HR/HR Admin หรือ permission hr_request.approve และต้องเชื่อม LINE
+
+ไฟล์ที่แก้
+- src/index.js
+
+ติดตั้ง
+1. ทับ src/index.js
+2. npm run check
+3. npx wrangler deploy
+
+ไม่มี Migration ใหม่
