@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.27-HR-DAILY-1300';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.27-HR-DAILY-1300';
-const NAKNA_RUNTIME_FEATURE = 'daily-hr-attendance-and-pending-work-summary';
+const NAKNA_RUNTIME_RELEASE = 'P9.28-HR-DAILY-DELIVERY-FIX';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.28-HR-DAILY-DELIVERY-FIX';
+const NAKNA_RUNTIME_FEATURE = 'hr-daily-role-fix-catchup-delivery-diagnostics';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -1741,11 +1741,8 @@ export default {
     if(clock.time===MISSING_CHECKIN_REMINDER_TIME){
       jobs.push(runMissingCheckinReminderAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'missing_checkin_reminder_failed',message:String(error?.message||error)}))));
     }
-    // P9.27: every day at 13:00 Asia/Bangkok send HR-only operational snapshot.
-    // It summarizes today's attendance plus HR work still waiting for action.
-    if(clock.time===DAILY_HR_STATUS_TIME){
-      jobs.push(sendDailyHrStatusSummary(env).catch(error=>console.error(JSON.stringify({level:'error',event:'hr_daily_status_failed',message:String(error?.message||error)}))));
-    }
+    // P9.28: heartbeat + catch up after a missed 13:00 tick, per recipient.
+    jobs.push(runDailyHrStatusTick(env,controller).catch(error=>console.error(JSON.stringify({level:'error',event:'hr_daily_status_failed',message:String(error?.message||error)}))));
     await Promise.all(jobs);
   },
 };
@@ -1754,6 +1751,12 @@ async function handleApi(request, env, url, auth, ctx) {
   const method = request.method;
   const path = url.pathname;
   const clientId = auth.clientId ? Number(auth.clientId) : null;
+
+  if(path==='/api/hr/daily-summary/status'&&method==='GET'){
+    if(!clientId)return json({error:'COMPANY_REQUIRED'},409);
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูสถานะสรุป HR'},403);
+    return json({ok:true,...await getDailyHrSummaryDiagnostics(env,clientId)});
+  }
 
   if (path === '/api/attendance/gps-diagnostics' && method === 'GET') {
     if (!clientId) return json({error:'COMPANY_REQUIRED'},409);
@@ -5134,6 +5137,9 @@ async function processLineEvent(event, env, lineCtx) {
     const text = String(event.message.text || '').trim();
     const quickLower=text.toLowerCase();
 
+    const hrSummaryCommand=dailyHrCommand(text);
+    if(hrSummaryCommand)return replyDailyHrSummary(env,lineCtx,event,{statusOnly:hrSummaryCommand==='status'});
+
     if(['เวอร์ชัน','version','runtime','build'].includes(quickLower)){
       return replyLineMessages(accessToken,event.replyToken,[buildRuntimeVersionFlex(providerScope)]);
     }
@@ -5302,8 +5308,12 @@ async function processLineEvent(event, env, lineCtx) {
   if(event.type==='postback'){
     const data=new URLSearchParams(event.postback?.data||''); const action=data.get('action');
 
+    if(action==='hr_daily_summary'||action==='hr_daily_status'){
+      return replyDailyHrSummary(env,lineCtx,event,{statusOnly:action==='hr_daily_status',clientId:Number(data.get('client_id')||0)});
+    }
+
     if(action==='owner_dashboard'){
-      const ownerAccess=await getLineOwnerDashboardAccess(env,lineCtx,lineUserId).catch(()=>null);
+      const ownerAccess=await getLineOwnerDashboardAccess(env,lineCtx,lineUserId,Number(lineCtx.clientId||data.get('client_id')||0)||null).catch(()=>null);
       if(ownerAccess) return replyLineMessages(accessToken,event.replyToken,[buildOwnerDashboardFlex(ownerAccess)]);
       return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ไม่มีสิทธิ์ HR Dashboard','บัญชี LINE นี้ยังไม่มีสิทธิ์ Owner / HR ใน Workspace','warning')]);
     }
@@ -10643,54 +10653,390 @@ async function pushLineMessagesReliable(accessToken,to,messages){
   return pushLineMessages(accessToken,to,messages);
 }
 
+// P9.28 — durable per-recipient delivery, HR account recipients and diagnostics.
+// The API acceptance ledger is NOT a read/delivery receipt from a phone.
 async function ensureDailyHrStatusReady(db){
-  if(SCHEMA_READY.has('daily_hr_status'))return;
+  if(SCHEMA_READY.has('daily_hr_status_p928'))return;
   await db.prepare(`CREATE TABLE IF NOT EXISTS hr_daily_status_logs (
-    client_id INTEGER NOT NULL,
-    summary_date TEXT NOT NULL,
-    summary_time TEXT NOT NULL,
-    recipient_count INTEGER NOT NULL DEFAULT 0,
-    sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    client_id INTEGER NOT NULL, summary_date TEXT NOT NULL, summary_time TEXT NOT NULL,
+    recipient_count INTEGER NOT NULL DEFAULT 0, sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(client_id,summary_date,summary_time),
     FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
   )`).run();
-  SCHEMA_READY.add('daily_hr_status');
+  await db.prepare(`CREATE TABLE IF NOT EXISTS hr_daily_status_deliveries (
+    client_id INTEGER NOT NULL, summary_date TEXT NOT NULL, summary_time TEXT NOT NULL,
+    provider_scope TEXT NOT NULL, line_user_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', retry_key TEXT NOT NULL, payload_json TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL DEFAULT 0,
+    lease_until INTEGER NOT NULL DEFAULT 0, lease_token TEXT,
+    http_status INTEGER, last_error TEXT, accepted_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(client_id,summary_date,summary_time,provider_scope,line_user_id),
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS hr_daily_status_runtime (
+    runtime_key TEXT PRIMARY KEY, value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+  SCHEMA_READY.add('daily_hr_status_p928');
+}
+
+async function setDailyHrRuntime(db,key,value){
+  await db.prepare(`INSERT INTO hr_daily_status_runtime(runtime_key,value_json)
+    VALUES(?1,?2) ON CONFLICT(runtime_key) DO UPDATE SET
+    value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP`)
+    .bind(String(key),JSON.stringify(value)).run();
 }
 
 async function getDailyHrLineRecipients(db,clientId){
+  // Same administrative roles as canManagePeopleAdmin(), not every Dashboard role.
+  // Managers, approvers and payroll-only accounts are NOT automatically included.
+  // The second branch supports legacy HR staff and canonical Google accounts whose
+  // LINE identity lives on employees, not users. Provider scopes must match.
   const result=await db.prepare(`
-    SELECT DISTINCT e.id,e.line_user_id,COALESCE(e.line_provider_scope,'default') AS line_provider_scope,
-      e.first_name,e.last_name,e.nickname,e.email
+    SELECT u.id AS user_id,NULL AS employee_id,u.name AS recipient_name,m.role,
+      u.line_user_id,COALESCE(NULLIF(u.line_provider_scope,''),'default') AS line_provider_scope
+    FROM company_members m JOIN users u ON u.id=m.user_id
+    WHERE m.client_id=?1 AND m.status='active' AND u.status='active'
+      AND m.role IN ('owner','co_owner','hr_admin','hr')
+      AND u.line_user_id IS NOT NULL AND TRIM(u.line_user_id)<>''
+    UNION ALL
+    SELECT u.id AS user_id,e.id AS employee_id,
+      COALESCE(NULLIF(e.nickname,''),NULLIF(TRIM(e.first_name||' '||COALESCE(e.last_name,'')),''),'HR') AS recipient_name,
+      CASE WHEN m.role IN ('owner','co_owner','hr_admin','hr') THEN m.role ELSE 'hr_delegate' END AS role,
+      e.line_user_id,COALESCE(NULLIF(e.line_provider_scope,''),'default') AS line_provider_scope
     FROM employees e
     LEFT JOIN departments d ON d.id=e.department_id AND d.client_id=e.client_id
     LEFT JOIN positions p ON p.id=e.position_id AND p.client_id=e.client_id
-    LEFT JOIN users u ON e.email IS NOT NULL AND TRIM(e.email)<>'' AND LOWER(TRIM(u.email))=LOWER(TRIM(e.email)) AND u.status='active'
-    LEFT JOIN company_members cm ON cm.client_id=e.client_id AND cm.user_id=u.id AND cm.status='active'
+    LEFT JOIN users u ON u.status='active' AND (
+      (u.line_user_id=e.line_user_id AND COALESCE(NULLIF(u.line_provider_scope,''),'default')=COALESCE(NULLIF(e.line_provider_scope,''),'default'))
+      OR (e.email IS NOT NULL AND TRIM(e.email)<>'' AND LOWER(TRIM(u.email))=LOWER(TRIM(e.email)))
+    )
+    LEFT JOIN company_members m ON m.user_id=u.id AND m.client_id=e.client_id AND m.status='active'
     WHERE e.client_id=?1 AND e.status='active'
       AND e.line_user_id IS NOT NULL AND TRIM(e.line_user_id)<>''
       AND (
-        UPPER(COALESCE(d.code,''))='HR'
-        OR LOWER(COALESCE(d.name,'')) LIKE '%human resource%'
-        OR LOWER(COALESCE(d.name,'')) LIKE '%ทรัพยากรบุคคล%'
-        OR LOWER(COALESCE(p.name,'')) LIKE '%hr%'
-        OR LOWER(COALESCE(p.name,'')) LIKE '%human resource%'
-        OR LOWER(COALESCE(cm.role,'')) IN ('hr','hr_admin')
-        OR EXISTS (
-          SELECT 1 FROM employee_permissions ep
-          WHERE ep.client_id=e.client_id AND ep.employee_id=e.id AND ep.permission_key='hr_request.approve'
-        )
+        m.role IN ('owner','co_owner','hr_admin','hr')
+        OR UPPER(TRIM(COALESCE(d.code,'')))='HR'
+        OR LOWER(TRIM(COALESCE(d.name,''))) IN ('hr','human resources','human resource','ฝ่ายบุคคล','ทรัพยากรบุคคล')
+        OR LOWER(TRIM(COALESCE(p.name,''))) IN ('hr','hr admin','hr manager','human resources','human resource')
+        OR EXISTS (SELECT 1 FROM employee_permissions ep
+          WHERE ep.client_id=e.client_id AND ep.employee_id=e.id AND ep.permission_key='hr_request.approve')
       )
-    ORDER BY e.id
   `).bind(Number(clientId)).all();
-  return result.results||[];
+  const unique=new Map();
+  for(const row of result.results||[]){
+    const scope=String(row.line_provider_scope||'default'),id=String(row.line_user_id||'').trim();
+    if(!id)continue;
+    const key=`${scope}:${id}`,prev=unique.get(key);
+    // A canonical HR account takes precedence over a legacy department match.
+    if(!prev||(!canManagePeopleAdmin(prev.role)&&canManagePeopleAdmin(row.role))){
+      unique.set(key,{...row,line_user_id:id,line_provider_scope:scope,can_private:canManagePeopleAdmin(row.role)});
+    }
+  }
+  return [...unique.values()];
 }
+
+function isDailyHrSummaryDue(clock){
+  return Boolean(clock && clock.time>=DAILY_HR_STATUS_TIME && clock.time<'18:00');
+}
+
+async function runDailyHrStatusTick(env,controller){
+  await ensureDailyHrStatusReady(env.DB);
+  const now=new Date(),clock=bangkokClock(now);
+  const scheduledMs=Number(controller?.scheduledTime||0);
+  await setDailyHrRuntime(env.DB,'scheduler',{
+    release:NAKNA_RUNTIME_RELEASE,last_seen_at:now.toISOString(),
+    scheduled_at:Number.isFinite(scheduledMs)&&scheduledMs>0?new Date(scheduledMs).toISOString():null,
+    cron:String(controller?.cron||'unknown')
+  });
+  if(!isDailyHrSummaryDue(clock))return {skipped:true,reason:'outside_window',time:clock.time};
+  return sendDailyHrStatusSummary(env);
+}
+
+async function pushDailyHrSummaryRequest(accessToken,to,payloadJson,retryKey){
+  if(!accessToken)return {accepted:false,retryable:true,status:0,error:'LINE_TOKEN_MISSING'};
+  const abort=new AbortController();
+  const timeout=setTimeout(()=>abort.abort(),10000);
+  try{
+    const response=await fetch('https://api.line.me/v2/bot/message/push',{
+      method:'POST',signal:abort.signal,
+      headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`,'X-Line-Retry-Key':retryKey},
+      body:JSON.stringify({to,messages:JSON.parse(payloadJson)})
+    });
+    const accepted=response.ok||(response.status===409&&Boolean(response.headers.get('x-line-accepted-request-id')));
+    // Do not persist tokens, names, message bodies or raw LINE request payloads in logs.
+    return {accepted,retryable:response.status>=500,status:response.status,
+      error:accepted?null:`LINE_HTTP_${response.status}`};
+  }catch(error){
+    return {accepted:false,retryable:true,status:0,error:error?.name==='AbortError'?'LINE_TIMEOUT':'LINE_NETWORK_ERROR'};
+  }finally{clearTimeout(timeout);}
+}
+
+async function deliverDailyHrSummary(env,clientId,recipient,clock,message){
+  const db=env.DB,cid=Number(clientId),scope=recipient.line_provider_scope,id=recipient.line_user_id;
+  const key=[cid,clock.date,DAILY_HR_STATUS_TIME,scope,id];
+  await db.prepare(`INSERT OR IGNORE INTO hr_daily_status_deliveries
+    (client_id,summary_date,summary_time,provider_scope,line_user_id,retry_key,payload_json)
+    VALUES(?1,?2,?3,?4,?5,?6,?7)`)
+    .bind(...key,crypto.randomUUID(),JSON.stringify([message])).run();
+  const now=Date.now(),lease=crypto.randomUUID();
+  // Conditional UPDATE is the lock: independent Worker isolates cannot claim the
+  // same recipient simultaneously. A timed-out process can be retried later.
+  const claim=await db.prepare(`UPDATE hr_daily_status_deliveries SET
+    status='sending',lease_token=?6,lease_until=?7,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP
+    WHERE client_id=?1 AND summary_date=?2 AND summary_time=?3 AND provider_scope=?4 AND line_user_id=?5
+      AND status IN ('pending','retry','sending') AND lease_until<=?8 AND next_attempt_at<=?8 AND attempts<6`)
+    .bind(...key,lease,now+60000,now).run();
+  if(Number(claim.meta?.changes||0)!==1)return {skipped:true};
+  const row=await db.prepare(`SELECT retry_key,payload_json,attempts FROM hr_daily_status_deliveries
+    WHERE client_id=?1 AND summary_date=?2 AND summary_time=?3 AND provider_scope=?4 AND line_user_id=?5 AND lease_token=?6`)
+    .bind(...key,lease).first();
+  if(!row)return {skipped:true};
+  let result;
+  try{
+    const token=await getAccessTokenForProviderScope(env,cid,scope);
+    result=await pushDailyHrSummaryRequest(token,id,row.payload_json,row.retry_key);
+  }catch{
+    result={accepted:false,retryable:true,status:0,error:'LINE_TOKEN_LOOKUP_FAILED'};
+  }
+  const retry=result.retryable&&Number(row.attempts)<6;
+  const status=result.accepted?'accepted':retry?'retry':'failed';
+  const next=retry?Date.now()+Math.min(30*60000,60000*2**(Number(row.attempts)-1)):0;
+  await db.prepare(`UPDATE hr_daily_status_deliveries SET
+    status=?7,http_status=?8,last_error=?9,next_attempt_at=?10,lease_until=0,lease_token=NULL,
+    accepted_at=CASE WHEN ?7='accepted' THEN CURRENT_TIMESTAMP ELSE accepted_at END,
+    payload_json=CASE WHEN ?7='accepted' THEN '' ELSE payload_json END,updated_at=CURRENT_TIMESTAMP
+    WHERE client_id=?1 AND summary_date=?2 AND summary_time=?3 AND provider_scope=?4 AND line_user_id=?5 AND lease_token=?6`)
+    .bind(...key,lease,status,Number(result.status||0),result.error||null,next).run();
+  if(!result.accepted){
+    console.warn(JSON.stringify({level:'warn',event:'hr_daily_recipient_failed',client_id:cid,
+      provider_scope:scope,http_status:result.status,error:result.error,attempt:Number(row.attempts),retry}));
+  }
+  return {...result,skipped:false};
+}
+
+async function sendDailyHrStatusSummary(env){
+  const clock=bangkokClock();
+  if(!isDailyHrSummaryDue(clock))return {sent:0,clients:0,skipped:true,time:clock.time};
+  await ensureDailyHrStatusReady(env.DB);
+  await ensureAttendanceRetroReady(env.DB);
+  const clients=(await env.DB.prepare('SELECT id,name FROM clients ORDER BY id').all()).results||[];
+  let recipientCount=0,sent=0,failed=0,noRecipients=0;
+  for(const client of clients){
+    const cid=Number(client.id);
+    try{
+      const recipients=await getDailyHrLineRecipients(env.DB,cid);
+      recipientCount+=recipients.length;
+      if(!recipients.length){
+        noRecipients++;
+        await setDailyHrRuntime(env.DB,`client:${cid}`,{date:clock.date,time:clock.time,eligible:0,error:'NO_HR_RECIPIENTS'});
+        continue;
+      }
+      const rows=(await env.DB.prepare(`SELECT provider_scope,line_user_id,status,attempts,lease_until,next_attempt_at
+        FROM hr_daily_status_deliveries WHERE client_id=?1 AND summary_date=?2 AND summary_time=?3`)
+        .bind(cid,clock.date,DAILY_HR_STATUS_TIME).all()).results||[];
+      const existing=new Map(rows.map(r=>[`${r.provider_scope}:${r.line_user_id}`,r]));
+      const now=Date.now();
+      const due=recipients.filter(r=>{
+        const delivery=existing.get(`${r.line_provider_scope}:${r.line_user_id}`);
+        return !delivery||( ['pending','retry','sending'].includes(delivery.status)
+          &&Number(delivery.attempts)<6&&Number(delivery.lease_until)<=now&&Number(delivery.next_attempt_at)<=now );
+      });
+      if(!due.length)continue;
+      const [dashboard,retroRow]=await Promise.all([
+        getDashboard(env.DB,cid,{includeHrCases:due.some(r=>r.can_private)}),
+        env.DB.prepare(`SELECT COUNT(*) AS n FROM attendance_retro_requests WHERE client_id=?1 AND status='pending'`).bind(cid).first()
+      ]);
+      const messages=new Map();
+      let acceptedNow=0,failedNow=0;
+      for(const recipient of due){
+        const privateKey=recipient.can_private?'admin':'delegate';
+        if(!messages.has(privateKey))messages.set(privateKey,buildDailyHrStatusFlex(client,dashboard,Number(retroRow?.n||0),{
+          asOf:bangkokClock(),includePrivate:recipient.can_private
+        }));
+        try{
+          const result=await deliverDailyHrSummary(env,cid,recipient,clock,messages.get(privateKey));
+          if(result.accepted){sent++;acceptedNow++;}else if(!result.skipped){failed++;failedNow++;}
+        }catch(error){
+          failed++;failedNow++;
+          console.error(JSON.stringify({level:'error',event:'hr_daily_delivery_store_failed',client_id:cid,message:String(error?.message||error).slice(0,250)}));
+        }
+      }
+      const accepted=await env.DB.prepare(`SELECT COUNT(*) AS n FROM hr_daily_status_deliveries
+        WHERE client_id=?1 AND summary_date=?2 AND summary_time=?3 AND status='accepted'`)
+        .bind(cid,clock.date,DAILY_HR_STATUS_TIME).first();
+      if(Number(accepted?.n||0)>0){
+        await env.DB.prepare(`INSERT INTO hr_daily_status_logs(client_id,summary_date,summary_time,recipient_count)
+          VALUES(?1,?2,?3,?4) ON CONFLICT(client_id,summary_date,summary_time) DO UPDATE SET
+          recipient_count=excluded.recipient_count,sent_at=CURRENT_TIMESTAMP`)
+          .bind(cid,clock.date,DAILY_HR_STATUS_TIME,Number(accepted.n)).run();
+      }
+      await setDailyHrRuntime(env.DB,`client:${cid}`,{date:clock.date,time:clock.time,eligible:recipients.length,
+        accepted:Number(accepted?.n||0),accepted_now:acceptedNow,failed_now:failedNow,error:failedNow?'DELIVERY_FAILED':null});
+    }catch(error){
+      failed++;
+      console.error(JSON.stringify({level:'error',event:'hr_daily_client_failed',client_id:cid,message:String(error?.message||error).slice(0,250)}));
+      await setDailyHrRuntime(env.DB,`client:${cid}`,{date:clock.date,time:clock.time,error:'SUMMARY_BUILD_FAILED'}).catch(()=>{});
+    }
+  }
+  const result={date:clock.date,time:clock.time,clients:clients.length,recipients:recipientCount,sent,failed,no_recipients:noRecipients};
+  console.log(JSON.stringify({level:failed?'warn':'info',event:'hr_daily_status_complete',...result}));
+  return result;
+}
+
+function dailyHrCommand(text){
+  const value=String(text||'').trim().toLowerCase().replace(/\s+/g,'');
+  if(['สรุปhrวันนี้','สรุปทีมวันนี้','hrsummary'].includes(value))return 'summary';
+  if(['สถานะสรุปhr','เช็กสรุปhr','เช็คสรุปhr','hrsummarystatus'].includes(value))return 'status';
+  return null;
+}
+
+async function resolveDailyHrLineAccess(db,lineCtx,lineUserId,requestedClientId=0){
+  const scope=String(lineCtx?.providerScope||'default');
+  const contextId=Number(lineCtx?.clientId||0),requested=Number(requestedClientId||0);
+  if(contextId&&requested&&contextId!==requested)return [];
+  const limitId=contextId||requested;
+  // Candidate Workspaces must belong to this LINE identity. Never trust client_id
+  // in a postback as authorisation, and never search another provider's identity.
+  const rows=(await db.prepare(`SELECT c.id,c.name FROM clients c
+    WHERE (?3=0 OR c.id=?3) AND (
+      EXISTS(SELECT 1 FROM company_members m JOIN users u ON u.id=m.user_id
+        WHERE m.client_id=c.id AND m.status='active' AND u.status='active'
+          AND u.line_user_id=?1 AND COALESCE(NULLIF(u.line_provider_scope,''),'default')=?2)
+      OR EXISTS(SELECT 1 FROM employees e WHERE e.client_id=c.id AND e.status='active'
+        AND e.line_user_id=?1 AND COALESCE(NULLIF(e.line_provider_scope,''),'default')=?2)
+    ) ORDER BY c.id`)
+    .bind(String(lineUserId),scope,limitId).all()).results||[];
+  const allowed=[];
+  for(const client of rows){
+    const recipients=await getDailyHrLineRecipients(db,Number(client.id));
+    const recipient=recipients.find(r=>r.line_user_id===String(lineUserId)&&r.line_provider_scope===scope);
+    if(recipient)allowed.push({client,recipient});
+  }
+  // Multiple companies require an explicit choice rather than guessing which
+  // company's staff records the administrator intended to view.
+  return allowed;
+}
+
+async function getDailyHrSummaryDiagnostics(env,clientId,recipient=null){
+  await ensureDailyHrStatusReady(env.DB);
+  const clock=bangkokClock(),cid=Number(clientId);
+  const [heartbeat,clientRun,deliveries,recipients]=await Promise.all([
+    env.DB.prepare(`SELECT value_json FROM hr_daily_status_runtime WHERE runtime_key='scheduler'`).first(),
+    env.DB.prepare(`SELECT value_json FROM hr_daily_status_runtime WHERE runtime_key=?1`).bind(`client:${cid}`).first(),
+    env.DB.prepare(`SELECT provider_scope,line_user_id,status,attempts,http_status,last_error,accepted_at,next_attempt_at
+      FROM hr_daily_status_deliveries WHERE client_id=?1 AND summary_date=?2 AND summary_time=?3`)
+      .bind(cid,clock.date,DAILY_HR_STATUS_TIME).all(),
+    getDailyHrLineRecipients(env.DB,cid)
+  ]);
+  const scheduler=safeJsonParse(heartbeat?.value_json,null),run=safeJsonParse(clientRun?.value_json,null);
+  const rows=deliveries.results||[];
+  const mine=recipient?rows.find(r=>r.provider_scope===recipient.line_provider_scope&&r.line_user_id===recipient.line_user_id):null;
+  // Return only recipient-independent aggregates and the caller's own outcome.
+  // No raw LINE IDs, retry keys, message snapshots or credentials are exposed.
+  return {release:NAKNA_RUNTIME_RELEASE,date:clock.date,time:clock.time,send_time:DAILY_HR_STATUS_TIME,
+    catchup_until:'18:00',scheduler,last_run:run?.date===clock.date?run:null,eligible:recipients.length,
+    accepted:rows.filter(r=>r.status==='accepted').length,failed:rows.filter(r=>r.status==='failed').length,
+    retrying:rows.filter(r=>r.status==='retry'||r.status==='sending').length,
+    me:mine?{status:mine.status,attempts:Number(mine.attempts),http_status:mine.http_status,error:mine.last_error,
+      accepted_at:mine.accepted_at,next_attempt_at:mine.next_attempt_at}:null};
+}
+
+function dailyHrErrorHint(code){
+  return ({NO_HR_RECIPIENTS:'ไม่พบ HR ที่เชื่อม LINE ในบริษัทนี้',
+    SUMMARY_BUILD_FAILED:'สร้างสรุปไม่สำเร็จ ให้ตรวจ Logs: hr_daily_client_failed',
+    LINE_TOKEN_MISSING:'ยังไม่มี Channel Access Token ของ OA ผู้รับ',
+    LINE_TOKEN_LOOKUP_FAILED:'อ่านการเชื่อมต่อ LINE ไม่สำเร็จ',
+    LINE_HTTP_400:'LINE ไม่รับรูปแบบข้อความหรือข้อมูลผู้รับ',
+    LINE_HTTP_401:'Channel Access Token ใช้งานไม่ได้',
+    LINE_HTTP_403:'LINE ปฏิเสธสิทธิ์การส่งข้อความ',
+    LINE_HTTP_429:'ตรวจโควตาข้อความหรือจำนวนคำขอต่อเวลาใน LINE OA',
+    LINE_TIMEOUT:'LINE ตอบช้า ระบบรอลองส่งใหม่',
+    LINE_NETWORK_ERROR:'เชื่อมต่อ LINE ไม่สำเร็จ ระบบรอลองส่งใหม่',
+    DELIVERY_FAILED:'มีผู้รับที่ส่งไม่สำเร็จ ให้ตรวจสถานะรายคน'})[code]||String(code||'');
+}
+
+function buildDailyHrDiagnosticsFlex(client,data,recipient){
+  const lastSeen=data.scheduler?.last_seen_at;
+  let heartbeat='ยังไม่พบการทำงานของ Cron หลังลง P9.28';
+  if(lastSeen){
+    const d=new Date(lastSeen),c=bangkokClock(d);
+    heartbeat=`${formatThaiShortDate(c.date)} ${c.time} น.`;
+    if(Date.now()-d.getTime()>5*60000)heartbeat+=' · ไม่พบการทำงานใน 5 นาทีล่าสุด';
+  }
+  const me=data.me;
+  const statusLabel=me?.status==='accepted'?'LINE รับคำขอแล้ว':me?.status==='failed'?'ส่งไม่สำเร็จ':me?'กำลังส่ง / รอลองใหม่':'ยังไม่มีการส่งถึงบัญชีนี้วันนี้';
+  const note=me?.error?dailyHrErrorHint(me.error):data.last_run?.error?dailyHrErrorHint(data.last_run.error):
+    !lastSeen?'ตรวจ Cloudflare > Worker hr-line > Settings > Triggers > Cron Triggers ว่ามี * * * * *':
+    data.time<'13:00'?'ยังไม่ถึงเวลารอบ 13:00 น.':
+    data.time>='18:00'?'เลยช่วงส่งชดเชยวันนี้แล้ว กดดูสรุปวันนี้ได้โดยไม่รอรอบถัดไป':
+    'รอบอัตโนมัติตรวจทุกนาทีในช่วง 13:00–17:59 น. และบันทึกแยกผู้รับ';
+  return {type:'flex',altText:`สถานะสรุป HR · ${client.name}`,contents:lineBubble({
+    eyebrow:'NAKNA · HR DAILY STATUS',title:'สถานะสรุป HR',subtitle:client.name,
+    status:statusLabel,statusTone:me?.status==='accepted'?'success':me?.status==='failed'?'error':'warning',
+    body:[lineInfoCard([
+      lineInfoRow('เวลาส่ง','13:00 น. · เวลาไทย'),
+      lineInfoRow('บัญชีนี้',lineManagementRoleLabel(recipient.role)),
+      lineInfoRow('ผู้รับที่มีสิทธิ์',`${data.eligible} คน`),
+      lineInfoRow('Cron ล่าสุด',heartbeat),
+      lineInfoRow('LINE รับคำขอวันนี้',`${data.accepted} คน`),
+      lineInfoRow('ส่งไม่สำเร็จ',`${data.failed} คน`)
+    ],'teal'),lineText(note,'xs',LINE_CI.text),
+    lineText('ตอบสรุปในแชตได้ ไม่ได้แปลว่า Cron หรือโควตาส่งอัตโนมัติพร้อม และ LINE รับคำขอไม่ใช่หลักฐานว่าอ่านข้อความแล้ว','xxs',LINE_CI.muted),
+    lineText(NAKNA_RUNTIME_RELEASE,'xxs',LINE_CI.primary)],
+    footer:[linePrimaryButton('ดูสรุปวันนี้',{type:'postback',label:'ดูสรุปวันนี้',data:`action=hr_daily_summary&client_id=${Number(client.id)}`})]
+  })};
+}
+
+async function replyDailyHrSummary(env,lineCtx,event,{statusOnly=false,clientId=0}={}){
+  const accessToken=lineCtx.accessToken;
+  if(event.source?.type!=='user')return replyLineMessages(accessToken,event.replyToken,[
+    buildSimpleNoticeFlex('เปิดในแชตส่วนตัว','สรุปนี้มีข้อมูลพนักงาน กรุณาพิมพ์คำสั่งในแชตส่วนตัวกับนากนะ','warning')
+  ]);
+  try{
+    const options=await resolveDailyHrLineAccess(env.DB,lineCtx,event.source.userId,clientId);
+    if(!options.length)return replyLineMessages(accessToken,event.replyToken,[
+      buildSimpleNoticeFlex('ยังไม่มีสิทธิ์รับสรุป HR','บัญชีนี้ต้องมีสิทธิ์ HR / Owner / Co-Owner ที่จัดการ HR ได้ และเชื่อม LINE กับบริษัทนั้นก่อน','warning')
+    ]);
+    if(options.length>1){
+      const action=statusOnly?'hr_daily_status':'hr_daily_summary';
+      return replyLineMessages(accessToken,event.replyToken,[{type:'flex',altText:'เลือกบริษัทสำหรับสรุป HR',contents:lineBubble({
+        eyebrow:'NAKNA · HR DAILY',title:'ต้องการดูบริษัทไหน?',
+        body:[lineText('เลือกบริษัทก่อน เพื่อไม่สรุปข้อมูลผิด Workspace','sm',LINE_CI.text)],
+        footer:options.slice(0,10).map(({client})=>lineSecondaryButton(String(client.name).slice(0,35),{
+          type:'postback',label:String(client.name).slice(0,35),data:`action=${action}&client_id=${Number(client.id)}`
+        }))
+      })}]);
+    }
+    const {client,recipient}=options[0];
+    if(statusOnly){
+      const diagnostics=await getDailyHrSummaryDiagnostics(env,Number(client.id),recipient);
+      return replyLineMessages(accessToken,event.replyToken,[buildDailyHrDiagnosticsFlex(client,diagnostics,recipient)]);
+    }
+    await ensureAttendanceRetroReady(env.DB);
+    const [dashboard,retroRow]=await Promise.all([
+      getDashboard(env.DB,Number(client.id),{includeHrCases:recipient.can_private}),
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM attendance_retro_requests WHERE client_id=?1 AND status='pending'`).bind(Number(client.id)).first()
+    ]);
+    // Manual replies are deliberately not written as successful cron deliveries.
+    return replyLineMessages(accessToken,event.replyToken,[buildDailyHrStatusFlex(client,dashboard,Number(retroRow?.n||0),{
+      manual:true,asOf:bangkokClock(),includePrivate:recipient.can_private
+    })]);
+  }catch(error){
+    console.error(JSON.stringify({level:'error',event:'hr_daily_manual_failed',message:String(error?.message||error).slice(0,250)}));
+    return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('ยังสร้างสรุปไม่ได้',
+      `ระบบ ${NAKNA_RUNTIME_RELEASE} รับคำสั่งแล้ว แต่โหลดข้อมูลไม่สำเร็จ ให้ผู้ดูแลตรวจ Logs: hr_daily_manual_failed`,'error')]);
+  }
+}
+
 
 function dashboardAttentionTotal(dashboard,key){
   const row=(dashboard?.attention||[]).find(x=>String(x.key)===String(key));
   return Number(row?.total_count??row?.count??0);
 }
 
-function buildDailyHrStatusFlex(client,dashboard,retroPending=0){
+function buildDailyHrStatusFlex(client,dashboard,retroPending=0,{asOf=bangkokClock(),manual=false,includePrivate=true}={}){
   const summary=dashboard?.summary||{};
   const scheduled=Number(summary.scheduled_today||0);
   const checkedIn=Number(summary.scheduled_present??summary.present??0);
@@ -10700,7 +11046,7 @@ function buildDailyHrStatusFlex(client,dashboard,retroPending=0){
   const active=Number(summary.employees||0);
   const pendingLeave=dashboardAttentionTotal(dashboard,'leave_pending');
   const hrRequests=dashboardAttentionTotal(dashboard,'request');
-  const hrCases=Number(dashboard?.hr_cases_open||dashboardAttentionTotal(dashboard,'hr_private')||0);
+  const hrCases=includePrivate?Number(dashboard?.hr_cases_open||dashboardAttentionTotal(dashboard,'hr_private')||0):0;
   const pendingHrSign=Number(dashboard?.documents?.pending_hr_sign||0);
   const pendingEmployeeSign=Number(dashboard?.documents?.pending_employee_sign||0);
   const pendingTotal=pendingLeave+Number(retroPending||0)+hrRequests+hrCases+pendingHrSign+pendingEmployeeSign;
@@ -10737,65 +11083,26 @@ function buildDailyHrStatusFlex(client,dashboard,retroPending=0){
       lineInfoRow('ใบลารอจัดการ',`${pendingLeave} รายการ`,pendingLeave?LINE_CI.warning:LINE_CI.text),
       lineInfoRow('เช็กอินย้อนหลัง',`${Number(retroPending||0)} รายการ`,retroPending?LINE_CI.warning:LINE_CI.text),
       lineInfoRow('HR Request',`${hrRequests} รายการ`,hrRequests?LINE_CI.warning:LINE_CI.text),
-      lineInfoRow('แจ้งเรื่องส่วนตัวถึง HR',`${hrCases} เรื่อง`,hrCases?LINE_CI.error:LINE_CI.text),
+      ...(includePrivate?[lineInfoRow('แจ้งเรื่องส่วนตัวถึง HR',`${hrCases} เรื่อง`,hrCases?LINE_CI.error:LINE_CI.text)]:[]),
       lineInfoRow('เอกสารรอ HR เซ็น',`${pendingHrSign} ฉบับ`,pendingHrSign?LINE_CI.warning:LINE_CI.text),
       lineInfoRow('เอกสารรอพนักงานเซ็น',`${pendingEmployeeSign} ฉบับ`,pendingEmployeeSign?LINE_CI.warning:LINE_CI.text),
     ],'neutral'));
   }else{
     body.push(lineInfoCard([lineText('ไม่มีคำขอหรือเอกสารค้างที่ระบบตรวจพบ','sm',LINE_CI.success,'bold')],'success'));
   }
-  body.push(lineText('สรุป Attendance ใช้ตารางงาน วันหยุดบริษัท ใบลาที่อนุมัติ และข้อมูลเช็กอินที่มีอยู่ในระบบ ณ เวลา 13:00 น.','xxs',LINE_CI.muted));
-  return {type:'flex',altText:`สรุป HR 13:00 · ${client.name}`,contents:lineBubble({
+  body.push(lineText(`ข้อมูล ณ ${asOf.time} น. เวลาไทย · ใช้ตารางงาน วันหยุดบริษัท ใบลาที่อนุมัติ และข้อมูลเช็กอินในระบบ`,'xxs',LINE_CI.muted));
+  if(manual)body.push(lineText('สรุปตามคำขอ · ไม่ใช่การยืนยันว่ารอบส่งอัตโนมัติทำงานแล้ว','xxs',LINE_CI.muted));
+  if(!includePrivate)body.push(lineText('ไม่รวมเรื่องส่วนตัวที่ต้องใช้สิทธิ์ผู้ดูแล HR','xxs',LINE_CI.muted));
+  return {type:'flex',altText:`${manual?'สรุป HR วันนี้':'สรุป HR รอบ 13:00'} · ${client.name}`,contents:lineBubble({
     eyebrow:'NAKNA · HR DAILY',
-    title:'สรุปทีม 13:00 น.',
+    title:manual?'สรุปทีมวันนี้':'สรุปทีมรอบ 13:00',
     subtitle:`${client.name} · ${formatThaiShortDate(dashboard.today)}`,
     status,statusTone,body,
-    footer:[linePrimaryButton('เปิด HR Dashboard',{type:'postback',label:'เปิด HR Dashboard',data:'action=owner_dashboard'})]
+    footer:[
+      linePrimaryButton('เปิด HR Dashboard',{type:'postback',label:'เปิด HR Dashboard',data:`action=owner_dashboard&client_id=${Number(client.id)}`}),
+      lineSecondaryButton('สถานะสรุป HR',{type:'postback',label:'สถานะสรุป HR',data:`action=hr_daily_status&client_id=${Number(client.id)}`})
+    ]
   })};
-}
-
-async function sendDailyHrStatusSummary(env){
-  const clock=bangkokClock();
-  if(clock.time!==DAILY_HR_STATUS_TIME)return {sent:0,clients:0,skipped:true,time:clock.time};
-  await ensureDailyHrStatusReady(env.DB);
-  await ensureAttendanceRetroRequestsReady(env.DB);
-  const clients=(await env.DB.prepare('SELECT id,name FROM clients ORDER BY id').all()).results||[];
-  let clientCount=0,recipientCount=0,sent=0,failed=0;
-  for(const client of clients){
-    const cid=Number(client.id);
-    const already=await env.DB.prepare(`SELECT 1 AS ok FROM hr_daily_status_logs WHERE client_id=?1 AND summary_date=?2 AND summary_time=?3 LIMIT 1`).bind(cid,clock.date,DAILY_HR_STATUS_TIME).first();
-    if(already)continue;
-    const recipients=await getDailyHrLineRecipients(env.DB,cid);
-    if(!recipients.length)continue;
-    const [dashboard,retroRow]=await Promise.all([
-      getDashboard(env.DB,cid,{includeHrCases:true}),
-      env.DB.prepare(`SELECT COUNT(*) AS n FROM attendance_retro_requests WHERE client_id=?1 AND status='pending'`).bind(cid).first().catch(()=>({n:0}))
-    ]);
-    const message=buildDailyHrStatusFlex(client,dashboard,Number(retroRow?.n||0));
-    const groups=new Map();
-    for(const row of recipients){
-      const scope=String(row.line_provider_scope||'default');
-      if(!groups.has(scope))groups.set(scope,[]);
-      groups.get(scope).push(row);
-    }
-    let sentForClient=0;
-    for(const [scope,rows] of groups.entries()){
-      const token=await getAccessTokenForProviderScope(env,cid,scope).catch(()=>null);
-      if(!token){failed+=rows.length;continue;}
-      for(let i=0;i<rows.length;i+=500){
-        const chunk=rows.slice(i,i+500);
-        const ok=await multicastLineMessages(token,chunk.map(r=>r.line_user_id),[message]);
-        if(ok){sent+=chunk.length;sentForClient+=chunk.length;}else failed+=chunk.length;
-      }
-    }
-    recipientCount+=recipients.length;
-    clientCount++;
-    if(sentForClient>0){
-      await env.DB.prepare(`INSERT OR REPLACE INTO hr_daily_status_logs(client_id,summary_date,summary_time,recipient_count,sent_at) VALUES(?1,?2,?3,?4,CURRENT_TIMESTAMP)`).bind(cid,clock.date,DAILY_HR_STATUS_TIME,sentForClient).run();
-    }
-  }
-  console.log(JSON.stringify({level:'info',event:'hr_daily_status_complete',date:clock.date,time:clock.time,clients:clientCount,recipients:recipientCount,sent,failed}));
-  return {date:clock.date,time:clock.time,clients:clientCount,recipients:recipientCount,sent,failed};
 }
 
 async function sendDailyHrBrief(env) {
