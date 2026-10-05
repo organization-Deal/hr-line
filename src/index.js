@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.28-HR-DAILY-DELIVERY-FIX';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.28-HR-DAILY-DELIVERY-FIX';
-const NAKNA_RUNTIME_FEATURE = 'hr-daily-role-fix-catchup-delivery-diagnostics';
+const NAKNA_RUNTIME_RELEASE = 'P9.29-RETRO-ATTENDANCE-LEAVE';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.29-RETRO-ATTENDANCE-LEAVE';
+const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -2756,6 +2756,7 @@ async function handleApi(request, env, url, auth, ctx) {
           checkout_source_title:checkoutSourceTitle||null,checkout_source_address:checkoutSourceAddress||null,checkout_actual_title:checkoutActualTitle,checkout_actual_address:checkoutActualAddress,
           checkout_distance_m:checkoutDistance,checkout_outside_geofence:checkoutOutside?1:0,checkout_lat:a.checkout_lat==null?null:Number(a.checkout_lat),checkout_lng:a.checkout_lng==null?null:Number(a.checkout_lng),checkout_accuracy_m:a.checkout_accuracy_m==null?null:Number(a.checkout_accuracy_m),
           leave_id:lr?.id?Number(lr.id):null,leave_name:lr?.leave_name||lr?.leave_type||null,leave_code:lr?.leave_code||null,leave_status:lr?.status||null,
+          leave_is_retroactive:Boolean(Number(lr?.is_retroactive||0)),leave_retro_reason:lr?.retro_reason||null,
           leave_day_part:lr?.day_part||null,leave_duration_days:lr?.duration_days==null?null:Number(lr.duration_days),approved_leave:lr?.status==='approved',
           is_future:isFuture,is_active_date:isActiveDate,is_workday:isWorkday,scheduled_start:schedule?.start_time||null,scheduled_end:schedule?.end_time||null,schedule_source:schedule?.source||null,holiday_name:holiday?.name||null});
       }
@@ -5268,6 +5269,9 @@ async function processLineEvent(event, env, lineCtx) {
     if(['แจ้ง hr','แจ้งhr','hr','แจ้งปัญหา','ติดต่อ hr'].includes(lower)){
       return sendHrCaseForm(env,event.replyToken,emp,accessToken);
     }
+    if(['เช็กอินย้อนหลัง','เช็คอินย้อนหลัง','ลืมเช็กอิน','ลืมเช็คอิน','retro checkin','retro check-in'].includes(lower)){
+      return sendQuickAttendanceEntry(env,event.replyToken,emp,accessToken,'retro');
+    }
     if(['เช็กอิน','checkin','check-in'].includes(lower)){
       if(session?.action==='checkin'||session?.action==='checkout') await clearLineSession(env.DB,sessionKey).catch(()=>{});
       return sendQuickAttendanceEntry(env,event.replyToken,emp,accessToken,'checkin');
@@ -5277,8 +5281,8 @@ async function processLineEvent(event, env, lineCtx) {
       return sendQuickAttendanceEntry(env,event.replyToken,emp,accessToken,'checkout');
     }
     if(lower==='สถานะ'){
-      const a=await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(emp.id),dateInBangkok()).first();
-      return replyLineMessages(accessToken,event.replyToken,[buildEmployeeStatusFlex(emp,a)]);
+      const dayStatus=await getEmployeeDayStatusContext(env.DB,Number(emp.id),dateInBangkok());
+      return replyLineMessages(accessToken,event.replyToken,[buildEmployeeStatusFlex(emp,dayStatus)]);
     }
     return replyLineMessages(accessToken,event.replyToken,[await buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp)]);
   }
@@ -5362,7 +5366,8 @@ async function processLineEvent(event, env, lineCtx) {
     if(action==='wellness') return sendWellnessPortal(env,event.replyToken,emp,accessToken);
     if(action==='menu') return replyLineMessages(accessToken,event.replyToken,[await buildEmployeeMenuForLine(env,lineCtx,lineUserId,emp)]);
     if(action==='quick_attendance_unavailable'){
-      const mode=data.get('mode')==='checkout'?'checkout':'checkin';
+      const rawMode=data.get('mode');
+      const mode=rawMode==='checkout'?'checkout':rawMode==='retro'?'retro':'checkin';
       return sendQuickAttendanceEntry(env,event.replyToken,emp,accessToken,mode);
     }
     if(action==='checkin'||action==='checkout'){
@@ -5378,7 +5383,7 @@ async function processLineEvent(event, env, lineCtx) {
     if(action==='rewards') return sendEngagementPortal(env,event.replyToken,emp,accessToken);
     if(action==='hr_case'){ return sendHrCaseForm(env,event.replyToken,emp,accessToken); }
     if(action==='leave_locked') return replyLineMessages(accessToken,event.replyToken,[buildSimpleNoticeFlex('สิทธิ์ลายังถูกล็อก','สิทธิ์ประเภทนี้จะเปิดหลังผ่านทดลองงาน หรือติดต่อ HR หากต้องการให้เปิดเป็นกรณีพิเศษ','warning')]);
-    if(action==='status'){ const a=await env.DB.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(emp.id),dateInBangkok()).first(); return replyLineMessages(accessToken,event.replyToken,[buildEmployeeStatusFlex(emp,a)]); }
+    if(action==='status'){ const dayStatus=await getEmployeeDayStatusContext(env.DB,Number(emp.id),dateInBangkok()); return replyLineMessages(accessToken,event.replyToken,[buildEmployeeStatusFlex(emp,dayStatus)]); }
     if(action==='leave_type'){
       const policyId=Number(data.get('policy_id')); const policy=await env.DB.prepare('SELECT * FROM leave_policies WHERE id=?1 AND client_id=?2 AND is_active=1').bind(policyId,Number(emp.client_id)).first();
       if(!policy) return replyLine(accessToken,event.replyToken,'ไม่พบประเภทลานี้');
@@ -6795,11 +6800,14 @@ async function sendQuickAttendanceEntry(env,replyToken,emp,accessToken,action='c
     if(!token) token=await getEmployeePortalTokenForMenu(env.DB,Number(emp.client_id),Number(emp.id));
     if(!token) throw new Error('สร้างลิงก์ Quick Attendance ไม่สำเร็จ');
     const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
-    const normalized=action==='checkout'?'checkout':'checkin';
-    const url=`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=P9.16-FACE`;
+    const normalized=action==='checkout'?'checkout':action==='retro'?'retro':'checkin';
+    const url=normalized==='retro'
+      ?`${base}/attendance.html?token=${encodeURIComponent(token)}&retro=1&v=P9.29-RETRO`
+      :`${base}/attendance.html?token=${encodeURIComponent(token)}&action=${normalized}&v=P9.16-FACE`;
     return replyLineMessages(accessToken,replyToken,[buildQuickAttendanceEntryFlex(normalized,url)]);
   }catch(e){
-    return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ',`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
+    const title=action==='checkout'?'เปิดเช็กเอาต์ไม่สำเร็จ':action==='retro'?'เปิดเช็กอินย้อนหลังไม่สำเร็จ':'เปิดเช็กอินไม่สำเร็จ';
+    return replyLineMessages(accessToken,replyToken,[buildSimpleNoticeFlex(title,`${e.message||'กรุณาลองใหม่อีกครั้ง'} · ${NAKNA_RUNTIME_RELEASE}`,'error')]);
   }
 }
 
@@ -7028,7 +7036,16 @@ async function notifyQuickAttendanceAlreadyRecordedLine(env,access,action,saved,
 }
 
 function buildQuickAttendanceEntryFlex(action,url){
+  const retro=action==='retro';
   const checkin=action==='checkin';
+  if(retro){
+    return {type:'flex',altText:'เช็กอินย้อนหลัง · ส่งให้ HR อนุมัติ',contents:lineBubble({
+      eyebrow:'ATTENDANCE · RETRO',title:'ลืมเช็กอิน?',subtitle:'กรอกวันที่ เวลาเข้างานจริง และสาเหตุ แล้วส่งให้ HR อนุมัติ',
+      status:'HR APPROVAL',statusTone:'warning',
+      body:[lineInfoCard([lineText('คำขอนี้ไม่แก้เวลาให้อัตโนมัติ จนกว่า HR จะตรวจและกดอนุมัติ','sm',LINE_CI.text)],'teal')],
+      footer:[linePrimaryButton('เปิดเช็กอินย้อนหลัง',{type:'uri',label:'เช็กอินย้อนหลัง',uri:url})]
+    })};
+  }
   return {type:'flex',altText:checkin?'เช็กอินแบบอัตโนมัติ':'เช็กเอาต์แบบอัตโนมัติ',contents:lineBubble({
     eyebrow:'ATTENDANCE · QUICK',
     title:checkin?'เช็กอินทันที':'เช็กเอาต์ทันที',
@@ -8397,6 +8414,11 @@ async function submitPublicLeaveForm(request,env,token){
   const endDate=String(form.get('end_date')||startDate).trim();
   const dayPart=String(form.get('day_part')||'full');
   const reason=String(form.get('reason')||'').trim();
+  const retroReason=String(form.get('retro_reason')||'').trim();
+  const today=dateInBangkok();
+  const isRetroactive=Boolean(startDate&&startDate<today);
+  if(isRetroactive&&endDate>=today)return json({error:'ลาย้อนหลังต้องเป็นวันที่ผ่านไปแล้วทั้งหมด หากมีวันปัจจุบันหรืออนาคตให้แยกเป็นอีกคำขอ'},400);
+  if(isRetroactive&&retroReason.length<3)return json({error:'กรุณาระบุสาเหตุที่ไม่ได้ยื่นลาในวันนั้น'},400);
   const policy=await resolveLeavePolicy(env.DB,Number(access.client_id),policyId,null);
   if(!policy)return json({error:'ไม่พบประเภทลาที่เลือก'},400);
   const employee=await getEmployeeForClient(env.DB,Number(access.employee_id),Number(access.client_id));
@@ -8414,7 +8436,7 @@ async function submitPublicLeaveForm(request,env,token){
   if(evidenceRequired&&!rawFiles.length)return json({error:`${policy.name} ${duration} วัน ต้องแนบหลักฐานตามนโยบายบริษัท`},400);
   let row;
   try{
-    row=await createLeaveRequest(env,{clientId:Number(access.client_id),employeeId:Number(access.employee_id),policyId,startDate,endDate,dayPart,reason,submittedVia:'line'});
+    row=await createLeaveRequest(env,{clientId:Number(access.client_id),employeeId:Number(access.employee_id),policyId,startDate,endDate,dayPart,reason,retroReason,submittedVia:'line'});
     let optionalEvidenceWarning=null;
     try{
       for(const file of rawFiles){
@@ -8439,7 +8461,7 @@ async function submitPublicLeaveForm(request,env,token){
     row=await hydrateLeaveBalance(env.DB,await getLeaveRequestDetail(env.DB,Number(row.id),Number(access.client_id)));
     await notifyLeaveApprover(env,Number(row.id)).catch(error=>console.error(JSON.stringify({level:'error',event:'leave_web_notify_approver_failed',request_id:Number(row.id),message:String(error?.message||error)})));
     await pushLeaveWebSubmittedConfirmation(env,row).catch(error=>console.error(JSON.stringify({level:'error',event:'leave_web_confirmation_failed',request_id:Number(row.id),message:String(error?.message||error)})));
-    return json({ok:true,warning:optionalEvidenceWarning,request:{id:Number(row.id),code:`LV-${String(row.id).padStart(4,'0')}`,status:row.status,leave_type:row.leave_type_name||row.leave_type,start_date:row.start_date,end_date:row.end_date,duration_days:Number(row.duration_days||0),evidence_count:Number(row.evidence_count||0)}} ,201);
+    return json({ok:true,warning:optionalEvidenceWarning,request:{id:Number(row.id),code:`LV-${String(row.id).padStart(4,'0')}`,status:row.status,leave_type:row.leave_type_name||row.leave_type,start_date:row.start_date,end_date:row.end_date,duration_days:Number(row.duration_days||0),evidence_count:Number(row.evidence_count||0),is_retroactive:Boolean(Number(row.is_retroactive||0)),retro_reason:row.retro_reason||null}} ,201);
   }catch(e){
     const raw=String(e?.message||'');
     const friendly=isGoogleReauthRequiredError(e)?'การเชื่อม Google Drive ของบริษัทหมดอายุ ระบบกำลังใช้พื้นที่สำรองไม่ได้ กรุณาแจ้ง HR ให้เชื่อม Google ใหม่แล้วลองอีกครั้ง':(raw||'ส่งใบลาไม่สำเร็จ');
@@ -8454,7 +8476,9 @@ async function pushLeaveWebSubmittedConfirmation(env,row){
   const range=formatLeaveRange(row);
   const duration=Number(row.duration_days||0).toFixed(Number(row.duration_days||0)%1?1:0);
   const status=row.status==='pending'?'รออนุมัติ':row.status==='awaiting_evidence'?'รอหลักฐาน':'ส่งแล้ว';
-  const message=`✅ ส่งใบลาแล้ว\n#LV-${String(row.id).padStart(4,'0')} · ${row.leave_type_name||row.leave_type}\n${range} · ${duration} วัน\nสถานะ: ${status}`;
+  const prefix=isRetroLeave(row)?'✅ ส่งคำขอลาย้อนหลังแล้ว':'✅ ส่งใบลาแล้ว';
+  const retroLine=isRetroLeave(row)?`\nย้อนหลัง: ${row.retro_reason||'—'}`:'';
+  const message=`${prefix}\n#LV-${String(row.id).padStart(4,'0')} · ${row.leave_type_name||row.leave_type}\n${range} · ${duration} วัน${retroLine}\nสถานะ: ${status}`;
   await pushLineMessages(accessToken,row.employee_line_user_id,[{type:'text',text:message}]);
   return true;
 }
@@ -9762,19 +9786,25 @@ async function resolveLeavePolicy(db,clientId,policyId,leaveType){
   return null;
 }
 
-async function createLeaveRequest(env,{clientId,employeeId,policyId,leaveType,startDate,endDate,dayPart='full',reason='',submittedVia='line',submittedByUserId=null}){
+async function createLeaveRequest(env,{clientId,employeeId,policyId,leaveType,startDate,endDate,dayPart='full',reason='',retroReason='',submittedVia='line',submittedByUserId=null}){
   const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee) throw httpError('ไม่พบพนักงาน',404);
   const policy=await resolveLeavePolicy(env.DB,clientId,policyId,leaveType); if(!policy) throw httpError('ไม่พบประเภทลา',400);
   if(!startDate||!endDate) throw httpError('กรุณาเลือกวันลาให้ครบ',400);
   const eligibility=await leaveEligibility(env.DB,employee,policy); if(!eligibility.allowed) throw httpError(eligibility.reason,409);
   const duration=await calculateEmployeeLeaveDuration(env.DB,employee,startDate,endDate,dayPart); if(duration<=0) throw httpError('ช่วงนี้ไม่มีวันทำงานให้ลา',400);
+  const today=dateInBangkok();
+  const isRetroactive=String(startDate)<today;
+  if(isRetroactive&&String(endDate)>=today) throw httpError('ลาย้อนหลังต้องเป็นวันที่ผ่านไปแล้วทั้งหมด กรุณาแยกคำขอปัจจุบัน/อนาคตออกจากคำขอย้อนหลัง',400);
+  if(isRetroactive&&String(retroReason||'').trim().length<3) throw httpError('กรุณาระบุสาเหตุที่ไม่ได้ยื่นลาในวันนั้น',400);
   if(Number(policy.requires_reason)&&String(reason).trim().length<2) throw httpError('กรุณาระบุเหตุผลการลา',400);
   const overlap=await env.DB.prepare("SELECT id FROM leave_requests WHERE employee_id=?1 AND status IN ('pending','awaiting_evidence','approved') AND NOT(end_date<?2 OR start_date>?3) LIMIT 1").bind(employeeId,startDate,endDate).first(); if(overlap) throw httpError('มีคำขอลาในช่วงวันที่นี้อยู่แล้ว',409);
   const profile=await getEmployeeLeaveProfile(env.DB,employeeId,clientId,Number(startDate.slice(0,4)));
   const bal=profile.balances.find(x=>Number(x.id)===Number(policy.id));
   if(!Number(policy.is_unlimited)&&!Number(policy.allow_negative)&&num(bal?.remaining_days)<duration) throw httpError(`สิทธิ์${policy.name}ไม่พอ · เหลือ ${num(bal?.remaining_days)} วัน`,409);
-  if(submittedVia==='line' && num(policy.notice_days)>0){
-    const today=dateInBangkok(); const minDate=new Date(`${today}T12:00:00+07:00`); minDate.setDate(minDate.getDate()+num(policy.notice_days));
+  // Advance-notice rules apply to normal leave. A retroactive request is an exception request
+  // that still requires HR approval and a specific explanation for why it was not filed on time.
+  if(submittedVia==='line' && !isRetroactive && num(policy.notice_days)>0){
+    const minDate=new Date(`${today}T12:00:00+07:00`); minDate.setDate(minDate.getDate()+num(policy.notice_days));
     if(new Date(`${startDate}T12:00:00+07:00`)<minDate) throw httpError(`${policy.name} ต้องแจ้งล่วงหน้าอย่างน้อย ${policy.notice_days} วัน`,409);
   }
   const evidenceRequired=policy.evidence_required_after_days!=null && duration>=num(policy.evidence_required_after_days);
@@ -9783,8 +9813,8 @@ async function createLeaveRequest(env,{clientId,employeeId,policyId,leaveType,st
   // No named approver is valid: the request falls back to the Owner/HR dashboard queue.
   // This matches Nakna's workflow where companies can choose manager approval OR direct HR approval.
   const status=evidenceRequired?'awaiting_evidence':'pending';
-  const result=await env.DB.prepare(`INSERT INTO leave_requests (client_id,employee_id,leave_type,policy_id,start_date,end_date,reason,status,approver_employee_id,duration_days,day_part,evidence_required,evidence_count,submitted_via) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,?13)`)
-    .bind(clientId,employeeId,policy.code,Number(policy.id),startDate,endDate,reason||null,status,approverId,duration,dayPart,evidenceRequired?1:0,submittedVia).run();
+  const result=await env.DB.prepare(`INSERT INTO leave_requests (client_id,employee_id,leave_type,policy_id,start_date,end_date,reason,status,approver_employee_id,duration_days,day_part,evidence_required,evidence_count,submitted_via,is_retroactive,retro_reason) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,?13,?14,?15)`)
+    .bind(clientId,employeeId,policy.code,Number(policy.id),startDate,endDate,reason||null,status,approverId,duration,dayPart,evidenceRequired?1:0,submittedVia,isRetroactive?1:0,isRetroactive?String(retroReason||'').trim():null).run();
   const id=Number(result.meta.last_row_id);
   await env.DB.prepare(`INSERT INTO leave_approval_events (client_id,leave_request_id,action,actor_type,actor_employee_id,actor_user_id,reason) VALUES (?1,?2,'submitted',?3,?4,?5,?6)`).bind(clientId,id,submittedVia==='line'?'employee':'user',submittedVia==='line'?employeeId:null,submittedVia==='line'?null:submittedByUserId,reason||null).run();
   await env.DB.prepare(`INSERT OR IGNORE INTO leave_ledger(client_id,employee_id,leave_policy_id,year,entry_type,days,reference_type,reference_id,note) VALUES(?1,?2,?3,?4,'reserved',?5,'leave_request',?6,?7)`).bind(clientId,employeeId,Number(policy.id),Number(startDate.slice(0,4)),-duration,id,`จองสิทธิ์ ${policy.name}`).run();
@@ -9961,7 +9991,7 @@ async function createHrCaseFromLine(env,emp,subject,detail){
 
 async function getEmployeeServiceHistory(db,emp){
   const [leaves,cases]=await db.batch([
-    db.prepare(`SELECT l.id,l.start_date,l.end_date,l.duration_days,l.status,l.decision_reason,lp.name AS leave_type_name FROM leave_requests l LEFT JOIN leave_policies lp ON lp.id=l.policy_id WHERE l.employee_id=?1 ORDER BY l.created_at DESC LIMIT 5`).bind(Number(emp.id)),
+    db.prepare(`SELECT l.id,l.start_date,l.end_date,l.duration_days,l.status,l.decision_reason,l.is_retroactive,l.retro_reason,lp.name AS leave_type_name FROM leave_requests l LEFT JOIN leave_policies lp ON lp.id=l.policy_id WHERE l.employee_id=?1 ORDER BY l.created_at DESC LIMIT 5`).bind(Number(emp.id)),
     db.prepare(`SELECT id,subject,status,last_reply_to_employee,updated_at FROM hr_cases WHERE employee_id=?1 ORDER BY updated_at DESC LIMIT 5`).bind(Number(emp.id))
   ]);
   return {leaves:leaves.results||[],cases:cases.results||[]};
@@ -10091,7 +10121,7 @@ function leaveStatusLabel(status){return ({pending:'รออนุมัติ'
 function caseStatusLabel(status){return ({open:'HR รับเรื่องแล้ว',in_progress:'กำลังดำเนินการ',waiting_employee:'HR ตอบแล้ว',resolved:'แก้ไขแล้ว',closed:'ปิดเรื่อง'})[status]||status;}
 function buildEmployeeServiceHistoryFlex(history){
   const contents=[];
-  if(history.leaves.length){contents.push(lineText('คำขอลาล่าสุด','xs',LINE_CI.primaryDark,'bold'));for(const r of history.leaves.slice(0,4))contents.push(lineInfoCard([lineInfoRow(r.leave_type_name||'ลา',`${formatThaiDateOnly(r.start_date)} · ${Number(r.duration_days||0)} วัน`),lineInfoRow('สถานะ',leaveStatusLabel(r.status))]));}
+  if(history.leaves.length){contents.push(lineText('คำขอลาล่าสุด','xs',LINE_CI.primaryDark,'bold'));for(const r of history.leaves.slice(0,4))contents.push(lineInfoCard([lineInfoRow(`${r.leave_type_name||'ลา'}${Number(r.is_retroactive||0)?' · ย้อนหลัง':''}`,`${formatThaiDateOnly(r.start_date)} · ${Number(r.duration_days||0)} วัน`),lineInfoRow('สถานะ',Number(r.is_retroactive||0)&&r.status==='pending'?'รออนุมัติลาย้อนหลัง':leaveStatusLabel(r.status))]));}
   if(history.cases.length){contents.push(lineText('เรื่องที่แจ้ง HR','xs',LINE_CI.primaryDark,'bold',{margin:'md'}));for(const c of history.cases.slice(0,3))contents.push(lineInfoCard([lineInfoRow(`#HR-${String(c.id).padStart(4,'0')}`,c.subject),lineInfoRow('สถานะ',caseStatusLabel(c.status))]));}
   if(!contents.length)contents.push(lineText('ยังไม่มีคำขอหรือเรื่องที่แจ้ง HR','sm',LINE_CI.muted));
   return {type:'flex',altText:'คำขอของฉัน',contents:lineBubble({eyebrow:'MY REQUESTS',title:'คำขอของฉัน',body:contents})};
@@ -10195,6 +10225,8 @@ function leavePolicyIcon(policy){
   return '🗓';
 }
 function formatLeaveRange(row){return `${formatThaiDateOnly(row.start_date)}${row.start_date!==row.end_date?` – ${formatThaiDateOnly(row.end_date)}`:''}`;}
+function isRetroLeave(row){return Boolean(Number(row?.is_retroactive||0));}
+function retroLeaveLabel(row){return isRetroLeave(row)?'ลาย้อนหลัง':'ลางาน';}
 function formatDayPart(part){return part==='am'?'ครึ่งวันเช้า':part==='pm'?'ครึ่งวันบ่าย':'เต็มวัน';}
 
 function buildRuntimeVersionFlex(providerScope='default'){
@@ -10232,9 +10264,14 @@ function buildEmployeeMenuFlex(emp,ownerAccess=null,leaveFormUrl=null,hrCaseForm
       lineText('เมนูพนักงาน','xs',LINE_CI.primaryDark,'bold'),
       lineText('จัดการเรื่องงานประจำวันได้จากตรงนี้','sm',LINE_CI.muted),
       lineText(`Quick Attendance · ${runtimeRelease}`,'xxs',LINE_CI.primary,'bold'),
-      linePrimaryButton('📍  เช็กอิน',quickCheckInUrl?{type:'uri',label:'เช็กอิน',uri:quickCheckInUrl}:{type:'postback',label:'เช็กอิน',data:'action=quick_attendance_unavailable&mode=checkin'}),
-      lineSecondaryButton('🏠  เช็กเอาต์',quickCheckOutUrl?{type:'uri',label:'เช็กเอาต์',uri:quickCheckOutUrl}:{type:'postback',label:'เช็กเอาต์',data:'action=quick_attendance_unavailable&mode=checkout'}),
-      lineSecondaryButton('🕘  ลืมเช็กอิน / ย้อนหลัง',retroCheckInUrl?{type:'uri',label:'เช็กอินย้อนหลัง',uri:retroCheckInUrl}:{type:'postback',label:'เช็กอินย้อนหลัง',data:'action=quick_attendance_unavailable&mode=retro'},'#FFF7E8'),
+      // Keep the three attendance actions inside one child box. LINE Flex limits the
+      // number of direct components in a box; Face Verification previously pushed the
+      // retro button beyond that limit on some employee menus.
+      {type:'box',layout:'vertical',spacing:'sm',contents:[
+        linePrimaryButton('📍  เช็กอิน',quickCheckInUrl?{type:'uri',label:'เช็กอิน',uri:quickCheckInUrl}:{type:'postback',label:'เช็กอิน',data:'action=quick_attendance_unavailable&mode=checkin'}),
+        lineSecondaryButton('🏠  เช็กเอาต์',quickCheckOutUrl?{type:'uri',label:'เช็กเอาต์',uri:quickCheckOutUrl}:{type:'postback',label:'เช็กเอาต์',data:'action=quick_attendance_unavailable&mode=checkout'}),
+        lineSecondaryButton('🕘  ลืมเช็กอิน / เช็กอินย้อนหลัง',retroCheckInUrl?{type:'uri',label:'เช็กอินย้อนหลัง',uri:retroCheckInUrl}:{type:'postback',label:'เช็กอินย้อนหลัง',data:'action=quick_attendance_unavailable&mode=retro'},'#FFF7E8')
+      ]},
       ...(faceManageUrl?[lineSecondaryButton('👤  ใบหน้า & การยืนยันตัวตน',{type:'uri',label:'ใบหน้า & การยืนยัน',uri:faceManageUrl},'#EEF9F5')]:[]),
       lineSecondaryButton('🏖  ขอลางาน',leaveFormUrl?{type:'uri',label:'ขอลางาน',uri:leaveFormUrl}:{type:'postback',label:'ขอลางาน',data:'action=leave_menu'},'#F1F7F5'),
       lineSecondaryButton('📅  สิทธิ์ลา',{type:'postback',label:'สิทธิ์ลา',data:'action=leave_balance'},'#F7F9F8'),
@@ -10300,10 +10337,12 @@ function buildHrLeaveApprovalFlex(row,role='hr_admin'){
     lineInfoRow('ประเภท',row.leave_type_name||row.leave_type||'—'),
     lineInfoRow('ช่วง',formatLeaveRange(row)),
     lineInfoRow('จำนวน',`${Number(row.duration_days||0)} วัน`),
+    ...(isRetroLeave(row)?[lineInfoRow('คำขอ','ลาย้อนหลัง',LINE_CI.warning)]:[]),
     ...(remaining==null?[]:[lineInfoRow('สิทธิ์คงเหลือหลังจอง',`${Number(remaining)} วัน`)]),
     lineInfoRow('ส่งถึง','HR / Owner',LINE_CI.primary)
   ],'teal')];
-  if(row.reason) body.push(lineText(`เหตุผล: ${row.reason}`,'xs',LINE_CI.text));
+  if(row.reason) body.push(lineText(`เหตุผลการลา: ${row.reason}`,'xs',LINE_CI.text));
+  if(isRetroLeave(row)) body.push(lineInfoCard([lineText('เหตุผลที่ยื่นย้อนหลัง','xxs',LINE_CI.muted,'bold'),lineText(row.retro_reason||'—','sm',LINE_CI.text)],'coral'));
   if(row.evidence_url) body.push(lineSecondaryButton('ดูหลักฐาน',{type:'uri',label:'ดูหลักฐาน',uri:row.evidence_url},LINE_CI.mintSoft));
   body.push(lineText('ไม่มีผู้อนุมัติรายบุคคล คำขอนี้จึงส่งตรงถึง Owner / HR Admin','xxs',LINE_CI.muted));
   return {type:'flex',altText:`คำขอลาใหม่จาก ${row.nickname||row.first_name}`,contents:lineBubble({
@@ -10330,13 +10369,33 @@ async function notifyCompanyAccessGranted(env,{clientId,targetUser,employee,role
   await pushLineMessages(token,lineUserId,[buildCompanyAccessGrantedFlex({companyName:company?.name||'บริษัทของคุณ',role,dashboardUrl})]);
   return true;
 }
-function buildEmployeeStatusFlex(emp,a){
-  const hasIn=Boolean(a?.check_in_at), hasOut=Boolean(a?.check_out_at), isLeave=a?.status==='leave';
-  const status=isLeave?'วันนี้ลา':hasIn?(a?.status==='late'?'มาสาย':'มาทำงานแล้ว'):'ยังไม่เช็กอิน';
-  const tone=isLeave?'info':hasIn?(a?.status==='late'?'warning':'success'):'warning';
+async function getEmployeeDayStatusContext(db,employeeId,workDate){
+  const [attendance,leave,retro]=await Promise.all([
+    db.prepare('SELECT * FROM attendance WHERE employee_id=?1 AND work_date=?2').bind(Number(employeeId),workDate).first(),
+    db.prepare(`SELECT l.*,lp.name AS leave_type_name FROM leave_requests l LEFT JOIN leave_policies lp ON lp.id=l.policy_id WHERE l.employee_id=?1 AND l.start_date<=?2 AND l.end_date>=?2 AND l.status IN ('pending','awaiting_evidence','approved') ORDER BY CASE l.status WHEN 'approved' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,l.id DESC LIMIT 1`).bind(Number(employeeId),workDate).first().catch(()=>null),
+    db.prepare(`SELECT * FROM attendance_retro_requests WHERE employee_id=?1 AND work_date=?2 AND status='pending' ORDER BY id DESC LIMIT 1`).bind(Number(employeeId),workDate).first().catch(()=>null)
+  ]);
+  return {attendance:attendance||null,leave:leave||null,retro:retro||null,work_date:workDate};
+}
+function buildEmployeeStatusFlex(emp,ctx){
+  const a=ctx?.attendance!==undefined?ctx.attendance:ctx;
+  const leave=ctx?.leave||null,retro=ctx?.retro||null;
+  const hasIn=Boolean(a?.check_in_at), hasOut=Boolean(a?.check_out_at), isLeave=a?.status==='leave'||leave?.status==='approved';
+  const pendingLeave=leave&&['pending','awaiting_evidence'].includes(String(leave.status||''));
+  const pendingRetro=retro?.status==='pending';
+  const status=isLeave?(Number(leave?.is_retroactive||0)?'ลาย้อนหลัง · อนุมัติแล้ว':'วันนี้ลา'):hasIn?(a?.status==='late'?'มาสาย':'มาทำงานแล้ว'):pendingRetro?'รออนุมัติเช็กอินย้อนหลัง':pendingLeave?(Number(leave?.is_retroactive||0)?'รออนุมัติลาย้อนหลัง':leave.status==='awaiting_evidence'?'รอหลักฐานการลา':'รออนุมัติลา'):'ยังไม่เช็กอิน';
+  const tone=isLeave?'info':hasIn?(a?.status==='late'?'warning':'success'):(pendingRetro||pendingLeave?'warning':'warning');
   const rows=[];
-  if(isLeave){ rows.push(lineInfoRow('สถานะ','ลางาน',LINE_CI.info)); }
-  else {
+  if(isLeave){
+    rows.push(lineInfoRow('สถานะ',Number(leave?.is_retroactive||0)?'ลาย้อนหลัง · อนุมัติแล้ว':'ลางาน',LINE_CI.info));
+    if(leave?.leave_type_name||leave?.leave_type) rows.push(lineInfoRow('ประเภท',leave.leave_type_name||leave.leave_type));
+  }else if(pendingLeave){
+    rows.push(lineInfoRow('สถานะ',Number(leave?.is_retroactive||0)?'รอ HR อนุมัติลาย้อนหลัง':leave.status==='awaiting_evidence'?'รอหลักฐานการลา':'รออนุมัติลา',LINE_CI.warning));
+    rows.push(lineInfoRow('ประเภท',leave.leave_type_name||leave.leave_type||'ลางาน'));
+  }else if(pendingRetro){
+    rows.push(lineInfoRow('สถานะ','รอ HR อนุมัติเช็กอินย้อนหลัง',LINE_CI.warning));
+    rows.push(lineInfoRow('เวลาที่แจ้ง',`${retro.requested_check_in_time||'—'} น.`));
+  }else {
     rows.push(lineInfoRow('เช็กอิน',hasIn?formatBangkokTime(a.check_in_at):'—',hasIn?LINE_CI.success:LINE_CI.muted));
     rows.push(lineInfoRow('เช็กเอาต์',hasOut?formatBangkokTime(a.check_out_at):'—'));
     if(Number(a?.late_minutes||0)>0) rows.push(lineInfoRow('มาสาย',`${a.late_minutes} นาที`,LINE_CI.warning));
@@ -10521,10 +10580,14 @@ function buildLeaveSubmittedFlex(row){
     lineInfoRow('ประเภท',row.leave_type_name||row.leave_type,LINE_CI.primaryDark),
     lineInfoRow('วันที่',formatLeaveRange(row)),
     lineInfoRow('จำนวน',`${Number(row.duration_days||0).toFixed(Number(row.duration_days||0)%1?1:0)} วัน`),
+    isRetroLeave(row)?lineInfoRow('คำขอ','ลาย้อนหลัง',LINE_CI.warning):null,
     row.balance?lineInfoRow('สิทธิ์คงเหลือ',row.balance.is_unlimited?'ไม่จำกัด':`${Number(row.balance.remaining_days||0).toFixed(Number(row.balance.remaining_days||0)%1?1:0)} วัน`,LINE_CI.primary):null,
     row.reason?{type:'separator',color:LINE_CI.border}:null,
     row.reason?lineText('เหตุผล','xxs',LINE_CI.muted,'bold'):null,
     row.reason?lineText(row.reason,'sm',LINE_CI.text):null,
+    isRetroLeave(row)?{type:'separator',color:LINE_CI.border}:null,
+    isRetroLeave(row)?lineText('เหตุผลที่ยื่นย้อนหลัง','xxs',LINE_CI.muted,'bold'):null,
+    isRetroLeave(row)?lineText(row.retro_reason||'—','sm',LINE_CI.text):null,
   ].filter(Boolean),'neutral')];
   const footer=[];
   if(awaiting||Number(row.evidence_required)) footer.push(lineSecondaryButton('📎  แนบหลักฐาน',{type:'postback',label:'แนบหลักฐาน',data:`action=leave_attach&id=${row.id}`},LINE_CI.coralSoft));
@@ -10541,8 +10604,10 @@ function buildLeaveApprovalFlex(row){
       lineInfoRow('ประเภท',row.leave_type_name||row.leave_type),
       lineInfoRow('วันที่',formatLeaveRange(row)),
       lineInfoRow('จำนวน',`${Number(row.duration_days||0).toFixed(Number(row.duration_days||0)%1?1:0)} วัน`),
+      ...(isRetroLeave(row)?[lineInfoRow('คำขอ','ลาย้อนหลัง',LINE_CI.warning)]:[]),
     ],'neutral'),
-    lineInfoCard([lineText('เหตุผล','xxs',LINE_CI.muted,'bold'),lineText(row.reason||'—','sm',LINE_CI.text)],'teal'),
+    lineInfoCard([lineText('เหตุผลการลา','xxs',LINE_CI.muted,'bold'),lineText(row.reason||'—','sm',LINE_CI.text)],'teal'),
+    ...(isRetroLeave(row)?[lineInfoCard([lineText('เหตุผลที่ยื่นย้อนหลัง','xxs',LINE_CI.muted,'bold'),lineText(row.retro_reason||'—','sm',LINE_CI.text)],'coral')]:[]),
     {type:'box',layout:'horizontal',spacing:'sm',contents:[
       {type:'box',layout:'vertical',flex:1,paddingAll:'10px',cornerRadius:'12px',backgroundColor:LINE_CI.bg,contents:[lineText('ก่อนลา','xxs',LINE_CI.muted,'bold'),lineText(before,'sm',LINE_CI.primaryDark,'bold',{margin:'xs'})]},
       {type:'box',layout:'vertical',flex:1,paddingAll:'10px',cornerRadius:'12px',backgroundColor:LINE_CI.mintSoft,contents:[lineText('หลังอนุมัติ','xxs',LINE_CI.muted,'bold'),lineText(after,'sm',LINE_CI.primary,'bold',{margin:'xs'})]},
@@ -10557,6 +10622,7 @@ function buildLeaveDecisionFlex(row,approved){
     lineInfoRow('ประเภท',row.leave_type_name||row.leave_type),
     lineInfoRow('วันที่',formatLeaveRange(row)),
     lineInfoRow('จำนวน',`${Number(row.duration_days||0).toFixed(Number(row.duration_days||0)%1?1:0)} วัน`),
+    ...(isRetroLeave(row)?[lineInfoRow('คำขอ','ลาย้อนหลัง',LINE_CI.warning)]:[]),
   ],'neutral')];
   if(!approved) body.push(lineInfoCard([lineText('เหตุผลที่ไม่อนุมัติ','xxs',LINE_CI.muted,'bold'),lineText(row.decision_reason||'ไม่ระบุ','sm',LINE_CI.text)],'error'));
   else body.push(lineText('ระบบอัปเดตสิทธิ์ลาและ Attendance ให้เรียบร้อยแล้ว','xs',LINE_CI.muted));
