@@ -1,0 +1,20 @@
+Nakna P9.29 verification
+
+PASS npm run check
+- src/index.js syntax
+- public/app.js syntax
+- public/leave.js syntax
+- public/attendance.js and remaining public JS syntax
+
+PASS migration smoke
+- Applied migrations 0001..0037 to an empty SQLite database
+- leave_requests.is_retroactive exists
+- leave_requests.retro_reason exists
+
+PASS static behavior checks
+- Employee menu groups check-in / check-out / retro check-in in one Flex child box
+- Text command aliases for retro check-in are present
+- quick_attendance_unavailable mode=retro no longer falls back to normal check-in
+- Normal leave form accepts past dates and requires retro_reason
+- HR work-log distinguishes pending retro check-in / pending leave / pending retro leave
+- Leave approval cards expose retroactive flag and late-filing reason
