@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/leave.css?v=1.0-p7.23" />
+  <link rel="stylesheet" href="/leave.css?v=1.0-p9.29" />
 </head>
 <body>
   <main class="leave-shell">
@@ -78,9 +78,21 @@
         </div>
       </section>
 
+      <section id="retroLeavePanel" class="retro-leave-card hidden">
+        <div class="retro-leave-head">
+          <span class="retro-leave-badge">ย้อนหลัง</span>
+          <div><strong>กำลังยื่นลาย้อนหลัง</strong><small>วันที่ที่เลือกผ่านไปแล้ว ระบบจะส่งให้ HR อนุมัติเหมือนใบลาปกติ</small></div>
+        </div>
+        <label class="textarea-label retro-reason-field">
+          <span class="field-label">ทำไมไม่ได้ยื่นลาในวันนั้น</span>
+          <textarea id="retroReason" name="retro_reason" rows="3" maxlength="500" placeholder="เช่น ป่วยฉุกเฉินและลืมส่งใบลา / ไม่สามารถเข้า LINE ได้"></textarea>
+          <small><span id="retroReasonCount">0</span>/500</small>
+        </label>
+      </section>
+
       <section class="form-card">
         <div class="section-head">
-          <div><span class="step-no">3</span><div><strong>เหตุผล</strong><small>เขียนสั้น ๆ ให้ผู้อนุมัติเข้าใจ</small></div></div>
+          <div><span class="step-no">3</span><div><strong>เหตุผลการลา</strong><small>เขียนสั้น ๆ ให้ผู้อนุมัติเข้าใจว่าลาเพราะอะไร</small></div></div>
         </div>
         <label class="textarea-label"><textarea id="reason" name="reason" rows="4" maxlength="500" placeholder="เช่น มีธุระครอบครัว / ไม่สบายและไปพบแพทย์" required></textarea><small><span id="reasonCount">0</span>/500</small></label>
       </section>
@@ -115,6 +127,6 @@
     </form>
   </main>
 
-  <script src="/leave.js?v=1.0-p7.23" defer></script>
+  <script src="/leave.js?v=1.0-p9.29" defer></script>
 </body>
 </html>

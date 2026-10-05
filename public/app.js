@@ -2063,7 +2063,9 @@ window.decideAttendanceRetro=async(id,decision,button)=>{
 
 function workLogStatus(row){
   if(row.is_future) return '<span class="worklog-status future">ยังไม่ถึงวัน</span>';
-  if(row.approved_leave && !row.check_in_at) return '<span class="worklog-status leave">ลา</span>';
+  if(row.approved_leave && !row.check_in_at) return `<span class="worklog-status leave">${row.leave_is_retroactive?'ลาย้อนหลัง · อนุมัติแล้ว':'ลา'}</span>`;
+  if(!row.check_in_at&&row.retro_request_status==='pending') return '<span class="worklog-status retro">รออนุมัติเช็กอินย้อนหลัง</span>';
+  if(!row.check_in_at&&row.leave_name&&['pending','awaiting_evidence'].includes(String(row.leave_status||''))) return `<span class="worklog-status warn">${row.leave_is_retroactive?'รออนุมัติลาย้อนหลัง':row.leave_status==='awaiting_evidence'?'รอหลักฐานการลา':'รออนุมัติลา'}</span>`;
   if(row.check_in_at && String(row.attendance_source||'')==='retro_approved') return '<span class="worklog-status retro">ย้อนหลัง · HR อนุมัติ</span>';
   if(row.check_in_at && Number(row.late_minutes||0)>0) return `<span class="worklog-status warn">สาย ${Number(row.late_minutes)} นาที</span>`;
   if(row.check_in_at) return '<span class="worklog-status ok">มาทำงาน</span>';
@@ -2102,9 +2104,10 @@ function workLogMatrixCell(r){
   // Approved leave is a first-class attendance status. Show it even on future dates,
   // and never mislabel an approved leave day as "ยังไม่เช็กอิน".
   if(r.approved_leave){
-    parts.push(`<div class="worklog-approved-leave"><div class="worklog-leave-chip">ลา · อนุมัติแล้ว</div><strong>${escapeHtml(r.leave_name||'ลางาน')}</strong><small>${escapeHtml(leavePart)} · ${escapeHtml(leaveDaysLabel)}</small></div>`);
+    const approvedLabel=r.leave_is_retroactive?'ลาย้อนหลัง · อนุมัติแล้ว':'ลา · อนุมัติแล้ว';
+    parts.push(`<div class="worklog-approved-leave"><div class="worklog-leave-chip">${approvedLabel}</div><strong>${escapeHtml(r.leave_name||'ลางาน')}</strong><small>${escapeHtml(leavePart)} · ${escapeHtml(leaveDaysLabel)}</small></div>`);
   }else if(r.leave_name){
-    const pendingLabel=({pending:'รออนุมัติ',awaiting_evidence:'รอหลักฐาน'})[r.leave_status]||'รอดำเนินการ';
+    const pendingLabel=r.leave_is_retroactive?'ลาย้อนหลัง · รอ HR อนุมัติ':(({pending:'รออนุมัติ',awaiting_evidence:'รอหลักฐาน'})[r.leave_status]||'รอดำเนินการ');
     parts.push(`<div class="worklog-leave-note pending">${escapeHtml(r.leave_name)} · ${escapeHtml(pendingLabel)}</div>`);
   }
 
@@ -2146,7 +2149,7 @@ function workLogMatrixCell(r){
   // Pending retro request keeps the day unresolved until HR approves, but show why it is waiting.
   if(!r.check_in_at&&r.retro_request_status==='pending'){
     parts.push(`<div class="worklog-retro-pending">↶ รอ HR อนุมัติย้อนหลัง · ${escapeHtml(r.retro_requested_check_in_time||'—')} น.</div>`);
-  }else if(!r.check_in_at&&!r.approved_leave&&!r.is_future&&r.is_workday!==false){
+  }else if(!r.check_in_at&&!r.approved_leave&&!r.leave_name&&!r.is_future&&r.is_workday!==false){
     parts.push('<div class="worklog-missing-note">ยังไม่เช็กอิน</div>');
   }
   if(!parts.length)return `<div class="worklog-day-card missing"><small>ยังไม่เช็กอิน</small></div>`;
@@ -3017,7 +3020,7 @@ function renderLeaves() {
     ? state.leaves.map(leave => `
       <tr>
         <td data-label="พนักงาน"><div class="person"><div class="avatar">${initial(leave)}</div><div><strong>${escapeHtml(leave.nickname || leave.first_name)} ${escapeHtml(leave.last_name || '')}</strong><small>#LV-${String(leave.id).padStart(4, '0')}</small></div></div></td>
-        <td data-label="ประเภท / วัน"><strong class="table-primary">${escapeHtml(leave.leave_type_name || leaveLabels[leave.leave_type] || leave.leave_type)}</strong><small class="table-secondary">${formatDate(leave.start_date)}${leave.start_date !== leave.end_date ? ` – ${formatDate(leave.end_date)}` : ''} · ${formatLeaveDays(leave.duration_days)}</small></td>
+        <td data-label="ประเภท / วัน"><strong class="table-primary">${escapeHtml(leave.leave_type_name || leaveLabels[leave.leave_type] || leave.leave_type)} ${Number(leave.is_retroactive||0)?'<span class="badge badge-warning">ย้อนหลัง</span>':''}</strong><small class="table-secondary">${formatDate(leave.start_date)}${leave.start_date !== leave.end_date ? ` – ${formatDate(leave.end_date)}` : ''} · ${formatLeaveDays(leave.duration_days)}</small></td>
         <td data-label="ผู้อนุมัติ">${leave.approver_employee_id ? `<div class="approver-inline"><strong>${escapeHtml(leave.approver_nickname || leave.approver_first_name || 'ผู้อนุมัติ')}</strong><small>${leave.status === 'pending' ? 'กำลังรอคนนี้' : 'Approval owner'}</small></div>` : '<span class="badge badge-danger">ยังไม่กำหนด</span>'}</td>
         <td data-label="หลักฐาน"><button class="text-btn ${Number(leave.evidence_count||0) ? '' : 'muted-btn'}" onclick="window.openLeaveDetail(${Number(leave.id)})">${Number(leave.evidence_count||0) ? `📎 ${Number(leave.evidence_count)} ไฟล์` : Number(leave.evidence_required) ? '⚠ ต้องแนบ' : 'ดูรายละเอียด'}</button></td>
         <td data-label="สถานะ">${statusBadge(leave.status)}</td>
@@ -3063,8 +3066,9 @@ window.openLeaveDetail = async id => {
     $('#modalSubtitle').textContent = `${formatDate(row.start_date)}${row.start_date!==row.end_date?` – ${formatDate(row.end_date)}`:''} · ${formatLeaveDays(row.duration_days)}`;
     $('#modalFields').className = 'leave-detail';
     $('#modalFields').innerHTML = `
-      <div class="detail-block"><span>เหตุผล</span><strong>${escapeHtml(row.reason || '—')}</strong></div>
-      <div class="detail-grid"><div><span>ผู้อนุมัติ</span><strong>${escapeHtml(row.approver_nickname || row.approver_first_name || 'ยังไม่กำหนด')}</strong></div><div><span>สถานะ</span>${statusBadge(row.status)}</div></div>
+      <div class="detail-block"><span>เหตุผลการลา</span><strong>${escapeHtml(row.reason || '—')}</strong></div>
+      ${Number(row.is_retroactive||0)?`<div class="detail-block"><span>ลาย้อนหลัง · เหตุผลที่ไม่ได้ยื่นในวันนั้น</span><strong>${escapeHtml(row.retro_reason || '—')}</strong></div>`:''}
+      <div class="detail-grid"><div><span>ผู้อนุมัติ</span><strong>${escapeHtml(row.approver_nickname || row.approver_first_name || 'ยังไม่กำหนด')}</strong></div><div><span>สถานะ</span>${Number(row.is_retroactive||0)?'<span class="badge badge-warning">ลาย้อนหลัง</span> ':''}${statusBadge(row.status)}</div></div>
       ${row.decision_reason ? `<div class="detail-block"><span>เหตุผลการพิจารณา</span><strong>${escapeHtml(row.decision_reason)}</strong></div>` : ''}
       <div class="detail-block"><span>หลักฐาน</span><div class="evidence-links">${(result.evidence||[]).length ? result.evidence.map(ev => `<a class="secondary-btn" href="/api/leave-evidence/${ev.id}" target="_blank" rel="noopener">📎 ${escapeHtml(ev.file_name || `หลักฐาน ${ev.id}`)}</a>`).join('') : '<small class="muted">ไม่มีไฟล์แนบ</small>'}</div>${['pending','awaiting_evidence'].includes(row.status)?`<div class="evidence-upload"><input id="leaveEvidenceFile" type="file" accept="image/*,.pdf" /><button type="button" class="secondary-btn" onclick="window.uploadLeaveEvidence(${id})">อัปโหลดหลักฐาน</button></div>`:''}</div>`;
     $('#modalSave').textContent = 'ปิด';
