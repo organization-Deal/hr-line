@@ -1,12 +1,14 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.29-RETRO-ATTENDANCE-LEAVE';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.29-RETRO-ATTENDANCE-LEAVE';
-const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status';
+const NAKNA_RUNTIME_RELEASE = 'P9.30-LEAVE-SCHEMA-HOTFIX';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.30-LEAVE-SCHEMA-HOTFIX';
+const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
+// P9.30: cache per DB binding, never share readiness between databases.
+const LEAVE_RETRO_SCHEMA_TASKS = new WeakMap();
 const AUTH_CACHE = new Map();
 const AUTH_CACHE_TTL_MS = 15 * 1000;
 const LINE_MENU_TOKEN_CACHE = new Map();
@@ -8390,6 +8392,7 @@ async function pushHrCaseSubmittedConfirmation(env,row){
 async function getPublicLeaveForm(env,token){
   const access=await getEmployeePortalAccess(env.DB,token);
   if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิด “ขอลางาน” จาก LINE ใหม่'},401);
+  await ensureLeaveRetroSchemaReady(env.DB);
   await ensureDefaultLeavePolicies(env.DB,Number(access.client_id));
   const year=Number(dateInBangkok().slice(0,4));
   const profile=await getEmployeeLeaveProfile(env.DB,Number(access.employee_id),Number(access.client_id),year);
@@ -9176,6 +9179,85 @@ async function ensureDashboardAttentionReady(db){
   SCHEMA_READY.add('dashboard_attention_reads');
 }
 
+// P9.30 — P9.29 started reading/writing these two columns unconditionally,
+// but ensureV050Ready only checked old table names. Deploying without migration
+// 0037 therefore broke NORMAL leave too. Repair only this additive schema delta.
+// Use a targeted guard here to handle concurrent ALTER calls and cache by DB.
+async function ensureLeaveRetroSchemaReady(db){
+  const cached=LEAVE_RETRO_SCHEMA_TASKS.get(db);
+  if(cached&&cached.expiresAt>Date.now())return cached.promise;
+  const entry={expiresAt:Infinity,promise:null};
+  entry.promise=(async()=>{
+    const definitions=[['is_retroactive','INTEGER NOT NULL DEFAULT 0'],['retro_reason','TEXT']];
+    const readColumns=async()=>{
+      const result=await db.prepare('PRAGMA table_info("leave_requests")').all();
+      if(!Array.isArray(result?.results)||!result.results.length){
+        throw new Error('leave_requests table is missing; base leave schema must exist');
+      }
+      return new Set(result.results.map(row=>String(row.name)));
+    };
+    let columns=await readColumns();
+    const added=[];
+    for(const [name,type] of definitions){
+      if(columns.has(name))continue;
+      try{
+        // Identifiers/types are constants above, never user-supplied SQL.
+        await db.prepare(`ALTER TABLE leave_requests ADD COLUMN ${name} ${type}`).run();
+        added.push(name);
+      }catch(error){
+        // Another Worker isolate (or a manual migration) may add it first.
+        // Ignore ONLY a confirmed duplicate-column race, not quota/DB errors.
+        if(!/duplicate column name/i.test(String(error?.message||error)))throw error;
+        columns=await readColumns();
+        if(!columns.has(name))throw error;
+      }
+    }
+    // Do not mark readiness on a partial/failed migration.
+    columns=await readColumns();
+    if(definitions.some(([name])=>!columns.has(name)))throw new Error('leave retro schema verification failed');
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_leave_retroactive_status ON leave_requests(client_id,is_retroactive,status,created_at)`).run();
+
+    // Reconcile only the exact 0037 migration, AFTER verifying its effects.
+    // This project uses Wrangler's default d1_migrations table. Do not create a
+    // second/custom journal or touch records for any other migration.
+    let journalSynced=true;
+    try{
+      const journal=await db.prepare('PRAGMA table_info("d1_migrations")').all();
+      if((journal.results||[]).length){
+        if(!(journal.results||[]).some(row=>row.name==='name'))throw new Error('unsupported d1_migrations schema');
+        const index=await db.prepare('PRAGMA index_info("idx_leave_retroactive_status")').all();
+        const expected=['client_id','is_retroactive','status','created_at'];
+        if(JSON.stringify((index.results||[]).map(row=>row.name))!==JSON.stringify(expected)){
+          throw new Error('leave retro index definition differs; migration journal not changed');
+        }
+        await db.prepare(`INSERT INTO d1_migrations(name) SELECT ?1 WHERE NOT EXISTS (SELECT 1 FROM d1_migrations WHERE name=?1)`)
+          .bind('0037_leave_retroactive.sql').run();
+      }
+    }catch(error){
+      // A journal-only failure must not reject a valid leave request whose
+      // required columns exist. Retry journal reconciliation on the next call.
+      journalSynced=false;
+      console.warn(JSON.stringify({level:'warn',event:'leave_retro_migration_journal_pending',release:NAKNA_RUNTIME_RELEASE,message:String(error?.message||error)}));
+    }
+    if(added.length)console.log(JSON.stringify({level:'info',event:'leave_retro_schema_repaired',release:NAKNA_RUNTIME_RELEASE,columns:added}));
+    return {ok:true,added_columns:added,journal_synced:journalSynced};
+  })().then(result=>{
+    // Revalidate periodically (also protects against an operator restoring D1).
+    entry.expiresAt=result.journal_synced?Date.now()+60000:0;
+    return result;
+  }).catch(error=>{
+    if(LEAVE_RETRO_SCHEMA_TASKS.get(db)===entry)LEAVE_RETRO_SCHEMA_TASKS.delete(db);
+    console.error(JSON.stringify({level:'error',event:'leave_retro_schema_repair_failed',release:NAKNA_RUNTIME_RELEASE,message:String(error?.message||error)}));
+    const failure=httpError('ระบบบันทึกใบลายังไม่พร้อม กรุณาลองอีกครั้งหรือแจ้ง HR พร้อมรหัส LEAVE_SCHEMA_NOT_READY',503);
+    failure.code='LEAVE_SCHEMA_NOT_READY';
+    throw failure;
+  });
+  // Cache the normalized promise so ALL simultaneous callers get the same
+  // safe 503 on failure, not a raw SQLite exception from the inner task.
+  LEAVE_RETRO_SCHEMA_TASKS.set(db,entry);
+  return entry.promise;
+}
+
 async function ensureV050Ready(db){
   if(SCHEMA_READY.has('v050')) return;
   const ready=await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('leave_policies','leave_evidence_share_tokens')").first();
@@ -9813,6 +9895,7 @@ async function createLeaveRequest(env,{clientId,employeeId,policyId,leaveType,st
   // No named approver is valid: the request falls back to the Owner/HR dashboard queue.
   // This matches Nakna's workflow where companies can choose manager approval OR direct HR approval.
   const status=evidenceRequired?'awaiting_evidence':'pending';
+  await ensureLeaveRetroSchemaReady(env.DB);
   const result=await env.DB.prepare(`INSERT INTO leave_requests (client_id,employee_id,leave_type,policy_id,start_date,end_date,reason,status,approver_employee_id,duration_days,day_part,evidence_required,evidence_count,submitted_via,is_retroactive,retro_reason) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,?13,?14,?15)`)
     .bind(clientId,employeeId,policy.code,Number(policy.id),startDate,endDate,reason||null,status,approverId,duration,dayPart,evidenceRequired?1:0,submittedVia,isRetroactive?1:0,isRetroactive?String(retroReason||'').trim():null).run();
   const id=Number(result.meta.last_row_id);
@@ -9990,6 +10073,7 @@ async function createHrCaseFromLine(env,emp,subject,detail){
 }
 
 async function getEmployeeServiceHistory(db,emp){
+  await ensureLeaveRetroSchemaReady(db);
   const [leaves,cases]=await db.batch([
     db.prepare(`SELECT l.id,l.start_date,l.end_date,l.duration_days,l.status,l.decision_reason,l.is_retroactive,l.retro_reason,lp.name AS leave_type_name FROM leave_requests l LEFT JOIN leave_policies lp ON lp.id=l.policy_id WHERE l.employee_id=?1 ORDER BY l.created_at DESC LIMIT 5`).bind(Number(emp.id)),
     db.prepare(`SELECT id,subject,status,last_reply_to_employee,updated_at FROM hr_cases WHERE employee_id=?1 ORDER BY updated_at DESC LIMIT 5`).bind(Number(emp.id))

@@ -1,0 +1,12 @@
+{
+  "base": "P9.29-RETRO-ATTENDANCE-LEAVE",
+  "release": "P9.30-LEAVE-SCHEMA-HOTFIX",
+  "runtime_files_changed": [
+    "src/index.js"
+  ],
+  "base_src_sha256": "f38bb651a72e25c829ef4e72849457e322a9848f62e76e5a3ae417ae0d1c27e0",
+  "new_src_sha256": "3aee1eeb08337a7f9da6506cd5e33df1c60f1e49e1850965ce1afa39cc4f5a56",
+  "new_sql_migrations": [],
+  "production_deployed": false,
+  "tests_passed": 56
+}

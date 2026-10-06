@@ -1,0 +1,377 @@
+NAKNA P9.30 — LOCAL REGRESSION TEST RESULTS
+Base: P9.29 supplied in this conversation; previous patches retained.
+Runtime change: src/index.js only.
+No production deployment, credentials, real employee records, or LINE calls.
+
+Syntax: npm run check PASS (all 9 JavaScript targets in package.json)
+Leave/schema regression: 30 PASS / 0 FAIL / 0 SKIP
+HR daily regression: 26 PASS / 0 FAIL / 0 SKIP
+TOTAL: 56 PASS / 0 FAIL
+
+The HR regression test changes only the old hard-coded release-label assertion.
+Both old-version reproduction tests were run with local source paths supplied.
+SQLite models D1 SQL behavior; Cloudflare network/permissions/LINE delivery are NOT verified.
+
+=== Leave/schema suite ===
+TAP version 13
+# (node:1804) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P9.29 reproduces screenshot: normal leave POST fails on missing is_retroactive
+ok 1 - P9.29 reproduces screenshot: normal leave POST fails on missing is_retroactive
+  ---
+  duration_ms: 195.061989
+  type: 'test'
+  ...
+# Subtest: P9.30 real public POST: legacy DB repairs automatically and normal leave is pending
+ok 2 - P9.30 real public POST: legacy DB repairs automatically and normal leave is pending
+  ---
+  duration_ms: 167.952203
+  type: 'test'
+  ...
+# Subtest: real public GET repairs before showing the form; fields need not be resubmitted elsewhere
+ok 3 - real public GET repairs before showing the form; fields need not be resubmitted elsewhere
+  ---
+  duration_ms: 156.389847
+  type: 'test'
+  ...
+# Subtest: expired/invalid portal token remains 401 and never repairs schema or creates leave
+ok 4 - expired/invalid portal token remains 401 and never repairs schema or creates leave
+  ---
+  duration_ms: 119.380655
+  type: 'test'
+  ...
+# Subtest: retroactive public POST stores BOTH reasons and requires approval; no immediate attendance change
+ok 5 - retroactive public POST stores BOTH reasons and requires approval; no immediate attendance change
+  ---
+  duration_ms: 135.986207
+  type: 'test'
+  ...
+# Subtest: retroactive leave without explanation is still rejected before INSERT
+ok 6 - retroactive leave without explanation is still rejected before INSERT
+  ---
+  duration_ms: 142.752411
+  type: 'test'
+  ...
+# Subtest: mixed retrospective and future date range remains invalid
+ok 7 - mixed retrospective and future date range remains invalid
+  ---
+  duration_ms: 128.770771
+  type: 'test'
+  ...
+# Subtest: half-day leave still calculates 0.5 days
+ok 8 - half-day leave still calculates 0.5 days
+  ---
+  duration_ms: 129.468951
+  type: 'test'
+  ...
+# Subtest: old leaves, evidence links and approval events are untouched by additive repair
+ok 9 - old leaves, evidence links and approval events are untouched by additive repair
+  ---
+  duration_ms: 128.127692
+  type: 'test'
+  ...
+# Subtest: partial migration with is_retroactive already present adds only the other column
+ok 10 - partial migration with is_retroactive already present adds only the other column
+  ---
+  duration_ms: 135.643571
+  type: 'test'
+  ...
+# Subtest: partial migration with retro_reason already present adds only the other column
+ok 11 - partial migration with retro_reason already present adds only the other column
+  ---
+  duration_ms: 140.524103
+  type: 'test'
+  ...
+# Subtest: already migrated DB is not ALTERed and values are preserved
+ok 12 - already migrated DB is not ALTERed and values are preserved
+  ---
+  duration_ms: 131.925947
+  type: 'test'
+  ...
+# Subtest: 20 simultaneous schema requests share a single repair task
+ok 13 - 20 simultaneous schema requests share a single repair task
+  ---
+  duration_ms: 124.533739
+  type: 'test'
+  ...
+# Subtest: separate Worker isolates tolerate a real duplicate-column race on the same database
+ok 14 - separate Worker isolates tolerate a real duplicate-column race on the same database
+  ---
+  duration_ms: 135.511046
+  type: 'test'
+  ...
+# Subtest: a real D1/ALTER failure fails closed without INSERT, clears failed cache, and succeeds on retry
+ok 15 - a real D1/ALTER failure fails closed without INSERT, clears failed cache, and succeeds on retry
+  ---
+  duration_ms: 130.02414
+  type: 'test'
+  ...
+# Subtest: a fake duplicate error is not swallowed unless the column actually exists
+ok 16 - a fake duplicate error is not swallowed unless the column actually exists
+  ---
+  duration_ms: 121.033214
+  type: 'test'
+  ...
+# Subtest: migration journal records only verified 0037 once; other migrations remain unchanged
+ok 17 - migration journal records only verified 0037 once; other migrations remain unchanged
+  ---
+  duration_ms: 126.213277
+  type: 'test'
+  ...
+# Subtest: journal-only failure does not lose leave or lie about migration completion; next call retries
+ok 18 - journal-only failure does not lose leave or lie about migration completion; next call retries
+  ---
+  duration_ms: 134.722182
+  type: 'test'
+  ...
+# Subtest: legacy installation without Wrangler journal is repaired without creating a second journal
+ok 19 - legacy installation without Wrangler journal is repaired without creating a second journal
+  ---
+  duration_ms: 124.199095
+  type: 'test'
+  ...
+# Subtest: cache is scoped per database; a second independent database is repaired too
+ok 20 - cache is scoped per database; a second independent database is repaired too
+  ---
+  duration_ms: 246.768426
+  type: 'test'
+  ...
+# Subtest: employee leave-history query also works before opening/submitting the leave form
+ok 21 - employee leave-history query also works before opening/submitting the leave form
+  ---
+  duration_ms: 120.755144
+  type: 'test'
+  ...
+# Subtest: duplicate leave is still rejected; there is no auto-resubmission/double reservation
+ok 22 - duplicate leave is still rejected; there is no auto-resubmission/double reservation
+  ---
+  duration_ms: 123.736518
+  type: 'test'
+  ...
+# Subtest: cross-company employee access remains rejected
+ok 23 - cross-company employee access remains rejected
+  ---
+  duration_ms: 140.015032
+  type: 'test'
+  ...
+# Subtest: insufficient entitlement remains rejected and does not bypass HR policy
+ok 24 - insufficient entitlement remains rejected and does not bypass HR policy
+  ---
+  duration_ms: 130.170126
+  type: 'test'
+  ...
+# Subtest: retro leave approval still needs an authorized approver and then updates attendance
+ok 25 - retro leave approval still needs an authorized approver and then updates attendance
+  ---
+  duration_ms: 139.121538
+  type: 'test'
+  ...
+# Subtest: required evidence remains required in public form
+ok 26 - required evidence remains required in public form
+  ---
+  duration_ms: 130.411812
+  type: 'test'
+  ...
+# Subtest: health reports the new runtime release
+ok 27 - health reports the new runtime release
+  ---
+  duration_ms: 133.481922
+  type: 'test'
+  ...
+# Subtest: all concurrent callers receive safe 503 on schema failure and a later call retries
+ok 28 - all concurrent callers receive safe 503 on schema failure and a later call retries
+  ---
+  duration_ms: 129.111604
+  type: 'test'
+  ...
+# Subtest: an index-creation failure does not record 0037 complete and is recoverable
+ok 29 - an index-creation failure does not record 0037 complete and is recoverable
+  ---
+  duration_ms: 134.853756
+  type: 'test'
+  ...
+# Subtest: already-applied migration keeps its timestamp and does not gain a duplicate history record
+ok 30 - already-applied migration keeps its timestamp and does not gain a duplicate history record
+  ---
+  duration_ms: 129.452407
+  type: 'test'
+  ...
+1..30
+# tests 30
+# suites 0
+# pass 30
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4242.406315
+
+=== HR daily regression suite ===
+TAP version 13
+# (node:1886) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: original P9.27 reproduces the undefined helper runtime failure
+ok 1 - original P9.27 reproduces the undefined helper runtime failure
+  ---
+  duration_ms: 33.555151
+  type: 'test'
+  ...
+# Subtest: role recipients include account-only Owner/Co-Owner, canonical accounts and deduplicate HR
+ok 2 - role recipients include account-only Owner/Co-Owner, canonical accounts and deduplicate HR
+  ---
+  duration_ms: 14.256405
+  type: 'test'
+  ...
+# Subtest: window uses Bangkok time, includes 13:00/13:21/17:59 and excludes 12:59/18:00
+ok 3 - window uses Bangkok time, includes 13:00/13:21/17:59 and excludes 12:59/18:00
+  ---
+  duration_ms: 2.965756
+  type: 'test'
+  ...
+# Subtest: real scheduler path at 13:21 creates real SQLite tables and sends once per recipient
+ok 4 - real scheduler path at 13:21 creates real SQLite tables and sends once per recipient
+  ---
+  duration_ms: 21.688342
+  type: 'test'
+  ...
+# Subtest: cron heartbeat before send time has no outgoing message
+ok 5 - cron heartbeat before send time has no outgoing message
+  ---
+  duration_ms: 3.621453
+  type: 'test'
+  ...
+# Subtest: concurrent invocations claim each recipient only once
+ok 6 - concurrent invocations claim each recipient only once
+  ---
+  duration_ms: 7.530111
+  type: 'test'
+  ...
+# Subtest: partial failure retries only failed recipient with SAME retry key and SAME payload
+ok 7 - partial failure retries only failed recipient with SAME retry key and SAME payload
+  ---
+  duration_ms: 8.151758
+  type: 'test'
+  ...
+# Subtest: HTTP 401 is not recorded as accepted and is not automatically retried
+ok 8 - HTTP 401 is not recorded as accepted and is not automatically retried
+  ---
+  duration_ms: 6.813624
+  type: 'test'
+  ...
+# Subtest: 409 with accepted-request-id means accepted, plain 409 does not
+ok 9 - 409 with accepted-request-id means accepted, plain 409 does not
+  ---
+  duration_ms: 12.512853
+  type: 'test'
+  ...
+# Subtest: network timeout path retains retries; no actual outbound network is used
+ok 10 - network timeout path retains retries; no actual outbound network is used
+  ---
+  duration_ms: 5.530671
+  type: 'test'
+  ...
+# Subtest: missing token is visible without an HTTP request or a false success
+ok 11 - missing token is visible without an HTTP request or a false success
+  ---
+  duration_ms: 4.994399
+  type: 'test'
+  ...
+# Subtest: lease expiry recovers worker crashes with the same stored retry key
+ok 12 - lease expiry recovers worker crashes with the same stored retry key
+  ---
+  duration_ms: 7.657038
+  type: 'test'
+  ...
+# Subtest: permission revocation prevents pending retry; ordinary employees get no summary access
+ok 13 - permission revocation prevents pending retry; ordinary employees get no summary access
+  ---
+  duration_ms: 5.811175
+  type: 'test'
+  ...
+# Subtest: manual Thai command replies only to authorized user and does not mark cron success
+ok 14 - manual Thai command replies only to authorized user and does not mark cron success
+  ---
+  duration_ms: 6.006562
+  type: 'test'
+  ...
+# Subtest: manual command in group chat never reveals employee summary
+ok 15 - manual command in group chat never reveals employee summary
+  ---
+  duration_ms: 3.244568
+  type: 'test'
+  ...
+# Subtest: daily status command displays missing heartbeat and actual runtime version
+ok 16 - daily status command displays missing heartbeat and actual runtime version
+  ---
+  duration_ms: 4.631633
+  type: 'test'
+  ...
+# Subtest: forged postback cannot select an unrelated company
+ok 17 - forged postback cannot select an unrelated company
+  ---
+  duration_ms: 4.55413
+  type: 'test'
+  ...
+# Subtest: multiple authorized companies require selection rather than guessing
+ok 18 - multiple authorized companies require selection rather than guessing
+  ---
+  duration_ms: 3.553102
+  type: 'test'
+  ...
+# Subtest: private HR case counts are hidden from department-only delegate
+ok 19 - private HR case counts are hidden from department-only delegate
+  ---
+  duration_ms: 4.006181
+  type: 'test'
+  ...
+# Subtest: failed company does not stop another company from receiving its own summary
+ok 20 - failed company does not stop another company from receiving its own summary
+  ---
+  duration_ms: 5.878714
+  type: 'test'
+  ...
+# Subtest: new calendar day sends a new round; prior P9.27 aggregate does not exclude new Owner recipients
+ok 21 - new calendar day sends a new round; prior P9.27 aggregate does not exclude new Owner recipients
+  ---
+  duration_ms: 7.819668
+  type: 'test'
+  ...
+# Subtest: authenticated diagnostics API rejects employee role; HR response contains no raw identities
+ok 22 - authenticated diagnostics API rejects employee role; HR response contains no raw identities
+  ---
+  duration_ms: 18.57681
+  type: 'test'
+  ...
+# Subtest: revoked Co-Owner is not retried using a queued snapshot
+ok 23 - revoked Co-Owner is not retried using a queued snapshot
+  ---
+  duration_ms: 6.1612
+  type: 'test'
+  ...
+# Subtest: HTTP 429 is a visible failure and does not keep consuming requests
+ok 24 - HTTP 429 is a visible failure and does not keep consuming requests
+  ---
+  duration_ms: 6.10612
+  type: 'test'
+  ...
+# Subtest: retry limit bounds repeated server failures and marks them failed
+ok 25 - retry limit bounds repeated server failures and marks them failed
+  ---
+  duration_ms: 18.321473
+  type: 'test'
+  ...
+# Subtest: no eligible recipients is reported, not silently recorded as sent
+ok 26 - no eligible recipients is reported, not silently recorded as sent
+  ---
+  duration_ms: 4.416076
+  type: 'test'
+  ...
+1..26
+# tests 26
+# suites 0
+# pass 26
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 304.685496
