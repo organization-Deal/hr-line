@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.30-LEAVE-SCHEMA-HOTFIX';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.30-LEAVE-SCHEMA-HOTFIX';
-const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair';
+const NAKNA_RUNTIME_RELEASE = 'P9.31-ENROLLMENT-TRIAL-RECOVERY';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.31-ENROLLMENT-TRIAL-RECOVERY';
+const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -4883,7 +4883,7 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if(path==='/api/subscription' && method==='GET'){
-    await ensurePhase5Defaults(env.DB,clientId); const overview=await getSubscriptionOverview(env.DB,clientId); return json({...overview,saas_admin:isNaknaSaasAdmin(env,auth.user?.email)});
+    await ensurePhase5Defaults(env.DB,clientId); const overview=await getSubscriptionOverview(env.DB,clientId); return json({...overview,saas_admin:isNaknaSaasAdmin(env,auth.user?.email),can_change_plan:await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id),enrollment:await getEmployeeEnrollmentStatus(env.DB,clientId),release:NAKNA_RUNTIME_RELEASE});
   }
 
   if(path==='/api/subscription/plan' && method==='POST'){
@@ -4903,9 +4903,19 @@ async function handleApi(request, env, url, auth, ctx) {
     if(!isNaknaSaasAdmin(env,auth.user?.email))return json({error:'NAKNA_ADMIN_REQUIRED'},403); const id=Number(adminPlanMatch[1]); const body=await safeJson(request); const row=await env.DB.prepare('SELECT * FROM subscription_plans WHERE id=?1').bind(id).first(); if(!row)return json({error:'ไม่พบแพ็กเกจ'},404); await env.DB.prepare(`UPDATE subscription_plans SET name=?1,description=?2,pricing_mode=?3,base_fee=?4,price_per_seat=?5,included_seats=?6,max_seats=?7,trial_days=?8,status=?9,updated_at=CURRENT_TIMESTAMP WHERE id=?10`).bind(String(body.name??row.name).trim(),String(body.description??row.description??'').trim()||null,['per_seat','flat','custom'].includes(String(body.pricing_mode))?String(body.pricing_mode):row.pricing_mode,Math.max(0,num(body.base_fee,row.base_fee)),Math.max(0,num(body.price_per_seat,row.price_per_seat)),Math.max(0,Math.floor(num(body.included_seats,row.included_seats))),body.max_seats===null?null:(body.max_seats===undefined?row.max_seats:Math.max(1,Math.floor(num(body.max_seats,row.max_seats||1)))),Math.max(0,Math.floor(num(body.trial_days,row.trial_days||30))),['active','inactive','archived'].includes(String(body.status))?String(body.status):row.status,id).run(); return json({ok:true});
   }
 
+  const adminTrialExtensionMatch=path.match(/^\/api\/admin\/saas\/subscriptions\/(\d+)\/extend-trial$/);
+  if(adminTrialExtensionMatch&&method==='POST'){
+    return json(await extendCompanyTrial(env,auth,Number(adminTrialExtensionMatch[1]),await safeJson(request)));
+  }
+
   const adminSubscriptionMatch=path.match(/^\/api\/admin\/saas\/subscriptions\/(\d+)\/status$/);
   if(adminSubscriptionMatch && method==='POST'){
-    if(!isNaknaSaasAdmin(env,auth.user?.email))return json({error:'NAKNA_ADMIN_REQUIRED'},403); const body=await safeJson(request); const status=['trialing','active','past_due','expired','cancelled'].includes(String(body.status))?String(body.status):null; if(!status)return json({error:'สถานะไม่ถูกต้อง'},400); const client=await getClient(env.DB,Number(adminSubscriptionMatch[1])); if(!client)return json({error:'ไม่พบบริษัท'},404); await ensurePhase5Defaults(env.DB,Number(client.id)); await env.DB.prepare(`UPDATE company_subscriptions SET status=?1,updated_at=CURRENT_TIMESTAMP WHERE client_id=?2`).bind(status,Number(client.id)).run(); return json({ok:true});
+    if(!isNaknaSaasAdmin(env,auth.user?.email))return json({error:'NAKNA_ADMIN_REQUIRED'},403); const body=await safeJson(request); const status=['trialing','active','past_due','expired','cancelled'].includes(String(body.status))?String(body.status):null; if(!status)return json({error:'สถานะไม่ถูกต้อง'},400); const client=await getClient(env.DB,Number(adminSubscriptionMatch[1])); if(!client)return json({error:'ไม่พบบริษัท'},404); await ensurePhase5Defaults(env.DB,Number(client.id));
+    if(status==='trialing'){
+      const current=await env.DB.prepare('SELECT trial_ends_at FROM company_subscriptions WHERE client_id=?1').bind(Number(client.id)).first();
+      if(!current?.trial_ends_at||!Number.isFinite(Date.parse(current.trial_ends_at))||Date.parse(current.trial_ends_at)<=Date.now())return json({error:'วันสิ้นสุด Trial เดิมหมดแล้ว กรุณาใช้ปุ่มต่อทดลองใช้และเลือกวันสิ้นสุดใหม่'},409);
+    }
+    await env.DB.prepare(`UPDATE company_subscriptions SET status=?1,updated_at=CURRENT_TIMESTAMP WHERE client_id=?2`).bind(status,Number(client.id)).run(); return json({ok:true});
   }
 
   const adminPaidMatch=path.match(/^\/api\/admin\/saas\/invoices\/(\d+)\/mark-paid$/);
@@ -5782,6 +5792,8 @@ async function getPublicInvite(db, token) {
       remaining_uses: Math.max(0, Number(invite.max_uses) - Number(invite.used_count)),
       locations: locations.results || [],
     },
+    enrollment:publicEnrollmentStatus(await getEmployeeEnrollmentStatus(db,Number(invite.client_id))),
+    release:NAKNA_RUNTIME_RELEASE,
   });
 }
 
@@ -5823,6 +5835,7 @@ async function acceptPublicInvite(request, env, token) {
       String(body.emergency_contact_phone || '').trim() || null,
     ).run();
   } catch (error) {
+    if(error?.enrollment){const enrollment=publicEnrollmentStatus(error.enrollment);return json({error:enrollment.message,code:enrollment.code,enrollment},error.status||409);}
     if (/UNIQUE constraint failed: employees\.email/i.test(String(error?.message || error)) && email) {
       return json({ error: 'อีเมลนี้มีอยู่ในบริษัทแล้ว กรุณาติดต่อ HR' }, 409);
     }
@@ -8129,8 +8142,97 @@ async function materializePointCashRewardsForPayroll(db,clientId,period){
   return rows.length;
 }
 
+// P9.31: all employee-entry paths share one subscription/seat decision.
+// No automatic trial renewal, paid activation, quota removal or tenant allowlist.
+async function getEmployeeEnrollmentStatus(db,clientId,additional=1){
+  const cid=Number(clientId), extra=Number(additional);
+  if(!Number.isSafeInteger(cid)||cid<1||!Number.isSafeInteger(extra)||extra<0)throw httpError('ข้อมูลบริษัทหรือจำนวนพนักงานไม่ถูกต้อง',400);
+  await ensurePhase5Defaults(db,cid);
+  await refreshSubscriptionState(db,cid);
+  const row=await db.prepare(`SELECT cs.status,cs.trial_ends_at,sp.code AS plan_code,sp.max_seats
+    FROM company_subscriptions cs LEFT JOIN subscription_plans sp ON sp.id=cs.plan_id
+    WHERE cs.client_id=?1`).bind(cid).first();
+  const usage=await activeSeatUsage(db,cid);
+  const common={subscription_status:row?.status||null,trial_ends_at:row?.trial_ends_at||null,
+    active_employee_seats:usage.active_employee_seats,line_connected_seats:usage.line_connected_seats,
+    max_seats:row?.max_seats==null?null:Number(row.max_seats)};
+  const deny=(code,message,httpStatus)=>({...common,allowed:false,code,message,http_status:httpStatus});
+  if(!row||!row.plan_code)return deny('SUBSCRIPTION_NOT_READY','บริษัทนี้ยังตั้งค่าแพ็กเกจไม่ครบ กรุณาให้ผู้ดูแลนากนะตรวจสอบก่อนเพิ่มพนักงาน',409);
+  if(row.status==='cancelled')return deny('SUBSCRIPTION_CANCELLED','แพ็กเกจของบริษัทถูกยกเลิก กรุณาให้ผู้ดูแลบริษัทติดต่อผู้ดูแลนากนะ',402);
+  if(row.status==='expired')return deny(row.plan_code==='trial'?'TRIAL_EXPIRED':'SUBSCRIPTION_EXPIRED',
+    row.plan_code==='trial'?'ช่วงทดลองใช้ของบริษัทหมดอายุ ให้ผู้ดูแลนากนะต่อ Trial เฉพาะบริษัท หรือให้เจ้าของบริษัทเปิดแพ็กเกจ ก่อนเพิ่มพนักงาน':'แพ็กเกจของบริษัทหมดอายุ กรุณาให้เจ้าของบริษัทตรวจสอบแพ็กเกจ',402);
+  // Preserve the existing past_due policy; do not silently change billing access.
+  if(!['trialing','active','past_due'].includes(String(row.status)))return deny('SUBSCRIPTION_NOT_READY','ไม่สามารถตรวจสิทธิ์แพ็กเกจของบริษัทได้ กรุณาติดต่อผู้ดูแลนากนะ',409);
+  if(row.status==='trialing'&&(!row.trial_ends_at||!Number.isFinite(Date.parse(row.trial_ends_at))))return deny('TRIAL_DATE_INVALID','วันสิ้นสุดทดลองใช้ของบริษัทไม่ถูกต้อง กรุณาให้ผู้ดูแลนากนะตรวจสอบ',409);
+  if(row.max_seats!=null&&Number(row.max_seats)>0&&usage.active_employee_seats+extra>Number(row.max_seats))return deny('SEAT_LIMIT_REACHED',`แพ็กเกจนี้รองรับสูงสุด ${Number(row.max_seats)} Active Employee Seats กรุณาให้เจ้าของบริษัทตรวจสอบจำนวนพนักงานหรือแพ็กเกจ`,409);
+  return {...common,allowed:true,code:'ENROLLMENT_READY',message:'เพิ่มพนักงานได้',http_status:200};
+}
+
+function publicEnrollmentStatus(status){
+  const messages={
+    TRIAL_EXPIRED:'บริษัทนี้หมดช่วงทดลองใช้ กรุณาแจ้ง HR ให้ผู้ดูแลนากนะต่อ Trial หรือเปิดแพ็กเกจของบริษัทก่อน คุณไม่ต้องชำระเงินเอง',
+    SUBSCRIPTION_EXPIRED:'แพ็กเกจของบริษัทหมดอายุ กรุณาแจ้ง HR ให้เจ้าของบริษัทตรวจสอบ คุณไม่ต้องชำระเงินเอง',
+    SUBSCRIPTION_CANCELLED:'บริษัทพักการรับพนักงานผ่านระบบนี้ กรุณาติดต่อ HR',
+    SEAT_LIMIT_REACHED:'จำนวนพนักงานถึงขีดจำกัดแพ็กเกจของบริษัทแล้ว กรุณาติดต่อ HR',
+    SUBSCRIPTION_NOT_READY:'บริษัทต้องตรวจสอบการตั้งค่าแพ็กเกจก่อน กรุณาติดต่อ HR',
+    TRIAL_DATE_INVALID:'บริษัทต้องตรวจสอบวันสิ้นสุดทดลองใช้ก่อน กรุณาติดต่อ HR',
+  };
+  return {allowed:Boolean(status.allowed),code:status.code,
+    message:status.allowed?'พร้อมกรอกข้อมูลเข้าร่วมทีม':(messages[status.code]||'บริษัทต้องตรวจสอบสิทธิ์เพิ่มพนักงาน กรุณาติดต่อ HR')};
+}
+
 async function assertSeatCapacity(db,clientId,additional=1){
-  await ensurePhase5Defaults(db,clientId); await refreshSubscriptionState(db,clientId); const row=await db.prepare(`SELECT cs.status,sp.max_seats FROM company_subscriptions cs LEFT JOIN subscription_plans sp ON sp.id=cs.plan_id WHERE cs.client_id=?1`).bind(Number(clientId)).first(); if(['expired','cancelled'].includes(String(row?.status||'')))throw httpError('ช่วงทดลองใช้หมดแล้ว กรุณาเปิดใช้งานแพ็กเกจก่อนเพิ่มพนักงาน',402); const usage=await activeSeatUsage(db,clientId); if(row?.max_seats!=null&&Number(row.max_seats)>0&&usage.active_employee_seats+Number(additional)>Number(row.max_seats))throw httpError(`แพ็กเกจนี้รองรับสูงสุด ${Number(row.max_seats)} Active Employee Seats`,409); return usage;
+  const status=await getEmployeeEnrollmentStatus(db,clientId,additional);
+  if(!status.allowed){const error=httpError(status.message,status.http_status);error.enrollment=status;throw error;}
+  return {active_employee_seats:status.active_employee_seats,line_connected_seats:status.line_connected_seats};
+}
+
+// Explicit SaaS-operator action only. Uses a FIXED end date, not now()+N on
+// every request. The original trial start and all payment records are preserved.
+async function extendCompanyTrial(env,auth,clientId,body){
+  if(!isNaknaSaasAdmin(env,auth.user?.email))throw httpError('เฉพาะผู้ดูแลระบบนากนะที่ได้รับสิทธิ์เท่านั้น',403);
+  const db=env.DB,cid=Number(clientId),uid=Number(auth.user?.id);
+  if(!Number.isSafeInteger(cid)||cid<1||!Number.isSafeInteger(uid)||uid<1)throw httpError('ข้อมูลผู้ดูแลหรือบริษัทไม่ถูกต้อง',400);
+  const client=await getClient(db,cid);if(!client)throw httpError('ไม่พบบริษัท',404);
+  const reason=String(body?.reason||'').trim(),date=String(body?.end_date||'').trim();
+  if(reason.length<5||reason.length>500)throw httpError('กรุณาระบุเหตุผลการต่อ Trial 5–500 ตัวอักษร',400);
+  const until=new Date(`${date}T23:59:59+07:00`);
+  const today=dateInBangkok(),maxDate=dateInBangkok(new Date(Date.now()+30*86400000));
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(until.getTime())||dateInBangkok(until)!==date||date<=today||date>maxDate){
+    throw httpError(`เลือกวันสิ้นสุดหลังวันนี้และไม่เกิน ${maxDate} (ต่อครั้งละไม่เกิน 30 วัน)`,400);
+  }
+  await ensurePhase5Defaults(db,cid);
+  const sub=await db.prepare(`SELECT cs.*,sp.code AS plan_code FROM company_subscriptions cs
+    LEFT JOIN subscription_plans sp ON sp.id=cs.plan_id WHERE cs.client_id=?1`).bind(cid).first();
+  if(!sub||sub.plan_code!=='trial'||!['trialing','expired'].includes(String(sub.status)))throw httpError('ต่อ Trial ได้เฉพาะบริษัทแพ็กเกจ Trial ที่กำลังทดลองหรือหมดอายุแล้ว ไม่ใช้กับแพ็กเกจชำระเงินหรือบริษัทที่ยกเลิก',409);
+  const oldEnd=Date.parse(sub.trial_ends_at||'');
+  if(Number.isFinite(oldEnd)&&until.getTime()<=oldEnd)throw httpError('วันสิ้นสุดใหม่ต้องอยู่หลังวันสิ้นสุด Trial เดิม',409);
+  // If a payment/invoice was attached to a trial, require a deliberate billing
+  // review instead of implicitly overwriting that company's entitlement.
+  const billing=await db.prepare(`SELECT
+    (SELECT COUNT(*) FROM billing_payments WHERE client_id=?1) AS payments,
+    (SELECT COUNT(*) FROM billing_invoices WHERE client_id=?1 AND status!='void') AS invoices`).bind(cid).first();
+  if(Number(billing?.payments||0)||Number(billing?.invoices||0))throw httpError('บริษัทนี้มีรายการบิลหรือการชำระเงิน กรุณาตรวจ Subscription ใน Nakna Admin แทนการต่อ Trial',409);
+  const end=until.toISOString();
+  const detail=JSON.stringify({company_name:client.name,reason,previous_status:sub.status,
+    trial_started_at:sub.trial_started_at,previous_trial_ends_at:sub.trial_ends_at,new_trial_ends_at:end,
+    release:NAKNA_RUNTIME_RELEASE});
+  // Compare-and-set guards against an operator cancelling/changing the plan in
+  // another tab. Audit and UPDATE succeed together in the same D1 transaction.
+  const match=`client_id=?1 AND id=?2 AND plan_id=?3 AND status=?4 AND trial_ends_at IS ?5
+    AND NOT EXISTS(SELECT 1 FROM billing_payments WHERE client_id=?1)
+    AND NOT EXISTS(SELECT 1 FROM billing_invoices WHERE client_id=?1 AND status!='void')`;
+  const binds=[cid,Number(sub.id),Number(sub.plan_id),sub.status,sub.trial_ends_at||null];
+  const results=await db.batch([
+    db.prepare(`INSERT INTO audit_logs(client_id,actor_type,actor_id,action,entity_type,entity_id,detail_json)
+      SELECT client_id,'user',?6,'subscription.trial_extended','company_subscription',CAST(id AS TEXT),?7
+      FROM company_subscriptions WHERE ${match}`).bind(...binds,String(uid),detail),
+    db.prepare(`UPDATE company_subscriptions SET status='trialing',trial_ends_at=?6,current_period_end=?6,
+      updated_at=CURRENT_TIMESTAMP WHERE ${match}`).bind(...binds,end),
+  ]);
+  if(Number(results[1]?.meta?.changes)!==1)throw httpError('สถานะแพ็กเกจเปลี่ยนระหว่างบันทึก กรุณารีเฟรชแล้วตรวจอีกครั้ง',409);
+  return {ok:true,client_id:cid,company_name:client.name,trial_ends_at:end,
+    enrollment:await getEmployeeEnrollmentStatus(db,cid)};
 }
 
 async function activeSeatUsage(db,clientId){
