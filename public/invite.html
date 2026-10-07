@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/invite.css" />
+  <link rel="stylesheet" href="/invite.css?v=P9.31-ENROLLMENT" />
 </head>
 <body>
   <main class="invite-shell">
@@ -42,6 +42,13 @@
           <div><span>เริ่มงาน</span><strong id="contextStart">ตามที่ HR กำหนด</strong></div>
           <div class="wide"><span>Work Location</span><strong id="contextLocations">ทุก Location ของบริษัท</strong></div>
         </div>
+
+        <aside id="enrollmentNotice" class="enrollment-notice hidden" role="status" aria-live="polite">
+          <strong>บริษัทต้องตรวจสอบสิทธิ์เพิ่มพนักงาน</strong>
+          <p id="enrollmentMessage"></p>
+          <p class="enrollment-help">หลัง HR จัดการแล้ว กดตรวจสิทธิ์อีกครั้งได้ ข้อมูลที่กรอกยังอยู่ตราบใดที่ไม่ปิดหรือรีเฟรชหน้านี้</p>
+          <button id="enrollmentRetry" class="secondary-action" type="button">ตรวจสิทธิ์อีกครั้ง</button>
+        </aside>
 
         <form id="employeeForm">
           <div class="section-title"><strong>ข้อมูลของคุณ</strong><span>ข้อมูลพื้นฐานสำหรับสร้าง Employee Profile</span></div>
@@ -124,6 +131,6 @@
     <footer>นากนะ · HR Tech สำหรับคนไทย · Otterwork Co., Ltd.</footer>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" defer></script>
-  <script src="/invite.js?v=P9.14-FACE" type="module"></script>
+  <script src="/invite.js?v=P9.31-ENROLLMENT" type="module"></script>
 </body>
 </html>

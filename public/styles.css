@@ -3238,3 +3238,10 @@ button.nakna-mutation-pending:not(.icon-btn):not(.close-btn)::after,a.nakna-muta
 .attendance-retro-request-meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;padding:12px 14px;border-radius:14px;background:#f5faf8}.attendance-retro-request-meta .wide{grid-column:1/-1}.attendance-retro-request-meta span{display:block;color:#8b9a98;font-size:10px}.attendance-retro-request-meta strong{display:block;margin-top:3px;color:#294d53;font-size:12px;line-height:1.45}.attendance-retro-actions{display:flex;gap:8px;justify-content:flex-end}.danger-soft{border-color:#efd3ce!important;color:#a44b40!important;background:#fff7f5!important}.attendance-retro-empty{display:flex;align-items:center;gap:12px;padding:18px;border:1px dashed #cae4dc;border-radius:17px;background:#f6fcf9}.attendance-retro-empty>span{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:#e0f5ea;color:#20815c;font-weight:800}.attendance-retro-empty strong,.attendance-retro-empty small{display:block}.attendance-retro-empty small{margin-top:3px;color:#879694}
 .worklog-status.retro,.worklog-check-state.retro,.worklog-point-badge.retro{background:#eef0ff!important;color:#5858a8!important;border-color:#dfe0fb!important}.worklog-retro-pending{margin-top:6px;padding:6px 8px;border-radius:9px;background:#fff7e7;color:#a76b14;font-size:10px;font-weight:700;line-height:1.35}
 @media(max-width:900px){.attendance-retro-request-card{grid-template-columns:1fr}.attendance-retro-actions{justify-content:stretch}.attendance-retro-actions button{flex:1}}
+
+/* P9.31 — avoid reusing invoice-grid styles inside the narrow plan card. */
+.enrollment-recovery{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:12px;margin-top:12px;min-width:0;border:1px solid #E7DABF;border-radius:12px;background:#FFF8EB;color:#55472C}
+.enrollment-recovery p{margin:0;font-size:13px;line-height:1.65;overflow-wrap:anywhere}
+.enrollment-recovery small{font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+.enrollment-recovery button{width:100%;min-height:42px;white-space:normal}
+.enrollment-recovery.hidden{display:none}

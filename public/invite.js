@@ -2,6 +2,8 @@ const $ = selector => document.querySelector(selector);
 const params = new URLSearchParams(location.search);
 const token = params.get('token') || '';
 let invite = null;
+let enrollmentStatus = null;
+let submitBusy = false;
 let joinResult = null;
 let faceStream = null;
 let faceModelsReady = false;
@@ -48,18 +50,45 @@ async function loadInvite() {
     $('#contextStart').textContent = invite.start_date ? formatDate(invite.start_date) : 'ตามที่ HR กำหนด';
     $('#contextLocations').textContent = invite.locations?.length ? invite.locations.map(item => item.name).join(', ') : 'ทุก Location ของบริษัท';
     show('formState');
+    renderEnrollmentStatus(data.enrollment || null);
   } catch { fail('เปิดลิงก์เชิญไม่สำเร็จ กรุณาลองใหม่'); }
 }
 
 function fail(message) { $('#errorText').textContent = message; show('errorState'); }
 
+function renderEnrollmentStatus(status){
+  enrollmentStatus=status;
+  const blocked=status?.allowed===false;
+  $('#enrollmentNotice')?.classList.toggle('hidden',!blocked);
+  if($('#enrollmentMessage'))$('#enrollmentMessage').textContent=blocked?status.message:'';
+  updateSubmitState();
+}
+function updateSubmitState(){
+  const button=$('#submitBtn');if(!button)return;
+  button.disabled=submitBusy||enrollmentStatus?.allowed===false;
+  button.textContent=submitBusy?'กำลังสร้างโปรไฟล์…':enrollmentStatus?.allowed===false?'รอ HR จัดการสิทธิ์บริษัท':'ยืนยันและสร้างโปรไฟล์พนักงาน';
+}
+$('#enrollmentRetry')?.addEventListener('click',async()=>{
+  const button=$('#enrollmentRetry');button.disabled=true;button.textContent='กำลังตรวจสิทธิ์…';
+  try{
+    const res=await fetch(`/api/public/invites/${encodeURIComponent(token)}`,{cache:'no-store'});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){
+      if(res.status===404||res.status===410){renderEnrollmentStatus({allowed:false,code:'INVITE_EXPIRED',message:'ลิงก์เชิญหมดอายุหรือถูกใช้ครบแล้ว กรุณาขอลิงก์ใหม่จาก HR'});return;}
+      throw new Error('ยังตรวจสิทธิ์ไม่สำเร็จ กรุณาลองอีกครั้ง ข้อมูลที่กรอกยังอยู่ในหน้านี้');
+    }
+    invite=data.invite;renderEnrollmentStatus(data.enrollment||null);
+  }catch(error){$('#enrollmentMessage').textContent=error.message;}
+  finally{button.disabled=false;button.textContent='ตรวจสิทธิ์อีกครั้ง';}
+});
+
+
 $('#employeeForm').addEventListener('submit', async event => {
   event.preventDefault();
-  if (!$('#confirmCheck').checked) return;
+  if (submitBusy || enrollmentStatus?.allowed===false || !$('#confirmCheck').checked) return;
   const button = $('#submitBtn');
   const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-  button.disabled = true;
-  button.textContent = 'กำลังสร้างโปรไฟล์…';
+  submitBusy=true;updateSubmitState();
   try {
     const res = await fetch(`/api/public/invites/${encodeURIComponent(token)}`, {
       method: 'POST',
@@ -67,15 +96,17 @@ $('#employeeForm').addEventListener('submit', async event => {
       body: JSON.stringify(data),
     });
     const result = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(result.error || 'สร้างโปรไฟล์ไม่สำเร็จ');
+    if (!res.ok) {
+      if(result.enrollment?.allowed===false){renderEnrollmentStatus(result.enrollment);$('#enrollmentNotice')?.scrollIntoView({behavior:'smooth',block:'center'});return;}
+      throw new Error(result.error || 'สร้างโปรไฟล์ไม่สำเร็จ');
+    }
     joinResult = result;
     cacheJoinResult(result);
     preparePostCreateFlow();
   } catch (error) {
     alert(error.message);
   } finally {
-    button.disabled = false;
-    button.textContent = 'ยืนยันและสร้างโปรไฟล์พนักงาน';
+    submitBusy=false;updateSubmitState();
   }
 });
 
@@ -196,7 +227,7 @@ function stopFaceCamera() {
 async function detectFace({ withDescriptor = false } = {}) {
   const api = await waitForFaceApi();
   const video = $('#faceVideo');
-  const opts = new api.TinyFaceDetectorOptions({ inputSize:224, scoreThreshold:0.5 });
+  const opts = new api.TinyFaceDetectorOptions({ inputSize:320, scoreThreshold:0.35 });
   let result = api.detectSingleFace(video, opts).withFaceLandmarks(true);
   if (withDescriptor) result = result.withFaceDescriptor();
   const face = await result;
@@ -220,39 +251,51 @@ function faceMotionMetrics(face) {
   const eyeMidX = (leftCenter.x+rightCenter.x)/2;
   return { ear, noseOffset:(points[30].x-eyeMidX)/eyeDistance };
 }
-async function waitForLivenessAction(action, timeoutMs = 10000) {
+async function waitForLivenessAction(action, timeoutMs = 12000) {
   const started = Date.now();
-  let seenOpen = false, seenClosed = false, seenNeutral = false;
+  let baselineEar = null, baselineNose = null, closedSince = 0;
+  const earSamples = [], noseSamples = [];
   while (Date.now() - started < timeoutMs) {
     try {
       const face = await detectFace();
       const m = faceMotionMetrics(face);
+      if (baselineEar == null || baselineNose == null) {
+        earSamples.push(m.ear); noseSamples.push(m.noseOffset);
+        if (earSamples.length >= 4) {
+          const sortedEar = [...earSamples].sort((a,b)=>a-b);
+          baselineEar = sortedEar[Math.floor(sortedEar.length/2)];
+          baselineNose = noseSamples.reduce((sum,v)=>sum+v,0) / noseSamples.length;
+        }
+        $('#faceCameraState').textContent = 'มองตรงนิ่ง ๆ แป๊บเดียว';
+        await sleep(90); continue;
+      }
       if (action === 'blink') {
-        if (m.ear > 0.20) seenOpen = true;
-        if (seenOpen && m.ear < 0.16) seenClosed = true;
-        if (seenClosed && m.ear > 0.19) return true;
-        $('#faceCameraState').textContent = 'กระพริบตา 1 ครั้ง';
+        const closeThreshold = Math.max(0.105, baselineEar * 0.78);
+        const reopenThreshold = Math.max(closeThreshold + 0.018, baselineEar * 0.88);
+        if (m.ear < closeThreshold) { if (!closedSince) closedSince = Date.now(); }
+        else if (closedSince && m.ear > reopenThreshold && Date.now() - closedSince >= 180) return true;
+        else if (m.ear > reopenThreshold) closedSince = 0;
+        $('#faceCameraState').textContent = 'หลับตาค้างสั้น ๆ แล้วลืมตา';
       } else {
-        if (Math.abs(m.noseOffset) < 0.11) seenNeutral = true;
-        if (seenNeutral && Math.abs(m.noseOffset) > 0.19) return true;
-        $('#faceCameraState').textContent = 'มองตรงก่อน แล้วหันหน้าไปด้านข้างเล็กน้อย';
+        if (Math.abs(m.noseOffset - baselineNose) > 0.10) return true;
+        $('#faceCameraState').textContent = 'หันหน้าไปซ้ายหรือขวานิดเดียว';
       }
     } catch (error) {
       $('#faceCameraState').textContent = error.message || 'จัดใบหน้าให้อยู่ในกรอบ';
     }
-    await sleep(170);
+    await sleep(90);
   }
-  throw new Error(action === 'blink' ? 'ยังตรวจการกระพริบตาไม่สำเร็จ กรุณาลองใหม่' : 'ยังตรวจการหันหน้าไม่สำเร็จ กรุณาลองใหม่');
+  throw new Error(action === 'blink' ? 'ยังจับการหลับตาไม่ได้ กดลองอีกครั้ง' : 'ยังจับการหันหน้าไม่ได้ กดลองอีกครั้ง');
 }
 async function runLiveness(actions) {
   faceStep('Live','active');
   const result = { blink:false, turn:false };
   for (const action of actions || []) {
-    $('#faceInstruction').textContent = action === 'blink' ? 'กระพริบตา 1 ครั้ง' : 'มองตรงก่อน แล้วหันหน้าไปด้านข้างเล็กน้อย';
+    $('#faceInstruction').textContent = action === 'blink' ? 'หลับตาค้างสั้น ๆ แล้วลืมตา' : 'มองตรงก่อน แล้วหันหน้าไปด้านข้างนิดเดียว';
     await waitForLivenessAction(action);
     result[action] = true;
-    $('#faceCameraState').textContent = action === 'blink' ? 'ตรวจการกระพริบตาแล้ว ✓' : 'ตรวจการหันหน้าแล้ว ✓';
-    await sleep(400);
+    $('#faceCameraState').textContent = action === 'blink' ? 'ตรวจการหลับตาแล้ว ✓' : 'ตรวจการหันหน้าแล้ว ✓';
+    await sleep(300);
   }
   faceStep('Live','done');
   return result;
