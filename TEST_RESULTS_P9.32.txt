@@ -1,0 +1,8 @@
+Nakna P9.32 static validation
+- node --check src/index.js: PASS
+- node --check public/app.js: PASS
+- Settings critical load split (company + subscription first): PASS
+- Subscription GET no longer calls ensurePhase5Defaults/getSubscriptionOverview write path: PASS
+- Subscription POST returns enrollment + permission flags: PASS
+- Plan save no longer calls refreshPhase5 full refresh: PASS
+- Runtime release marker P9.32-SUBSCRIPTION-FAST-LOAD: PASS

@@ -1,7 +1,7 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.31-ENROLLMENT-TRIAL-RECOVERY';
+const NAKNA_RUNTIME_RELEASE = 'P9.32-SUBSCRIPTION-FAST-LOAD';
 const NAKNA_RUNTIME_VERSION = '1.0-P9.31-ENROLLMENT-TRIAL-RECOVERY';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
@@ -4883,11 +4883,30 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if(path==='/api/subscription' && method==='GET'){
-    await ensurePhase5Defaults(env.DB,clientId); const overview=await getSubscriptionOverview(env.DB,clientId); return json({...overview,saas_admin:isNaknaSaasAdmin(env,auth.user?.email),can_change_plan:await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id),enrollment:await getEmployeeEnrollmentStatus(env.DB,clientId),release:NAKNA_RUNTIME_RELEASE});
+    // P9.32 — read-only fast path. The previous route ran schema/default writes,
+    // usage snapshot writes and subscription refresh writes before rendering the
+    // Settings card. On D1 this could leave the UI at "กำลังโหลดสถานะ…".
+    const [overview,canChange,enrollment]=await Promise.all([
+      getSubscriptionOverviewFast(env.DB,clientId),
+      isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id),
+      getEmployeeEnrollmentStatusFast(env.DB,clientId)
+    ]);
+    return json({...overview,saas_admin:isNaknaSaasAdmin(env,auth.user?.email),can_change_plan:canChange,enrollment,release:NAKNA_RUNTIME_RELEASE});
   }
 
   if(path==='/api/subscription/plan' && method==='POST'){
-    if(!(await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id)))return json({error:'เฉพาะ Primary Owner ที่เปลี่ยนแพ็กเกจได้'},403); await ensurePhase5Defaults(env.DB,clientId); const body=await safeJson(request); const plan=await env.DB.prepare(`SELECT * FROM subscription_plans WHERE code=?1 AND status='active'`).bind(String(body.plan_code||'')).first(); if(!plan)return json({error:'ไม่พบแพ็กเกจ'},404); await env.DB.prepare(`UPDATE company_subscriptions SET plan_id=?1,status=CASE WHEN status='trialing' THEN 'trialing' ELSE 'active' END,billing_cycle=?2,updated_at=CURRENT_TIMESTAMP WHERE client_id=?3`).bind(Number(plan.id),body.billing_cycle==='annual'?'annual':'monthly',clientId).run(); return json({ok:true,...await getSubscriptionOverview(env.DB,clientId)});
+    if(!(await isPrimaryWorkspaceOwner(env.DB,clientId,auth.user.id)))return json({error:'เฉพาะ Primary Owner ที่เปลี่ยนแพ็กเกจได้'},403);
+    await ensurePhase5Defaults(env.DB,clientId);
+    const body=await safeJson(request);
+    const plan=await env.DB.prepare(`SELECT * FROM subscription_plans WHERE code=?1 AND status='active'`).bind(String(body.plan_code||'')).first();
+    if(!plan)return json({error:'ไม่พบแพ็กเกจ'},404);
+    // If the company is still inside a live Trial, remember the selected plan
+    // while preserving Trial access. If Trial already ended/restricted, choosing
+    // a real plan activates it immediately so enrollment is not left blocked.
+    await refreshSubscriptionState(env.DB,clientId);
+    await env.DB.prepare(`UPDATE company_subscriptions SET plan_id=?1,status=CASE WHEN status='trialing' THEN 'trialing' ELSE 'active' END,billing_cycle=?2,updated_at=CURRENT_TIMESTAMP WHERE client_id=?3`).bind(Number(plan.id),body.billing_cycle==='annual'?'annual':'monthly',clientId).run();
+    const [overview,enrollment]=await Promise.all([getSubscriptionOverviewFast(env.DB,clientId),getEmployeeEnrollmentStatusFast(env.DB,clientId)]);
+    return json({ok:true,...overview,saas_admin:isNaknaSaasAdmin(env,auth.user?.email),can_change_plan:true,enrollment,release:NAKNA_RUNTIME_RELEASE});
   }
 
   if(path==='/api/subscription/invoices/generate' && method==='POST'){
@@ -8244,6 +8263,45 @@ async function snapshotCompanyUsage(db,clientId,dateKey=dateInBangkok()){
 
 async function getSubscriptionOverview(db,clientId){
   await ensurePhase5Defaults(db,clientId); const cid=Number(clientId); await refreshSubscriptionState(db,cid); const subscription=await db.prepare(`SELECT cs.*,sp.code AS plan_code,sp.name AS plan_name,sp.description AS plan_description,sp.pricing_mode,sp.base_fee,sp.price_per_seat,sp.included_seats,sp.max_seats,sp.features_json FROM company_subscriptions cs LEFT JOIN subscription_plans sp ON sp.id=cs.plan_id WHERE cs.client_id=?1`).bind(cid).first(); const plans=(await db.prepare(`SELECT id,code,name,description,pricing_mode,base_fee,price_per_seat,included_seats,max_seats,trial_days,status FROM subscription_plans WHERE status='active' ORDER BY id`).all()).results||[]; const usage=await snapshotCompanyUsage(db,cid,dateInBangkok()); const invoices=(await db.prepare(`SELECT * FROM billing_invoices WHERE client_id=?1 ORDER BY created_at DESC LIMIT 24`).bind(cid).all()).results||[]; let daysRemaining=null; if(subscription?.status==='trialing'&&subscription.trial_ends_at)daysRemaining=Math.max(0,Math.ceil((new Date(subscription.trial_ends_at).getTime()-Date.now())/86400000)); const seatBillable=Math.max(0,usage.active_employee_seats-Number(subscription?.included_seats||0)); const monthlyEstimate=Number(subscription?.pricing_mode==='flat'?subscription.base_fee:Number(subscription?.base_fee||0)+seatBillable*Number(subscription?.price_per_seat||0)); return {subscription,plans,usage,invoices,trial:{days_remaining:daysRemaining},estimate:{billable_seats:seatBillable,monthly_amount:roundMoney(monthlyEstimate),pricing_configured:Boolean(Number(subscription?.base_fee||0)||Number(subscription?.price_per_seat||0)||subscription?.pricing_mode==='custom')},access_mode:['trialing','active'].includes(String(subscription?.status))?'full':'restricted'};
+}
+
+
+// P9.32 — fast, read-only subscription view used by Settings.
+async function getSubscriptionOverviewFast(db,clientId){
+  const cid=Number(clientId);
+  const [subscriptionRaw,plansResult,usage,invoicesResult]=await Promise.all([
+    db.prepare(`SELECT cs.*,sp.code AS plan_code,sp.name AS plan_name,sp.description AS plan_description,sp.pricing_mode,sp.base_fee,sp.price_per_seat,sp.included_seats,sp.max_seats,sp.features_json FROM company_subscriptions cs LEFT JOIN subscription_plans sp ON sp.id=cs.plan_id WHERE cs.client_id=?1`).bind(cid).first(),
+    db.prepare(`SELECT id,code,name,description,pricing_mode,base_fee,price_per_seat,included_seats,max_seats,trial_days,status FROM subscription_plans WHERE status='active' ORDER BY id`).all(),
+    activeSeatUsage(db,cid),
+    db.prepare(`SELECT * FROM billing_invoices WHERE client_id=?1 ORDER BY created_at DESC LIMIT 12`).bind(cid).all()
+  ]);
+  if(!subscriptionRaw)throw httpError('ไม่พบ Subscription',404);
+  const subscription={...subscriptionRaw};
+  if(subscription.status==='trialing'&&subscription.trial_ends_at&&Date.parse(subscription.trial_ends_at)<Date.now())subscription.status='expired';
+  let daysRemaining=null;
+  if(subscription.status==='trialing'&&subscription.trial_ends_at)daysRemaining=Math.max(0,Math.ceil((Date.parse(subscription.trial_ends_at)-Date.now())/86400000));
+  const seatBillable=Math.max(0,Number(usage.active_employee_seats||0)-Number(subscription.included_seats||0));
+  const monthlyEstimate=Number(subscription.pricing_mode==='flat'?subscription.base_fee:Number(subscription.base_fee||0)+seatBillable*Number(subscription.price_per_seat||0));
+  return {subscription,plans:plansResult.results||[],usage,invoices:invoicesResult.results||[],trial:{days_remaining:daysRemaining},estimate:{billable_seats:seatBillable,monthly_amount:roundMoney(monthlyEstimate),pricing_configured:Boolean(Number(subscription.base_fee||0)||Number(subscription.price_per_seat||0)||subscription.pricing_mode==='custom')},access_mode:['trialing','active'].includes(String(subscription.status))?'full':'restricted'};
+}
+
+async function getEmployeeEnrollmentStatusFast(db,clientId,additional=1){
+  const cid=Number(clientId),extra=Number(additional);
+  const [row,usage]=await Promise.all([
+    db.prepare(`SELECT cs.status,cs.trial_ends_at,sp.code AS plan_code,sp.max_seats FROM company_subscriptions cs LEFT JOIN subscription_plans sp ON sp.id=cs.plan_id WHERE cs.client_id=?1`).bind(cid).first(),
+    activeSeatUsage(db,cid)
+  ]);
+  let status=String(row?.status||'');
+  if(status==='trialing'&&row?.trial_ends_at&&Date.parse(row.trial_ends_at)<Date.now())status='expired';
+  const common={subscription_status:status||null,trial_ends_at:row?.trial_ends_at||null,active_employee_seats:Number(usage.active_employee_seats||0),line_connected_seats:Number(usage.line_connected_seats||0),max_seats:row?.max_seats==null?null:Number(row.max_seats)};
+  const deny=(code,message,httpStatus)=>({...common,allowed:false,code,message,http_status:httpStatus});
+  if(!row||!row.plan_code)return deny('SUBSCRIPTION_NOT_READY','บริษัทนี้ยังตั้งค่าแพ็กเกจไม่ครบ กรุณาให้ผู้ดูแลนากนะตรวจสอบก่อนเพิ่มพนักงาน',409);
+  if(status==='cancelled')return deny('SUBSCRIPTION_CANCELLED','แพ็กเกจของบริษัทถูกยกเลิก กรุณาให้ผู้ดูแลบริษัทติดต่อผู้ดูแลนากนะ',402);
+  if(status==='expired')return deny(row.plan_code==='trial'?'TRIAL_EXPIRED':'SUBSCRIPTION_EXPIRED',row.plan_code==='trial'?'ช่วงทดลองใช้ของบริษัทหมดอายุ กรุณาตรวจสอบแพ็กเกจหรือต่อ Trial ก่อนเพิ่มพนักงาน':'แพ็กเกจของบริษัทหมดอายุ กรุณาให้เจ้าของบริษัทตรวจสอบแพ็กเกจ',402);
+  if(!['trialing','active','past_due'].includes(status))return deny('SUBSCRIPTION_NOT_READY','ไม่สามารถตรวจสิทธิ์แพ็กเกจของบริษัทได้ กรุณาติดต่อผู้ดูแลนากนะ',409);
+  if(status==='trialing'&&(!row.trial_ends_at||!Number.isFinite(Date.parse(row.trial_ends_at))))return deny('TRIAL_DATE_INVALID','วันสิ้นสุดทดลองใช้ของบริษัทไม่ถูกต้อง กรุณาให้ผู้ดูแลนากนะตรวจสอบ',409);
+  if(row.max_seats!=null&&Number(row.max_seats)>0&&Number(usage.active_employee_seats||0)+extra>Number(row.max_seats))return deny('SEAT_LIMIT_REACHED',`แพ็กเกจนี้รองรับสูงสุด ${Number(row.max_seats)} Active Employee Seats กรุณาตรวจสอบจำนวนพนักงานหรือแพ็กเกจ`,409);
+  return {...common,allowed:true,code:'ENROLLMENT_READY',message:'เพิ่มพนักงานได้',http_status:200};
 }
 
 async function refreshSubscriptionState(db,clientId){
