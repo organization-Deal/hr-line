@@ -1,0 +1,81 @@
+{
+  "release": "P9.31-ENROLLMENT-TRIAL-RECOVERY",
+  "base": "P9.30 backend + preceding conversation asset patches",
+  "production_files": 7,
+  "migration_required": false,
+  "automatic_subscription_unlock": false,
+  "files": [
+    {
+      "path": "src/index.js",
+      "base_sha256": "3aee1eeb08337a7f9da6506cd5e33df1c60f1e49e1850965ce1afa39cc4f5a56",
+      "sha256": "b002f9844dd1e92f74aaeafc2d075861533cdc9cf43276974f9ff920c82d2481",
+      "size": 1121211
+    },
+    {
+      "path": "public/app.js",
+      "base_sha256": "f87091a300843c87664b4dc71bde73777df193943155c2dd7fa19310975bbab7",
+      "sha256": "0dcf75e330d2d8d9fabebc0a7978854e6ec81bbc34b1ddd8105f17de29646b17",
+      "size": 582922
+    },
+    {
+      "path": "public/index.html",
+      "base_sha256": "6b676ce0b7ab45ed443a888ce435e2795e295812d7e483e6e5a960f448c24d72",
+      "sha256": "331ff0370da7a492b56a90d342f15f94232d62086b93cf03da20f026f79e31ae",
+      "size": 227265
+    },
+    {
+      "path": "public/styles.css",
+      "base_sha256": "d3e9f677e45f90e4f20870f7473e697841328a94f9202ceb55133254f9ba4dfd",
+      "sha256": "4864ad57fcc3fa8fd3964caea8c0b97a9bd9c6e6aae152d57d5a926be9db188b",
+      "size": 325231
+    },
+    {
+      "path": "public/invite.js",
+      "base_sha256": "a91be48ef044ce4d5ddd04c8a7ee55c1ac832575b29d4edfe172b3cdb51819a8",
+      "sha256": "5cc18fd42292595e5fce6d94bdced56b8fb9c78bd1107d08e6b158bce97b6d67",
+      "size": 19423
+    },
+    {
+      "path": "public/invite.html",
+      "base_sha256": "9563dc2777a4573e710c8feabe4eface05b262e67e13a5c3ccc16c3540cbf78e",
+      "sha256": "4c763791129de90a046cda28a44ae995ab56c8afd9cc74dba7287e0c2736fd9b",
+      "size": 9680
+    },
+    {
+      "path": "public/invite.css",
+      "base_sha256": "2d1fbff23db880db2beb2c96faf7745b3fdccaf94082108d4d4059605728ad61",
+      "sha256": "a94cc1c88ce9b744f4d7bbf5c6ce14bdbb3f197fc9ee2c4af720430d6551b595",
+      "size": 8485
+    },
+    {
+      "path": "scripts/test-enrollment-p931.mjs",
+      "base_sha256": null,
+      "sha256": "179fa271de2a84e93767a234c7cae53f613b564203ddb3a3b087729218f11600",
+      "size": 18010
+    },
+    {
+      "path": "scripts/test-enrollment-ui-p931.py",
+      "base_sha256": null,
+      "sha256": "30da80a0e570a9af8fdc79ed431f8091ecb6563004258b6edd35a724af326b96",
+      "size": 10385
+    },
+    {
+      "path": "scripts/test-leave-regression-p931.mjs",
+      "base_sha256": null,
+      "sha256": "339c3e3c1df709b402487749d1969d4b00058274800197ca19a38d045bbec5cf",
+      "size": 20015
+    },
+    {
+      "path": "scripts/test-hr-daily-regression-p931.mjs",
+      "base_sha256": null,
+      "sha256": "a00b7186b082adf032f8daf7efdafb8dddde89373cf6ecfa122da40630236d0c",
+      "size": 20773
+    },
+    {
+      "path": "README_P9.31.md",
+      "base_sha256": null,
+      "sha256": "f0cba79e8c92169b4e91d33dd160238a6e5b038ec471a859e1b9b7c220023a8c",
+      "size": 13070
+    }
+  ]
+}

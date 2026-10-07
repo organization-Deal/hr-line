@@ -1,0 +1,631 @@
+Nakna P9.31 — LOCAL TEST RESULTS
+
+Not deployed. No production D1/LINE/payment calls. No customer records used.
+98 Node/SQLite tests + 11 in-memory Chromium UI checks.
+
+SYNTAX CHECK
+
+> nakna-hr@1.0.111 check
+> node --check src/index.js && node --check public/app.js && node --check public/documents.js && node --check public/hr-case.js && node --check public/invite.js && node --check public/learn.js && node --check public/leave.js && node --check public/attendance.js && node --check public/wellness.js
+
+
+NODE SQLITE TESTS
+TAP version 13
+# (node:2509) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P9.30 reproduces screenshot: invite POST returns expired-trial error and HR gate rejects
+ok 1 - P9.30 reproduces screenshot: invite POST returns expired-trial error and HR gate rejects
+  ---
+  duration_ms: 177.059381
+  type: 'test'
+  ...
+# Subtest: P9.31 deployment alone never silently renews expired trials
+ok 2 - P9.31 deployment alone never silently renews expired trials
+  ---
+  duration_ms: 136.747956
+  type: 'test'
+  ...
+# Subtest: valid public invite GET warns BEFORE form submission without leaking billing details
+ok 3 - valid public invite GET warns BEFORE form submission without leaking billing details
+  ---
+  duration_ms: 137.465807
+  type: 'test'
+  ...
+# Subtest: public POST still enforces gate even when browser preflight is bypassed
+ok 4 - public POST still enforces gate even when browser preflight is bypassed
+  ---
+  duration_ms: 122.482932
+  type: 'test'
+  ...
+# Subtest: operator extends chosen company; preserves trial start and OTHER company byte-for-byte
+ok 5 - operator extends chosen company; preserves trial start and OTHER company byte-for-byte
+  ---
+  duration_ms: 136.461913
+  type: 'test'
+  ...
+# Subtest: same invite works after extension; POST creates ONE employee and consumes ONE use
+ok 6 - same invite works after extension; POST creates ONE employee and consumes ONE use
+  ---
+  duration_ms: 125.030735
+  type: 'test'
+  ...
+# Subtest: HR manual employee creation rejects before extension, succeeds after extension
+ok 7 - HR manual employee creation rejects before extension, succeeds after extension
+  ---
+  duration_ms: 119.628527
+  type: 'test'
+  ...
+# Subtest: HR cannot grant its own free extension without operator allowlist
+ok 8 - HR cannot grant its own free extension without operator allowlist
+  ---
+  duration_ms: 119.760692
+  type: 'test'
+  ...
+# Subtest: Owner cannot grant its own free extension without operator allowlist
+ok 9 - Owner cannot grant its own free extension without operator allowlist
+  ---
+  duration_ms: 123.325506
+  type: 'test'
+  ...
+# Subtest: Co-owner cannot grant its own free extension without operator allowlist
+ok 10 - Co-owner cannot grant its own free extension without operator allowlist
+  ---
+  duration_ms: 126.984549
+  type: 'test'
+  ...
+# Subtest: employee cannot grant its own free extension without operator allowlist
+ok 11 - employee cannot grant its own free extension without operator allowlist
+  ---
+  duration_ms: 124.472379
+  type: 'test'
+  ...
+# Subtest: forged-body-admin cannot grant its own free extension without operator allowlist
+ok 12 - forged-body-admin cannot grant its own free extension without operator allowlist
+  ---
+  duration_ms: 117.035558
+  type: 'test'
+  ...
+# Subtest: no configured admin emails means DENY, not wildcard access
+ok 13 - no configured admin emails means DENY, not wildcard access
+  ---
+  duration_ms: 119.823906
+  type: 'test'
+  ...
+# Subtest: unauthenticated HTTP request cannot reach trial-extension endpoint
+ok 14 - unauthenticated HTTP request cannot reach trial-extension endpoint
+  ---
+  duration_ms: 117.036059
+  type: 'test'
+  ...
+# Subtest: invalid/past/overlong date "2026-10-07" rejected without change
+ok 15 - invalid/past/overlong date "2026-10-07" rejected without change
+  ---
+  duration_ms: 125.626835
+  type: 'test'
+  ...
+# Subtest: invalid/past/overlong date "2026-10-06" rejected without change
+ok 16 - invalid/past/overlong date "2026-10-06" rejected without change
+  ---
+  duration_ms: 120.103408
+  type: 'test'
+  ...
+# Subtest: invalid/past/overlong date "2026-11-07" rejected without change
+ok 17 - invalid/past/overlong date "2026-11-07" rejected without change
+  ---
+  duration_ms: 115.844109
+  type: 'test'
+  ...
+# Subtest: invalid/past/overlong date "2026-02-30" rejected without change
+ok 18 - invalid/past/overlong date "2026-02-30" rejected without change
+  ---
+  duration_ms: 114.457962
+  type: 'test'
+  ...
+# Subtest: invalid/past/overlong date "nonsense" rejected without change
+ok 19 - invalid/past/overlong date "nonsense" rejected without change
+  ---
+  duration_ms: 121.511718
+  type: 'test'
+  ...
+# Subtest: invalid/past/overlong date "2026-10-21T00:00:00Z" rejected without change
+ok 20 - invalid/past/overlong date "2026-10-21T00:00:00Z" rejected without change
+  ---
+  duration_ms: 114.494676
+  type: 'test'
+  ...
+# Subtest: invalid/past/overlong date "" rejected without change
+ok 21 - invalid/past/overlong date "" rejected without change
+  ---
+  duration_ms: 117.40221
+  type: 'test'
+  ...
+# Subtest: reason length 0 rejected
+ok 22 - reason length 0 rejected
+  ---
+  duration_ms: 113.384156
+  type: 'test'
+  ...
+# Subtest: reason length 3 rejected
+ok 23 - reason length 3 rejected
+  ---
+  duration_ms: 119.809955
+  type: 'test'
+  ...
+# Subtest: reason length 501 rejected
+ok 24 - reason length 501 rejected
+  ---
+  duration_ms: 117.003882
+  type: 'test'
+  ...
+# Subtest: unknown company rejected; no default subscription created for made-up tenant
+ok 25 - unknown company rejected; no default subscription created for made-up tenant
+  ---
+  duration_ms: 119.17048
+  type: 'test'
+  ...
+# Subtest: second click cannot replay the same extension or slide expiry again
+ok 26 - second click cannot replay the same extension or slide expiry again
+  ---
+  duration_ms: 116.127558
+  type: 'test'
+  ...
+# Subtest: later daily refresh does not undo valid extension; expiry re-applies after new date
+ok 27 - later daily refresh does not undo valid extension; expiry re-applies after new date
+  ---
+  duration_ms: 123.15206
+  type: 'test'
+  ...
+# Subtest: trial status active cannot be revived/converted by extension
+ok 28 - trial status active cannot be revived/converted by extension
+  ---
+  duration_ms: 119.10912
+  type: 'test'
+  ...
+# Subtest: trial status cancelled cannot be revived/converted by extension
+ok 29 - trial status cancelled cannot be revived/converted by extension
+  ---
+  duration_ms: 117.42252
+  type: 'test'
+  ...
+# Subtest: trial status past_due cannot be revived/converted by extension
+ok 30 - trial status past_due cannot be revived/converted by extension
+  ---
+  duration_ms: 115.14105
+  type: 'test'
+  ...
+# Subtest: paid-plan subscription cannot be converted to free trial
+ok 31 - paid-plan subscription cannot be converted to free trial
+  ---
+  duration_ms: 124.017067
+  type: 'test'
+  ...
+# Subtest: cancelled company has accurate message, never trial-expired wording
+ok 32 - cancelled company has accurate message, never trial-expired wording
+  ---
+  duration_ms: 124.37789
+  type: 'test'
+  ...
+# Subtest: existing invoice blocks extension and leaves billing untouched
+ok 33 - existing invoice blocks extension and leaves billing untouched
+  ---
+  duration_ms: 120.949627
+  type: 'test'
+  ...
+# Subtest: existing payment blocks extension without marking anything paid
+ok 34 - existing payment blocks extension without marking anything paid
+  ---
+  duration_ms: 121.529244
+  type: 'test'
+  ...
+# Subtest: seat cap survives extension and public/manual paths still reject
+ok 35 - seat cap survives extension and public/manual paths still reject
+  ---
+  duration_ms: 129.978219
+  type: 'test'
+  ...
+# Subtest: audit failure rolls back trial update
+ok 36 - audit failure rolls back trial update
+  ---
+  duration_ms: 120.42912
+  type: 'test'
+  ...
+# Subtest: UPDATE failure rolls back preceding audit too
+ok 37 - UPDATE failure rolls back preceding audit too
+  ---
+  duration_ms: 117.947835
+  type: 'test'
+  ...
+# Subtest: concurrent cancellation is not overwritten; no spurious audit recorded
+ok 38 - concurrent cancellation is not overwritten; no spurious audit recorded
+  ---
+  duration_ms: 117.552702
+  type: 'test'
+  ...
+# Subtest: legacy admin status=trialing with expired end date now explains correct recovery action
+ok 39 - legacy admin status=trialing with expired end date now explains correct recovery action
+  ---
+  duration_ms: 125.85464
+  type: 'test'
+  ...
+# Subtest: expired INVITE remains expired even after subscription extension
+ok 40 - expired INVITE remains expired even after subscription extension
+  ---
+  duration_ms: 120.150708
+  type: 'test'
+  ...
+# Subtest: invalid token does not expose subscription or create any employee
+ok 41 - invalid token does not expose subscription or create any employee
+  ---
+  duration_ms: 119.08222
+  type: 'test'
+  ...
+# Subtest: active paid plan remains unaffected despite old trial expiry
+ok 42 - active paid plan remains unaffected despite old trial expiry
+  ---
+  duration_ms: 120.17305
+  type: 'test'
+  ...
+# (node:2510) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: original P9.27 reproduces the undefined helper runtime failure
+ok 43 - original P9.27 reproduces the undefined helper runtime failure
+  ---
+  duration_ms: 30.236177
+  type: 'test'
+  ...
+# Subtest: role recipients include account-only Owner/Co-Owner, canonical accounts and deduplicate HR
+ok 44 - role recipients include account-only Owner/Co-Owner, canonical accounts and deduplicate HR
+  ---
+  duration_ms: 14.101293
+  type: 'test'
+  ...
+# Subtest: window uses Bangkok time, includes 13:00/13:21/17:59 and excludes 12:59/18:00
+ok 45 - window uses Bangkok time, includes 13:00/13:21/17:59 and excludes 12:59/18:00
+  ---
+  duration_ms: 2.802478
+  type: 'test'
+  ...
+# Subtest: real scheduler path at 13:21 creates real SQLite tables and sends once per recipient
+ok 46 - real scheduler path at 13:21 creates real SQLite tables and sends once per recipient
+  ---
+  duration_ms: 21.459628
+  type: 'test'
+  ...
+# Subtest: cron heartbeat before send time has no outgoing message
+ok 47 - cron heartbeat before send time has no outgoing message
+  ---
+  duration_ms: 3.499027
+  type: 'test'
+  ...
+# Subtest: concurrent invocations claim each recipient only once
+ok 48 - concurrent invocations claim each recipient only once
+  ---
+  duration_ms: 8.4006
+  type: 'test'
+  ...
+# Subtest: partial failure retries only failed recipient with SAME retry key and SAME payload
+ok 49 - partial failure retries only failed recipient with SAME retry key and SAME payload
+  ---
+  duration_ms: 11.936366
+  type: 'test'
+  ...
+# Subtest: HTTP 401 is not recorded as accepted and is not automatically retried
+ok 50 - HTTP 401 is not recorded as accepted and is not automatically retried
+  ---
+  duration_ms: 9.882402
+  type: 'test'
+  ...
+# Subtest: 409 with accepted-request-id means accepted, plain 409 does not
+ok 51 - 409 with accepted-request-id means accepted, plain 409 does not
+  ---
+  duration_ms: 19.276424
+  type: 'test'
+  ...
+# Subtest: network timeout path retains retries; no actual outbound network is used
+ok 52 - network timeout path retains retries; no actual outbound network is used
+  ---
+  duration_ms: 8.316661
+  type: 'test'
+  ...
+# Subtest: missing token is visible without an HTTP request or a false success
+ok 53 - missing token is visible without an HTTP request or a false success
+  ---
+  duration_ms: 6.796877
+  type: 'test'
+  ...
+# Subtest: lease expiry recovers worker crashes with the same stored retry key
+ok 54 - lease expiry recovers worker crashes with the same stored retry key
+  ---
+  duration_ms: 9.821572
+  type: 'test'
+  ...
+# Subtest: permission revocation prevents pending retry; ordinary employees get no summary access
+ok 55 - permission revocation prevents pending retry; ordinary employees get no summary access
+  ---
+  duration_ms: 7.949328
+  type: 'test'
+  ...
+# Subtest: manual Thai command replies only to authorized user and does not mark cron success
+ok 56 - manual Thai command replies only to authorized user and does not mark cron success
+  ---
+  duration_ms: 7.84825
+  type: 'test'
+  ...
+# Subtest: manual command in group chat never reveals employee summary
+ok 57 - manual command in group chat never reveals employee summary
+  ---
+  duration_ms: 3.982411
+  type: 'test'
+  ...
+# Subtest: daily status command displays missing heartbeat and actual runtime version
+ok 58 - daily status command displays missing heartbeat and actual runtime version
+  ---
+  duration_ms: 5.215902
+  type: 'test'
+  ...
+# Subtest: forged postback cannot select an unrelated company
+ok 59 - forged postback cannot select an unrelated company
+  ---
+  duration_ms: 5.761758
+  type: 'test'
+  ...
+# Subtest: multiple authorized companies require selection rather than guessing
+ok 60 - multiple authorized companies require selection rather than guessing
+  ---
+  duration_ms: 4.439005
+  type: 'test'
+  ...
+# Subtest: private HR case counts are hidden from department-only delegate
+ok 61 - private HR case counts are hidden from department-only delegate
+  ---
+  duration_ms: 5.291824
+  type: 'test'
+  ...
+# Subtest: failed company does not stop another company from receiving its own summary
+ok 62 - failed company does not stop another company from receiving its own summary
+  ---
+  duration_ms: 5.569814
+  type: 'test'
+  ...
+# Subtest: new calendar day sends a new round; prior P9.27 aggregate does not exclude new Owner recipients
+ok 63 - new calendar day sends a new round; prior P9.27 aggregate does not exclude new Owner recipients
+  ---
+  duration_ms: 8.288368
+  type: 'test'
+  ...
+# Subtest: authenticated diagnostics API rejects employee role; HR response contains no raw identities
+ok 64 - authenticated diagnostics API rejects employee role; HR response contains no raw identities
+  ---
+  duration_ms: 18.334904
+  type: 'test'
+  ...
+# Subtest: revoked Co-Owner is not retried using a queued snapshot
+ok 65 - revoked Co-Owner is not retried using a queued snapshot
+  ---
+  duration_ms: 6.268987
+  type: 'test'
+  ...
+# Subtest: HTTP 429 is a visible failure and does not keep consuming requests
+ok 66 - HTTP 429 is a visible failure and does not keep consuming requests
+  ---
+  duration_ms: 6.236819
+  type: 'test'
+  ...
+# Subtest: retry limit bounds repeated server failures and marks them failed
+ok 67 - retry limit bounds repeated server failures and marks them failed
+  ---
+  duration_ms: 17.646988
+  type: 'test'
+  ...
+# Subtest: no eligible recipients is reported, not silently recorded as sent
+ok 68 - no eligible recipients is reported, not silently recorded as sent
+  ---
+  duration_ms: 4.844033
+  type: 'test'
+  ...
+# (node:2511) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P9.29 reproduces screenshot: normal leave POST fails on missing is_retroactive
+ok 69 - P9.29 reproduces screenshot: normal leave POST fails on missing is_retroactive
+  ---
+  duration_ms: 211.540202
+  type: 'test'
+  ...
+# Subtest: P9.30 real public POST: legacy DB repairs automatically and normal leave is pending
+ok 70 - P9.30 real public POST: legacy DB repairs automatically and normal leave is pending
+  ---
+  duration_ms: 144.04063
+  type: 'test'
+  ...
+# Subtest: real public GET repairs before showing the form; fields need not be resubmitted elsewhere
+ok 71 - real public GET repairs before showing the form; fields need not be resubmitted elsewhere
+  ---
+  duration_ms: 130.380323
+  type: 'test'
+  ...
+# Subtest: expired/invalid portal token remains 401 and never repairs schema or creates leave
+ok 72 - expired/invalid portal token remains 401 and never repairs schema or creates leave
+  ---
+  duration_ms: 118.904077
+  type: 'test'
+  ...
+# Subtest: retroactive public POST stores BOTH reasons and requires approval; no immediate attendance change
+ok 73 - retroactive public POST stores BOTH reasons and requires approval; no immediate attendance change
+  ---
+  duration_ms: 128.885105
+  type: 'test'
+  ...
+# Subtest: retroactive leave without explanation is still rejected before INSERT
+ok 74 - retroactive leave without explanation is still rejected before INSERT
+  ---
+  duration_ms: 117.816601
+  type: 'test'
+  ...
+# Subtest: mixed retrospective and future date range remains invalid
+ok 75 - mixed retrospective and future date range remains invalid
+  ---
+  duration_ms: 117.715723
+  type: 'test'
+  ...
+# Subtest: half-day leave still calculates 0.5 days
+ok 76 - half-day leave still calculates 0.5 days
+  ---
+  duration_ms: 122.174746
+  type: 'test'
+  ...
+# Subtest: old leaves, evidence links and approval events are untouched by additive repair
+ok 77 - old leaves, evidence links and approval events are untouched by additive repair
+  ---
+  duration_ms: 119.732541
+  type: 'test'
+  ...
+# Subtest: partial migration with is_retroactive already present adds only the other column
+ok 78 - partial migration with is_retroactive already present adds only the other column
+  ---
+  duration_ms: 125.998953
+  type: 'test'
+  ...
+# Subtest: partial migration with retro_reason already present adds only the other column
+ok 79 - partial migration with retro_reason already present adds only the other column
+  ---
+  duration_ms: 128.595538
+  type: 'test'
+  ...
+# Subtest: already migrated DB is not ALTERed and values are preserved
+ok 80 - already migrated DB is not ALTERed and values are preserved
+  ---
+  duration_ms: 122.564623
+  type: 'test'
+  ...
+# Subtest: 20 simultaneous schema requests share a single repair task
+ok 81 - 20 simultaneous schema requests share a single repair task
+  ---
+  duration_ms: 121.111797
+  type: 'test'
+  ...
+# Subtest: separate Worker isolates tolerate a real duplicate-column race on the same database
+ok 82 - separate Worker isolates tolerate a real duplicate-column race on the same database
+  ---
+  duration_ms: 123.352956
+  type: 'test'
+  ...
+# Subtest: a real D1/ALTER failure fails closed without INSERT, clears failed cache, and succeeds on retry
+ok 83 - a real D1/ALTER failure fails closed without INSERT, clears failed cache, and succeeds on retry
+  ---
+  duration_ms: 126.207282
+  type: 'test'
+  ...
+# Subtest: a fake duplicate error is not swallowed unless the column actually exists
+ok 84 - a fake duplicate error is not swallowed unless the column actually exists
+  ---
+  duration_ms: 117.225658
+  type: 'test'
+  ...
+# Subtest: migration journal records only verified 0037 once; other migrations remain unchanged
+ok 85 - migration journal records only verified 0037 once; other migrations remain unchanged
+  ---
+  duration_ms: 121.098067
+  type: 'test'
+  ...
+# Subtest: journal-only failure does not lose leave or lie about migration completion; next call retries
+ok 86 - journal-only failure does not lose leave or lie about migration completion; next call retries
+  ---
+  duration_ms: 130.887642
+  type: 'test'
+  ...
+# Subtest: legacy installation without Wrangler journal is repaired without creating a second journal
+ok 87 - legacy installation without Wrangler journal is repaired without creating a second journal
+  ---
+  duration_ms: 119.483974
+  type: 'test'
+  ...
+# Subtest: cache is scoped per database; a second independent database is repaired too
+ok 88 - cache is scoped per database; a second independent database is repaired too
+  ---
+  duration_ms: 234.607519
+  type: 'test'
+  ...
+# Subtest: employee leave-history query also works before opening/submitting the leave form
+ok 89 - employee leave-history query also works before opening/submitting the leave form
+  ---
+  duration_ms: 120.319077
+  type: 'test'
+  ...
+# Subtest: duplicate leave is still rejected; there is no auto-resubmission/double reservation
+ok 90 - duplicate leave is still rejected; there is no auto-resubmission/double reservation
+  ---
+  duration_ms: 117.569467
+  type: 'test'
+  ...
+# Subtest: cross-company employee access remains rejected
+ok 91 - cross-company employee access remains rejected
+  ---
+  duration_ms: 110.877375
+  type: 'test'
+  ...
+# Subtest: insufficient entitlement remains rejected and does not bypass HR policy
+ok 92 - insufficient entitlement remains rejected and does not bypass HR policy
+  ---
+  duration_ms: 116.082491
+  type: 'test'
+  ...
+# Subtest: retro leave approval still needs an authorized approver and then updates attendance
+ok 93 - retro leave approval still needs an authorized approver and then updates attendance
+  ---
+  duration_ms: 124.210433
+  type: 'test'
+  ...
+# Subtest: required evidence remains required in public form
+ok 94 - required evidence remains required in public form
+  ---
+  duration_ms: 117.792295
+  type: 'test'
+  ...
+# Subtest: health reports the new runtime release
+ok 95 - health reports the new runtime release
+  ---
+  duration_ms: 116.541789
+  type: 'test'
+  ...
+# Subtest: all concurrent callers receive safe 503 on schema failure and a later call retries
+ok 96 - all concurrent callers receive safe 503 on schema failure and a later call retries
+  ---
+  duration_ms: 117.162636
+  type: 'test'
+  ...
+# Subtest: an index-creation failure does not record 0037 complete and is recoverable
+ok 97 - an index-creation failure does not record 0037 complete and is recoverable
+  ---
+  duration_ms: 133.881288
+  type: 'test'
+  ...
+# Subtest: already-applied migration keeps its timestamp and does not gain a duplicate history record
+ok 98 - already-applied migration keeps its timestamp and does not gain a duplicate history record
+  ---
+  duration_ms: 122.731228
+  type: 'test'
+  ...
+1..98
+# tests 98
+# suites 0
+# pass 98
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5239.536169
+
+BROWSER CHECKS
+PASS: Mobile invite shows company access problem before form submit; submit disabled
+PASS: 390px mobile layout has no horizontal overflow
+PASS: Programmatic submit while blocked makes no POST
+PASS: Network error during recheck keeps block and preserves entered form values
+PASS: After HR resolves entitlement, recheck enables submit without clearing fields/consent
+PASS: Subscription expiry between GET and POST displays inline issue and keeps form values
+PASS: Successful retry reaches original LINE connection success flow
+PASS: Operator has recovery buttons on current subscription and company list
+PASS: Extension modal identifies target company and prevents empty-reason submission
+PASS: Explicit confirmation sends fixed end date and reason to selected company only
+PASS: Non-operator UI hides action and refuses direct client-side invocation
+
+11/11 browser checks passed. Mock responses; not production LINE or D1.
