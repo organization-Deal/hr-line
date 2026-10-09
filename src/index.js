@@ -1,9 +1,9 @@
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.32-SUBSCRIPTION-FAST-LOAD';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.31-ENROLLMENT-TRIAL-RECOVERY';
-const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery';
+const NAKNA_RUNTIME_RELEASE = 'P9.33-EMPLOYEE-DOCUMENT-UPLOAD-FIX';
+const NAKNA_RUNTIME_VERSION = '1.0-P9.33-EMPLOYEE-DOCUMENT-UPLOAD-FIX';
+const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
 const SCHEMA_READY = new Set();
@@ -2966,7 +2966,7 @@ async function handleApi(request, env, url, auth, ctx) {
     const employeeId = Number(employeeDocumentsMatch[1]);
     const employee = await env.DB.prepare('SELECT id,employee_code,first_name,last_name,nickname FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId,clientId).first();
     if (!employee) return json({ error: 'ไม่พบพนักงาน' }, 404);
-    const rows = await env.DB.prepare(`SELECT id,document_type,title,file_name,storage_provider,drive_url,content_type,document_date,expires_at,visibility,note,status,version,source,confidentiality,sha256,archived_at,supersedes_document_id,created_at,updated_at FROM employee_documents WHERE client_id=?1 AND employee_id=?2 ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, created_at DESC`).bind(clientId,employeeId).all();
+    const rows = await env.DB.prepare(`SELECT id,document_type,title,file_name,storage_provider,drive_url,content_type,file_size,document_date,expires_at,visibility,note,status,version,source,confidentiality,sha256,archived_at,supersedes_document_id,created_at,updated_at FROM employee_documents WHERE client_id=?1 AND employee_id=?2 ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, created_at DESC`).bind(clientId,employeeId).all();
     return json({ employee, data: rows.results || [] });
   }
 
@@ -2980,6 +2980,10 @@ async function handleApi(request, env, url, auth, ctx) {
     const file = form.get('file');
     if (!file || typeof file.arrayBuffer !== 'function' || !file.name) return json({ error: 'กรุณาเลือกไฟล์' }, 400);
     if (Number(file.size || 0) > 10 * 1024 * 1024) return json({ error: 'ไฟล์ต้องไม่เกิน 10 MB' }, 413);
+    const fileName=String(file.name||'document').trim();
+    const extension=(fileName.toLowerCase().match(/\.([a-z0-9]+)$/)||[])[1]||'';
+    const allowedExtensions=new Set(['pdf','png','jpg','jpeg','webp','doc','docx']);
+    if(!allowedExtensions.has(extension))return json({error:'รองรับเฉพาะ PDF รูปภาพ และ Word'},415);
     const allowedTypes = new Set(['employment_contract','job_description','nda','id_card_copy','house_registration','bank_book_copy','social_security','tax_document','education_certificate','salary_certificate','employment_certificate','probation','salary_adjustment','performance','warning','resignation','asset_return','final_pay','other']);
     const documentType = allowedTypes.has(String(form.get('document_type') || '')) ? String(form.get('document_type')) : 'other';
     const labels = {employment_contract:'สัญญาจ้างงาน',job_description:'Job Description',nda:'ข้อตกลงรักษาความลับ',id_card_copy:'สำเนาบัตรประชาชน',house_registration:'สำเนาทะเบียนบ้าน',bank_book_copy:'หน้าสมุดบัญชี',social_security:'เอกสารประกันสังคม',tax_document:'เอกสารภาษี',education_certificate:'วุฒิการศึกษา',salary_certificate:'หนังสือรับรองเงินเดือน',employment_certificate:'หนังสือรับรองการทำงาน',probation:'เอกสารทดลองงาน',salary_adjustment:'เอกสารปรับเงินเดือน',performance:'เอกสารประเมินผลงาน',warning:'หนังสือเตือน',resignation:'เอกสารลาออก',asset_return:'เอกสารคืนทรัพย์สิน',final_pay:'เอกสาร Final Pay',other:'เอกสารพนักงาน'};
@@ -2988,24 +2992,78 @@ async function handleApi(request, env, url, auth, ctx) {
     const expiresAt = String(form.get('expires_at') || '').trim() || null;
     const note = String(form.get('note') || '').trim() || null;
     const visibility = ['employee','hr_only','manager'].includes(String(form.get('visibility'))) ? String(form.get('visibility')) : 'hr_only';
-    const workspace = await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
-    if (!workspace?.drive_folder_id) return json({ error: 'กรุณาเชื่อม Google Drive ก่อนอัปโหลดเอกสารพนักงาน' }, 409);
-    const accessToken = await getWorkspaceGoogleAccessToken(env,workspace);
-    const rootFolder = await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Employee Documents');
-    const empFolder = await ensureDriveChildFolder(accessToken,rootFolder,`${employee.employee_code} - ${employee.nickname || employee.first_name}`);
-    const privateFolder = await ensureDriveChildFolder(accessToken,empFolder,'HR & Contracts');
+    const confidentiality = ['internal','confidential','restricted'].includes(String(form.get('confidentiality'))) ? String(form.get('confidentiality')) : 'confidential';
     const bytes = new Uint8Array(await file.arrayBuffer());
     const digest = await crypto.subtle.digest('SHA-256',bytes);
     const sha256 = [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
-    const confidentiality = ['internal','confidential','restricted'].includes(String(form.get('confidentiality'))) ? String(form.get('confidentiality')) : 'confidential';
-    const uploaded = await uploadGoogleDriveFile(accessToken,{folderId:privateFolder,fileName:file.name,contentType:file.type || 'application/octet-stream',bytes});
-    const result = await env.DB.prepare(`INSERT INTO employee_documents (client_id,employee_id,document_type,title,file_name,storage_provider,drive_file_id,drive_url,content_type,document_date,expires_at,visibility,note,created_by_user_id,status,version,source,confidentiality,sha256) VALUES (?1,?2,?3,?4,?5,'google_drive',?6,?7,?8,?9,?10,?11,?12,?13,'active',1,'upload',?14,?15)`).bind(clientId,employeeId,documentType,title,file.name,uploaded.id,uploaded.webViewLink || null,file.type || 'application/octet-stream',documentDate,expiresAt,visibility,note,Number(auth.user.id),confidentiality,sha256).run();
+
+    // Prefer the company's Drive, but do not make one expired Google token block
+    // HR from keeping an employee document. EVIDENCE_BUCKET is private and is
+    // already used by Nakna for protected HR/leave files, so it is a safe fallback.
+    let storageProvider='';
+    let driveFileId=null;
+    let driveUrl=null;
+    let storageKey=null;
+    let driveError=null;
+    const workspace = await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
+    if(workspace?.drive_folder_id){
+      try{
+        const accessToken = await getWorkspaceGoogleAccessToken(env,workspace);
+        const rootFolder = await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Employee Documents');
+        const empFolder = await ensureDriveChildFolder(accessToken,rootFolder,`${employee.employee_code} - ${employee.nickname || employee.first_name}`);
+        const privateFolder = await ensureDriveChildFolder(accessToken,empFolder,'HR & Contracts');
+        const uploaded = await uploadGoogleDriveFile(accessToken,{folderId:privateFolder,fileName,contentType:file.type || 'application/octet-stream',bytes});
+        storageProvider='google_drive'; driveFileId=uploaded.id; driveUrl=uploaded.webViewLink||null;
+      }catch(error){driveError=error; console.warn(JSON.stringify({level:'warn',event:'employee_document_drive_upload_failed',client_id:clientId,employee_id:employeeId,message:String(error?.message||error)}));}
+    }
+    if(!storageProvider && env.EVIDENCE_BUCKET){
+      const safeName=fileName.replace(/[^A-Za-z0-9._-]/g,'_').slice(-120)||'document';
+      storageKey=`client-${clientId}/employee-documents/employee-${employeeId}/${crypto.randomUUID()}-${safeName}`;
+      await env.EVIDENCE_BUCKET.put(storageKey,bytes,{httpMetadata:{contentType:file.type||'application/octet-stream'}});
+      storageProvider='r2';
+    }
+    if(!storageProvider){
+      if(driveError && isGoogleReauthRequiredError(driveError)) return json({error:'สิทธิ์ Google Drive หมดอายุ กรุณาให้ HR เชื่อม Google Workspace ใหม่แล้วลองอีกครั้ง'},409);
+      if(driveError) return json({error:`อัปโหลด Google Drive ไม่สำเร็จ: ${String(driveError?.message||driveError).replace(/^Google Drive upload failed\s*/,'').slice(0,180)}`},503);
+      return json({error:'ยังไม่มีพื้นที่เก็บเอกสาร กรุณาเชื่อม Google Drive ของบริษัทก่อนอัปโหลด'},409);
+    }
+    const result = await env.DB.prepare(`INSERT INTO employee_documents (client_id,employee_id,document_type,title,file_name,storage_provider,drive_file_id,drive_url,storage_key,content_type,file_size,document_date,expires_at,visibility,note,created_by_user_id,status,version,source,confidentiality,sha256) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,'active',1,'upload',?17,?18)`).bind(clientId,employeeId,documentType,title,fileName,storageProvider,driveFileId,driveUrl,storageKey,file.type || 'application/octet-stream',Number(file.size||bytes.byteLength),documentDate,expiresAt,visibility,note,Number(auth.user.id),confidentiality,sha256).run();
     const documentId=Number(result.meta.last_row_id);
-    await env.DB.prepare(`INSERT INTO employee_document_events (client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES (?1,?2,?3,'user',?4,'uploaded',?5)`).bind(clientId,documentId,employeeId,Number(auth.user.id),JSON.stringify({document_type:documentType,file_name:file.name,sha256})).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.upload','employee_document',String(documentId),{employee_id:employeeId,document_type:documentType,file_name:file.name,sha256});
+    await env.DB.prepare(`INSERT INTO employee_document_events (client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES (?1,?2,?3,'user',?4,'uploaded',?5)`).bind(clientId,documentId,employeeId,Number(auth.user.id),JSON.stringify({document_type:documentType,file_name:fileName,sha256,storage_provider:storageProvider})).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.upload','employee_document',String(documentId),{employee_id:employeeId,document_type:documentType,file_name:fileName,sha256,storage_provider:storageProvider});
     let delivery=null;
     if(visibility==='employee')delivery=await notifyEmployeeDocumentReady(env,clientId,documentId).catch(error=>({ok:false,reason:'push_failed',message:String(error?.message||error)}));
-    return json({ ok:true, id:documentId, drive_url:uploaded.webViewLink || null, sha256, delivery },201);
+    return json({ ok:true, id:documentId, storage_provider:storageProvider, drive_url:driveUrl, sha256, delivery },201);
+  }
+
+  const employeeDocumentFileMatch = path.match(/^\/api\/employee-documents\/(\d+)\/file$/);
+  if (employeeDocumentFileMatch && method === 'GET') {
+    if (!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role)) return json({ error:'ไม่มีสิทธิ์เปิดเอกสารพนักงาน' },403);
+    await ensureDocumentFoundationReady(env.DB);
+    const id=Number(employeeDocumentFileMatch[1]);
+    const row=await env.DB.prepare(`SELECT id,file_name,storage_provider,drive_file_id,storage_key,content_type,status FROM employee_documents WHERE id=?1 AND client_id=?2`).bind(id,clientId).first();
+    if(!row)return new Response('Document not found',{status:404});
+    const headers=new Headers({'content-type':row.content_type||'application/octet-stream','cache-control':'private, no-store','x-robots-tag':'noindex,nofollow','content-disposition':`inline; filename*=UTF-8''${encodeURIComponent(row.file_name||`document-${id}`)}`});
+    if(String(row.storage_provider||'')==='r2' && row.storage_key){
+      if(!env.EVIDENCE_BUCKET)return new Response('Document storage unavailable',{status:503});
+      const object=await env.EVIDENCE_BUCKET.get(row.storage_key);
+      if(!object)return new Response('Document not found',{status:404});
+      const storedType=object.httpMetadata?.contentType; if(storedType)headers.set('content-type',storedType);
+      return new Response(object.body,{headers});
+    }
+    if(row.drive_file_id){
+      const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first();
+      if(!workspace)return new Response('Google Drive connection required',{status:503});
+      try{
+        const accessToken=await getWorkspaceGoogleAccessToken(env,workspace);
+        const response=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(row.drive_file_id)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}});
+        if(!response.ok)return new Response(response.status===404?'Document not found':'Google Drive unavailable',{status:response.status===404?404:503});
+        if(response.headers.get('content-type'))headers.set('content-type',response.headers.get('content-type'));
+        if(response.headers.get('content-length'))headers.set('content-length',response.headers.get('content-length'));
+        return new Response(response.body,{headers});
+      }catch(error){return new Response(isGoogleReauthRequiredError(error)?'Google Drive authorization expired':'Google Drive unavailable',{status:503});}
+    }
+    return new Response('Document file unavailable',{status:404});
   }
 
   const employeeDocumentEventsMatch = path.match(/^\/api\/employee-documents\/(\d+)\/events$/);
@@ -9532,6 +9590,8 @@ async function ensureDocumentFoundationReady(db){
     ['source',"TEXT NOT NULL DEFAULT 'upload'"],
     ['confidentiality',"TEXT NOT NULL DEFAULT 'internal'"],
     ['sha256','TEXT'],
+    ['storage_key','TEXT'],
+    ['file_size','INTEGER'],
     ['archived_at','TEXT'],
     ['supersedes_document_id','INTEGER']
   ]);

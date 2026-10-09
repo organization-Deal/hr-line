@@ -769,12 +769,13 @@ async function api(path, options = {}) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res;
   try {
+    const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
     res = await fetch(path, {
       ...fetchOptions,
       signal: controller.signal,
       credentials: 'same-origin',
       headers: {
-        'content-type': 'application/json',
+        ...(isFormData ? {} : {'content-type': 'application/json'}),
         ...(fetchOptions.headers || {}),
       },
     });
@@ -4413,7 +4414,7 @@ function ensureEmployeeDocumentsDialog(){
       <label><span>ระดับความลับ</span><select id="employeeDocumentConfidentiality"><option value="confidential">Confidential</option><option value="internal">Internal</option><option value="restricted">Restricted</option></select></label>
       <label class="employee-doc-file-field"><span>ไฟล์</span><input id="employeeDocumentFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx" /></label>
     </div>
-    <div class="employee-doc-upload-actions"><small>PDF / รูป / Word · สูงสุด 10 MB · เก็บใน Google Drive ของบริษัท</small><button id="employeeDocumentUploadBtn" class="btn primary" type="button">อัปโหลดไฟล์</button></div>
+    <div class="employee-doc-upload-actions"><div><small>PDF / รูป / Word · สูงสุด 10 MB · ระบบจะใช้ Google Drive ของบริษัท และสำรองลงพื้นที่เก็บไฟล์ของนากนะเมื่อ Drive ใช้งานไม่ได้</small><div id="employeeDocumentUploadStatus" role="status" aria-live="polite" style="margin-top:6px;font-size:12px;color:var(--muted,#6b787a)"></div></div><button id="employeeDocumentUploadBtn" class="btn primary" type="button">อัปโหลดไฟล์</button></div>
     <div id="employeeDocumentsList" class="employee-documents-list"></div>
   </div>`;
   document.body.appendChild(dialog);
@@ -4431,7 +4432,7 @@ async function loadEmployeeDocuments(employeeId){
   list.innerHTML = docs.length ? docs.map(doc => `<div class="employee-document-row ${doc.status==='archived'?'is-archived':''}">
     <div class="employee-document-icon">${iconSvg('document')}</div>
     <div class="employee-document-copy"><strong>${escapeHtml(doc.title || employeeDocumentTypeLabel(doc.document_type))} <span class="doc-version">v${Number(doc.version||1)}</span></strong><span>${escapeHtml(employeeDocumentTypeLabel(doc.document_type))} · ${doc.document_date ? formatDate(doc.document_date) : formatDate(String(doc.created_at||'').slice(0,10))}${doc.expires_at ? ` · หมดอายุ ${formatDate(doc.expires_at)}` : ''}</span><small>${escapeHtml(doc.file_name || '')} · ${escapeHtml(doc.confidentiality||'internal')} ${doc.status==='archived'?'· เก็บถาวร':''}</small></div>
-    <div class="employee-document-actions">${doc.drive_url ? `<a class="text-btn" href="${escapeHtml(doc.drive_url)}" target="_blank" rel="noopener">เปิดไฟล์</a>` : ''}<button type="button" class="text-btn" onclick="window.openEmployeeDocumentHistory(${Number(doc.id)})">ประวัติ</button>${doc.status!=='archived'?`<button type="button" class="text-btn danger-text" onclick="window.deleteEmployeeDocument(${Number(doc.id)},${Number(employeeId)})">เก็บถาวร</button>`:''}</div>
+    <div class="employee-document-actions">${(doc.drive_url || doc.storage_provider==='r2') ? `<a class="text-btn" href="/api/employee-documents/${Number(doc.id)}/file" target="_blank" rel="noopener">เปิดไฟล์</a>` : ''}<button type="button" class="text-btn" onclick="window.openEmployeeDocumentHistory(${Number(doc.id)})">ประวัติ</button>${doc.status!=='archived'?`<button type="button" class="text-btn danger-text" onclick="window.deleteEmployeeDocument(${Number(doc.id)},${Number(employeeId)})">เก็บถาวร</button>`:''}</div>
   </div>`).join('') : emptyState('ยังไม่มีเอกสาร', 'อัปโหลดสัญญาจ้าง สำเนาบัตรประชาชน หน้าสมุดบัญชี หรือเอกสาร Payroll ได้จากด้านบน');
   return result;
 }
@@ -4453,24 +4454,46 @@ window.openEmployeeDocuments = async id => {
 async function uploadEmployeeDocument(){
   const employeeId = Number($('#employeeDocumentsEmployeeId').value || 0);
   const file = $('#employeeDocumentFile').files?.[0];
+  const status = $('#employeeDocumentUploadStatus');
   if (!employeeId || !file) return toast('กรุณาเลือกไฟล์ก่อน', true);
   if (file.size > 10 * 1024 * 1024) return toast('ไฟล์ต้องไม่เกิน 10 MB', true);
+  const extension = String(file.name || '').toLowerCase().split('.').pop();
+  if (!['pdf','png','jpg','jpeg','webp','doc','docx'].includes(extension)) return toast('รองรับเฉพาะ PDF รูปภาพ และ Word', true);
   const button = $('#employeeDocumentUploadBtn');
   button.disabled = true; button.textContent = 'กำลังอัปโหลด…';
-  const tracked = beginMutationStatus(`/api/employees/${employeeId}/documents`,'POST',false);
+  if(status) status.textContent = `กำลังส่ง ${file.name} (${Math.max(1,Math.round(file.size/1024))} KB)…`;
   try {
     const form = new FormData();
-    form.append('file',file); form.append('document_type',$('#employeeDocumentType').value); form.append('document_date',$('#employeeDocumentDate').value); form.append('expires_at',$('#employeeDocumentExpires').value); form.append('visibility',$('#employeeDocumentVisibility').value); form.append('confidentiality',$('#employeeDocumentConfidentiality').value);
-    const res = await fetch(`/api/employees/${employeeId}/documents`,{method:'POST',credentials:'same-origin',body:form});
-    let data={}; try{data=await res.json();}catch{}
-    if (!res.ok) throw new Error(data.error || `HTTP_${res.status}`);
-    endMutationStatus(tracked,true);
+    form.append('file',file);
+    form.append('document_type',$('#employeeDocumentType').value);
+    form.append('document_date',$('#employeeDocumentDate').value);
+    form.append('expires_at',$('#employeeDocumentExpires').value);
+    form.append('visibility',$('#employeeDocumentVisibility').value);
+    form.append('confidentiality',$('#employeeDocumentConfidentiality').value);
+    const data = await api(`/api/employees/${employeeId}/documents`,{method:'POST',body:form,timeoutMs:60000,silentStatus:true});
+    if(status) status.textContent = data.storage_provider==='r2' ? 'อัปโหลดสำเร็จ · เก็บในพื้นที่ไฟล์สำรองของนากนะ' : 'อัปโหลดสำเร็จ · เก็บใน Google Drive ของบริษัท';
     $('#employeeDocumentFile').value='';
     await loadEmployeeDocuments(employeeId);
-    await loadAll({silent:true});
+    const localEmployee = state.employees.find(item => Number(item.id) === employeeId);
+    if(localEmployee) localEmployee.document_count = Number(localEmployee.document_count || 0) + 1;
+    renderEmployees($('#employeeSearch')?.value || '');
+    // Refresh only the employee list in the background. Do not reload the entire
+    // HR dashboard after one file upload; that made a successful upload look stuck.
+    api('/api/employees',{timeoutMs:10000,silentStatus:true}).then(result=>{
+      if(Array.isArray(result?.data)){
+        state.employees=result.data;
+        renderEmployees($('#employeeSearch')?.value || '');
+      }
+    }).catch(()=>{});
     toast('อัปโหลดเอกสารแล้ว');
-  } catch(error) { endMutationStatus(tracked,false); toast(error.message || 'อัปโหลดเอกสารไม่สำเร็จ',true); }
-  finally { button.disabled=false; button.textContent='อัปโหลดไฟล์'; }
+  } catch(error) {
+    const message = String(error?.message || 'อัปโหลดเอกสารไม่สำเร็จ');
+    if(status) status.textContent = `อัปโหลดไม่สำเร็จ · ${message}`;
+    toast(message,true);
+  } finally {
+    button.disabled=false;
+    button.textContent='อัปโหลดไฟล์';
+  }
 }
 
 window.openEmployeeDocumentHistory = async documentId => {

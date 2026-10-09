@@ -1,0 +1,21 @@
+Nakna P9.33 Employee Document Upload Fix
+Date: 2026-10-09
+
+PASS node --check public/app.js
+PASS node --check src/index.js
+PASS SQLite employee_documents insert with storage_provider/storage_key/file_size
+PASS api() preserves multipart FormData boundary
+PASS upload uses common API helper with 60s timeout
+PASS upload no longer calls full loadAll()
+PASS persistent upload status is present
+PASS secure authenticated employee-document file route is present
+PASS Google Drive -> private R2 fallback is present
+PASS runtime schema guard adds storage_key/file_size
+PASS file extension allowlist is enforced
+PASS Google re-auth error has a user-facing message
+PASS release marker P9.33-EMPLOYEE-DOCUMENT-UPLOAD-FIX
+
+Static checks: 10/10 passed
+Runtime syntax / SQL sanity: passed
+
+Not production-verified: Google Drive and R2 calls were not executed against the user's live Cloudflare account in this environment.
