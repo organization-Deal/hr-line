@@ -1,0 +1,31 @@
+Nakna P9.35 static validation
+====================================================
+PASS - Build label P9.35 present 
+PASS - Exactly 3 runtime loadAll calls remain  | [(1644, 'if (await ensureWorkspaceReady()) await loadAll({ silent: true });'), (1667, 'if (await ensureWorkspaceReady()) await loadAll({ silent: true });'), (1738, 'if(state.me?.active_company_id){showAppShell();await loadAll({silent:true});}')]
+PASS - All runtime loadAll calls are structural boot/workspace flows  | [(1644, 'if (await ensureWorkspaceReady()) await loadAll({ silent: true });'), (1667, 'if (await ensureWorkspaceReady()) await loadAll({ silent: true });'), (1738, 'if(state.me?.active_company_id){showAppShell();await loadAll({silent:true});}')]
+PASS - Settings secondary tasks are lazy functions 
+PASS - API timing instrumentation present 
+PASS - refreshRecruitmentOnly helper present 
+PASS - refreshLeavesOnly helper present 
+PASS - refreshLeavePoliciesOnly helper present 
+PASS - refreshLearningOnly helper present 
+PASS - refreshPerformanceOnly helper present 
+PASS - refreshEngagementOnly helper present 
+PASS - refreshAnalyticsOnly helper present 
+PASS - refreshSubscriptionOnly helper present 
+PASS - refreshSaasAdminOnly helper present 
+PASS - refreshPayrollSnapshot helper present 
+PASS - refreshPhase5 has no mutation call sites  | count=1 (definition only)
+PASS - refreshGrowth has no mutation call sites  | count=1 (definition only)
+PASS - Payroll snapshot loads overview/detail in parallel 
+PASS - Document archive reloads only employee documents 
+PASS - Recruitment targeted refresh  | calls=2 + definition
+PASS - Leave targeted refresh  | calls=3 + definition
+PASS - Learning targeted refresh  | calls=4 + definition
+PASS - Performance targeted refresh  | calls=5 + definition
+PASS - Engagement targeted refresh  | calls=6 + definition
+PASS - Payroll targeted refresh  | calls=13 + definition
+----------------------------------------------------
+TOTAL: 25  PASS: 25  FAIL: 0
+
+NOTE: Static/source validation only. Production latency for Cloudflare/D1/Google/LINE must be measured after deploy.

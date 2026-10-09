@@ -1,4 +1,4 @@
-const NAKNA_FRONTEND_BUILD='P9.31-ENROLLMENT'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
+const NAKNA_FRONTEND_BUILD='P9.35-MUTATION-PERFORMANCE-SWEEP'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
 // P9.15.3 — Face settings render lifecycle + deployment visibility fix.
 // If a Face link is accidentally served by index.html, recover before booting the HR login page.
 try {
@@ -372,9 +372,15 @@ async function loadViewData(name,{force=false}={}){
         state.subscription=subscription||state.subscription;
         renderSettings(); renderSettingsSidebar(); renderSubscription();
         // Secondary settings are loaded after the package card is already usable.
-        const secondary=[load('/api/people-core',state.peopleCore),load('/api/work-locations',{data:state.workLocations}),load('/api/leave-policies',{data:state.leavePolicies}),load('/api/integrations/google-workspace',state.googleWorkspace),load('/api/integrations/line',state.lineIntegration)];
-        if(isHr)secondary.push(load('/api/approver-access',{data:state.approverAccess,catalog:state.approverPermissionCatalog}));
-        const result=await runLoadPool(secondary.map(p=>()=>p),3);
+        const secondary=[
+          ()=>load('/api/people-core',state.peopleCore),
+          ()=>load('/api/work-locations',{data:state.workLocations}),
+          ()=>load('/api/leave-policies',{data:state.leavePolicies}),
+          ()=>load('/api/integrations/google-workspace',state.googleWorkspace),
+          ()=>load('/api/integrations/line',state.lineIntegration)
+        ];
+        if(isHr)secondary.push(()=>load('/api/approver-access',{data:state.approverAccess,catalog:state.approverPermissionCatalog}));
+        const result=await runLoadPool(secondary,3);
         const [peopleCore,workLocations,leavePolicies,google,line,approver]=result;
         state.peopleCore=mergePeopleCoreFromServer(peopleCore)||state.peopleCore; state.workLocations=workLocations?.data||state.workLocations; state.leavePolicies=leavePolicies?.data||state.leavePolicies; state.googleWorkspace=google||state.googleWorkspace; state.lineIntegration=line||state.lineIntegration; if(approver){state.approverAccess=approver?.data||state.approverAccess;state.approverPermissionCatalog=approver?.catalog||state.approverPermissionCatalog;}
       }
@@ -444,6 +450,161 @@ async function refreshPeopleData({ includeLookups = false, render = true } = {})
   if (includeLookups && lookups) state.lookups = lookups;
   if (render) renderPeopleFast();
   return true;
+}
+
+// P9.34 — mutation refresh helpers. A single employee/document/settings change must
+// never trigger loadAll(), because loadAll fetches ~27 independent modules. That
+// made a quick D1 write wait on Payroll/Google/Recruitment/etc. and could surface
+// the global partial-load banner even though the mutation itself had succeeded.
+async function refreshEmployeesOnly({ render = true } = {}) {
+  const result = await api('/api/employees', { timeoutMs: 12000, silentStatus: true });
+  if (Array.isArray(result?.data)) state.employees = result.data;
+  if (render) {
+    try { renderEmployees($('#employeeSearch')?.value || ''); } catch {}
+    try { renderSettingsSidebar(); } catch {}
+  }
+  markViewLoaded('employees');
+  markViewLoaded('organization');
+  return state.employees;
+}
+
+async function refreshInvitesOnly({ render = true } = {}) {
+  const result = await api('/api/invites', { timeoutMs: 12000, silentStatus: true });
+  if (Array.isArray(result?.data)) state.invites = result.data;
+  if (render) {
+    try { renderInviteCenter(); } catch {}
+    try { renderEmployees($('#employeeSearch')?.value || ''); } catch {}
+  }
+  markViewLoaded('employees');
+  return state.invites;
+}
+
+async function refreshWorkLocationsOnly({ render = true, refreshEmployees = true } = {}) {
+  const result = await api('/api/work-locations', { timeoutMs: 12000, silentStatus: true });
+  if (Array.isArray(result?.data)) state.workLocations = result.data;
+  if (render) {
+    try { renderWorkLocations(); } catch {}
+    try { renderSettingsSidebar(); } catch {}
+  }
+  if (refreshEmployees) refreshEmployeesOnly({ render: true }).catch(error => console.warn('[Nakna] employee refresh after location change failed', error?.message || error));
+  return state.workLocations;
+}
+
+async function refreshPeopleCoreOnly({ render = true } = {}) {
+  const result = await api('/api/people-core', { timeoutMs: 12000, silentStatus: true });
+  state.peopleCore = mergePeopleCoreFromServer(result) || state.peopleCore || { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} };
+  if (render) {
+    try { renderPeopleCore(); } catch {}
+    try { renderSettingsSidebar(); } catch {}
+  }
+  markViewLoaded('organization');
+  return state.peopleCore;
+}
+
+// P9.35 — targeted post-mutation refreshes. Keep the mutation response on the
+// critical path; everything not required for the user's immediate result is
+// refreshed in the background. This prevents a successful save from feeling
+// slow just because an unrelated read (Analytics/Google/Payroll/etc.) is slow.
+function markViewStale(name){ if(name) viewLoadedAt.delete(name); }
+function queueBackgroundRefresh(label, task, delay = 0) {
+  const run = () => Promise.resolve().then(task).catch(error => {
+    console.warn(`[Nakna] background refresh failed · ${label}`, error?.message || error);
+  });
+  if (delay > 0) return setTimeout(run, delay);
+  Promise.resolve().then(run);
+  return null;
+}
+
+async function refreshRecruitmentOnly({ render = true } = {}) {
+  const result = await api('/api/candidates', { timeoutMs: 12000, silentStatus: true });
+  if (Array.isArray(result?.data)) state.candidates = result.data;
+  if (render) { try { renderCandidates(); } catch {} }
+  markViewLoaded('recruitment');
+  return state.candidates;
+}
+
+async function refreshLeavesOnly({ render = true } = {}) {
+  const result = await api('/api/leaves', { timeoutMs: 12000, silentStatus: true });
+  if (Array.isArray(result?.data)) state.leaves = result.data;
+  if (render) { try { renderLeaves(); } catch {} }
+  markViewLoaded('leave');
+  return state.leaves;
+}
+
+async function refreshLeavePoliciesOnly({ render = true } = {}) {
+  const result = await api('/api/leave-policies', { timeoutMs: 12000, silentStatus: true });
+  if (Array.isArray(result?.data)) state.leavePolicies = result.data;
+  if (render) {
+    try { renderLeavePolicies(); } catch {}
+    try { renderSettings(); } catch {}
+  }
+  markViewLoaded('leave');
+  return state.leavePolicies;
+}
+
+async function refreshLearningOnly({ render = true } = {}) {
+  const result = await api('/api/learning/overview', { timeoutMs: 15000, silentStatus: true });
+  if (result) state.learning = result;
+  if (render) { try { renderGrowth(); } catch {} }
+  markViewLoaded('performance');
+  return state.learning;
+}
+
+async function refreshPerformanceOnly({ render = true } = {}) {
+  const result = await api('/api/performance/overview', { timeoutMs: 15000, silentStatus: true });
+  if (result) state.performance = result;
+  if (render) { try { renderGrowth(); } catch {} }
+  markViewLoaded('performance');
+  return state.performance;
+}
+
+async function refreshEngagementOnly({ render = true } = {}) {
+  const result = await api('/api/engagement/overview', { timeoutMs: 15000, silentStatus: true });
+  if (result) state.engagement = result;
+  if (render) { try { renderEngagement(); } catch {} }
+  markViewLoaded('engagement');
+  return state.engagement;
+}
+
+async function refreshAnalyticsOnly({ render = true } = {}) {
+  const result = await api('/api/analytics/overview', { timeoutMs: 15000, silentStatus: true });
+  if (result) state.analytics = result;
+  if (render) { try { renderAnalytics(); } catch {} }
+  markViewLoaded('analytics');
+  return state.analytics;
+}
+
+async function refreshSubscriptionOnly({ render = true } = {}) {
+  const result = await api('/api/subscription', { timeoutMs: 12000, silentStatus: true });
+  if (result) state.subscription = result;
+  if (render) { try { renderSubscription(); } catch {} }
+  return state.subscription;
+}
+
+async function refreshSaasAdminOnly({ render = true } = {}) {
+  const result = await api('/api/admin/saas/overview', { timeoutMs: 15000, silentStatus: true });
+  if (result) state.saasAdmin = result;
+  if (render) { try { renderSaasAdmin(); } catch {} }
+  markViewLoaded('saas-admin');
+  return state.saasAdmin;
+}
+
+async function refreshPayrollSnapshot(periodId = state.activePayrollPeriodId, { render = true } = {}) {
+  const role=String(activeCompanyRole()||'');
+  if(!['owner','co_owner','hr_admin','hr','payroll_admin'].includes(role)) return null;
+  const id=Number(periodId||0);
+  const [overview,detail]=await Promise.all([
+    api('/api/payroll/overview',{timeoutMs:18000,silentStatus:true}),
+    id ? api(`/api/payroll/periods/${id}`,{timeoutMs:18000,silentStatus:true}) : Promise.resolve(null)
+  ]);
+  if(overview) state.payroll=overview;
+  if(detail){ state.activePayrollPeriodId=id; state.payrollDetail=detail; }
+  if(render){
+    try{ renderPayroll(); }catch{}
+    if(detail){ try{ renderPayrollDetail(); }catch{} }
+  }
+  markViewLoaded('payroll');
+  return {overview,detail};
 }
 
 function schedulePeopleRefresh(delay = 700, { includeLookups = false } = {}) {
@@ -756,8 +917,20 @@ function initGlobalInteractionFeedback(){
   },true);
 }
 
+function recordApiTiming(path, method, elapsedMs, status, ok) {
+  try {
+    const row = { path:String(path||''), method:String(method||'GET'), ms:Math.round(Number(elapsedMs||0)), status:Number(status||0), ok:!!ok, at:new Date().toISOString() };
+    const list = Array.isArray(window.__NAKNA_API_TIMINGS) ? window.__NAKNA_API_TIMINGS : [];
+    list.push(row);
+    if (list.length > 80) list.splice(0, list.length - 80);
+    window.__NAKNA_API_TIMINGS = list;
+    if (row.ms >= 1500) console.warn('[Nakna] slow API', row);
+  } catch {}
+}
+
 async function api(path, options = {}) {
   const controller = new AbortController();
+  const apiStartedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const { timeoutMs: requestedTimeout, silentStatus = false, ...fetchOptions } = options;
   const method = String(fetchOptions.method || 'GET').toUpperCase();
   const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
@@ -781,12 +954,16 @@ async function api(path, options = {}) {
     });
   } catch (error) {
     clearTimeout(timer);
+    const apiEndedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    recordApiTiming(path, method, apiEndedAt - apiStartedAt, 0, false);
     endMutationStatus(trackedMutation, false);
     endUserReadInteraction(trackedRead,false,error?.name==='AbortError'?'ใช้เวลานานเกินไป กรุณาลองอีกครั้ง':String(error?.message||error||''));
     if (error?.name === 'AbortError') throw new Error(`API_TIMEOUT:${path}`);
     throw error;
   }
   clearTimeout(timer);
+  const apiEndedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  recordApiTiming(path, method, apiEndedAt - apiStartedAt, res.status, res.ok);
 
   let data = {};
   try { data = await res.json(); } catch {}
@@ -1718,7 +1895,7 @@ async function disconnectGoogleWorkspace() {
 
 async function syncGoogleWorkspace() {
   const button=$('#googleWorkspaceSyncBtn');button.disabled=true;button.textContent='กำลัง Sync…';
-  try{await api('/api/integrations/google-workspace/sync',{method:'POST',body:'{}'});state.googleWorkspace=await api('/api/integrations/google-workspace');renderSettings();toast('Sync ข้อมูลเข้า Google Sheet แล้ว');}
+  try{await api('/api/integrations/google-workspace/sync',{method:'POST',body:'{}'});toast('Sync ข้อมูลเข้า Google Sheet แล้ว');queueBackgroundRefresh('google:sync-status',async()=>{state.googleWorkspace=await api('/api/integrations/google-workspace',{silentStatus:true});renderSettings();});}
   catch(error){toast(error.message,true);}finally{button.disabled=false;button.textContent='Sync ตอนนี้';}
 }
 
@@ -2070,7 +2247,7 @@ function renderAttendanceRetroRequests(){
 window.decideAttendanceRetro=async(id,decision,button)=>{
   let reason='';if(decision==='reject'){reason=prompt('เหตุผลที่ไม่อนุมัติ (พนักงานจะเห็นข้อความนี้)')||'';if(!reason.trim())return;}
   const old=button?.textContent;if(button){button.disabled=true;button.textContent=decision==='approve'?'กำลังอนุมัติ…':'กำลังบันทึก…';}
-  try{await api(`/api/attendance-retro-requests/${Number(id)}/${decision}`,{method:'POST',body:JSON.stringify({reason:reason.trim()})});toast(decision==='approve'?'อนุมัติเช็กอินย้อนหลังแล้ว':'ไม่อนุมัติคำขอแล้ว');await loadTeamWorkLog();refreshDashboardSoon(80);}catch(e){toast(e.message||'ดำเนินการไม่สำเร็จ',true);}finally{if(button){button.disabled=false;button.textContent=old;}}
+  try{await api(`/api/attendance-retro-requests/${Number(id)}/${decision}`,{method:'POST',body:JSON.stringify({reason:reason.trim()})});toast(decision==='approve'?'อนุมัติเช็กอินย้อนหลังแล้ว':'ไม่อนุมัติคำขอแล้ว');queueBackgroundRefresh('attendance:retro-decision',()=>loadTeamWorkLog());refreshDashboardSoon(80);}catch(e){toast(e.message||'ดำเนินการไม่สำเร็จ',true);}finally{if(button){button.disabled=false;button.textContent=old;}}
 };
 
 function workLogStatus(row){
@@ -2679,7 +2856,7 @@ window.revokeInvite = async id => {
   if (!confirm('ยกเลิกลิงก์เชิญนี้ใช่ไหม? คนที่ยังไม่ได้เข้าร่วมจะใช้ลิงก์นี้ต่อไม่ได้')) return;
   try {
     await api(`/api/invites/${id}/revoke`, { method: 'POST', body: '{}' });
-    await loadAll({ silent: true });
+    await refreshInvitesOnly();
     toast('ยกเลิกลิงก์เชิญแล้ว');
   } catch (error) { toast(error.message, true); }
 };
@@ -2718,7 +2895,7 @@ async function createInvite() {
     });
     try { await navigator.clipboard.writeText(result.invite_url); } catch {}
     $('#inviteModal').close();
-    await loadAll({ silent: true });
+    await refreshInvitesOnly();
     showInviteCreated(result.invite_url, result.expires_at, result.max_uses);
   } catch (error) {
     toast(error.message, true);
@@ -2777,7 +2954,11 @@ window.moveCandidate = async (id, stage) => {
 
 window.hireCandidate = id => {
   const candidate=state.candidates.find(c=>Number(c.id)===Number(id)); if(!candidate)return;
-  openModal('HIRE','รับเข้าทำงาน',`เปลี่ยน ${candidate.nickname||candidate.first_name} จาก Candidate เป็นพนักงานทดลองงาน`,[['employee_code','รหัสพนักงาน (ไม่กรอก = สร้างอัตโนมัติ)','text'],['start_date','วันเริ่มงาน','date',true],['probation_end_date','วันครบ Probation','date']],async data=>{await api(`/api/candidates/${id}/hire`,{method:'POST',body:JSON.stringify(data)});await loadAll({silent:true});toast('สร้างพนักงานทดลองงานแล้ว');}); const start=$('#field-start_date'); if(start&&!start.value) start.value=localDateKey(new Date());
+  openModal('HIRE','รับเข้าทำงาน',`เปลี่ยน ${candidate.nickname||candidate.first_name} จาก Candidate เป็นพนักงานทดลองงาน`,[['employee_code','รหัสพนักงาน (ไม่กรอก = สร้างอัตโนมัติ)','text'],['start_date','วันเริ่มงาน','date',true],['probation_end_date','วันครบ Probation','date']],async data=>{
+    await api(`/api/candidates/${id}/hire`,{method:'POST',body:JSON.stringify(data)});
+    candidate.stage='hired'; renderCandidates();
+    queueBackgroundRefresh('recruitment:hire',()=>Promise.all([refreshRecruitmentOnly(),refreshEmployeesOnly()]));
+  }); const start=$('#field-start_date'); if(start&&!start.value) start.value=localDateKey(new Date());
 };
 
 
@@ -2816,11 +2997,11 @@ async function syncRecruitmentGmailNow() {
   button.textContent = 'กำลัง Sync…';
   try {
     const result = await api('/api/recruitment/gmail/sync', { method:'POST', body:'{}', timeoutMs:45000 });
-    await refreshRecruitmentGmail({ reloadCandidates: true });
     toast(`Gmail Sync สำเร็จ · เพิ่ม ${result.imported || 0} ผู้สมัคร · เชื่อมของเดิม ${result.linked || 0}`);
+    queueBackgroundRefresh('recruitment:gmail-sync',()=>refreshRecruitmentGmail({ reloadCandidates: true }));
   } catch (error) {
     toast(error.message, true);
-    await refreshRecruitmentGmail().catch(()=>{});
+    queueBackgroundRefresh('recruitment:gmail-error-status',()=>refreshRecruitmentGmail());
   } finally {
     button.disabled = false;
     button.textContent = original;
@@ -3105,7 +3286,7 @@ window.uploadLeaveEvidence = async requestId => {
     if (!response.ok) throw new Error(data.error || `อัปโหลดไม่สำเร็จ (${response.status})`);
     toast('อัปโหลดหลักฐานแล้ว');
     await window.openLeaveDetail(Number(requestId));
-    await loadAll({ silent: true });
+    queueBackgroundRefresh('leave:evidence',()=>refreshLeavesOnly());
   } catch (error) {
     toast(error.message || 'อัปโหลดหลักฐานไม่สำเร็จ', true);
   } finally {
@@ -3245,9 +3426,9 @@ async function sendBroadcast(){
   if(audience_type==='department') body.department_id=Number($('#broadcastDepartment').value);
   if(audience_type==='employees') body.employee_ids=$$('#broadcastEmployeeChecks input:checked').map(x=>Number(x.value));
   const btn=$('#broadcastSendBtn');btn.disabled=true;btn.textContent='กำลังส่ง…';
-  try{const result=await api('/api/broadcasts',{method:'POST',body:JSON.stringify(body)});$('#broadcastModal').close();const fresh=await api('/api/broadcasts');state.broadcasts=fresh?.data||[];renderEmployeeService();renderBroadcastPage();toast(`ส่งประกาศแล้ว ${Number(result.delivered||0)} คน${body.requires_ack?' · เปิดการรับทราบแล้ว':''}${Number(result.failed||0)+Number(result.skipped||0)>0?` · ไม่สำเร็จ ${Number(result.failed||0)+Number(result.skipped||0)}`:''}`);}catch(e){toast(e.message,true);}finally{btn.disabled=false;btn.textContent='ส่งประกาศตอนนี้';}
+  try{const result=await api('/api/broadcasts',{method:'POST',body:JSON.stringify(body)});$('#broadcastModal').close();toast(`ส่งประกาศแล้ว ${Number(result.delivered||0)} คน${body.requires_ack?' · เปิดการรับทราบแล้ว':''}${Number(result.failed||0)+Number(result.skipped||0)>0?` · ไม่สำเร็จ ${Number(result.failed||0)+Number(result.skipped||0)}`:''}`);queueBackgroundRefresh('broadcast:send',async()=>{const fresh=await api('/api/broadcasts',{silentStatus:true});state.broadcasts=fresh?.data||[];renderEmployeeService();renderBroadcastPage();});}catch(e){toast(e.message,true);}finally{btn.disabled=false;btn.textContent='ส่งประกาศตอนนี้';}
 }
-window.sendBroadcastById=async id=>{try{const result=await api(`/api/broadcasts/${id}/send`,{method:'POST',body:'{}'});const fresh=await api('/api/broadcasts');state.broadcasts=fresh?.data||[];renderEmployeeService();renderBroadcastPage();toast(`ส่งประกาศแล้ว ${Number(result.delivered||0)} คน`);}catch(e){toast(e.message,true);}};
+window.sendBroadcastById=async id=>{try{const result=await api(`/api/broadcasts/${id}/send`,{method:'POST',body:'{}'});toast(`ส่งประกาศแล้ว ${Number(result.delivered||0)} คน`);queueBackgroundRefresh('broadcast:send-existing',async()=>{const fresh=await api('/api/broadcasts',{silentStatus:true});state.broadcasts=fresh?.data||[];renderEmployeeService();renderBroadcastPage();});}catch(e){toast(e.message,true);}};
 window.openBroadcastAckDetail=async id=>{
   try{
     const result=await api(`/api/broadcasts/${Number(id)}/acknowledgements`); const b=result.broadcast||{},summary=result.summary||{},rows=result.data||[];
@@ -3268,9 +3449,9 @@ async function remindPendingBroadcast(){
 
 async function setupRichMenu(){
   const btn=$('#setupRichMenuBtn');btn.disabled=true;btn.textContent='กำลังตั้ง Rich Menu…';
-  try{await api('/api/integrations/line/rich-menu',{method:'POST',body:'{}'});state.employeeService=await api('/api/employee-service');renderEmployeeService();toast('ตั้ง Rich Menu ให้ LINE บริษัทแล้ว');}catch(e){toast(e.message,true);}finally{btn.disabled=false;btn.textContent=state.employeeService?.rich_menu?.configured?'อัปเดต Rich Menu':'ตั้ง Rich Menu ให้ LINE บริษัท';}
+  try{await api('/api/integrations/line/rich-menu',{method:'POST',body:'{}'});toast('ตั้ง Rich Menu ให้ LINE บริษัทแล้ว');queueBackgroundRefresh('line:rich-menu',async()=>{state.employeeService=await api('/api/employee-service',{silentStatus:true});renderEmployeeService();});}catch(e){toast(e.message,true);}finally{btn.disabled=false;btn.textContent='อัปเดต Rich Menu';}
 }
-async function removeRichMenu(){if(!confirm('ลบ Rich Menu เริ่มต้นของบริษัทออกจาก LINE ใช่ไหม?'))return;try{await api('/api/integrations/line/rich-menu',{method:'DELETE'});state.employeeService=await api('/api/employee-service');renderEmployeeService();toast('ลบ Rich Menu แล้ว');}catch(e){toast(e.message,true);}}
+async function removeRichMenu(){if(!confirm('ลบ Rich Menu เริ่มต้นของบริษัทออกจาก LINE ใช่ไหม?'))return;try{await api('/api/integrations/line/rich-menu',{method:'DELETE'});toast('ลบ Rich Menu แล้ว');queueBackgroundRefresh('line:rich-menu-remove',async()=>{state.employeeService=await api('/api/employee-service',{silentStatus:true});renderEmployeeService();});}catch(e){toast(e.message,true);}}
 
 window.openHrCase=async id=>{
   try{
@@ -3286,7 +3467,7 @@ window.openHrCase=async id=>{
 };
 async function saveHrCase(){
   const id=state.activeHrCaseId;if(!id)return;const btn=$('#hrCaseSaveBtn');btn.disabled=true;
-  try{await api(`/api/hr-cases/${id}`,{method:'PATCH',body:JSON.stringify({status:$('#hrCaseStatus').value,priority:$('#hrCasePriority').value,hr_note:$('#hrCaseNote').value.trim(),assigned_to_me:true})});const reply=$('#hrCaseReply').value.trim();if(reply)await api(`/api/hr-cases/${id}/reply`,{method:'POST',body:JSON.stringify({message:reply})});$('#hrCaseModal').close();await loadViewData('hr-inbox',{force:true});refreshDashboardSoon(80);toast(reply?'บันทึกและตอบกลับพนักงานแล้ว':'บันทึกเรื่อง HR แล้ว');}catch(e){toast(e.message,true);}finally{btn.disabled=false;}
+  try{await api(`/api/hr-cases/${id}`,{method:'PATCH',body:JSON.stringify({status:$('#hrCaseStatus').value,priority:$('#hrCasePriority').value,hr_note:$('#hrCaseNote').value.trim(),assigned_to_me:true})});const reply=$('#hrCaseReply').value.trim();if(reply)await api(`/api/hr-cases/${id}/reply`,{method:'POST',body:JSON.stringify({message:reply})});$('#hrCaseModal').close();toast(reply?'บันทึกและตอบกลับพนักงานแล้ว':'บันทึกเรื่อง HR แล้ว');queueBackgroundRefresh('hr-case:save',()=>loadViewData('hr-inbox',{force:true}));refreshDashboardSoon(80);}catch(e){toast(e.message,true);}finally{btn.disabled=false;}
 }
 
 async function saveProbationLeaveLock(){
@@ -3573,7 +3754,7 @@ window.renderOrganizationBuilder=renderOrganizationBuilder;
 async function setDepartmentParentQuick(id,parentId){
   try{
     await api(`/api/departments/${Number(id)}`,{method:'PATCH',body:JSON.stringify({parent_department_id:parentId||null})});
-    await loadAll({silent:true});
+    await loadViewData('organization',{force:true});
     renderOrganizationBuilder();
     toast(parentId?'โยงสายบังคับบัญชาแล้ว':'ย้ายเป็นระดับบนสุดแล้ว');
   }catch(e){toast(e.message,true);}
@@ -3600,7 +3781,7 @@ async function saveDepartmentLink(){
   try{
     await api(`/api/departments/${id}`,{method:'PATCH',body:JSON.stringify({parent_department_id:parentRaw||null,sort_order:sortOrder})});
     $('#departmentLinkModal').close();
-    await loadAll({silent:true});
+    await loadViewData('organization',{force:true});
     toast('บันทึกการโยงเส้นและลำดับแล้ว');
   }catch(e){toast(e.message,true);}finally{button.disabled=false;}
 }
@@ -3629,7 +3810,7 @@ window.moveDepartment = async (id,direction) => {
       api(`/api/departments/${current.id}`,{method:'PATCH',body:JSON.stringify({sort_order:targetOrder})}),
       api(`/api/departments/${target.id}`,{method:'PATCH',body:JSON.stringify({sort_order:currentOrder})}),
     ]);
-    await loadAll({silent:true});
+    await loadViewData('organization',{force:true});
     toast(`ย้ายลำดับ ${current.name} แล้ว`);
   }catch(e){toast(e.message,true);}
 };
@@ -3795,13 +3976,13 @@ async function savePosition(){
   }catch(e){toast(e.message,true);}finally{b.disabled=false;}
 }
 window.openScheduleFor=(type,id)=>openScheduleModal(type,id);
-window.resetSchedule=async(type,id)=>{if(!confirm('ล้างตาราง Override นี้และกลับไปใช้ค่าระดับบนใช่ไหม?'))return;try{await api(`/api/work-schedules/${type}/${Number(id||0)}`,{method:'DELETE'});await loadAll({silent:true});toast('ล้างตาราง Override แล้ว');}catch(e){toast(e.message,true);}};
+window.resetSchedule=async(type,id)=>{if(!confirm('ล้างตาราง Override นี้และกลับไปใช้ค่าระดับบนใช่ไหม?'))return;try{await api(`/api/work-schedules/${type}/${Number(id||0)}`,{method:'DELETE'});await refreshPeopleCoreOnly();toast('ล้างตาราง Override แล้ว');}catch(e){toast(e.message,true);}};
 function openScheduleModal(type='company',id=0){$('#scheduleScopeType').value=type;refreshScheduleTarget();if(id)$('#scheduleScopeId').value=String(id);$('#scheduleStart').value=state.companyProfile?.work_start||'09:00';$('#scheduleEnd').value=state.companyProfile?.work_end||'18:00';$('#scheduleGrace').value=String(state.companyProfile?.late_grace_minutes??10);$('#scheduleIsWorkday').checked=true;$$('#scheduleWeekdays input').forEach((input,i)=>input.checked=i<5);$('#scheduleModal').showModal();}
 function refreshScheduleTarget(){const type=$('#scheduleScopeType').value;const target=$('#scheduleScopeId');if(type==='company'){target.innerHTML='<option value="0">ทั้งบริษัท</option>';target.disabled=true;}else if(type==='department'){target.disabled=false;target.innerHTML=(state.peopleCore.departments||[]).map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');}else{target.disabled=false;target.innerHTML=state.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}">${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</option>`).join('');}}
-async function saveSchedule(){const weekdays=$$('#scheduleWeekdays input:checked').map(i=>Number(i.value));if(!weekdays.length)return toast('เลือกวันที่ต้องการตั้งเวลาอย่างน้อย 1 วัน',true);const body={scope_type:$('#scheduleScopeType').value,scope_id:Number($('#scheduleScopeId').value||0),rules:weekdays.map(weekday=>({weekday,is_workday:$('#scheduleIsWorkday').checked,start_time:$('#scheduleStart').value,end_time:$('#scheduleEnd').value,late_grace_minutes:Number($('#scheduleGrace').value||0)}))};const b=$('#scheduleSaveBtn');b.disabled=true;try{await api('/api/work-schedules',{method:'PUT',body:JSON.stringify(body)});$('#scheduleModal').close();await loadAll({silent:true});toast('บันทึกเวลาทำงานแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
+async function saveSchedule(){const weekdays=$$('#scheduleWeekdays input:checked').map(i=>Number(i.value));if(!weekdays.length)return toast('เลือกวันที่ต้องการตั้งเวลาอย่างน้อย 1 วัน',true);const body={scope_type:$('#scheduleScopeType').value,scope_id:Number($('#scheduleScopeId').value||0),rules:weekdays.map(weekday=>({weekday,is_workday:$('#scheduleIsWorkday').checked,start_time:$('#scheduleStart').value,end_time:$('#scheduleEnd').value,late_grace_minutes:Number($('#scheduleGrace').value||0)}))};const b=$('#scheduleSaveBtn');b.disabled=true;try{await api('/api/work-schedules',{method:'PUT',body:JSON.stringify(body)});$('#scheduleModal').close();await refreshPeopleCoreOnly();toast('บันทึกเวลาทำงานแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
 function openHolidayModal(){ $('#holidayDate').value='';$('#holidayName').value='';$('#holidayType').value='traditional';$('#holidayPaid').checked=true;$('#holidayNotes').value='';$('#holidayModal').showModal(); }
-async function saveHoliday(){const body={holiday_date:$('#holidayDate').value,name:$('#holidayName').value.trim(),holiday_type:$('#holidayType').value,is_paid:$('#holidayPaid').checked,notes:$('#holidayNotes').value.trim()};const b=$('#holidaySaveBtn');b.disabled=true;try{await api('/api/company-holidays',{method:'POST',body:JSON.stringify(body)});$('#holidayModal').close();await loadAll({silent:true});toast('เพิ่มวันหยุดบริษัทแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
-window.deleteHoliday=async id=>{if(!confirm('ลบวันหยุดนี้ใช่ไหม?'))return;try{await api(`/api/company-holidays/${id}`,{method:'DELETE'});await loadAll({silent:true});toast('ลบวันหยุดแล้ว');}catch(e){toast(e.message,true);}};
+async function saveHoliday(){const body={holiday_date:$('#holidayDate').value,name:$('#holidayName').value.trim(),holiday_type:$('#holidayType').value,is_paid:$('#holidayPaid').checked,notes:$('#holidayNotes').value.trim()};const b=$('#holidaySaveBtn');b.disabled=true;try{await api('/api/company-holidays',{method:'POST',body:JSON.stringify(body)});$('#holidayModal').close();await refreshPeopleCoreOnly();toast('เพิ่มวันหยุดบริษัทแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
+window.deleteHoliday=async id=>{if(!confirm('ลบวันหยุดนี้ใช่ไหม?'))return;try{await api(`/api/company-holidays/${id}`,{method:'DELETE'});await refreshPeopleCoreOnly();toast('ลบวันหยุดแล้ว');}catch(e){toast(e.message,true);}};
 function renderAttendanceReminderSettings(){
   const card=$('#attendanceReminderCard'),toggle=$('#attendanceReminderToggle'),message=$('#attendanceReminderMessage');
   if(!card||!toggle||!message)return;
@@ -4260,7 +4441,7 @@ async function saveWorkLocation() {
     await api(editingId?`/api/work-locations/${editingId}`:'/api/work-locations', { method: editingId?'PATCH':'POST', body: JSON.stringify(payload) });
     state.editingWorkLocationId=0;
     $('#locationModal').close();
-    await loadAll({ silent: true });
+    await refreshWorkLocationsOnly({render:true,refreshEmployees:true});
     toast(editingId?'แก้ไข Work Location แล้ว · ใช้พิกัดใหม่ทันที':'เพิ่ม Work Location แล้ว · พนักงานใช้จุดนี้เช็กอินได้ทันที');
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; }
@@ -4294,7 +4475,8 @@ function openEmployeeModal() {
     data.department_id = data.department_id || null;
     data.position_id = data.position_id || null;
     await api('/api/employees', { method: 'POST', body: JSON.stringify(data) });
-    await loadAll({ silent: true });
+    await refreshEmployeesOnly();
+    api('/api/subscription',{timeoutMs:10000,silentStatus:true}).then(v=>{state.subscription=v||state.subscription;}).catch(()=>{});
   });
   const code = $('#field-employee_code');
   if (code) code.placeholder = 'เช่น NK-0001 · เว้นว่างได้';
@@ -4353,7 +4535,7 @@ window.openEmployeeEdit = id => {
     data.department_id = data.department_id || null;
     data.position_id = data.position_id || null;
     await api(`/api/employees/${employee.id}`, { method: 'PATCH', body: JSON.stringify(data) });
-    await loadAll({ silent: true });
+    await refreshEmployeesOnly();
     toast('แก้ไขข้อมูลพนักงานแล้ว');
   });
 
@@ -4507,7 +4689,12 @@ window.openEmployeeDocumentHistory = async documentId => {
 
 window.deleteEmployeeDocument = async (documentId,employeeId) => {
   if (!window.confirm('เก็บเอกสารนี้เข้าคลังถาวร?\nประวัติและไฟล์ต้นฉบับจะยังคงอยู่เพื่อการตรวจสอบย้อนหลัง')) return;
-  try { await api(`/api/employee-documents/${documentId}`,{method:'DELETE',body:'{}'}); await loadEmployeeDocuments(employeeId); await loadAll({silent:true}); toast('เก็บเอกสารเข้าคลังถาวรแล้ว'); }
+  try {
+    await api(`/api/employee-documents/${documentId}`,{method:'DELETE',body:'{}'});
+    await loadEmployeeDocuments(employeeId);
+    // Archiving changes only this employee's document state. Never reload all HR modules.
+    toast('เก็บเอกสารเข้าคลังถาวรแล้ว');
+  }
   catch(error){ toast(error.message || 'ลบเอกสารไม่สำเร็จ',true); }
 };
 
@@ -4521,7 +4708,10 @@ window.deleteEmployee = async id => {
   if (typed !== 'ลบ') return toast('ยกเลิกการลบแล้ว');
   try {
     await api(`/api/employees/${employee.id}`, { method: 'DELETE', body: '{}' });
-    await loadAll({ silent: true });
+    state.employees = state.employees.filter(item => Number(item.id) !== Number(employee.id));
+    renderPeopleFast();
+    refreshEmployeesOnly().catch(()=>{});
+    api('/api/subscription',{timeoutMs:10000,silentStatus:true}).then(v=>{state.subscription=v||state.subscription;}).catch(()=>{});
     toast(`ลบ ${name} แล้ว`);
   } catch (error) {
     toast(error.message || 'ลบพนักงานไม่สำเร็จ', true);
@@ -4540,7 +4730,8 @@ function openCandidateModal() {
     ['expected_salary', 'เงินเดือนที่คาดหวัง', 'number'],
   ], async data => {
     await api('/api/candidates', { method: 'POST', body: JSON.stringify(data) });
-    await loadAll({ silent: true });
+    markViewStale('recruitment');
+    queueBackgroundRefresh('recruitment:new-candidate',()=>refreshRecruitmentOnly());
   });
 }
 
@@ -4627,8 +4818,10 @@ async function saveLeaveProfile() {
     const result=await api(`/api/employees/${employeeId}/leave-profile`,{method:'PUT',body:JSON.stringify({year:Number($('#leaveProfileYear').value),leave_approver_employee_id:$('#leaveApproverSelect').value||null,leave_access_override:leaveAccessRaw===''?null:Number(leaveAccessRaw),entitlements})});
     const employee=state.employees.find(e=>Number(e.id)===Number(employeeId));
     if(employee && result.profile?.employee){employee.leave_access_override=result.profile.employee.leave_access_override;employee.leave_approver_employee_id=result.profile.employee.leave_approver_employee_id;}
-    $('#leaveProfileModal').close(); await loadAll({silent:true});
+    $('#leaveProfileModal').close();
+    try{renderEmployees($('#employeeSearch')?.value||'');}catch{}
     toast(result.auto_unlocked?'บันทึกสิทธิ์ลาแล้ว · เปิดสิทธิ์รายคนให้อัตโนมัติ':'บันทึกสิทธิ์ลาแล้ว');
+    queueBackgroundRefresh('leave:profile',()=>Promise.all([refreshEmployeesOnly({render:false}),refreshLeavesOnly()]));
   }catch(error){toast(error.message,true);}finally{button.disabled=false;}
 }
 
@@ -4642,7 +4835,9 @@ async function saveLeaveRequest(){
   const button=$('#leaveRequestSaveBtn'); button.disabled=true;
   try{
     await api('/api/leaves',{method:'POST',body:JSON.stringify({employee_id:Number($('#leaveEmployeeSelect').value),policy_id:Number($('#leavePolicySelect').value),start_date:$('#leaveStartDate').value,end_date:$('#leaveEndDate').value,day_part:$('#leaveDayPart').value,reason:$('#leaveReason').value.trim()})});
-    $('#leaveRequestModal').close(); await loadAll({silent:true}); toast('ส่งคำขอลาเข้าระบบแล้ว');
+    $('#leaveRequestModal').close(); toast('ส่งคำขอลาเข้าระบบแล้ว');
+    markViewStale('leave');
+    queueBackgroundRefresh('leave:create',()=>refreshLeavesOnly());
   }catch(error){toast(error.message,true);}finally{button.disabled=false;}
 }
 
@@ -4667,7 +4862,7 @@ function openLeavePolicyModal(policy=null){
 async function saveLeavePolicy(){
   const id=$('#leavePolicyId').value; const body={name:$('#leavePolicyName').value.trim(),code:$('#leavePolicyCode').value.trim(),default_entitlement_days:Number($('#leavePolicyDays').value||0),notice_days:Number($('#leavePolicyNotice').value||0),evidence_required_after_days:$('#leavePolicyEvidence').value===''?null:Number($('#leavePolicyEvidence').value),is_unlimited:$('#leavePolicyUnlimited').checked,requires_reason:$('#leavePolicyReason').checked,allow_negative:$('#leavePolicyNegative').checked,available_during_probation:$('#leavePolicyProbation').checked};
   if(body.name.length<2)return toast('กรุณาใส่ชื่อประเภทลา',true); const button=$('#leavePolicySaveBtn');button.disabled=true;
-  try{await api(id?`/api/leave-policies/${id}`:'/api/leave-policies',{method:id?'PATCH':'POST',body:JSON.stringify(body)});$('#leavePolicyModal').close();await loadAll({silent:true});toast('บันทึก Leave Policy แล้ว');}catch(error){toast(error.message,true);}finally{button.disabled=false;}
+  try{await api(id?`/api/leave-policies/${id}`:'/api/leave-policies',{method:id?'PATCH':'POST',body:JSON.stringify(body)});$('#leavePolicyModal').close();await refreshLeavePoliciesOnly();toast('บันทึก Leave Policy แล้ว');}catch(error){toast(error.message,true);}finally{button.disabled=false;}
 }
 
 function renderSettings() {
@@ -4924,7 +5119,11 @@ async function saveApproverAccess(){
   const button=$('#approverAccessSaveBtn');button.disabled=true;
   try{
     await api(`/api/approver-access/${employeeId}`,{method:'PUT',body:JSON.stringify({permissions})});
-    $('#approverAccessModal').close();await loadAll({silent:true});toast('บันทึกสิทธิ์ผู้อนุมัติแล้ว');
+    $('#approverAccessModal').close();
+    const approver=await api('/api/approver-access',{timeoutMs:12000,silentStatus:true});
+    state.approverAccess=approver?.data||state.approverAccess; state.approverPermissionCatalog=approver?.catalog||state.approverPermissionCatalog;
+    try{renderSettings();renderSettingsSidebar();}catch{}
+    toast('บันทึกสิทธิ์ผู้อนุมัติแล้ว');
   }catch(error){toast(error.message,true);}finally{button.disabled=false;}
 }
 
@@ -5184,7 +5383,7 @@ window.openNextPayrollSetup=()=>{const profiles=state.payroll?.profiles||[];cons
 function payrollRecurringComponentsPayload(result){return (result.components||[]).map(x=>({component_id:Number(x.component_id),amount:Number(x.amount||0)}));}
 function payrollProfilePayloadFromResult(result){const p=result?.profile||{};return {base_salary:Number(p.base_salary||0),effective_from:p.effective_from||localDateKey(new Date()),social_security_enabled:p.social_security_enabled==null?true:Boolean(Number(p.social_security_enabled)),tax_enabled:p.tax_enabled==null?true:Boolean(Number(p.tax_enabled)),personal_allowance:Number(p.personal_allowance??60000),extra_annual_deductions:Number(p.extra_annual_deductions??0),monthly_tax_override:p.monthly_tax_override??'',bank_name:p.bank_name||'',bank_account_name:p.bank_account_name||'',bank_account_no:p.bank_account_no||'',payroll_note:p.payroll_note||'',recurring_components:payrollRecurringComponentsPayload(result)};}
 window.openPayrollQuickEdit=async(id,field)=>{try{const result=await api(`/api/employees/${Number(id)}/payroll-profile`);const p=result.profile||{},e=result.employee||{};$('#payrollQuickEditEmployeeId').value=String(id);$('#payrollQuickEditField').value=String(field||'base_salary');$('#payrollQuickEditEmployeeLabel').textContent=`พนักงาน · ${(e.nickname||e.first_name||'พนักงาน')} ${e.last_name||''}`.trim();const salaryWrap=$('#payrollQuickEditSalaryFields');const bankWrap=$('#payrollQuickEditBankFields');const isSalary=String(field)==='base_salary';salaryWrap?.classList.toggle('hidden',!isSalary);bankWrap?.classList.toggle('hidden',isSalary);if($('#payrollQuickEditTitle'))$('#payrollQuickEditTitle').textContent=isSalary?'แก้ฐานเงินเดือน':'แก้ข้อมูลบัญชีรับเงิน';if($('#payrollQuickEditSubtitle'))$('#payrollQuickEditSubtitle').textContent=isSalary?'อัปเดตฐานเงินเดือนและวันที่มีผลได้ทันทีจากตาราง Payroll':'แยกแก้ธนาคารและเลขบัญชีจากตาราง Payroll ได้โดยไม่ต้องกดปุ่มตั้งค่า';if($('#payrollQuickEditHint'))$('#payrollQuickEditHint').textContent=isSalary?'ใช้สำหรับเงินเดือนประจำของพนักงานคนนี้':'แก้ธนาคาร ชื่อบัญชี และเลขบัญชีสำหรับรับเงินเดือน';$('#payrollQuickBaseSalary').value=p.base_salary??0;$('#payrollQuickEffectiveFrom').value=p.effective_from||localDateKey(new Date());$('#payrollQuickBankName').value=p.bank_name||'';$('#payrollQuickBankAccountName').value=p.bank_account_name||'';$('#payrollQuickBankAccountNo').value=p.bank_account_no||'';$('#payrollQuickEditModal').showModal();setTimeout(()=>{(isSalary?$('#payrollQuickBaseSalary'):(String(field)==='bank_name'?$('#payrollQuickBankName'):$('#payrollQuickBankAccountNo')))?.focus();},40);}catch(error){toast(error.message,true)}};
-async function savePayrollQuickEdit(){const id=Number($('#payrollQuickEditEmployeeId')?.value||0);const field=String($('#payrollQuickEditField')?.value||'base_salary');const button=$('#payrollQuickEditSaveBtn');if(!id||!button)return;button.disabled=true;button.textContent='กำลังบันทึก…';try{const result=await api(`/api/employees/${id}/payroll-profile`);const payload=payrollProfilePayloadFromResult(result);if(field==='base_salary'){payload.base_salary=Number($('#payrollQuickBaseSalary').value||0);payload.effective_from=$('#payrollQuickEffectiveFrom').value||localDateKey(new Date());}else{payload.bank_name=$('#payrollQuickBankName').value.trim();payload.bank_account_name=$('#payrollQuickBankAccountName').value.trim();payload.bank_account_no=$('#payrollQuickBankAccountNo').value.trim();}await api(`/api/employees/${id}/payroll-profile`,{method:'PUT',body:JSON.stringify(payload)});$('#payrollQuickEditModal').close();await refreshPayroll();if(state.activePayrollPeriodId&&['draft','review'].includes(state.payrollDetail?.period?.status)){await api(`/api/payroll/periods/${state.activePayrollPeriodId}/recalculate`,{method:'POST',body:'{}'});await loadPayrollPeriod(state.activePayrollPeriodId);}toast(field==='base_salary'?'อัปเดตฐานเงินเดือนแล้ว':'อัปเดตข้อมูลบัญชีรับเงินแล้ว');}catch(error){toast(error.message,true)}finally{button.disabled=false;button.textContent='บันทึกทันที';}}
+async function savePayrollQuickEdit(){const id=Number($('#payrollQuickEditEmployeeId')?.value||0);const field=String($('#payrollQuickEditField')?.value||'base_salary');const button=$('#payrollQuickEditSaveBtn');if(!id||!button)return;button.disabled=true;button.textContent='กำลังบันทึก…';try{const result=await api(`/api/employees/${id}/payroll-profile`);const payload=payrollProfilePayloadFromResult(result);if(field==='base_salary'){payload.base_salary=Number($('#payrollQuickBaseSalary').value||0);payload.effective_from=$('#payrollQuickEffectiveFrom').value||localDateKey(new Date());}else{payload.bank_name=$('#payrollQuickBankName').value.trim();payload.bank_account_name=$('#payrollQuickBankAccountName').value.trim();payload.bank_account_no=$('#payrollQuickBankAccountNo').value.trim();}await api(`/api/employees/${id}/payroll-profile`,{method:'PUT',body:JSON.stringify(payload)});$('#payrollQuickEditModal').close();const activeId=Number(state.activePayrollPeriodId||0);if(activeId&&['draft','review'].includes(state.payrollDetail?.period?.status)){await api(`/api/payroll/periods/${activeId}/recalculate`,{method:'POST',body:'{}'});}await refreshPayrollSnapshot(activeId);toast(field==='base_salary'?'อัปเดตฐานเงินเดือนแล้ว':'อัปเดตข้อมูลบัญชีรับเงินแล้ว');}catch(error){toast(error.message,true)}finally{button.disabled=false;button.textContent='บันทึกทันที';}}
 
 window.openPayrollPeriod=id=>loadPayrollPeriod(Number(id));
 async function loadPayrollPeriod(id){state.activePayrollPeriodId=Number(id);try{state.payrollDetail=await api(`/api/payroll/periods/${id}`);renderPayroll();renderPayrollDetail();}catch(error){toast(error.message,true);}}
@@ -5311,14 +5510,14 @@ window.applyPayrollCyclePreset=type=>{if(type==='25-25'){$('#payrollCycleStartOf
 function syncPayrollPeriodRangeFromMonth(){const key=$('#payrollPeriodKey')?.value;if(!key)return;const s=state.payroll?.settings||{};$('#payrollPeriodStart').value=payrollCycleDateForKey(key,Number(s.cycle_start_month_offset??0),Number(s.cycle_start_day??1));$('#payrollPeriodEnd').value=payrollCycleDateForKey(key,Number(s.cycle_end_month_offset??0),Number(s.cycle_end_day??0));setPayrollPayDateFromMonth();updatePayrollPeriodRangePreview();}
 function updatePayrollPeriodRangePreview(){const start=$('#payrollPeriodStart')?.value,end=$('#payrollPeriodEnd')?.value,preview=$('#payrollPeriodRangePreview');if(!preview)return;const days=payrollRangeDays(start,end);preview.innerHTML=`<strong>ช่วงรอบเงินเดือน</strong><span>${start&&end?`${formatDate(start)} → ${formatDate(end)} · ${days} วัน`:'กรุณาระบุวันที่เริ่มและสิ้นสุด'}</span><small>Attendance / Leave / Prorate จะอิงช่วงวันที่นี้จริง</small>`;}
 function openPayrollSettingsModal(){const s=state.payroll?.settings||{};$('#payrollPayDay').value=s.pay_day||28;$('#payrollDailyDivisor').value=s.daily_rate_divisor||30;$('#payrollSsoEnabled').checked=Boolean(Number(s.social_security_enabled??1));$('#payrollEmployerSsoEnabled').checked=Boolean(Number(s.employer_social_security_enabled??1));$('#payrollTaxEnabled').checked=Boolean(Number(s.tax_enabled??1));$('#payrollAutoPayslip').checked=Boolean(Number(s.auto_payslip_on_lock??1));$('#payrollAbsenceDeduction').checked=Boolean(Number(s.absence_deduction_enabled||0));$('#payrollLateDeduction').checked=Boolean(Number(s.late_deduction_enabled||0));$('#payrollLatePerMinute').value=s.late_deduction_per_minute||0;$('#payrollAttendanceCutoff').value=s.attendance_cutoff_day||25;$('#payrollCommissionCutoff').value=s.commission_cutoff_day||25;$('#payrollVarianceWarning').value=s.variance_warning_pct||30;$('#payrollSeparateApprover').checked=Boolean(Number(s.require_separate_approver||0));$('#payrollCycleStartDay').value=Number(s.cycle_start_day??1);$('#payrollCycleStartOffset').value=String(Number(s.cycle_start_month_offset??0));$('#payrollCycleEndDay').value=Number(s.cycle_end_day??0);$('#payrollCycleEndOffset').value=String(Number(s.cycle_end_month_offset??0));['payrollCycleStartDay','payrollCycleStartOffset','payrollCycleEndDay','payrollCycleEndOffset'].forEach(id=>{const el=$(`#${id}`);if(el)el.oninput=updatePayrollCycleSettingsPreview;});updatePayrollCycleSettingsPreview();$('#payrollSettingsModal').showModal();}
-async function savePayrollSettings(){const button=$('#payrollSettingsSaveBtn');button.disabled=true;try{await api('/api/payroll/settings',{method:'PATCH',body:JSON.stringify({pay_day:Number($('#payrollPayDay').value),daily_rate_divisor:Number($('#payrollDailyDivisor').value),social_security_enabled:$('#payrollSsoEnabled').checked,employer_social_security_enabled:$('#payrollEmployerSsoEnabled').checked,tax_enabled:$('#payrollTaxEnabled').checked,auto_payslip_on_lock:$('#payrollAutoPayslip').checked,absence_deduction_enabled:$('#payrollAbsenceDeduction').checked,late_deduction_enabled:$('#payrollLateDeduction').checked,late_deduction_per_minute:Number($('#payrollLatePerMinute').value||0),attendance_cutoff_day:Number($('#payrollAttendanceCutoff').value||25),commission_cutoff_day:Number($('#payrollCommissionCutoff').value||25),variance_warning_pct:Number($('#payrollVarianceWarning').value||30),require_separate_approver:$('#payrollSeparateApprover').checked,cycle_start_day:Number($('#payrollCycleStartDay').value||1),cycle_start_month_offset:Number($('#payrollCycleStartOffset').value||0),cycle_end_day:Number($('#payrollCycleEndDay').value||0),cycle_end_month_offset:Number($('#payrollCycleEndOffset').value||0)})});$('#payrollSettingsModal').close();await refreshPayroll();if(state.activePayrollPeriodId)await loadPayrollPeriod(state.activePayrollPeriodId);toast('บันทึกรอบ Payroll ของบริษัทแล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function savePayrollSettings(){const button=$('#payrollSettingsSaveBtn');button.disabled=true;try{await api('/api/payroll/settings',{method:'PATCH',body:JSON.stringify({pay_day:Number($('#payrollPayDay').value),daily_rate_divisor:Number($('#payrollDailyDivisor').value),social_security_enabled:$('#payrollSsoEnabled').checked,employer_social_security_enabled:$('#payrollEmployerSsoEnabled').checked,tax_enabled:$('#payrollTaxEnabled').checked,auto_payslip_on_lock:$('#payrollAutoPayslip').checked,absence_deduction_enabled:$('#payrollAbsenceDeduction').checked,late_deduction_enabled:$('#payrollLateDeduction').checked,late_deduction_per_minute:Number($('#payrollLatePerMinute').value||0),attendance_cutoff_day:Number($('#payrollAttendanceCutoff').value||25),commission_cutoff_day:Number($('#payrollCommissionCutoff').value||25),variance_warning_pct:Number($('#payrollVarianceWarning').value||30),require_separate_approver:$('#payrollSeparateApprover').checked,cycle_start_day:Number($('#payrollCycleStartDay').value||1),cycle_start_month_offset:Number($('#payrollCycleStartOffset').value||0),cycle_end_day:Number($('#payrollCycleEndDay').value||0),cycle_end_month_offset:Number($('#payrollCycleEndOffset').value||0)})});$('#payrollSettingsModal').close();await refreshPayrollSnapshot(Number(state.activePayrollPeriodId||0));toast('บันทึกรอบ Payroll ของบริษัทแล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
 function configurePayrollPeriodModal(mode='create'){const editing=mode==='edit';if($('#payrollPeriodModalKicker'))$('#payrollPeriodModalKicker').textContent=editing?'EDIT PAY PERIOD':'NEW PAY PERIOD';if($('#payrollPeriodModalTitle'))$('#payrollPeriodModalTitle').textContent=editing?'แก้ไขรอบเงินเดือน':'สร้างรอบเงินเดือน';if($('#payrollPeriodModalDescription'))$('#payrollPeriodModalDescription').textContent=editing?'แก้เดือน รอบคิด และวันที่จ่ายได้ก่อน Lock ระบบจะคำนวณ Payroll ใหม่หลังบันทึก':'ระบบจะใช้รอบ Default ของบริษัท และ HR สามารถแก้ช่วงวันที่เฉพาะรอบนี้ได้';if($('#payrollPeriodCreateBtn'))$('#payrollPeriodCreateBtn').textContent=editing?'บันทึกและคำนวณใหม่':'สร้างและคำนวณ Preview';}
 function bindPayrollPeriodModalDates(){if($('#payrollPeriodKey'))$('#payrollPeriodKey').onchange=syncPayrollPeriodRangeFromMonth;if($('#payrollPeriodStart'))$('#payrollPeriodStart').onchange=()=>{updatePayrollPeriodRangePreview();syncPayrollPayDateFromPeriodEnd();};if($('#payrollPeriodEnd'))$('#payrollPeriodEnd').onchange=()=>{updatePayrollPeriodRangePreview();syncPayrollPayDateFromPeriodEnd();};}
 function openPayrollPeriodModal(){const now=new Date();const key=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;$('#payrollPeriodEditId').value='';configurePayrollPeriodModal('create');$('#payrollPeriodKey').value=key;syncPayrollPeriodRangeFromMonth();bindPayrollPeriodModalDates();$('#payrollPeriodModal').showModal();}
 window.editPayrollPeriod=id=>{const period=(state.payrollDetail?.period&&Number(state.payrollDetail.period.id)===Number(id))?state.payrollDetail.period:(state.payroll?.periods||[]).find(x=>Number(x.id)===Number(id));if(!period){toast('ไม่พบรอบเงินเดือน',true);return;}if(!['draft','review'].includes(String(period.status||''))){toast('แก้ไขได้เฉพาะรอบ Draft หรือรอตรวจ',true);return;}$('#payrollPeriodEditId').value=String(id);configurePayrollPeriodModal('edit');$('#payrollPeriodKey').value=period.period_key||'';$('#payrollPayDate').value=period.pay_date||'';$('#payrollPeriodStart').value=period.period_start||'';$('#payrollPeriodEnd').value=period.period_end||'';bindPayrollPeriodModalDates();updatePayrollPeriodRangePreview();$('#payrollPeriodModal').showModal();};
 function syncPayrollPayDateFromPeriodEnd(){const end=$('#payrollPeriodEnd')?.value;if(!end)return;const [y,m]=end.split('-').map(Number);if(!y||!m)return;const last=new Date(y,m,0).getDate();const day=Math.min(last,Math.max(1,Number(state.payroll?.settings?.pay_day||28)));$('#payrollPayDate').value=`${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;}
 function setPayrollPayDateFromMonth(){syncPayrollPayDateFromPeriodEnd();}
-async function createPayrollPeriod(retryOptions={}){const button=$('#payrollPeriodCreateBtn');const editId=Number($('#payrollPeriodEditId')?.value||0);const editing=editId>0;button.disabled=true;button.textContent=editing?'กำลังบันทึกและคำนวณ…':'กำลังคำนวณ…';const start=$('#payrollPeriodStart').value,end=$('#payrollPeriodEnd').value,periodKey=$('#payrollPeriodKey').value,payDate=$('#payrollPayDate').value;try{if(!start||!end)throw new Error('กรุณาระบุวันที่เริ่มและสิ้นสุดรอบเงินเดือน');if(start>end)throw new Error('วันที่เริ่มรอบต้องไม่เกินวันที่สิ้นสุดรอบ');const payload={period_key:periodKey,period_start:start,period_end:end,pay_date:payDate};if(!editing){payload.replace_existing_draft=Boolean(retryOptions.replaceExisting);payload.replace_overlapping_draft=Boolean(retryOptions.replaceOverlap);}const result=await api(editing?`/api/payroll/periods/${editId}`:'/api/payroll/periods',{method:editing?'PATCH':'POST',timeoutMs:45000,body:JSON.stringify(payload)});$('#payrollPeriodModal').close();$('#payrollPeriodEditId').value='';state.activePayrollPeriodId=Number(result.id||editId);await refreshPayroll();await loadPayrollPeriod(Number(result.id||editId));toast(editing?`แก้ไขรอบ ${formatDate(start)} → ${formatDate(end)} แล้ว`:`${result.reused?'ปรับรอบ Payroll เดิม':'สร้าง Payroll Preview'} ${formatDate(start)} → ${formatDate(end)} แล้ว`);}catch(e){const data=e?.data||{};if(!editing&&data.code==='PAYROLL_PERIOD_EXISTS_DRAFT'&&data.can_replace&&!retryOptions.replaceExisting){const x=data.existing||{};const ok=confirm(`มีรอบ ${periodKey} อยู่แล้ว ${x.period_start||''} → ${x.period_end||''}
+async function createPayrollPeriod(retryOptions={}){const button=$('#payrollPeriodCreateBtn');const editId=Number($('#payrollPeriodEditId')?.value||0);const editing=editId>0;button.disabled=true;button.textContent=editing?'กำลังบันทึกและคำนวณ…':'กำลังคำนวณ…';const start=$('#payrollPeriodStart').value,end=$('#payrollPeriodEnd').value,periodKey=$('#payrollPeriodKey').value,payDate=$('#payrollPayDate').value;try{if(!start||!end)throw new Error('กรุณาระบุวันที่เริ่มและสิ้นสุดรอบเงินเดือน');if(start>end)throw new Error('วันที่เริ่มรอบต้องไม่เกินวันที่สิ้นสุดรอบ');const payload={period_key:periodKey,period_start:start,period_end:end,pay_date:payDate};if(!editing){payload.replace_existing_draft=Boolean(retryOptions.replaceExisting);payload.replace_overlapping_draft=Boolean(retryOptions.replaceOverlap);}const result=await api(editing?`/api/payroll/periods/${editId}`:'/api/payroll/periods',{method:editing?'PATCH':'POST',timeoutMs:45000,body:JSON.stringify(payload)});$('#payrollPeriodModal').close();$('#payrollPeriodEditId').value='';state.activePayrollPeriodId=Number(result.id||editId);await refreshPayrollSnapshot(Number(result.id||editId));toast(editing?`แก้ไขรอบ ${formatDate(start)} → ${formatDate(end)} แล้ว`:`${result.reused?'ปรับรอบ Payroll เดิม':'สร้าง Payroll Preview'} ${formatDate(start)} → ${formatDate(end)} แล้ว`);}catch(e){const data=e?.data||{};if(!editing&&data.code==='PAYROLL_PERIOD_EXISTS_DRAFT'&&data.can_replace&&!retryOptions.replaceExisting){const x=data.existing||{};const ok=confirm(`มีรอบ ${periodKey} อยู่แล้ว ${x.period_start||''} → ${x.period_end||''}
 
 ต้องการปรับรอบเดิมให้เป็น ${start} → ${end} แล้วคำนวณใหม่หรือไม่?`);if(ok){button.disabled=false;configurePayrollPeriodModal('create');return createPayrollPeriod({...retryOptions,replaceExisting:true});}}else if(!editing&&data.code==='PAYROLL_PERIOD_OVERLAP'&&data.can_replace&&!retryOptions.replaceOverlap){const x=data.overlap||{};const ok=confirm(`ช่วงวันที่นี้ทับกับ Draft รอบ ${x.period_key||''} (${x.period_start||''} → ${x.period_end||''})
 
@@ -5328,30 +5527,30 @@ ${formatDate(period.period_start)} → ${formatDate(period.period_end)}
 
 รายการคำนวณและรายการปรับของรอบนี้จะถูกลบ และสามารถสร้างรอบใหม่ได้ทันที ต้องการลบหรือไม่?`);if(!ok)return;try{await api(`/api/payroll/periods/${Number(id)}`,{method:'DELETE',timeoutMs:30000,body:'{}'});if(Number(state.activePayrollPeriodId)===Number(id)){state.activePayrollPeriodId=null;state.payrollDetail=null;}await refreshPayroll();toast(`ลบรอบ ${period.period_key} แล้ว · สามารถสร้างใหม่ได้`);}catch(e){toast(e.message,true);}};
 window.openPayrollProfile=async id=>{try{const result=await api(`/api/employees/${id}/payroll-profile`);const p=result.profile||{},e=result.employee;$('#payrollProfileEmployeeId').value=id;$('#payrollProfileTitle').textContent=`เงินเดือน · ${e.nickname||e.first_name}`;$('#payrollBaseSalary').value=p.base_salary??0;$('#payrollEffectiveFrom').value=p.effective_from||localDateKey(new Date());$('#employeeSsoEnabled').checked=p.social_security_enabled==null?true:Boolean(Number(p.social_security_enabled));$('#employeeTaxEnabled').checked=p.tax_enabled==null?true:Boolean(Number(p.tax_enabled));$('#employeePersonalAllowance').value=p.personal_allowance??60000;$('#employeeExtraDeductions').value=p.extra_annual_deductions??0;$('#employeeTaxOverride').value=p.monthly_tax_override??'';$('#employeeBankName').value=p.bank_name||'';$('#employeeBankAccountName').value=p.bank_account_name||'';$('#employeeBankAccountNo').value=p.bank_account_no||'';$('#employeePayrollNote').value=p.payroll_note||'';const current=new Map((result.components||[]).map(x=>[Number(x.component_id),Number(x.amount||0)]));$('#payrollRecurringComponents').innerHTML=(result.component_definitions||[]).map(d=>`<label class="payroll-component-input"><span>${escapeHtml(d.name)}<small>${d.component_type==='deduction'?'รายการหักประจำ':'รายได้ประจำ'} · ${Number(d.taxable)?'ภาษี':''}${Number(d.sso_contributable)?' · SSO':''}</small></span><input type="number" min="0" step="0.01" data-payroll-component-id="${Number(d.id)}" value="${current.get(Number(d.id))||''}" placeholder="0" /></label>`).join('')||'<small>ยังไม่มีรายการประจำ</small>';$('#payrollProfileModal').showModal();}catch(e){toast(e.message,true)}};
-async function savePayrollProfile(){const id=Number($('#payrollProfileEmployeeId').value);const button=$('#payrollProfileSaveBtn');button.disabled=true;try{const recurring_components=$$('#payrollRecurringComponents [data-payroll-component-id]').map(i=>({component_id:Number(i.dataset.payrollComponentId),amount:Number(i.value||0)}));await api(`/api/employees/${id}/payroll-profile`,{method:'PUT',body:JSON.stringify({base_salary:Number($('#payrollBaseSalary').value||0),effective_from:$('#payrollEffectiveFrom').value,social_security_enabled:$('#employeeSsoEnabled').checked,tax_enabled:$('#employeeTaxEnabled').checked,personal_allowance:Number($('#employeePersonalAllowance').value||0),extra_annual_deductions:Number($('#employeeExtraDeductions').value||0),monthly_tax_override:$('#employeeTaxOverride').value,bank_name:$('#employeeBankName').value.trim(),bank_account_name:$('#employeeBankAccountName').value.trim(),bank_account_no:$('#employeeBankAccountNo').value.trim(),payroll_note:$('#employeePayrollNote').value.trim(),recurring_components})});$('#payrollProfileModal').close();await refreshPayroll();if(state.activePayrollPeriodId&&['draft','review'].includes(state.payrollDetail?.period?.status)){await api(`/api/payroll/periods/${state.activePayrollPeriodId}/recalculate`,{method:'POST',body:'{}'});await loadPayrollPeriod(state.activePayrollPeriodId);}toast('บันทึกข้อมูลเงินเดือนแล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function savePayrollProfile(){const id=Number($('#payrollProfileEmployeeId').value);const button=$('#payrollProfileSaveBtn');button.disabled=true;try{const recurring_components=$$('#payrollRecurringComponents [data-payroll-component-id]').map(i=>({component_id:Number(i.dataset.payrollComponentId),amount:Number(i.value||0)}));await api(`/api/employees/${id}/payroll-profile`,{method:'PUT',body:JSON.stringify({base_salary:Number($('#payrollBaseSalary').value||0),effective_from:$('#payrollEffectiveFrom').value,social_security_enabled:$('#employeeSsoEnabled').checked,tax_enabled:$('#employeeTaxEnabled').checked,personal_allowance:Number($('#employeePersonalAllowance').value||0),extra_annual_deductions:Number($('#employeeExtraDeductions').value||0),monthly_tax_override:$('#employeeTaxOverride').value,bank_name:$('#employeeBankName').value.trim(),bank_account_name:$('#employeeBankAccountName').value.trim(),bank_account_no:$('#employeeBankAccountNo').value.trim(),payroll_note:$('#employeePayrollNote').value.trim(),recurring_components})});$('#payrollProfileModal').close();const activeId=Number(state.activePayrollPeriodId||0);if(activeId&&['draft','review'].includes(state.payrollDetail?.period?.status)){await api(`/api/payroll/periods/${activeId}/recalculate`,{method:'POST',body:'{}'});}await refreshPayrollSnapshot(activeId);toast('บันทึกข้อมูลเงินเดือนแล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
 window.openPayrollAdjustment=(periodId,employeeId=null)=>{const detail=state.payrollDetail;if(!detail?.items?.length)return toast('ยังไม่มีพนักงานในรอบนี้',true);$('#payrollAdjustmentPeriodId').value=periodId;$('#payrollAdjustmentEmployee').innerHTML=detail.items.map(i=>`<option value="${i.employee_id}" ${Number(employeeId)===Number(i.employee_id)?'selected':''}>${escapeHtml(i.nickname||i.first_name)} · ${escapeHtml(i.employee_code)}</option>`).join('');$('#payrollAdjustmentType').value='earning';$('#payrollAdjustmentCategory').value='commission';$('#payrollAdjustmentAmount').value='';$('#payrollAdjustmentNote').value='';$('#payrollAdjustmentTaxable').checked=true;$('#payrollAdjustmentSso').checked=false;syncPayrollAdjustmentMode();$('#payrollAdjustmentModal').showModal();};
 function syncPayrollAdjustmentMode(){const cat=$('#payrollAdjustmentCategory').value;const tax=['tax_add','tax_reduce'].includes(cat);if(cat==='other_deduction')$('#payrollAdjustmentType').value='deduction';if(cat==='tax_add')$('#payrollAdjustmentType').value='deduction';if(cat==='tax_reduce')$('#payrollAdjustmentType').value='earning';$('#payrollAdjustmentType').disabled=tax||cat==='other_deduction';$('#payrollAdjustmentTaxable').closest('label').classList.toggle('hidden',tax||cat==='other_deduction');$('#payrollAdjustmentSso').closest('label').classList.toggle('hidden',tax||cat==='other_deduction');if(tax||cat==='other_deduction'){$('#payrollAdjustmentTaxable').checked=false;$('#payrollAdjustmentSso').checked=false;}}
 function syncPayrollAdjustmentCategory(){const cat=$('#payrollAdjustmentCategory').value;if($('#payrollAdjustmentType').value==='deduction'&&!['tax_add','tax_reduce','other_deduction'].includes(cat))$('#payrollAdjustmentCategory').value='other_deduction';if($('#payrollAdjustmentType').value==='earning'&&$('#payrollAdjustmentCategory').value==='other_deduction')$('#payrollAdjustmentCategory').value='commission';syncPayrollAdjustmentMode();}
-async function savePayrollAdjustment(){const periodId=Number($('#payrollAdjustmentPeriodId').value);const button=$('#payrollAdjustmentSaveBtn');button.disabled=true;try{await api(`/api/payroll/periods/${periodId}/adjustments`,{method:'POST',body:JSON.stringify({employee_id:Number($('#payrollAdjustmentEmployee').value),adjustment_type:$('#payrollAdjustmentType').value,category:$('#payrollAdjustmentCategory').value,amount:Number($('#payrollAdjustmentAmount').value||0),note:$('#payrollAdjustmentNote').value.trim(),taxable:$('#payrollAdjustmentTaxable').checked,sso_contributable:$('#payrollAdjustmentSso').checked})});$('#payrollAdjustmentModal').close();await loadPayrollPeriod(periodId);await refreshPayroll(false);toast('เพิ่มรายการและคำนวณใหม่แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
-window.deletePayrollAdjustment=async(id,periodId)=>{if(!confirm('ลบรายการปรับนี้ใช่ไหม? ระบบจะคำนวณ Payroll ใหม่ทันที'))return;try{await api(`/api/payroll/adjustments/${Number(id)}`,{method:'DELETE'});await loadPayrollPeriod(Number(periodId));await refreshPayroll(false);toast('ลบรายการและคำนวณใหม่แล้ว');}catch(e){toast(e.message,true)}};
-window.savePayrollGridCell=async(periodId,employeeId,category,input)=>{const value=Math.max(0,Number(input.value||0));input.disabled=true;input.classList.add('saving');try{const result=await api(`/api/payroll/periods/${periodId}/cell`,{method:'PUT',body:JSON.stringify({employee_id:employeeId,category,amount:value}),timeoutMs:30000,silentStatus:true});state.payrollDetail=result;renderPayrollDetail();await refreshPayroll(false);toast('คำนวณใหม่แล้ว');}catch(e){input.disabled=false;input.classList.remove('saving');toast(e.message,true)}};
-window.savePayrollManualCell=async(periodId,employeeId,category,input)=>{const value=Number(input.value);if(!Number.isFinite(value)||value<0){toast('กรุณาใส่ตัวเลขตั้งแต่ 0 ขึ้นไป',true);return;}input.disabled=true;input.classList.add('saving');try{const result=await api(`/api/payroll/periods/${periodId}/cell`,{method:'PUT',body:JSON.stringify({employee_id:employeeId,category,amount:value}),timeoutMs:30000,silentStatus:true});state.payrollDetail=result;renderPayrollDetail();await refreshPayroll(false);toast(category==='payable_days'?'แก้วันคิดเงินแล้ว · เงินเดือนและยอดสุทธิคำนวณใหม่':'แก้เงินเดือนรอบนี้แล้ว · Gross / ภาษี / ปกส. / Net คำนวณใหม่');}catch(e){input.disabled=false;input.classList.remove('saving');toast(e.message,true)}};
-window.resetPayrollManualCell=async(periodId,employeeId,category,button)=>{button.disabled=true;try{const result=await api(`/api/payroll/periods/${periodId}/cell`,{method:'PUT',body:JSON.stringify({employee_id:employeeId,category,reset:true}),timeoutMs:30000,silentStatus:true});state.payrollDetail=result;renderPayrollDetail();await refreshPayroll(false);toast('กลับไปใช้ค่าที่ระบบคำนวณแล้ว');}catch(e){button.disabled=false;toast(e.message,true)}};
+async function savePayrollAdjustment(){const periodId=Number($('#payrollAdjustmentPeriodId').value);const button=$('#payrollAdjustmentSaveBtn');button.disabled=true;try{await api(`/api/payroll/periods/${periodId}/adjustments`,{method:'POST',body:JSON.stringify({employee_id:Number($('#payrollAdjustmentEmployee').value),adjustment_type:$('#payrollAdjustmentType').value,category:$('#payrollAdjustmentCategory').value,amount:Number($('#payrollAdjustmentAmount').value||0),note:$('#payrollAdjustmentNote').value.trim(),taxable:$('#payrollAdjustmentTaxable').checked,sso_contributable:$('#payrollAdjustmentSso').checked})});$('#payrollAdjustmentModal').close();await refreshPayrollSnapshot(periodId);toast('เพิ่มรายการและคำนวณใหม่แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+window.deletePayrollAdjustment=async(id,periodId)=>{if(!confirm('ลบรายการปรับนี้ใช่ไหม? ระบบจะคำนวณ Payroll ใหม่ทันที'))return;try{await api(`/api/payroll/adjustments/${Number(id)}`,{method:'DELETE'});await refreshPayrollSnapshot(Number(periodId));toast('ลบรายการและคำนวณใหม่แล้ว');}catch(e){toast(e.message,true)}};
+window.savePayrollGridCell=async(periodId,employeeId,category,input)=>{const value=Math.max(0,Number(input.value||0));input.disabled=true;input.classList.add('saving');try{const result=await api(`/api/payroll/periods/${periodId}/cell`,{method:'PUT',body:JSON.stringify({employee_id:employeeId,category,amount:value}),timeoutMs:30000,silentStatus:true});state.payrollDetail=result;renderPayrollDetail();queueBackgroundRefresh('payroll:grid-overview',()=>refreshPayroll(false));toast('คำนวณใหม่แล้ว');}catch(e){input.disabled=false;input.classList.remove('saving');toast(e.message,true)}};
+window.savePayrollManualCell=async(periodId,employeeId,category,input)=>{const value=Number(input.value);if(!Number.isFinite(value)||value<0){toast('กรุณาใส่ตัวเลขตั้งแต่ 0 ขึ้นไป',true);return;}input.disabled=true;input.classList.add('saving');try{const result=await api(`/api/payroll/periods/${periodId}/cell`,{method:'PUT',body:JSON.stringify({employee_id:employeeId,category,amount:value}),timeoutMs:30000,silentStatus:true});state.payrollDetail=result;renderPayrollDetail();queueBackgroundRefresh('payroll:manual-overview',()=>refreshPayroll(false));toast(category==='payable_days'?'แก้วันคิดเงินแล้ว · เงินเดือนและยอดสุทธิคำนวณใหม่':'แก้เงินเดือนรอบนี้แล้ว · Gross / ภาษี / ปกส. / Net คำนวณใหม่');}catch(e){input.disabled=false;input.classList.remove('saving');toast(e.message,true)}};
+window.resetPayrollManualCell=async(periodId,employeeId,category,button)=>{button.disabled=true;try{const result=await api(`/api/payroll/periods/${periodId}/cell`,{method:'PUT',body:JSON.stringify({employee_id:employeeId,category,reset:true}),timeoutMs:30000,silentStatus:true});state.payrollDetail=result;renderPayrollDetail();queueBackgroundRefresh('payroll:manual-reset-overview',()=>refreshPayroll(false));toast('กลับไปใช้ค่าที่ระบบคำนวณแล้ว');}catch(e){button.disabled=false;toast(e.message,true)}};
 window.filterPayrollGrid=query=>{const q=String(query||'').trim().toLowerCase();$$('[data-payroll-search]').forEach(tr=>tr.classList.toggle('hidden',q&&!String(tr.dataset.payrollSearch||'').includes(q)));};
 window.openPayrollEmployeeDetail=employeeId=>{const item=(state.payrollDetail?.items||[]).find(x=>Number(x.employee_id)===Number(employeeId));if(!item)return;const bd=payrollBreakdown(item),rec=bd.recurring_components||[],adjs=(state.payrollDetail?.adjustments||[]).filter(x=>Number(x.employee_id)===Number(employeeId));const a=payrollAdjustmentMaps(state.payrollDetail).get(Number(employeeId))||{};$('#payrollEmployeeDetailTitle').textContent=`${item.nickname||item.first_name||''} ${item.last_name||''}`.trim();$('#payrollEmployeeDetailBody').innerHTML=`<div class="payroll-employee-kpis"><div><span>รายได้รวม</span><strong>${money(item.gross_income)}</strong></div><div><span>รับสุทธิ</span><strong>${money(item.net_pay)}</strong></div><div><span>YTD รายได้</span><strong>${money(item.ytd_gross)}</strong></div><div><span>YTD ภาษี</span><strong>${money(item.ytd_tax)}</strong></div></div><section class="payroll-source-card"><h4>ที่มาของตัวเลขรอบนี้</h4><div class="payroll-source-list"><div><span>ฐานเงินเดือน / รอบนี้</span><strong>${money(item.prorated_salary)}</strong><small>ฐาน ${money(item.base_salary)} · ${Number(bd.payable_days??0)} วัน${String(bd.salary_mode||'').startsWith('manual_')?' · HR แก้ในรอบนี้':''}</small></div>${Number(a.commission||0)?`<div><span>Commission</span><strong>+${money(a.commission)}</strong></div>`:''}${Number(a.kpi||0)?`<div><span>KPI</span><strong>+${money(a.kpi)}</strong></div>`:''}${Number(a.incentive||0)?`<div><span>Incentive</span><strong>+${money(a.incentive)}</strong></div>`:''}${Number(a.bonus||0)?`<div><span>Bonus</span><strong>+${money(a.bonus)}</strong></div>`:''}${rec.map(x=>`<div><span>${escapeHtml(x.name)}</span><strong>+${money(x.amount)}</strong><small>รายการประจำ</small></div>`).join('')}<div class="deduct"><span>ขาด / สาย</span><strong>-${money(item.attendance_deduction)}</strong><small>${Number(item.absent_days||0)} วัน · ${Number(item.late_minutes||0)} นาที</small></div><div class="deduct"><span>ประกันสังคม</span><strong>-${money(item.social_security)}</strong></div><div class="deduct"><span>ภาษีหัก ณ ที่จ่าย</span><strong>-${money(item.withholding_tax)}</strong><small>${escapeHtml(bd.tax_rule||'Tax Profile + YTD')}</small></div></div></section>${adjs.length?`<section class="payroll-source-card"><h4>รายการที่ HR ปรับในรอบนี้</h4><div class="payroll-source-list">${adjs.map(x=>`<div><span>${escapeHtml(x.category||x.adjustment_type||'รายการ')}</span><strong>${x.adjustment_type==='deduction'?'-':'+'}${money(x.amount)}</strong><small>${escapeHtml(x.note||'ไม่มีหมายเหตุ')}</small></div>`).join('')}</div></section>`:''}<div class="payroll-employee-detail-grid"><section><h4>ภาษี / ประกันสังคม</h4><p>ภาษีรอบนี้ <b>${money(item.withholding_tax)}</b></p><p>ประกันสังคมพนักงาน <b>${money(item.social_security)}</b></p><p>ประกันสังคมบริษัท <b>${money(item.employer_social_security)}</b></p></section><section><h4>การจ่ายเงิน</h4><p>ธนาคาร <b>${escapeHtml(item.bank_name||'ยังไม่ระบุ')}</b></p><p>เลขบัญชี <b>${escapeHtml(item.bank_account_no||'ยังไม่ระบุ')}</b></p><p>เทียบรอบก่อน ${payrollVarianceBadge(item)}</p></section></div>`;$('#payrollEmployeeDetailModal').showModal();};
 window.openPayrollBulkAdjustment=periodId=>{const items=state.payrollDetail?.items||[];$('#payrollBulkPeriodId').value=periodId;$('#payrollBulkEmployees').innerHTML=items.map(x=>`<label><input type="checkbox" value="${Number(x.employee_id)}"><span>${escapeHtml(x.nickname||x.first_name)} · ${escapeHtml(x.employee_code||'')}</span></label>`).join('');$('#payrollBulkAmount').value='';$('#payrollBulkNote').value='';$('#payrollBulkAdjustmentModal').showModal();};
-async function savePayrollBulkAdjustment(){const periodId=Number($('#payrollBulkPeriodId').value),ids=$$('#payrollBulkEmployees input:checked').map(x=>Number(x.value));const button=$('#payrollBulkSaveBtn');button.disabled=true;try{const category=$('#payrollBulkCategory').value,type=['other_deduction'].includes(category)?'deduction':'earning';await api(`/api/payroll/periods/${periodId}/bulk-adjustment`,{method:'POST',body:JSON.stringify({employee_ids:ids,adjustment_type:type,category,amount:Number($('#payrollBulkAmount').value||0),note:$('#payrollBulkNote').value.trim(),taxable:type==='earning',sso_contributable:false})});$('#payrollBulkAdjustmentModal').close();await loadPayrollPeriod(periodId);await refreshPayroll(false);toast(`เพิ่มรายการให้ ${ids.length} คนแล้ว`);}catch(e){toast(e.message,true)}finally{button.disabled=false;}};
+async function savePayrollBulkAdjustment(){const periodId=Number($('#payrollBulkPeriodId').value),ids=$$('#payrollBulkEmployees input:checked').map(x=>Number(x.value));const button=$('#payrollBulkSaveBtn');button.disabled=true;try{const category=$('#payrollBulkCategory').value,type=['other_deduction'].includes(category)?'deduction':'earning';await api(`/api/payroll/periods/${periodId}/bulk-adjustment`,{method:'POST',body:JSON.stringify({employee_ids:ids,adjustment_type:type,category,amount:Number($('#payrollBulkAmount').value||0),note:$('#payrollBulkNote').value.trim(),taxable:type==='earning',sso_contributable:false})});$('#payrollBulkAdjustmentModal').close();await refreshPayrollSnapshot(periodId);toast(`เพิ่มรายการให้ ${ids.length} คนแล้ว`);}catch(e){toast(e.message,true)}finally{button.disabled=false;}};
 window.openPayrollComponentsModal=()=>{const rows=state.payroll?.components||[];$('#payrollComponentList').innerHTML=rows.length?rows.map(x=>`<article><span><strong>${escapeHtml(x.name)}</strong><small>${x.component_type==='deduction'?'หัก':'เพิ่ม'} · ${Number(x.taxable)?'ภาษี':'ไม่เสียภาษี'} · ${Number(x.sso_contributable)?'เข้า SSO':'ไม่เข้า SSO'}</small></span><em>${x.active?'ใช้งาน':'ปิด'}</em></article>`).join(''):'<p class="muted">ยังไม่มีรายการ</p>';$('#payrollComponentName').value='';$('#payrollComponentType').value='earning';$('#payrollComponentTaxable').checked=true;$('#payrollComponentSso').checked=false;$('#payrollComponentsModal').showModal();};
 async function savePayrollComponent(){const button=$('#payrollComponentSaveBtn');button.disabled=true;try{await api('/api/payroll/components',{method:'POST',body:JSON.stringify({name:$('#payrollComponentName').value.trim(),component_type:$('#payrollComponentType').value,taxable:$('#payrollComponentTaxable').checked,sso_contributable:$('#payrollComponentSso').checked,recurring_default:true})});$('#payrollComponentsModal').close();await refreshPayroll(false);window.openPayrollComponentsModal();toast('เพิ่มรายการเงินแล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}};
-window.recalculatePayroll=async id=>{try{await api(`/api/payroll/periods/${id}/recalculate`,{method:'POST',body:'{}'});await loadPayrollPeriod(id);await refreshPayroll(false);toast('คำนวณ Payroll ใหม่แล้ว');}catch(e){toast(e.message,true)}};
+window.recalculatePayroll=async id=>{try{await api(`/api/payroll/periods/${id}/recalculate`,{method:'POST',body:'{}'});await refreshPayrollSnapshot(id);toast('คำนวณ Payroll ใหม่แล้ว');}catch(e){toast(e.message,true)}};
 window.downloadPayrollSavedExport=(url,fileName='Payroll.xlsx')=>{try{const a=document.createElement('a');a.href=url;a.download=fileName;a.rel='noopener';a.style.display='none';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1500);}catch{window.open(url,'_blank','noopener');}};
 window.createPayrollReviewExcel=async id=>{try{const r=await api(`/api/payroll/periods/${id}/review-export`,{method:'POST',body:'{}',timeoutMs:30000});await loadPayrollPeriod(id);if(r.export?.download_url)window.downloadPayrollSavedExport(r.export.download_url,r.export.file_name);const missing=Number(r.export?.missing_bank_count||0);toast(missing?`สร้าง Excel แล้ว · ${missing} คนข้อมูลบัญชียังไม่ครบ`:'สร้าง Excel และบันทึกในระบบแล้ว');}catch(e){toast(e.message,true)}};
-window.reviewPayroll=async id=>{try{const r=await api(`/api/payroll/periods/${id}/review`,{method:'POST',body:'{}',timeoutMs:30000});await refreshPayroll();await loadPayrollPeriod(id);if(r.export?.download_url){window.downloadPayrollSavedExport(r.export.download_url,r.export.file_name);const missing=Number(r.export.missing_bank_count||0);toast(missing?`ตรวจรอบแล้ว · Excel สร้างแล้ว แต่ ${missing} คนข้อมูลบัญชีไม่ครบ`:(r.approval_status==='pending'?'ส่งให้ Checker แล้ว · Excel ถูกบันทึกและดาวน์โหลดแล้ว':'ตรวจรอบแล้ว · Excel ถูกบันทึกและดาวน์โหลดแล้ว'));}else toast(r.export_warning||(r.approval_status==='pending'?'ส่งให้ Checker อนุมัติแล้ว':'ตรวจรอบแล้ว พร้อม Lock'),Boolean(r.export_warning));}catch(e){toast(e.message,true)}};
-window.approvePayroll=async id=>{try{await api(`/api/payroll/periods/${id}/approve`,{method:'POST',body:'{}'});await refreshPayroll();await loadPayrollPeriod(id);toast('อนุมัติ Payroll แล้ว');}catch(e){toast(e.message,true)}};
-window.lockPayroll=async(id,confirmed=false)=>{if(!confirmed&&!confirm('ปิดการแก้ไขรอบนี้แล้วจะเปลี่ยนตัวเลขไม่ได้ ต้องการทำต่อใช่ไหม?'))return;try{const r=await api(`/api/payroll/periods/${id}/lock`,{method:'POST',body:'{}'});await refreshPayroll();await loadPayrollPeriod(id);toast(r.warning||(r.payslip_queued?'Lock แล้ว · กำลังสร้าง Payslip อัตโนมัติ':'Lock Payroll แล้ว'));if(r.payslip_queued)setTimeout(()=>loadPayrollPeriod(id),2500);}catch(e){toast(e.message,true)}};
-window.unlockPayroll=async id=>{const reason=prompt('เหตุผลการปลด Lock (ต้องบันทึก Audit Trail)');if(reason===null)return;try{await api(`/api/payroll/periods/${id}/unlock`,{method:'POST',body:JSON.stringify({reason})});await refreshPayroll();await loadPayrollPeriod(id);toast('ปลด Lock แล้ว · รอบกลับไปรอตรวจ');}catch(e){toast(e.message,true)}};
+window.reviewPayroll=async id=>{try{const r=await api(`/api/payroll/periods/${id}/review`,{method:'POST',body:'{}',timeoutMs:30000});await refreshPayrollSnapshot(id);if(r.export?.download_url){window.downloadPayrollSavedExport(r.export.download_url,r.export.file_name);const missing=Number(r.export.missing_bank_count||0);toast(missing?`ตรวจรอบแล้ว · Excel สร้างแล้ว แต่ ${missing} คนข้อมูลบัญชีไม่ครบ`:(r.approval_status==='pending'?'ส่งให้ Checker แล้ว · Excel ถูกบันทึกและดาวน์โหลดแล้ว':'ตรวจรอบแล้ว · Excel ถูกบันทึกและดาวน์โหลดแล้ว'));}else toast(r.export_warning||(r.approval_status==='pending'?'ส่งให้ Checker อนุมัติแล้ว':'ตรวจรอบแล้ว พร้อม Lock'),Boolean(r.export_warning));}catch(e){toast(e.message,true)}};
+window.approvePayroll=async id=>{try{await api(`/api/payroll/periods/${id}/approve`,{method:'POST',body:'{}'});await refreshPayrollSnapshot(id);toast('อนุมัติ Payroll แล้ว');}catch(e){toast(e.message,true)}};
+window.lockPayroll=async(id,confirmed=false)=>{if(!confirmed&&!confirm('ปิดการแก้ไขรอบนี้แล้วจะเปลี่ยนตัวเลขไม่ได้ ต้องการทำต่อใช่ไหม?'))return;try{const r=await api(`/api/payroll/periods/${id}/lock`,{method:'POST',body:'{}'});await refreshPayrollSnapshot(id);toast(r.warning||(r.payslip_queued?'Lock แล้ว · กำลังสร้าง Payslip อัตโนมัติ':'Lock Payroll แล้ว'));if(r.payslip_queued)setTimeout(()=>loadPayrollPeriod(id),2500);}catch(e){toast(e.message,true)}};
+window.unlockPayroll=async id=>{const reason=prompt('เหตุผลการปลด Lock (ต้องบันทึก Audit Trail)');if(reason===null)return;try{await api(`/api/payroll/periods/${id}/unlock`,{method:'POST',body:JSON.stringify({reason})});await refreshPayrollSnapshot(id);toast('ปลด Lock แล้ว · รอบกลับไปรอตรวจ');}catch(e){toast(e.message,true)}};
 window.exportPayroll=(id,type)=>{window.open(`/api/payroll/periods/${Number(id)}/export/${type==='accounting'?'accounting':'bank'}.csv`,'_blank','noopener');};
-window.publishPayroll=async id=>{if(!confirm('Publish แล้วระบบจะสร้าง PDF ลง Google Drive และแจ้งพนักงานทาง Mail/LINE ต้องการทำต่อไหม?'))return;try{const r=await api(`/api/payroll/periods/${id}/publish`,{method:'POST',body:'{}'});await refreshPayroll();await loadPayrollPeriod(id);toast(r.message||'เริ่ม Publish Payslip แล้ว');setTimeout(()=>refreshDocuments(),2500);}catch(e){toast(e.message,true)}};
+window.publishPayroll=async id=>{if(!confirm('Publish แล้วระบบจะสร้าง PDF ลง Google Drive และแจ้งพนักงานทาง Mail/LINE ต้องการทำต่อไหม?'))return;try{const r=await api(`/api/payroll/periods/${id}/publish`,{method:'POST',body:'{}'});await refreshPayrollSnapshot(id);toast(r.message||'เริ่ม Publish Payslip แล้ว');setTimeout(()=>refreshDocuments(),2500);}catch(e){toast(e.message,true)}};
 
 async function refreshPayroll(render=true){const role=String(activeCompanyRole()||'');if(!['owner','co_owner','hr_admin','hr','payroll_admin'].includes(role))return;state.payroll=await api('/api/payroll/overview');if(render)renderPayroll();}
 
@@ -5593,7 +5792,7 @@ async function generateEmployeeDocument(){
       state.documents.data=[result.document,...state.documents.data.filter(x=>Number(x.id)!==Number(result.document.id))];
       renderDocuments();
     }
-    await refreshDocuments({silent:true});
+    queueBackgroundRefresh('documents:create',()=>refreshDocuments({silent:true}));
     toast(`สร้าง Draft ${result.document_number} แล้ว · อยู่ใน “งานที่ต้องดำเนินการ” เพื่อให้ HR ตรวจและอนุมัติ`);
   }catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='สร้าง Draft เพื่อตรวจสอบ';}
 }
@@ -5629,37 +5828,37 @@ function reviewStatusLabel(s){return ({pending:'รอประเมิน',sub
 async function refreshGrowth(){const role=String(activeCompanyRole()||'');if(!['owner','co_owner','hr_admin','hr','manager'].includes(role))return;try{const [learning,performance]=await Promise.all([api('/api/learning/overview'),api('/api/performance/overview')]);state.learning=learning;state.performance=performance;renderGrowth();}catch(e){toast(e.message,true);}}
 
 function openCourseModal(){ $('#courseTitle').value='';$('#courseDescription').value='';$('#courseAudience').value='probation';$('#coursePassingScore').value=80;$('#courseEstimatedMinutes').value=30;$('#courseRequired').checked=true;$('#courseModal').showModal(); }
-async function saveCourse(){const button=$('#courseSaveBtn');button.disabled=true;try{await api('/api/learning/courses',{method:'POST',body:JSON.stringify({title:$('#courseTitle').value.trim(),description:$('#courseDescription').value.trim(),audience_type:$('#courseAudience').value,passing_score:Number($('#coursePassingScore').value||80),estimated_minutes:Number($('#courseEstimatedMinutes').value||0),required:$('#courseRequired').checked})});$('#courseModal').close();await refreshGrowth();toast('สร้างหลักสูตรแล้ว · เพิ่มบทเรียนต่อได้เลย');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function saveCourse(){const button=$('#courseSaveBtn');button.disabled=true;try{await api('/api/learning/courses',{method:'POST',body:JSON.stringify({title:$('#courseTitle').value.trim(),description:$('#courseDescription').value.trim(),audience_type:$('#courseAudience').value,passing_score:Number($('#coursePassingScore').value||80),estimated_minutes:Number($('#courseEstimatedMinutes').value||0),required:$('#courseRequired').checked})});$('#courseModal').close();await refreshLearningOnly();toast('สร้างหลักสูตรแล้ว · เพิ่มบทเรียนต่อได้เลย');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
 
 window.openLearningModule=id=>openLearningModule(Number(id));
 function openLearningModule(courseId){$('#moduleCourseId').value=courseId;$('#moduleType').value='video';$('#moduleTitle').value='';$('#moduleDescription').value='';$('#moduleContentText').value='';$('#moduleExternalUrl').value='';$('#moduleFile').value='';$('#moduleRequired').checked=true;renderModuleFields();$('#moduleModal').showModal();}
 function renderModuleFields(){const type=$('#moduleType').value;$('#moduleTextField').classList.toggle('hidden',type!=='text');$('#moduleLinkField').classList.toggle('hidden',type!=='link');$('#moduleFileField').classList.toggle('hidden',!['video','document'].includes(type));}
-async function saveLearningModule(){const button=$('#moduleSaveBtn');button.disabled=true;button.textContent='กำลังเพิ่ม…';try{const type=$('#moduleType').value;const result=await api(`/api/learning/courses/${Number($('#moduleCourseId').value)}/modules`,{method:'POST',body:JSON.stringify({module_type:type,title:$('#moduleTitle').value.trim(),description:$('#moduleDescription').value.trim(),content_text:$('#moduleContentText').value.trim(),external_url:$('#moduleExternalUrl').value.trim(),required:$('#moduleRequired').checked})});const file=$('#moduleFile').files?.[0];if(file&&['video','document'].includes(type)){button.textContent='กำลังอัปขึ้น Drive…';const form=new FormData();form.append('file',file);const res=await fetch(`/api/learning/modules/${result.id}/media`,{method:'POST',credentials:'same-origin',body:form});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||'อัปโหลดไฟล์ไม่สำเร็จ');}$('#moduleModal').close();await refreshGrowth();toast(type==='quiz'?'เพิ่ม Quiz แล้ว · กดเพิ่มคำถามได้เลย':'เพิ่มบทเรียนแล้ว');if(type==='quiz')openQuizQuestion(result.id);}catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='เพิ่มบทเรียน';}}
+async function saveLearningModule(){const button=$('#moduleSaveBtn');button.disabled=true;button.textContent='กำลังเพิ่ม…';try{const type=$('#moduleType').value;const result=await api(`/api/learning/courses/${Number($('#moduleCourseId').value)}/modules`,{method:'POST',body:JSON.stringify({module_type:type,title:$('#moduleTitle').value.trim(),description:$('#moduleDescription').value.trim(),content_text:$('#moduleContentText').value.trim(),external_url:$('#moduleExternalUrl').value.trim(),required:$('#moduleRequired').checked})});const file=$('#moduleFile').files?.[0];if(file&&['video','document'].includes(type)){button.textContent='กำลังอัปขึ้น Drive…';const form=new FormData();form.append('file',file);const res=await fetch(`/api/learning/modules/${result.id}/media`,{method:'POST',credentials:'same-origin',body:form});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||'อัปโหลดไฟล์ไม่สำเร็จ');}$('#moduleModal').close();await refreshLearningOnly();toast(type==='quiz'?'เพิ่ม Quiz แล้ว · กดเพิ่มคำถามได้เลย':'เพิ่มบทเรียนแล้ว');if(type==='quiz')openQuizQuestion(result.id);}catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='เพิ่มบทเรียน';}}
 
 window.openQuizQuestion=id=>openQuizQuestion(Number(id));
 function openQuizQuestion(moduleId){$('#quizModuleId').value=moduleId;$('#quizQuestionText').value='';$('#quizOptions').value='';$('#quizCorrectIndex').value=1;$('#quizPoints').value=1;$('#quizExplanation').value='';$('#quizQuestionModal').showModal();}
-async function saveQuizQuestion(){const options=$('#quizOptions').value.split('\n').map(x=>x.trim()).filter(Boolean);const correct=Math.max(0,Number($('#quizCorrectIndex').value||1)-1);const button=$('#quizQuestionSaveBtn');button.disabled=true;try{await api(`/api/learning/modules/${Number($('#quizModuleId').value)}/questions`,{method:'POST',body:JSON.stringify({question_text:$('#quizQuestionText').value.trim(),question_type:'single',options,correct_answers:[correct],points:Number($('#quizPoints').value||1),explanation:$('#quizExplanation').value.trim()})});$('#quizQuestionModal').close();await refreshGrowth();toast('เพิ่มคำถามแล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function saveQuizQuestion(){const options=$('#quizOptions').value.split('\n').map(x=>x.trim()).filter(Boolean);const correct=Math.max(0,Number($('#quizCorrectIndex').value||1)-1);const button=$('#quizQuestionSaveBtn');button.disabled=true;try{await api(`/api/learning/modules/${Number($('#quizModuleId').value)}/questions`,{method:'POST',body:JSON.stringify({question_text:$('#quizQuestionText').value.trim(),question_type:'single',options,correct_answers:[correct],points:Number($('#quizPoints').value||1),explanation:$('#quizExplanation').value.trim()})});$('#quizQuestionModal').close();await refreshLearningOnly();toast('เพิ่มคำถามแล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
 
 window.openCourseAssign=id=>openCourseAssign(Number(id));
 function openCourseAssign(courseId){const course=(state.learning?.courses||[]).find(c=>Number(c.id)===courseId);$('#assignCourseId').value=courseId;$('#courseAssignTitle').textContent=`มอบหมาย · ${course?.title||'หลักสูตร'}`;$('#assignAudience').value=course?.audience_type==='manual'?'probation':course?.audience_type||'probation';$('#assignDueDate').value='';$('#assignDepartment').innerHTML=(state.peopleCore?.departments||[]).map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');$('#assignEmployeeChecks').innerHTML=state.employees.filter(e=>e.status==='active').map(e=>`<label class="location-check"><input type="checkbox" value="${e.id}"/><span><strong>${escapeHtml(e.nickname||e.first_name)}</strong><small>${escapeHtml(e.employee_code)} · ${escapeHtml(e.department_name||'-')}</small></span></label>`).join('');renderCourseAssignFields();$('#courseAssignModal').showModal();}
 function renderCourseAssignFields(){const a=$('#assignAudience').value;$('#assignDepartmentField').classList.toggle('hidden',a!=='department');$('#assignEmployeesField').classList.toggle('hidden',a!=='employees');}
-async function assignCourse(){const button=$('#courseAssignSaveBtn');button.disabled=true;try{const audience=$('#assignAudience').value;await api(`/api/learning/courses/${Number($('#assignCourseId').value)}/assign`,{method:'POST',body:JSON.stringify({audience_type:audience,department_id:audience==='department'?Number($('#assignDepartment').value):null,employee_ids:audience==='employees'?$$('#assignEmployeeChecks input:checked').map(x=>Number(x.value)):[],due_date:$('#assignDueDate').value||null})});$('#courseAssignModal').close();await refreshGrowth();toast('Publish และ Assign หลักสูตรแล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function assignCourse(){const button=$('#courseAssignSaveBtn');button.disabled=true;try{const audience=$('#assignAudience').value;await api(`/api/learning/courses/${Number($('#assignCourseId').value)}/assign`,{method:'POST',body:JSON.stringify({audience_type:audience,department_id:audience==='department'?Number($('#assignDepartment').value):null,employee_ids:audience==='employees'?$$('#assignEmployeeChecks input:checked').map(x=>Number(x.value)):[],due_date:$('#assignDueDate').value||null})});$('#courseAssignModal').close();await refreshLearningOnly();toast('Publish และ Assign หลักสูตรแล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
 
 function fillPerformanceEmployeeSelect(selector,selected=null){const el=$(selector);el.innerHTML=state.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}" ${Number(selected)===Number(e.id)?'selected':''}>${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</option>`).join('');}
 function openKpiModal(){fillPerformanceEmployeeSelect('#kpiEmployee');$('#kpiTitle').value='';$('#kpiDescription').value='';$('#kpiMetricType').value='number';$('#kpiTargetValue').value='';$('#kpiUnit').value='';$('#kpiFrequency').value='monthly';$('#kpiWeight').value=0;$('#kpiCycle').innerHTML='<option value="">ไม่ผูกรอบ</option>'+(state.performance?.cycles||[]).filter(c=>c.status==='active').map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');$('#kpiModal').showModal();}
-async function saveKpi(){const button=$('#kpiSaveBtn');button.disabled=true;try{await api('/api/performance/goals',{method:'POST',body:JSON.stringify({employee_id:Number($('#kpiEmployee').value),cycle_id:$('#kpiCycle').value||null,title:$('#kpiTitle').value.trim(),description:$('#kpiDescription').value.trim(),metric_type:$('#kpiMetricType').value,target_value:$('#kpiTargetValue').value,unit:$('#kpiUnit').value.trim(),update_frequency:$('#kpiFrequency').value,weight:Number($('#kpiWeight').value||0)})});$('#kpiModal').close();await refreshGrowth();toast('สร้าง KPI แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function saveKpi(){const button=$('#kpiSaveBtn');button.disabled=true;try{await api('/api/performance/goals',{method:'POST',body:JSON.stringify({employee_id:Number($('#kpiEmployee').value),cycle_id:$('#kpiCycle').value||null,title:$('#kpiTitle').value.trim(),description:$('#kpiDescription').value.trim(),metric_type:$('#kpiMetricType').value,target_value:$('#kpiTargetValue').value,unit:$('#kpiUnit').value.trim(),update_frequency:$('#kpiFrequency').value,weight:Number($('#kpiWeight').value||0)})});$('#kpiModal').close();await refreshPerformanceOnly();toast('สร้าง KPI แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
 window.openKpiUpdate=id=>{const g=(state.performance?.goals||[]).find(x=>Number(x.id)===Number(id));if(!g)return;$('#kpiUpdateGoalId').value=id;$('#kpiUpdateTitle').textContent=`อัปเดต · ${g.title}`;$('#kpiActualValue').value=g.latest_update?.actual_value??'';$('#kpiProgressPct').value='';$('#kpiUpdateNote').value='';$('#kpiUpdateModal').showModal();};
-async function saveKpiUpdate(){const button=$('#kpiUpdateSaveBtn');button.disabled=true;try{await api(`/api/performance/goals/${Number($('#kpiUpdateGoalId').value)}/updates`,{method:'POST',body:JSON.stringify({actual_value:$('#kpiActualValue').value,progress_pct:$('#kpiProgressPct').value,note:$('#kpiUpdateNote').value.trim()})});$('#kpiUpdateModal').close();await refreshGrowth();toast('อัปเดต KPI แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function saveKpiUpdate(){const button=$('#kpiUpdateSaveBtn');button.disabled=true;try{await api(`/api/performance/goals/${Number($('#kpiUpdateGoalId').value)}/updates`,{method:'POST',body:JSON.stringify({actual_value:$('#kpiActualValue').value,progress_pct:$('#kpiProgressPct').value,note:$('#kpiUpdateNote').value.trim()})});$('#kpiUpdateModal').close();await refreshPerformanceOnly();toast('อัปเดต KPI แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
 
 function openPerformanceCycleModal(){const now=new Date();const first=localDateKey(new Date(now.getFullYear(),now.getMonth(),1));const last=localDateKey(new Date(now.getFullYear(),now.getMonth()+1,0));$('#cycleName').value=`${now.toLocaleString('en',{month:'short'})} ${now.getFullYear()}`;$('#cycleType').value='monthly';$('#cycleStart').value=first;$('#cycleEnd').value=last;$('#performanceCycleModal').showModal();}
-async function savePerformanceCycle(){const button=$('#cycleSaveBtn');button.disabled=true;try{await api('/api/performance/cycles',{method:'POST',body:JSON.stringify({name:$('#cycleName').value.trim(),cycle_type:$('#cycleType').value,start_date:$('#cycleStart').value,end_date:$('#cycleEnd').value})});$('#performanceCycleModal').close();await refreshGrowth();toast('สร้างรอบประเมินแล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function savePerformanceCycle(){const button=$('#cycleSaveBtn');button.disabled=true;try{await api('/api/performance/cycles',{method:'POST',body:JSON.stringify({name:$('#cycleName').value.trim(),cycle_type:$('#cycleType').value,start_date:$('#cycleStart').value,end_date:$('#cycleEnd').value})});$('#performanceCycleModal').close();await refreshPerformanceOnly();toast('สร้างรอบประเมินแล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
 
 function openOneOnOneModal(){fillPerformanceEmployeeSelect('#oneEmployee');$('#oneScheduledAt').value='';$('#oneStatus').value='scheduled';$('#oneManagerNotes').value='';$('#oneActionItems').value='';$('#oneFollowup').value='';$('#oneOnOneModal').showModal();}
-async function saveOneOnOne(){const button=$('#oneSaveBtn');button.disabled=true;try{await api('/api/performance/one-on-ones',{method:'POST',body:JSON.stringify({employee_id:Number($('#oneEmployee').value),scheduled_at:$('#oneScheduledAt').value||null,status:$('#oneStatus').value,manager_notes:$('#oneManagerNotes').value.trim(),action_items:$('#oneActionItems').value.trim(),next_followup_at:$('#oneFollowup').value||null})});$('#oneOnOneModal').close();await refreshGrowth();toast('บันทึก 1:1 แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function saveOneOnOne(){const button=$('#oneSaveBtn');button.disabled=true;try{await api('/api/performance/one-on-ones',{method:'POST',body:JSON.stringify({employee_id:Number($('#oneEmployee').value),scheduled_at:$('#oneScheduledAt').value||null,status:$('#oneStatus').value,manager_notes:$('#oneManagerNotes').value.trim(),action_items:$('#oneActionItems').value.trim(),next_followup_at:$('#oneFollowup').value||null})});$('#oneOnOneModal').close();await refreshPerformanceOnly();toast('บันทึก 1:1 แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
 
 function openProbationReviewModal(employeeId=null){const probation=state.employees.filter(e=>e.status==='active'&&e.people_status==='probation');const select=$('#reviewEmployee');select.innerHTML=probation.map(e=>`<option value="${e.id}" ${Number(employeeId)===Number(e.id)?'selected':''}>${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</option>`).join('');$('#reviewDate').value=localDateKey(new Date());$('#reviewStatus').value='submitted';$('#reviewScore').value='';$('#reviewExtensionEnd').value='';$('#reviewStrengths').value='';$('#reviewImprovements').value='';$('#reviewManagerComment').value='';$('#reviewHrComment').value='';$('#probationReviewModal').showModal();}
 window.openProbationReview=id=>openProbationReviewModal(Number(id));
-async function saveProbationReview(){const button=$('#reviewSaveBtn');button.disabled=true;try{await api('/api/performance/probation-reviews',{method:'POST',body:JSON.stringify({employee_id:Number($('#reviewEmployee').value),review_date:$('#reviewDate').value,status:$('#reviewStatus').value,score:$('#reviewScore').value,strengths:$('#reviewStrengths').value.trim(),improvements:$('#reviewImprovements').value.trim(),manager_comment:$('#reviewManagerComment').value.trim(),hr_comment:$('#reviewHrComment').value.trim(),extension_end_date:$('#reviewExtensionEnd').value||null})});$('#probationReviewModal').close();await loadAll({silent:true});toast('บันทึกผล Probation แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function saveProbationReview(){const button=$('#reviewSaveBtn');button.disabled=true;try{await api('/api/performance/probation-reviews',{method:'POST',body:JSON.stringify({employee_id:Number($('#reviewEmployee').value),review_date:$('#reviewDate').value,status:$('#reviewStatus').value,score:$('#reviewScore').value,strengths:$('#reviewStrengths').value.trim(),improvements:$('#reviewImprovements').value.trim(),manager_comment:$('#reviewManagerComment').value.trim(),hr_comment:$('#reviewHrComment').value.trim(),extension_end_date:$('#reviewExtensionEnd').value||null})});$('#probationReviewModal').close();await refreshPerformanceOnly();toast('บันทึกผล Probation แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
 
 function attentionIcon(key) {
   return ({
@@ -5788,21 +5987,21 @@ async function saveWellnessSettings(){
   const button=$('#wellnessSaveBtn');button.disabled=true;try{const poseEnabled=$('#wellnessPoseTracking')?.checked!==false;if(poseEnabled&&$('#wellnessCamera'))$('#wellnessCamera').checked=true;const result=await api('/api/wellness/settings',{method:'PATCH',body:JSON.stringify({enabled:$('#wellnessEnabled').checked,reminder_time:$('#wellnessReminderTime').value,duration_minutes:Number($('#wellnessDuration').value||3),snooze_minutes:Number($('#wellnessSnooze').value||30),points_reward:Number($('#wellnessPoints').value||0),camera_enabled:$('#wellnessCamera').checked,pose_tracking_enabled:poseEnabled,workday_only:$('#wellnessWorkdayOnly').checked})});state.wellness.settings=result.settings||state.wellness.settings;markViewLoaded('wellness');renderWellness();toast('บันทึกการตั้งค่า Wellness แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
 async function sendWellnessReminderNow(){
   if(!confirm('ส่ง Wellness Reminder ให้ทีมงานที่เข้าเงื่อนไขตอนนี้ใช่ไหม?\n\nถ้าต้องการตรวจสอบ Flow ก่อน ให้ใช้ “พรีวิวสำหรับ HR” แทน'))return;
-  const button=$('#wellnessRemindNowBtn');button.disabled=true;button.textContent='กำลังส่งทั้งทีม…';try{const r=await api('/api/wellness/remind-now',{method:'POST',body:'{}'});state.wellness=await api('/api/wellness/overview');markViewLoaded('wellness');renderWellness();toast(`ส่งเตือนแล้ว ${Number(r.sent||0)} คน${Number(r.failed||0)?` · ไม่สำเร็จ ${r.failed}`:''}`);}catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='ส่งเตือนทั้งทีมตอนนี้';}}
+  const button=$('#wellnessRemindNowBtn');button.disabled=true;button.textContent='กำลังส่งทั้งทีม…';try{const r=await api('/api/wellness/remind-now',{method:'POST',body:'{}'});toast(`ส่งเตือนแล้ว ${Number(r.sent||0)} คน${Number(r.failed||0)?` · ไม่สำเร็จ ${r.failed}`:''}`);queueBackgroundRefresh('wellness:remind',async()=>{state.wellness=await api('/api/wellness/overview',{silentStatus:true});markViewLoaded('wellness');renderWellness();});}catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='ส่งเตือนทั้งทีมตอนนี้';}}
 function syncWellnessTestTimingUi(){const timing=$('#wellnessTestTiming')?.value||'now';$('#wellnessTestTimeField')?.classList.toggle('hidden',timing!=='custom');const btn=$('#wellnessTestSendBtn');if(btn)btn.textContent=timing==='now'?'ส่งให้ฉันตอนนี้':timing==='1'?'ส่งให้ฉันอีก 1 นาที':timing==='5'?'ส่งให้ฉันอีก 5 นาที':'ตั้งเวลาส่งให้ฉัน';}
-async function sendWellnessTestReminder(){const btn=$('#wellnessTestSendBtn'),timing=$('#wellnessTestTiming')?.value||'now';const body=timing==='now'?{mode:'now'}:timing==='custom'?{mode:'time',scheduled_time:$('#wellnessTestTime')?.value||''}:{mode:'delay',delay_minutes:Number(timing)};if(timing==='custom'&&!body.scheduled_time)return toast('กรุณาเลือกเวลาส่ง',true);btn.disabled=true;try{const r=await api('/api/wellness/test-reminder',{method:'POST',body:JSON.stringify(body)});state.wellness=await api('/api/wellness/overview');markViewLoaded('wellness');renderWellness();toast(r.sent?'ส่งข้อความตรวจสอบให้คุณแล้ว':'ตั้งเวลาส่งแล้ว · ส่งเฉพาะคุณ');}catch(e){toast(e.message,true)}finally{btn.disabled=false;syncWellnessTestTimingUi();}}
-async function cancelWellnessTestSchedule(id){if(!id)return;try{await api(`/api/wellness/test-schedules/${id}`,{method:'DELETE'});state.wellness=await api('/api/wellness/overview');renderWellness();toast('ยกเลิกเวลาส่งตรวจสอบแล้ว');}catch(e){toast(e.message,true)}}
+async function sendWellnessTestReminder(){const btn=$('#wellnessTestSendBtn'),timing=$('#wellnessTestTiming')?.value||'now';const body=timing==='now'?{mode:'now'}:timing==='custom'?{mode:'time',scheduled_time:$('#wellnessTestTime')?.value||''}:{mode:'delay',delay_minutes:Number(timing)};if(timing==='custom'&&!body.scheduled_time)return toast('กรุณาเลือกเวลาส่ง',true);btn.disabled=true;try{const r=await api('/api/wellness/test-reminder',{method:'POST',body:JSON.stringify(body)});toast(r.sent?'ส่งข้อความตรวจสอบให้คุณแล้ว':'ตั้งเวลาส่งแล้ว · ส่งเฉพาะคุณ');queueBackgroundRefresh('wellness:test',async()=>{state.wellness=await api('/api/wellness/overview',{silentStatus:true});markViewLoaded('wellness');renderWellness();});}catch(e){toast(e.message,true)}finally{btn.disabled=false;syncWellnessTestTimingUi();}}
+async function cancelWellnessTestSchedule(id){if(!id)return;try{await api(`/api/wellness/test-schedules/${id}`,{method:'DELETE'});toast('ยกเลิกเวลาส่งตรวจสอบแล้ว');queueBackgroundRefresh('wellness:cancel-test',async()=>{state.wellness=await api('/api/wellness/overview',{silentStatus:true});renderWellness();});}catch(e){toast(e.message,true)}}
 
 function eventRuleLabel(v){return ({attendance_streak:'มาตรงเวลาเป็นชุด' ,learning_complete:'เรียนจบหลักสูตร',kpi_complete:'KPI สำเร็จ',birthday:'วันเกิด',work_anniversary:'ครบรอบงาน',manual:'HR ให้เอง',custom:'กำหนดเอง'})[v]||v;}
 function rewardEmoji(v){return ({gift:'🎁',cash:'💸',leave:'🌴',perk:'✨',custom:'⭐'})[v]||'🎁';}
 function redemptionLabel(v){return ({pending:'รออนุมัติ',approved:'อนุมัติแล้ว',rejected:'ปฏิเสธ',delivered:'ส่งมอบแล้ว',cancelled:'ยกเลิก'})[v]||v;}
 function redemptionActions(r){if(r.status==='pending')return `<div class="row-actions"><button class="text-btn success-text" onclick="window.rewardDecision(${r.id},'approve')">อนุมัติ</button><button class="text-btn danger-text" onclick="window.rewardDecision(${r.id},'reject')">ปฏิเสธ</button></div>`;if(r.status==='approved')return `<button class="text-btn" onclick="window.rewardDecision(${r.id},'deliver')">ส่งมอบแล้ว</button>`;return '';}
-window.togglePointRule=async(id,on)=>{try{const r=(state.engagement.rules||[]).find(x=>Number(x.id)===Number(id));await api(`/api/engagement/rules/${id}`,{method:'PATCH',body:JSON.stringify({is_active:Boolean(on),name:r?.name,event_type:r?.event_type})});await refreshPhase5();toast(on?'เปิดกติกาแล้ว':'ปิดกติกาแล้ว')}catch(e){toast(e.message,true)}};
-window.rewardDecision=async(id,action)=>{const note=action==='reject'?prompt('เหตุผลที่ปฏิเสธ','')||'':action==='approve'?prompt('หมายเหตุถึงพนักงาน (ถ้ามี)','')||'':'';try{await api(`/api/engagement/redemptions/${id}/${action}`,{method:'POST',body:JSON.stringify({note})});await refreshPhase5();toast(action==='approve'?'อนุมัติรางวัลแล้ว':action==='reject'?'ปฏิเสธและคืนแต้มแล้ว':'บันทึกว่าส่งมอบแล้ว')}catch(e){toast(e.message,true)}};
-async function runPointRules(){try{const r=await api('/api/engagement/run-rules',{method:'POST',body:'{}'});await refreshPhase5();toast(`รันกติกาแล้ว · เพิ่ม ${Number(r.awarded||0)} รายการ`)}catch(e){toast(e.message,true)}}
-function openManualAward(){openPhase5Form({eyebrow:'MANUAL POINTS',title:'ให้แต้มพนักงาน',subtitle:'แต้มติดลบใช้สำหรับปรับยอดได้ Cash Incentive จะถูกส่งเข้า Payroll รอบที่เกี่ยวข้อง',html:`<div class="field full"><label>พนักงาน</label><select id="p5AwardEmployee">${phase5EmployeeOptions()}</select></div><div class="field"><label>แต้ม</label><input id="p5AwardPoints" type="number" value="100"/></div><div class="field"><label>Cash Incentive (บาท)</label><input id="p5AwardCash" type="number" min="0" value="0"/></div><div class="field full"><label>เหตุผล</label><input id="p5AwardNote" value="HR ให้แต้ม"/></div>`,onSave:async()=>{await api('/api/engagement/award',{method:'POST',body:JSON.stringify({employee_id:Number($('#p5AwardEmployee').value),points:Number($('#p5AwardPoints').value),cash_value:Number($('#p5AwardCash').value||0),note:$('#p5AwardNote').value.trim()})});await refreshPhase5();}})}
-function openPointRule(){openPhase5Form({eyebrow:'POINT RULE',title:'สร้างกติกาแต้ม',subtitle:'กติกาจะยังไม่ทำงานจนกว่าจะเปิดสวิตช์',html:`<div class="field full"><label>ชื่อกติกา</label><input id="p5RuleName" placeholder="เช่น มาตรงเวลา 10 ครั้ง"/></div><div class="field"><label>เหตุการณ์</label><select id="p5RuleEvent"><option value="attendance_streak">มาตรงเวลาครบจำนวน</option><option value="learning_complete">เรียนจบหลักสูตร</option><option value="kpi_complete">KPI สำเร็จ</option><option value="birthday">วันเกิด</option><option value="work_anniversary">ครบรอบงาน</option><option value="manual">Manual</option></select></div><div class="field"><label>จำนวนครั้ง</label><input id="p5RuleThreshold" type="number" min="1" value="10"/></div><div class="field"><label>แต้ม</label><input id="p5RulePoints" type="number" min="0" value="100"/></div><div class="field"><label>Cash Incentive (บาท)</label><input id="p5RuleCash" type="number" min="0" value="0"/></div><div class="field full"><label class="toggle-line"><input id="p5RuleActive" type="checkbox"/> เปิดใช้งานทันที</label></div>`,onSave:async()=>{await api('/api/engagement/rules',{method:'POST',body:JSON.stringify({name:$('#p5RuleName').value.trim(),event_type:$('#p5RuleEvent').value,threshold_count:Number($('#p5RuleThreshold').value||1),points:Number($('#p5RulePoints').value||0),cash_value:Number($('#p5RuleCash').value||0),is_active:$('#p5RuleActive').checked})});await refreshPhase5();}})}
-function openReward(){openPhase5Form({eyebrow:'REWARD',title:'เพิ่มของรางวัล',subtitle:'พนักงานจะเห็นรายการนี้ใน Employee Portal และใช้แต้มแลกได้',html:`<div class="field full"><label>ชื่อของรางวัล</label><input id="p5RewardTitle" placeholder="เช่น Voucher 500 บาท"/></div><div class="field"><label>ประเภท</label><select id="p5RewardType"><option value="gift">ของขวัญ</option><option value="cash">เงินรางวัล</option><option value="leave">วันลา / วันหยุดพิเศษ</option><option value="perk">สิทธิพิเศษ</option><option value="custom">อื่นๆ</option></select></div><div class="field"><label>แต้มที่ใช้</label><input id="p5RewardPoints" type="number" min="0" value="500"/></div><div class="field"><label>มูลค่าเงิน (ถ้ามี)</label><input id="p5RewardCash" type="number" min="0" value="0"/></div><div class="field"><label>จำนวนในคลัง</label><input id="p5RewardStock" type="number" min="0" placeholder="เว้นว่าง = ไม่จำกัด"/></div><div class="field full"><label>รายละเอียด</label><input id="p5RewardDescription" placeholder="เงื่อนไขหรือรายละเอียดของรางวัล"/></div>`,onSave:async()=>{await api('/api/engagement/rewards',{method:'POST',body:JSON.stringify({title:$('#p5RewardTitle').value.trim(),description:$('#p5RewardDescription').value.trim(),reward_type:$('#p5RewardType').value,points_cost:Number($('#p5RewardPoints').value||0),cash_value:Number($('#p5RewardCash').value||0),stock_qty:$('#p5RewardStock').value})});await refreshPhase5();}})}
+window.togglePointRule=async(id,on)=>{try{const r=(state.engagement.rules||[]).find(x=>Number(x.id)===Number(id));await api(`/api/engagement/rules/${id}`,{method:'PATCH',body:JSON.stringify({is_active:Boolean(on),name:r?.name,event_type:r?.event_type})});await refreshEngagementOnly();markViewStale('analytics');toast(on?'เปิดกติกาแล้ว':'ปิดกติกาแล้ว')}catch(e){toast(e.message,true)}};
+window.rewardDecision=async(id,action)=>{const note=action==='reject'?prompt('เหตุผลที่ปฏิเสธ','')||'':action==='approve'?prompt('หมายเหตุถึงพนักงาน (ถ้ามี)','')||'':'';try{await api(`/api/engagement/redemptions/${id}/${action}`,{method:'POST',body:JSON.stringify({note})});await refreshEngagementOnly();markViewStale('analytics');toast(action==='approve'?'อนุมัติรางวัลแล้ว':action==='reject'?'ปฏิเสธและคืนแต้มแล้ว':'บันทึกว่าส่งมอบแล้ว')}catch(e){toast(e.message,true)}};
+async function runPointRules(){try{const r=await api('/api/engagement/run-rules',{method:'POST',body:'{}'});await refreshEngagementOnly();markViewStale('analytics');markViewStale('payroll');queueBackgroundRefresh('engagement:analytics',()=>refreshAnalyticsOnly({render:state.currentView==='analytics'}),350);toast(`รันกติกาแล้ว · เพิ่ม ${Number(r.awarded||0)} รายการ`)}catch(e){toast(e.message,true)}}
+function openManualAward(){openPhase5Form({eyebrow:'MANUAL POINTS',title:'ให้แต้มพนักงาน',subtitle:'แต้มติดลบใช้สำหรับปรับยอดได้ Cash Incentive จะถูกส่งเข้า Payroll รอบที่เกี่ยวข้อง',html:`<div class="field full"><label>พนักงาน</label><select id="p5AwardEmployee">${phase5EmployeeOptions()}</select></div><div class="field"><label>แต้ม</label><input id="p5AwardPoints" type="number" value="100"/></div><div class="field"><label>Cash Incentive (บาท)</label><input id="p5AwardCash" type="number" min="0" value="0"/></div><div class="field full"><label>เหตุผล</label><input id="p5AwardNote" value="HR ให้แต้ม"/></div>`,onSave:async()=>{await api('/api/engagement/award',{method:'POST',body:JSON.stringify({employee_id:Number($('#p5AwardEmployee').value),points:Number($('#p5AwardPoints').value),cash_value:Number($('#p5AwardCash').value||0),note:$('#p5AwardNote').value.trim()})});await refreshEngagementOnly();markViewStale('analytics');markViewStale('payroll');queueBackgroundRefresh('engagement:manual-award-analytics',()=>refreshAnalyticsOnly({render:state.currentView==='analytics'}),350);}})}
+function openPointRule(){openPhase5Form({eyebrow:'POINT RULE',title:'สร้างกติกาแต้ม',subtitle:'กติกาจะยังไม่ทำงานจนกว่าจะเปิดสวิตช์',html:`<div class="field full"><label>ชื่อกติกา</label><input id="p5RuleName" placeholder="เช่น มาตรงเวลา 10 ครั้ง"/></div><div class="field"><label>เหตุการณ์</label><select id="p5RuleEvent"><option value="attendance_streak">มาตรงเวลาครบจำนวน</option><option value="learning_complete">เรียนจบหลักสูตร</option><option value="kpi_complete">KPI สำเร็จ</option><option value="birthday">วันเกิด</option><option value="work_anniversary">ครบรอบงาน</option><option value="manual">Manual</option></select></div><div class="field"><label>จำนวนครั้ง</label><input id="p5RuleThreshold" type="number" min="1" value="10"/></div><div class="field"><label>แต้ม</label><input id="p5RulePoints" type="number" min="0" value="100"/></div><div class="field"><label>Cash Incentive (บาท)</label><input id="p5RuleCash" type="number" min="0" value="0"/></div><div class="field full"><label class="toggle-line"><input id="p5RuleActive" type="checkbox"/> เปิดใช้งานทันที</label></div>`,onSave:async()=>{await api('/api/engagement/rules',{method:'POST',body:JSON.stringify({name:$('#p5RuleName').value.trim(),event_type:$('#p5RuleEvent').value,threshold_count:Number($('#p5RuleThreshold').value||1),points:Number($('#p5RulePoints').value||0),cash_value:Number($('#p5RuleCash').value||0),is_active:$('#p5RuleActive').checked})});await refreshEngagementOnly();markViewStale('analytics');}})}
+function openReward(){openPhase5Form({eyebrow:'REWARD',title:'เพิ่มของรางวัล',subtitle:'พนักงานจะเห็นรายการนี้ใน Employee Portal และใช้แต้มแลกได้',html:`<div class="field full"><label>ชื่อของรางวัล</label><input id="p5RewardTitle" placeholder="เช่น Voucher 500 บาท"/></div><div class="field"><label>ประเภท</label><select id="p5RewardType"><option value="gift">ของขวัญ</option><option value="cash">เงินรางวัล</option><option value="leave">วันลา / วันหยุดพิเศษ</option><option value="perk">สิทธิพิเศษ</option><option value="custom">อื่นๆ</option></select></div><div class="field"><label>แต้มที่ใช้</label><input id="p5RewardPoints" type="number" min="0" value="500"/></div><div class="field"><label>มูลค่าเงิน (ถ้ามี)</label><input id="p5RewardCash" type="number" min="0" value="0"/></div><div class="field"><label>จำนวนในคลัง</label><input id="p5RewardStock" type="number" min="0" placeholder="เว้นว่าง = ไม่จำกัด"/></div><div class="field full"><label>รายละเอียด</label><input id="p5RewardDescription" placeholder="เงื่อนไขหรือรายละเอียดของรางวัล"/></div>`,onSave:async()=>{await api('/api/engagement/rewards',{method:'POST',body:JSON.stringify({title:$('#p5RewardTitle').value.trim(),description:$('#p5RewardDescription').value.trim(),reward_type:$('#p5RewardType').value,points_cost:Number($('#p5RewardPoints').value||0),cash_value:Number($('#p5RewardCash').value||0),stock_qty:$('#p5RewardStock').value})});await refreshEngagementOnly();}})}
 
 function renderAnalytics(){const d=state.analytics||{},s=d.summary||{};if(!$('#analyticsSummary'))return;$('#analyticsSummary').innerHTML=[['Active Headcount',s.active_headcount||0,'คน'],['Probation',s.probation||0,'คน'],['รับเข้า 30 วัน',s.hires_30||0,'คน'],['ออก 90 วัน',s.exits_90||0,'คน'],['Turnover 90 วัน',`${Number(s.turnover_90_pct||0).toFixed(1)}%`,'อัตรา'],['มาสาย 30 วัน',s.late_records_30||0,'ครั้ง']].map(([l,v,u])=>`<article><span>${escapeHtml(l)}</span><strong>${v}</strong><small>${u}</small></article>`).join('');
   const trend=d.headcount_trend||[],max=Math.max(1,...trend.map(x=>Number(x.headcount||0)));$('#headcountTrend').innerHTML=trend.length?trend.map(x=>`<div class="trend-column"><div class="trend-bars"><i class="head" style="height:${Math.max(8,Number(x.headcount||0)/max*100)}%" title="Headcount ${x.headcount}"></i><i class="hire" style="height:${Math.max(2,Number(x.hires||0)/max*100)}%" title="Hire ${x.hires}"></i><i class="exit" style="height:${Math.max(2,Number(x.exits||0)/max*100)}%" title="Exit ${x.exits}"></i></div><strong>${escapeHtml(x.month.slice(5))}/${escapeHtml(x.month.slice(2,4))}</strong><small>${x.headcount} คน</small></div>`).join(''):emptyState('ยังไม่มีข้อมูล Trend','ข้อมูลจะสะสมตามเดือน');
@@ -5862,12 +6061,12 @@ window.extendSaasTrial=(clientId)=>{
 };
 
 function openSubscriptionPlan(){const plans=(state.subscription?.plans||[]).filter(p=>p.code!=='trial');openPhase5Form({eyebrow:'SUBSCRIPTION',title:'เลือกแพ็กเกจ',subtitle:'ราคาในระบบตั้งจาก Nakna Admin Console — หากยังเป็น 0 บาทหมายถึงยังไม่ได้ล็อกราคาขาย',html:`<div class="field full"><label>แพ็กเกจ</label><select id="p5Plan">${plans.map(p=>`<option value="${p.code}">${escapeHtml(p.name)} · ${p.pricing_mode==='custom'?'Custom':`${money(p.base_fee)} + ${money(p.price_per_seat)}/seat`}</option>`).join('')}</select></div><div class="field full"><label>รอบบิล</label><select id="p5BillingCycle"><option value="monthly">รายเดือน</option><option value="annual">รายปี</option></select></div>`,saveText:'เลือกแพ็กเกจ',onSave:async()=>{const r=await api('/api/subscription/plan',{method:'POST',body:JSON.stringify({plan_code:$('#p5Plan').value,billing_cycle:$('#p5BillingCycle').value})});state.subscription=r;renderSubscription();renderSettings();renderSettingsSidebar();markViewLoaded('settings');toast(`เปลี่ยนเป็น ${r?.subscription?.plan_name||'แพ็กเกจใหม่'} แล้ว`);}})}
-async function generateSubscriptionInvoice(){try{await api('/api/subscription/invoices/generate',{method:'POST',body:'{}'});await refreshPhase5();toast('สร้าง Invoice แล้ว')}catch(e){toast(e.message,true)}}
+async function generateSubscriptionInvoice(){try{await api('/api/subscription/invoices/generate',{method:'POST',body:'{}'});await refreshSubscriptionOnly();if(state.subscription?.saas_admin)queueBackgroundRefresh('saas:invoice',()=>refreshSaasAdminOnly({render:state.currentView==='saas-admin'}));toast('สร้าง Invoice แล้ว')}catch(e){toast(e.message,true)}}
 
 function renderSaasAdmin(){const d=state.saasAdmin,nav=$('#saasAdminNav');if(!nav)return;nav.classList.toggle('hidden',!d);if(!d)return;const s=d.summary||{};$('#saasAdminSummary').innerHTML=[['Companies',s.companies||0],['Trial',s.trialing||0],['Active',s.active||0],['Past due / Expired',s.past_due||0],['Active Seats',s.active_seats||0],['Estimated MRR',money(s.estimated_mrr||0)]].map(([l,v])=>`<article><span>${l}</span><strong>${v}</strong></article>`).join('');$('#saasPlansList').innerHTML=(d.plans||[]).map(p=>`<div class="phase5-row"><div class="phase5-copy"><strong>${escapeHtml(p.name)}</strong><p>${escapeHtml(p.code)} · ${p.pricing_mode} · Base ${money(p.base_fee)} · Seat ${money(p.price_per_seat)}</p></div><span class="badge ${p.status==='active'?'badge-success':'badge-neutral'}">${p.status}</span><button class="text-btn" onclick="window.editSaasPlan(${p.id})">ตั้งราคา</button></div>`).join('');$('#saasCompaniesList').innerHTML=(d.companies||[]).map(c=>`<div class="phase5-row"><div class="phase5-copy"><strong>${escapeHtml(c.name)}</strong><p>${escapeHtml(c.plan_name||'No plan')} · ${c.active_seats} seats${c.trial_ends_at?` · Trial ถึง ${formatDate(c.trial_ends_at)}`:''}</p></div><span class="badge ${c.status==='active'?'badge-success':c.status==='trialing'?'badge-soft':'badge-warning'}">${c.status||'unconfigured'}</span><button class="text-btn" onclick="window.changeSaasStatus(${c.id},'${escapeHtml(c.status||'trialing')}')">สถานะ</button>${c.plan_code==='trial'&&['trialing','expired'].includes(c.status)?`<button class="text-btn" onclick="window.extendSaasTrial(${Number(c.id)})">ต่อทดลองใช้</button>`:''}</div>`).join('');$('#saasInvoicesList').innerHTML=(d.invoices||[]).length?(d.invoices||[]).map(i=>`<div class="phase5-row"><div class="phase5-copy"><strong>${escapeHtml(i.invoice_no)} · ${escapeHtml(i.company_name)}</strong><p>${money(i.total)} · Due ${formatDate(i.due_date)}</p></div><span class="badge ${i.status==='paid'?'badge-success':'badge-warning'}">${i.status}</span>${i.status!=='paid'?`<button class="text-btn" onclick="window.markInvoicePaid(${i.id},${Number(i.total||0)})">รับชำระ</button>`:''}</div>`).join(''):emptyState('ยังไม่มี Invoice','Invoice จะปรากฏเมื่อมีแพ็กเกจที่ตั้งราคาแล้ว');}
-window.editSaasPlan=id=>{const p=(state.saasAdmin?.plans||[]).find(x=>Number(x.id)===Number(id));if(!p)return;openPhase5Form({eyebrow:'NAKNA PRICING',title:`ตั้งราคา · ${p.name}`,subtitle:'ราคาเป็น THB และยังไม่รวม VAT โดยอัตโนมัติ เพื่อไม่เดาสถานะจด VAT ของธุรกิจ',html:`<div class="field"><label>Base fee / เดือน</label><input id="p5AdminBase" type="number" min="0" value="${Number(p.base_fee||0)}"/></div><div class="field"><label>ราคา / Active Seat</label><input id="p5AdminSeat" type="number" min="0" value="${Number(p.price_per_seat||0)}"/></div><div class="field"><label>Included seats</label><input id="p5AdminIncluded" type="number" min="0" value="${Number(p.included_seats||0)}"/></div><div class="field"><label>Max seats</label><input id="p5AdminMax" type="number" min="1" value="${p.max_seats??''}" placeholder="ว่าง = ไม่จำกัด"/></div><div class="field"><label>Trial days</label><input id="p5AdminTrial" type="number" min="0" value="${Number(p.trial_days||30)}"/></div><div class="field"><label>Pricing mode</label><select id="p5AdminMode"><option value="per_seat" ${p.pricing_mode==='per_seat'?'selected':''}>Per seat</option><option value="flat" ${p.pricing_mode==='flat'?'selected':''}>Flat</option><option value="custom" ${p.pricing_mode==='custom'?'selected':''}>Custom</option></select></div>`,onSave:async()=>{await api(`/api/admin/saas/plans/${id}`,{method:'PATCH',body:JSON.stringify({base_fee:Number($('#p5AdminBase').value||0),price_per_seat:Number($('#p5AdminSeat').value||0),included_seats:Number($('#p5AdminIncluded').value||0),max_seats:$('#p5AdminMax').value===''?null:Number($('#p5AdminMax').value),trial_days:Number($('#p5AdminTrial').value||30),pricing_mode:$('#p5AdminMode').value})});await refreshPhase5();}})};
-window.changeSaasStatus=async(id,current)=>{const next=prompt('สถานะ: trialing / active / past_due / expired / cancelled',current);if(!next)return;try{await api(`/api/admin/saas/subscriptions/${id}/status`,{method:'POST',body:JSON.stringify({status:next})});await refreshPhase5();toast('อัปเดต Subscription แล้ว')}catch(e){toast(e.message,true)}};
-window.markInvoicePaid=async(id,total)=>{if(!confirm(`ยืนยันรับชำระ ${money(total)} ?`))return;try{await api(`/api/admin/saas/invoices/${id}/mark-paid`,{method:'POST',body:JSON.stringify({amount:total,method:'manual',provider:'manual',note:'บันทึกจาก Nakna Admin Console'})});await refreshPhase5();toast('บันทึกรับชำระแล้ว')}catch(e){toast(e.message,true)}};
+window.editSaasPlan=id=>{const p=(state.saasAdmin?.plans||[]).find(x=>Number(x.id)===Number(id));if(!p)return;openPhase5Form({eyebrow:'NAKNA PRICING',title:`ตั้งราคา · ${p.name}`,subtitle:'ราคาเป็น THB และยังไม่รวม VAT โดยอัตโนมัติ เพื่อไม่เดาสถานะจด VAT ของธุรกิจ',html:`<div class="field"><label>Base fee / เดือน</label><input id="p5AdminBase" type="number" min="0" value="${Number(p.base_fee||0)}"/></div><div class="field"><label>ราคา / Active Seat</label><input id="p5AdminSeat" type="number" min="0" value="${Number(p.price_per_seat||0)}"/></div><div class="field"><label>Included seats</label><input id="p5AdminIncluded" type="number" min="0" value="${Number(p.included_seats||0)}"/></div><div class="field"><label>Max seats</label><input id="p5AdminMax" type="number" min="1" value="${p.max_seats??''}" placeholder="ว่าง = ไม่จำกัด"/></div><div class="field"><label>Trial days</label><input id="p5AdminTrial" type="number" min="0" value="${Number(p.trial_days||30)}"/></div><div class="field"><label>Pricing mode</label><select id="p5AdminMode"><option value="per_seat" ${p.pricing_mode==='per_seat'?'selected':''}>Per seat</option><option value="flat" ${p.pricing_mode==='flat'?'selected':''}>Flat</option><option value="custom" ${p.pricing_mode==='custom'?'selected':''}>Custom</option></select></div>`,onSave:async()=>{await api(`/api/admin/saas/plans/${id}`,{method:'PATCH',body:JSON.stringify({base_fee:Number($('#p5AdminBase').value||0),price_per_seat:Number($('#p5AdminSeat').value||0),included_seats:Number($('#p5AdminIncluded').value||0),max_seats:$('#p5AdminMax').value===''?null:Number($('#p5AdminMax').value),trial_days:Number($('#p5AdminTrial').value||30),pricing_mode:$('#p5AdminMode').value})});await refreshSaasAdminOnly();queueBackgroundRefresh('saas:plan-subscription',()=>refreshSubscriptionOnly({render:false}));}})};
+window.changeSaasStatus=async(id,current)=>{const next=prompt('สถานะ: trialing / active / past_due / expired / cancelled',current);if(!next)return;try{await api(`/api/admin/saas/subscriptions/${id}/status`,{method:'POST',body:JSON.stringify({status:next})});await refreshSaasAdminOnly();queueBackgroundRefresh('saas:status-subscription',()=>refreshSubscriptionOnly({render:false}));toast('อัปเดต Subscription แล้ว')}catch(e){toast(e.message,true)}};
+window.markInvoicePaid=async(id,total)=>{if(!confirm(`ยืนยันรับชำระ ${money(total)} ?`))return;try{await api(`/api/admin/saas/invoices/${id}/mark-paid`,{method:'POST',body:JSON.stringify({amount:total,method:'manual',provider:'manual',note:'บันทึกจาก Nakna Admin Console'})});await refreshSaasAdminOnly();queueBackgroundRefresh('saas:invoice-paid-subscription',()=>refreshSubscriptionOnly({render:false}));toast('บันทึกรับชำระแล้ว')}catch(e){toast(e.message,true)}};
 
 boot();
 
@@ -6017,7 +6216,7 @@ async function submitDocumentHrSignature(){
   try{
     const r=await api(`/api/document-workflows/${id}/approve`,{method:'POST',body:JSON.stringify({signature_data_url:signatureDataUrl,use_saved_signature:useSaved,note:$('#documentHrSignNote')?.value.trim()||''}),timeoutMs:60000,silentStatus:true});
     $('#documentHrSignModal')?.close();
-    await refreshDocuments({silent:true});
+    queueBackgroundRefresh('documents:hr-sign',()=>refreshDocuments({silent:true}));
     if(r.workflow_status==='awaiting_employee_signature'){
       const delivery=r.delivery?.ok?' · ส่ง LINE ให้พนักงานแล้ว':r.delivery?.reason==='line_not_connected'?' · พนักงานยังไม่เชื่อม LINE สามารถกดส่งภายหลังได้':' · HR ลงนามแล้ว แต่ LINE ยังส่งไม่สำเร็จ';
       toast(`HR ลงนามแล้ว · ส่งต่อให้พนักงานเซ็นเรียบร้อย${delivery}`);
@@ -6041,7 +6240,7 @@ window.rejectDocumentWorkflow=async function rejectDocumentWorkflow(id,button=nu
   if(button){button.disabled=true;button.textContent='กำลังส่งกลับ…';}
   try{
     await api(`/api/document-workflows/${id}/reject`,{method:'POST',body:JSON.stringify({note}),timeoutMs:30000});
-    await refreshDocuments({silent:true});toast('ส่งเอกสารกลับเป็น Draft แล้ว');
+    queueBackgroundRefresh('documents:reject',()=>refreshDocuments({silent:true}));toast('ส่งเอกสารกลับเป็น Draft แล้ว');
   }catch(e){
     console.error('[Nakna] document reject failed',id,e);
     toast(`ส่งกลับไม่สำเร็จ · ${e.message}`,true);
@@ -6054,14 +6253,14 @@ window.sendEmployeeDocument=async function sendEmployeeDocument(id,button=null){
   if(button){button.disabled=true;button.textContent='กำลังส่ง LINE…';}
   try{
     const r=await api(`/api/employee-documents/${Number(id)}/send`,{method:'POST',body:'{}',timeoutMs:30000,silentStatus:true});
-    await refreshDocuments({silent:true});
+    queueBackgroundRefresh('documents:send',()=>refreshDocuments({silent:true}));
     toast(r.delivery?.ok?'ส่งเอกสารให้พนักงานทาง LINE แล้ว':'ส่งเอกสารแล้ว');
   }catch(e){
     toast(`ส่งเอกสารไม่สำเร็จ · ${e.message}`,true);
   }finally{if(button&&button.isConnected){button.disabled=false;button.textContent=original;}}
 };
 
-async function bulkApproveDocumentWorkflows(){const ids=(state.documentSystem?.pending_approvals||[]).map(x=>Number(x.document_id)).filter(Boolean);if(!ids.length)return toast('ไม่มีเอกสารรอ HR ลงนาม');const settings=await ensureDocumentSettingsForSigning().catch(()=>null);if(!settings?.signer_signature_data_url)return toast('การลงนามหลายเอกสารต้องบันทึกลายเซ็น HR ใน “ตั้งค่าเอกสาร & ลายเซ็น” ก่อน',true);if(!confirm(`ลงนามเอกสาร ${ids.length} ฉบับด้วยลายเซ็น HR ที่บันทึกไว้ และส่งเอกสารที่ต้องลงนามต่อให้พนักงาน?`))return;try{const r=await api('/api/document-workflows/bulk-approve',{method:'POST',body:JSON.stringify({ids}),timeoutMs:90000});await refreshDocuments({silent:true});toast(`ลงนามแล้ว ${Number(r.approved||0)} ฉบับ${Number(r.failed||0)?` · ไม่สำเร็จ ${Number(r.failed)} ฉบับ`:''}`);}catch(e){toast(`ลงนามหลายเอกสารไม่สำเร็จ · ${e.message}`,true)}}
+async function bulkApproveDocumentWorkflows(){const ids=(state.documentSystem?.pending_approvals||[]).map(x=>Number(x.document_id)).filter(Boolean);if(!ids.length)return toast('ไม่มีเอกสารรอ HR ลงนาม');const settings=await ensureDocumentSettingsForSigning().catch(()=>null);if(!settings?.signer_signature_data_url)return toast('การลงนามหลายเอกสารต้องบันทึกลายเซ็น HR ใน “ตั้งค่าเอกสาร & ลายเซ็น” ก่อน',true);if(!confirm(`ลงนามเอกสาร ${ids.length} ฉบับด้วยลายเซ็น HR ที่บันทึกไว้ และส่งเอกสารที่ต้องลงนามต่อให้พนักงาน?`))return;try{const r=await api('/api/document-workflows/bulk-approve',{method:'POST',body:JSON.stringify({ids}),timeoutMs:90000});queueBackgroundRefresh('documents:bulk-sign',()=>refreshDocuments({silent:true}));toast(`ลงนามแล้ว ${Number(r.approved||0)} ฉบับ${Number(r.failed||0)?` · ไม่สำเร็จ ${Number(r.failed)} ฉบับ`:''}`);}catch(e){toast(`ลงนามหลายเอกสารไม่สำเร็จ · ${e.message}`,true)}}
 async function seedDocumentTemplates(){try{await api('/api/document-templates/seed',{method:'POST',body:'{}'});await refreshDocuments();toast('ติดตั้ง Template มาตรฐานแล้ว');}catch(e){toast(e.message,true)}}
 
 $('#seedDocumentTemplatesBtn')?.addEventListener('click',seedDocumentTemplates); $('#refreshDocumentSystemBtn')?.addEventListener('click',refreshDocuments); $('#bulkApproveDocumentsBtn')?.addEventListener('click',bulkApproveDocumentWorkflows); $('#documentSettingsBtn')?.addEventListener('click',()=>{bindDocumentSignatureUpload();openDocumentSettings();}); $('#saveDocumentSettingsBtn')?.addEventListener('click',saveDocumentSettings); $('#documentHrSignSubmitBtn')?.addEventListener('click',submitDocumentHrSignature);
@@ -6072,7 +6271,7 @@ window.quickOpenDocumentCase=async function quickOpenDocumentCase(){
     const title=prompt('หัวข้อ Case เช่น มาสายต่อเนื่อง / เหตุการณ์ที่ต้องตรวจสอบ'); if(!title)return;
     const description=prompt('รายละเอียดเบื้องต้น (ถ้ามี)')||'';
     const r=await api('/api/hr-document-cases',{method:'POST',body:JSON.stringify({employee_id:employeeId,title,description,case_type:'general'})});
-    await refreshDocuments(); toast(`เปิด Case ${r.case_number} แล้ว`);
+    queueBackgroundRefresh('documents:new-case',()=>refreshDocuments({silent:true})); toast(`เปิด Case ${r.case_number} แล้ว`);
   }catch(e){toast(e.message,true)}
 }
 $('#openDocumentCaseBtn')?.addEventListener('click',quickOpenDocumentCase);
