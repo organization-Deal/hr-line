@@ -3178,8 +3178,8 @@ function renderLeaveMonthlyReport(){
       <td><strong>${Number(r.duration_days||0).toLocaleString('th-TH',{maximumFractionDigits:1})} วัน</strong></td>
       <td><span>${escapeHtml(r.reason||'—')}</span></td>
       <td>${statusBadge(r.status)}</td>
-      <td><strong>${escapeHtml(r.approver_nickname||r.approver_first_name||'HR / Owner')}</strong><small>${r.decision_reason?escapeHtml(r.decision_reason):''}</small></td>
-      <td><strong>${formatDate(r.created_at)}</strong><small>${r.approved_at?`อนุมัติ ${formatDate(r.approved_at)}`:''}</small></td>
+      <td><strong>${escapeHtml(leaveDecisionName(r)||r.approver_nickname||r.approver_first_name||'ยังไม่ระบุ')}</strong><small>${r.decision_reason?escapeHtml(r.decision_reason):''}</small></td>
+      <td><strong>${escapeHtml(formatDateTime(r.created_at))}</strong>${leaveDecisionInfo(r)}</td>
     </tr>`).join(''):`<tr><td colspan="9"><div class="leave-report-empty">ไม่มีรายการตามตัวกรองนี้</div></td></tr>`;
 }
 function exportLeaveMonthlyReportCsv(){
@@ -3195,6 +3195,16 @@ function exportLeaveMonthlyReportCsv(){
   const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob); const a=document.createElement('a');
   a.href=url;a.download=`nakna-leave-${report.month||currentBangkokMonth()}.csv`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+}
+
+function leaveDecisionName(r) {
+  return r.decided_by_employee_nickname || [r.decided_by_employee_first_name, r.decided_by_employee_last_name].filter(Boolean).join(' ') || r.decided_by_user_name || r.decided_by_user_email || '';
+}
+function leaveDecisionInfo(r) {
+  if (!['approved','rejected'].includes(String(r.status||''))) return '';
+  const name=leaveDecisionName(r);
+  const time=r.decision_at || (r.status==='approved' ? r.approved_at : null);
+  return `<small class="table-secondary">${r.status==='approved'?'อนุมัติโดย':'ไม่อนุมัติโดย'} ${escapeHtml(name||'ไม่พบชื่อผู้ดำเนินการในประวัติ')}${time?' · '+escapeHtml(formatDateTime(time)):' · ไม่พบเวลาบันทึกย้อนหลัง'}</small>`;
 }
 
 function renderLeaves() {
@@ -3213,8 +3223,8 @@ function renderLeaves() {
     ? state.leaves.map(leave => `
       <tr>
         <td data-label="พนักงาน"><div class="person"><div class="avatar">${initial(leave)}</div><div><strong>${escapeHtml(leave.nickname || leave.first_name)} ${escapeHtml(leave.last_name || '')}</strong><small>#LV-${String(leave.id).padStart(4, '0')}</small></div></div></td>
-        <td data-label="ประเภท / วัน"><strong class="table-primary">${escapeHtml(leave.leave_type_name || leaveLabels[leave.leave_type] || leave.leave_type)} ${Number(leave.is_retroactive||0)?'<span class="badge badge-warning">ย้อนหลัง</span>':''}</strong><small class="table-secondary">${formatDate(leave.start_date)}${leave.start_date !== leave.end_date ? ` – ${formatDate(leave.end_date)}` : ''} · ${formatLeaveDays(leave.duration_days)}</small></td>
-        <td data-label="ผู้อนุมัติ">${leave.approver_employee_id ? `<div class="approver-inline"><strong>${escapeHtml(leave.approver_nickname || leave.approver_first_name || 'ผู้อนุมัติ')}</strong><small>${leave.status === 'pending' ? 'กำลังรอคนนี้' : 'Approval owner'}</small></div>` : '<span class="badge badge-danger">ยังไม่กำหนด</span>'}</td>
+        <td data-label="ประเภท / วัน"><strong class="table-primary">${escapeHtml(leave.leave_type_name || leaveLabels[leave.leave_type] || leave.leave_type)} ${Number(leave.is_retroactive||0)?'<span class="badge badge-warning">ย้อนหลัง</span>':''}</strong><small class="table-secondary">${formatDate(leave.start_date)}${leave.start_date !== leave.end_date ? ` – ${formatDate(leave.end_date)}` : ''} · ${formatLeaveDays(leave.duration_days)}</small><small class="table-secondary">ยื่นคำขอ ${escapeHtml(formatDateTime(leave.created_at))}</small></td>
+        <td data-label="ผู้อนุมัติ">${leave.approver_employee_id ? `<div class="approver-inline"><strong>${escapeHtml(leave.approver_nickname || leave.approver_first_name || 'ผู้อนุมัติ')}</strong><small>${leave.status === 'pending' ? 'กำลังรอคนนี้' : 'ผู้อนุมัติที่กำหนดไว้'}</small></div>` : '<span class="badge badge-danger">ยังไม่กำหนด</span>'}${leaveDecisionInfo(leave)}</td>
         <td data-label="หลักฐาน"><button class="text-btn ${Number(leave.evidence_count||0) ? '' : 'muted-btn'}" onclick="window.openLeaveDetail(${Number(leave.id)})">${Number(leave.evidence_count||0) ? `📎 ${Number(leave.evidence_count)} ไฟล์` : Number(leave.evidence_required) ? '⚠ ต้องแนบ' : 'ดูรายละเอียด'}</button></td>
         <td data-label="สถานะ">${statusBadge(leave.status)}</td>
         <td data-label="จัดการ">${leave.status === 'pending' && canHrOverrideLeave() ? `<button class="text-btn" onclick="window.leaveAction(${leave.id},'approve')">HR อนุมัติแทน</button> <button class="text-btn danger" onclick="window.leaveAction(${leave.id},'reject')">HR ไม่อนุมัติ</button>` : leave.status === 'pending' ? '<span class="muted">รอผู้อนุมัติใน LINE</span>' : '<span class="muted">—</span>'}</td>
@@ -3245,7 +3255,7 @@ window.leaveAction = async (id, action) => {
     await api(`/api/leaves/${id}/${action}`, { method: 'PATCH', body: JSON.stringify({ reason }) });
     const leave=state.leaves.find(x=>Number(x.id)===Number(id));
     if(leave){ leave.status=action==='approve'?'approved':'rejected'; if(reason)leave.decision_reason=reason; }
-    renderLeaves(); markViewLoaded('leave'); refreshDashboardSoon(80);
+    renderLeaves(); markViewLoaded('leave'); refreshDashboardSoon(80); api('/api/leaves').then(res=>{state.leaves=res.data||[];renderLeaves();}).catch(()=>{});
     toast(action === 'approve' ? 'อนุมัติคำขอลาเรียบร้อยแล้ว' : 'บันทึกเหตุผลและไม่อนุมัติแล้ว');
   } catch (error) { toast(error.message, true); }
 };
@@ -3261,7 +3271,9 @@ window.openLeaveDetail = async id => {
     $('#modalFields').innerHTML = `
       <div class="detail-block"><span>เหตุผลการลา</span><strong>${escapeHtml(row.reason || '—')}</strong></div>
       ${Number(row.is_retroactive||0)?`<div class="detail-block"><span>ลาย้อนหลัง · เหตุผลที่ไม่ได้ยื่นในวันนั้น</span><strong>${escapeHtml(row.retro_reason || '—')}</strong></div>`:''}
-      <div class="detail-grid"><div><span>ผู้อนุมัติ</span><strong>${escapeHtml(row.approver_nickname || row.approver_first_name || 'ยังไม่กำหนด')}</strong></div><div><span>สถานะ</span>${Number(row.is_retroactive||0)?'<span class="badge badge-warning">ลาย้อนหลัง</span> ':''}${statusBadge(row.status)}</div></div>
+      <div class="detail-block"><span>วันที่และเวลายื่นคำขอ</span><strong>${escapeHtml(formatDateTime(row.created_at))}</strong></div>
+      ${['approved','rejected'].includes(row.status)?`<div class="detail-block"><span>${row.status==='approved'?'ผู้ที่กดอนุมัติจริง':'ผู้ที่กดไม่อนุมัติจริง'}</span><strong>${escapeHtml(leaveDecisionName(row)||'ไม่พบชื่อผู้ดำเนินการในประวัติ')}</strong><small>${row.decision_at||row.approved_at?escapeHtml(formatDateTime(row.decision_at||row.approved_at)):'ไม่พบเวลาบันทึกย้อนหลัง'}</small></div>`:''}
+      <div class="detail-grid"><div><span>ผู้อนุมัติที่กำหนดไว้</span><strong>${escapeHtml(row.approver_nickname || row.approver_first_name || 'ยังไม่กำหนด')}</strong></div><div><span>สถานะ</span>${Number(row.is_retroactive||0)?'<span class="badge badge-warning">ลาย้อนหลัง</span> ':''}${statusBadge(row.status)}</div></div>
       ${row.decision_reason ? `<div class="detail-block"><span>เหตุผลการพิจารณา</span><strong>${escapeHtml(row.decision_reason)}</strong></div>` : ''}
       <div class="detail-block"><span>หลักฐาน</span><div class="evidence-links">${(result.evidence||[]).length ? result.evidence.map(ev => `<a class="secondary-btn" href="/api/leave-evidence/${ev.id}" target="_blank" rel="noopener">📎 ${escapeHtml(ev.file_name || `หลักฐาน ${ev.id}`)}</a>`).join('') : '<small class="muted">ไม่มีไฟล์แนบ</small>'}</div>${['pending','awaiting_evidence'].includes(row.status)?`<div class="evidence-upload"><input id="leaveEvidenceFile" type="file" accept="image/*,.pdf" /><button type="button" class="secondary-btn" onclick="window.uploadLeaveEvidence(${id})">อัปโหลดหลักฐาน</button></div>`:''}</div>`;
     $('#modalSave').textContent = 'ปิด';

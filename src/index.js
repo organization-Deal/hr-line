@@ -4725,7 +4725,7 @@ async function handleApi(request, env, url, auth, ctx) {
       LEFT JOIN departments d ON d.id=e.department_id
       LEFT JOIN positions p ON p.id=e.position_id
       LEFT JOIN leave_policies lp ON lp.id=l.policy_id
-      LEFT JOIN employees ap ON ap.id=l.approver_employee_id
+      LEFT JOIN employees ap ON ap.id=l.approver_employee_id LEFT JOIN employees dec ON dec.id=l.decided_by_employee_id AND dec.client_id=l.client_id LEFT JOIN users du ON du.id=l.decided_by_user_id
       WHERE l.client_id=?1
         AND l.start_date < ?3
         AND l.end_date >= ?2
@@ -4773,12 +4773,12 @@ async function handleApi(request, env, url, auth, ctx) {
     const result = await env.DB.prepare(`
       SELECT l.*, e.first_name,e.last_name,e.nickname,e.employee_code,
              lp.name AS leave_type_name, lp.code AS leave_policy_code,
-             ap.nickname AS approver_nickname,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,
+             ap.nickname AS approver_nickname,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,dec.nickname AS decided_by_employee_nickname,dec.first_name AS decided_by_employee_first_name,dec.last_name AS decided_by_employee_last_name, du.name AS decided_by_user_name,du.email AS decided_by_user_email, (SELECT ev.created_at FROM leave_approval_events ev WHERE ev.leave_request_id=l.id AND ev.action IN ('approved','rejected') ORDER BY ev.id DESC LIMIT 1) AS decision_at,
              (SELECT COUNT(*) FROM leave_request_evidence ev WHERE ev.leave_request_id=l.id) AS evidence_count
       FROM leave_requests l
       JOIN employees e ON e.id=l.employee_id
       LEFT JOIN leave_policies lp ON lp.id=l.policy_id
-      LEFT JOIN employees ap ON ap.id=l.approver_employee_id
+      LEFT JOIN employees ap ON ap.id=l.approver_employee_id LEFT JOIN employees dec ON dec.id=l.decided_by_employee_id AND dec.client_id=l.client_id LEFT JOIN users du ON du.id=l.decided_by_user_id
       WHERE l.client_id=?1 ORDER BY l.created_at DESC LIMIT 300
     `).bind(clientId).all();
     return json({ data: result.results || [] });
@@ -10064,7 +10064,7 @@ async function leaveEligibility(db,employee,policy){
 
 async function getEmployeeLeaveProfile(db,employeeId,clientId,year){
   await ensureDefaultLeavePolicies(db,clientId);
-  const employee=await db.prepare(`SELECT e.*,ap.nickname AS approver_nickname,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,c.lock_leave_during_probation FROM employees e LEFT JOIN employees ap ON ap.id=e.leave_approver_employee_id JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.client_id=?2`).bind(employeeId,clientId).first();
+  const employee=await db.prepare(`SELECT e.*,ap.nickname AS approver_nickname,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,dec.nickname AS decided_by_employee_nickname,dec.first_name AS decided_by_employee_first_name,dec.last_name AS decided_by_employee_last_name, du.name AS decided_by_user_name,du.email AS decided_by_user_email, (SELECT ev.created_at FROM leave_approval_events ev WHERE ev.leave_request_id=l.id AND ev.action IN ('approved','rejected') ORDER BY ev.id DESC LIMIT 1) AS decision_at,c.lock_leave_during_probation FROM employees e LEFT JOIN employees ap ON ap.id=e.leave_approver_employee_id JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.client_id=?2`).bind(employeeId,clientId).first();
   if(!employee) throw httpError('ไม่พบพนักงาน',404);
   const policies=(await db.prepare('SELECT * FROM leave_policies WHERE client_id=?1 AND is_active=1 ORDER BY sort_order,name').bind(clientId).all()).results||[];
   const ent=(await db.prepare('SELECT * FROM employee_leave_entitlements WHERE employee_id=?1 AND year=?2').bind(employeeId,year).all()).results||[];
@@ -10132,7 +10132,7 @@ async function hydrateLeaveBalance(db,row){
 }
 
 async function getLeaveRequestDetail(db,id,clientId=null){
-  return db.prepare(`SELECT l.*,e.first_name,e.last_name,e.nickname,e.employee_code,e.line_user_id AS employee_line_user_id,e.line_provider_scope AS employee_line_provider_scope,lp.name AS leave_type_name,lp.code AS leave_policy_code,lp.is_unlimited,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,ap.nickname AS approver_nickname,ap.line_user_id AS approver_line_user_id,ap.line_provider_scope AS approver_line_provider_scope,(SELECT COUNT(*) FROM leave_request_evidence ev WHERE ev.leave_request_id=l.id) AS evidence_count FROM leave_requests l JOIN employees e ON e.id=l.employee_id LEFT JOIN leave_policies lp ON lp.id=l.policy_id LEFT JOIN employees ap ON ap.id=l.approver_employee_id WHERE l.id=?1 ${clientId?'AND l.client_id=?2':''}`).bind(...(clientId?[id,clientId]:[id])).first();
+  return db.prepare(`SELECT l.*,e.first_name,e.last_name,e.nickname,e.employee_code,e.line_user_id AS employee_line_user_id,e.line_provider_scope AS employee_line_provider_scope,lp.name AS leave_type_name,lp.code AS leave_policy_code,lp.is_unlimited,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,ap.nickname AS approver_nickname,ap.line_user_id AS approver_line_user_id,ap.line_provider_scope AS approver_line_provider_scope,(SELECT COUNT(*) FROM leave_request_evidence ev WHERE ev.leave_request_id=l.id) AS evidence_count FROM leave_requests l JOIN employees e ON e.id=l.employee_id LEFT JOIN leave_policies lp ON lp.id=l.policy_id LEFT JOIN employees ap ON ap.id=l.approver_employee_id LEFT JOIN employees dec ON dec.id=l.decided_by_employee_id AND dec.client_id=l.client_id LEFT JOIN users du ON du.id=l.decided_by_user_id WHERE l.id=?1 ${clientId?'AND l.client_id=?2':''}`).bind(...(clientId?[id,clientId]:[id])).first();
 }
 
 async function decideLeaveRequest(env,id,status,{actorType,actorEmployeeId=null,actorUserId=null,reason='',clientId=null,enforceApprover=false}={}){
