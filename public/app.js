@@ -1374,6 +1374,11 @@ function bindEvents() {
   if ($('#leaveReportPrevBtn')) $('#leaveReportPrevBtn').onclick = () => loadLeaveMonthlyReport(shiftMonthKey($('#leaveReportMonth').value,-1));
   if ($('#leaveReportNextBtn')) $('#leaveReportNextBtn').onclick = () => loadLeaveMonthlyReport(shiftMonthKey($('#leaveReportMonth').value,1));
   if ($('#leaveReportExportBtn')) $('#leaveReportExportBtn').onclick = exportLeaveMonthlyReportCsv;
+  if ($('#leaveOverviewPeriod')) $('#leaveOverviewPeriod').onchange = () => { updateLeaveOverviewYearVisibility(); loadLeaveOverview(); };
+  if ($('#leaveOverviewYear')) { const cy=Number(currentBangkokMonth().slice(0,4)); $('#leaveOverviewYear').innerHTML=Array.from({length:8},(_,i)=>`<option value="${cy-i}">${cy-i+543}</option>`).join(''); $('#leaveOverviewYear').onchange=loadLeaveOverview; }
+  if ($('#leaveOverviewSearch')) $('#leaveOverviewSearch').oninput=renderLeaveOverview;
+  if ($('#leaveOverviewExport')) $('#leaveOverviewExport').onclick=exportLeaveOverview;
+  updateLeaveOverviewYearVisibility();
   $('#addLeavePolicyBtn').onclick = () => openLeavePolicyModal();
   $('#leaveProfileSaveBtn').onclick = saveLeaveProfile;
   $('#leaveRequestSaveBtn').onclick = saveLeaveRequest;
@@ -2150,6 +2155,7 @@ function renderAll() {
   renderAttendance();
   renderLeaves();
   if ($('#leaveReportMonth') && !state.leaveMonthlyReport) loadLeaveMonthlyReport($('#leaveReportMonth').value || currentBangkokMonth());
+  if ($('#leaveOverviewBody') && !state.leaveOverviewReport) loadLeaveOverview();
   renderRequests();
   renderEmployeeService();
   renderInviteCenter();
@@ -3131,6 +3137,47 @@ function renderAttendance() {
 }
 
 
+
+function updateLeaveOverviewYearVisibility(){
+  if($('#leaveOverviewYear')) $('#leaveOverviewYear').hidden=$('#leaveOverviewPeriod')?.value==='all';
+}
+async function loadLeaveOverview(){
+  const period=$('#leaveOverviewPeriod')?.value||'year';
+  const year=$('#leaveOverviewYear')?.value||currentBangkokMonth().slice(0,4);
+  const body=$('#leaveOverviewBody'); if(body) body.innerHTML='<tr><td colspan="7">กำลังโหลดสรุปการลา…</td></tr>';
+  try{
+    const report=await api(`/api/leave-overview?period=${encodeURIComponent(period)}&year=${encodeURIComponent(year)}`);
+    state.leaveOverviewReport=report; renderLeaveOverview();
+  }catch(error){ if(body) body.innerHTML=`<tr><td colspan="7">${escapeHtml(error.message||'โหลดไม่สำเร็จ')} · ลองเปลี่ยนช่วงเวลาอีกครั้ง</td></tr>`; }
+}
+function leaveOverviewRows(){
+  const q=String($('#leaveOverviewSearch')?.value||'').trim().toLowerCase();
+  return (state.leaveOverviewReport?.people||[]).filter(p=>!q||[p.first_name,p.last_name,p.nickname,p.employee_code,p.department_name].join(' ').toLowerCase().includes(q));
+}
+function renderLeaveOverview(){
+  const r=state.leaveOverviewReport||{}; const people=leaveOverviewRows();
+  const n=x=>Number(x||0).toLocaleString('th-TH',{maximumFractionDigits:2});
+  if($('#leaveOverviewSummary')) $('#leaveOverviewSummary').innerHTML=`
+    <article><small>พนักงานทั้งหมด</small><strong>${n(r.total_employees)}</strong><span>คน</span></article>
+    <article><small>คนที่เคยลา</small><strong>${n(r.people_with_approved)}</strong><span>คน</span></article>
+    <article><small>ครั้งที่อนุมัติ</small><strong>${n(r.approved_requests)}</strong><span>ครั้ง</span></article>
+    <article><small>วันลารวม</small><strong>${n(r.approved_days)}</strong><span>วัน</span></article>`;
+  if($('#leaveOverviewBody')) $('#leaveOverviewBody').innerHTML=people.length?people.map(p=>`<tr>
+    <td><strong>${escapeHtml([p.first_name,p.last_name].filter(Boolean).join(' ')||p.nickname||'—')}</strong><small>${escapeHtml(p.employee_code||'')}</small></td>
+    <td>${escapeHtml(p.department_name||'—')}</td>
+    <td><strong>${n(p.approved_requests)} ครั้ง</strong></td><td>${n(p.approved_days)} วัน</td>
+    <td>${(p.types||[]).map(t=>`<div><small>${escapeHtml(t.name)}: ${n(t.requests)} ครั้ง · ${n(t.days)} วัน</small></div>`).join('')||'<small>ยังไม่เคยลา</small>'}</td>
+    <td>${n(p.pending_requests)}</td><td>${n(p.rejected_requests)}</td>
+  </tr>`).join(''):'<tr><td colspan="7">ไม่พบพนักงานที่ตรงกับคำค้นหา</td></tr>';
+}
+function exportLeaveOverview(){
+  const r=state.leaveOverviewReport;if(!r)return toast('รอโหลดข้อมูลก่อน',true);
+  const head=['รหัสพนักงาน','ชื่อพนักงาน','แผนก','จำนวนครั้งอนุมัติ','วันลาอนุมัติ','รายละเอียดประเภทลา','รออนุมัติ','ไม่อนุมัติ'];
+  const rows=leaveOverviewRows().map(p=>[p.employee_code||'', [p.first_name,p.last_name].filter(Boolean).join(' '),p.department_name||'',p.approved_requests||0,p.approved_days||0,(p.types||[]).map(t=>`${t.name}: ${t.requests} ครั้ง ${t.days} วัน`).join('; '),p.pending_requests||0,p.rejected_requests||0]);
+  const csv=[head,...rows].map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`nakna-leave-overview-${r.period==='all'?'all':r.year}.csv`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+}
+
 function currentBangkokMonth(){
   return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit'}).format(new Date()).slice(0,7);
 }
@@ -3255,7 +3302,7 @@ window.leaveAction = async (id, action) => {
     await api(`/api/leaves/${id}/${action}`, { method: 'PATCH', body: JSON.stringify({ reason }) });
     const leave=state.leaves.find(x=>Number(x.id)===Number(id));
     if(leave){ leave.status=action==='approve'?'approved':'rejected'; if(reason)leave.decision_reason=reason; }
-    renderLeaves(); markViewLoaded('leave'); refreshDashboardSoon(80); api('/api/leaves').then(res=>{state.leaves=res.data||[];renderLeaves();}).catch(()=>{});
+    renderLeaves(); markViewLoaded('leave'); state.leaveOverviewReport=null; loadLeaveOverview(); refreshDashboardSoon(80); api('/api/leaves').then(res=>{state.leaves=res.data||[];renderLeaves();}).catch(()=>{});
     toast(action === 'approve' ? 'อนุมัติคำขอลาเรียบร้อยแล้ว' : 'บันทึกเหตุผลและไม่อนุมัติแล้ว');
   } catch (error) { toast(error.message, true); }
 };

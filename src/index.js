@@ -4700,6 +4700,38 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
 
+
+  if (path === '/api/leave-overview' && method === 'GET') {
+    const url=new URL(request.url);
+    const period=url.searchParams.get('period')==='all'?'all':'year';
+    const nowYear=new Date(Date.now()+7*3600*1000).getUTCFullYear();
+    const year=Number(url.searchParams.get('year')||nowYear);
+    if(period==='year'&&(!Number.isInteger(year)||year<2000||year>2100)) return json({error:'ปีไม่ถูกต้อง'},400);
+    const start=`${year}-01-01`,end=`${year+1}-01-01`;
+    const [employeesRes,aggRes]=await env.DB.batch([
+      env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,d.name AS department_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id WHERE e.client_id=?1 ORDER BY e.first_name,e.last_name`).bind(clientId),
+      env.DB.prepare(`SELECT l.employee_id,l.status,COALESCE(lp.name,l.leave_type,'ไม่ระบุ') AS type_name,
+        COUNT(*) AS request_count, SUM(CASE WHEN l.status='approved' THEN COALESCE(l.duration_days,0) ELSE 0 END) AS approved_days
+        FROM leave_requests l LEFT JOIN leave_policies lp ON lp.id=l.policy_id
+        WHERE l.client_id=?1 AND (?2='all' OR (l.start_date < ?4 AND l.end_date >= ?3))
+        GROUP BY l.employee_id,l.status,COALESCE(lp.name,l.leave_type,'ไม่ระบุ')`).bind(clientId,period,start,end)
+    ]);
+    const people=(employeesRes.results||[]).map(e=>({...e,approved_requests:0,approved_days:0,pending_requests:0,rejected_requests:0,types:[]}));
+    const index=new Map(people.map(p=>[Number(p.id),p]));
+    for(const row of aggRes.results||[]){
+      const p=index.get(Number(row.employee_id));if(!p)continue;
+      const count=Number(row.request_count||0);
+      if(row.status==='approved'){
+        const days=Number(row.approved_days||0);p.approved_requests+=count;p.approved_days+=days;
+        p.types.push({name:row.type_name||'ไม่ระบุ',requests:count,days});
+      } else if(row.status==='pending'||row.status==='awaiting_evidence')p.pending_requests+=count;
+      else if(row.status==='rejected')p.rejected_requests+=count;
+    }
+    people.sort((a,b)=>b.approved_requests-a.approved_requests||b.approved_days-a.approved_days||String(a.first_name||'').localeCompare(String(b.first_name||''),'th'));
+    return json({period,year,total_employees:people.length,people_with_approved:people.filter(p=>p.approved_requests>0).length,
+      approved_requests:people.reduce((n,p)=>n+p.approved_requests,0),approved_days:Math.round(people.reduce((n,p)=>n+p.approved_days,0)*100)/100,people});
+  }
+
   if (path === '/api/leave-report' && method === 'GET') {
     const url = new URL(request.url);
     const monthRaw = String(url.searchParams.get('month') || '').trim();

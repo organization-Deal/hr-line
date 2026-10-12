@@ -14,8 +14,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
-  <link rel="stylesheet" href="/styles.css?v=P9.31-ENROLLMENT" />
-  <link rel="modulepreload" href="/app.js?v=P9.31-ENROLLMENT" />
+  <link rel="stylesheet" href="/styles.css?v=P9.15.3" />
+  <link rel="modulepreload" href="/app.js?v=P9.15.3" />
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -416,14 +416,6 @@
           <div class="attendance-center-actions"><span class="badge badge-success"><span class="status-dot"></span> LINE + GPS พร้อมใช้งาน</span><button class="secondary-btn" type="button" data-settings-sidebar-open="attendance">ตั้งค่า Work Location</button></div>
         </div>
 
-        <article id="attendanceRetroApprovalPanel" class="panel attendance-retro-approval-panel hidden">
-          <div class="panel-head attendance-retro-approval-head">
-            <div><p class="kicker">RETRO CHECK-IN APPROVAL</p><h3>คำขอเช็กอินย้อนหลัง</h3><p class="panel-subtitle">พนักงานที่ลืมเช็กอินจะต้องระบุเวลาและสาเหตุก่อน ระบบจะยังไม่แก้ Attendance จนกว่า HR จะอนุมัติ</p></div>
-            <span id="attendanceRetroApprovalCount" class="badge badge-warning">0 รายการ</span>
-          </div>
-          <div id="attendanceRetroApprovalList" class="attendance-retro-approval-list"></div>
-        </article>
-
         <article class="panel team-worklog-panel attendance-worklog-panel">
           <div class="panel-head team-worklog-head attendance-worklog-head">
             <div>
@@ -519,6 +511,25 @@
             <div id="leaveCalendar" class="leave-calendar"></div>
           </article>
         </div>
+
+
+        <article class="panel" id="leaveOverviewPanel" style="margin-bottom:18px">
+          <div class="panel-head">
+            <div><p class="kicker">LEAVE OVERVIEW</p><h3>สรุปการลารายพนักงาน</h3><p class="panel-subtitle">นับจำนวนครั้งจากคำขอที่อนุมัติแล้ว แยกจำนวนวันและประเภทลา · รวมพนักงานที่ยังไม่เคยลาด้วย</p></div>
+            <div class="leave-report-controls">
+              <select id="leaveOverviewPeriod" aria-label="ช่วงเวลาสรุปการลา"><option value="year">ปีปัจจุบัน</option><option value="all">สะสมทั้งหมด</option></select>
+              <select id="leaveOverviewYear" aria-label="เลือกปี"></select>
+              <input type="search" id="leaveOverviewSearch" placeholder="ค้นหาพนักงาน / แผนก" aria-label="ค้นหาพนักงานหรือแผนก" style="max-width:240px"/>
+              <button type="button" id="leaveOverviewExport" class="secondary-btn">Export CSV</button>
+            </div>
+          </div>
+          <div class="leave-report-summary" id="leaveOverviewSummary" aria-live="polite"></div>
+          <div class="leave-report-table-wrap"><table class="leave-report-table">
+            <thead><tr><th>พนักงาน</th><th>แผนก</th><th>จำนวนครั้ง (อนุมัติ)</th><th>จำนวนวันลา</th><th>แยกประเภทลา</th><th>รออนุมัติ</th><th>ไม่อนุมัติ</th></tr></thead>
+            <tbody id="leaveOverviewBody"><tr><td colspan="7">กำลังโหลดสรุป…</td></tr></tbody>
+          </table></div>
+          <p class="panel-subtitle" style="margin-top:10px">หมายเหตุ: 1 ใบคำขอที่อนุมัติแล้ว = 1 ครั้ง แม้ลาหลายวัน · ใบลาที่ถูกปฏิเสธไม่นับเป็นวันลา</p>
+        </article>
 
         <article class="panel leave-monthly-report-panel">
           <div class="panel-head leave-report-head">
@@ -1514,7 +1525,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=P9.31-ENROLLMENT" type="module"></script>
+  <script src="/app.js?v=P9.15.3" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
