@@ -3141,15 +3141,37 @@ function renderAttendance() {
 function updateLeaveOverviewYearVisibility(){
   if($('#leaveOverviewYear')) $('#leaveOverviewYear').hidden=$('#leaveOverviewPeriod')?.value==='all';
 }
-async function loadLeaveOverview(){
+let leaveOverviewPending = null;
+let leaveOverviewRequestId = 0;
+async function loadLeaveOverview({force=false}={}){
+  if(leaveOverviewPending && !force) return leaveOverviewPending;
+  const requestId=++leaveOverviewRequestId;
   const period=$('#leaveOverviewPeriod')?.value||'year';
   const year=$('#leaveOverviewYear')?.value||currentBangkokMonth().slice(0,4);
-  const body=$('#leaveOverviewBody'); if(body) body.innerHTML='<tr><td colspan="7">กำลังโหลดสรุปการลา…</td></tr>';
-  try{
-    const report=await api(`/api/leave-overview?period=${encodeURIComponent(period)}&year=${encodeURIComponent(year)}`);
-    state.leaveOverviewReport=report; renderLeaveOverview();
-  }catch(error){ if(body) body.innerHTML=`<tr><td colspan="7">${escapeHtml(error.message||'โหลดไม่สำเร็จ')} · ลองเปลี่ยนช่วงเวลาอีกครั้ง</td></tr>`; }
+  const body=$('#leaveOverviewBody');
+  if(body) body.innerHTML='<tr><td colspan="7">กำลังโหลดสรุปการลา…</td></tr>';
+  const task=(async()=>{
+    try{
+      const report=await api(`/api/leave-overview?period=${encodeURIComponent(period)}&year=${encodeURIComponent(year)}`,{timeoutMs:12000,silentStatus:true});
+      if(requestId!==leaveOverviewRequestId)return;
+      if(!report || !Array.isArray(report.people))throw new Error('ข้อมูลรายงานไม่ครบ');
+      state.leaveOverviewReport=report;
+      renderLeaveOverview();
+    }catch(error){
+      if(requestId!==leaveOverviewRequestId)return;
+      state.leaveOverviewReport=null;
+      const reason=error?.message?.startsWith('API_TIMEOUT:')?'ระบบตอบช้าเกิน 12 วินาที':(error?.message||'โหลดข้อมูลไม่สำเร็จ');
+      if(body){
+        body.innerHTML='<tr><td colspan="7"><div role="alert" class="leave-overview-error">โหลดสรุปการลาไม่สำเร็จ: '+escapeHtml(reason)+' <button type="button" id="leaveOverviewRetry" class="btn btn-small">ลองโหลดใหม่</button></div></td></tr>';
+        const retry=$('#leaveOverviewRetry');if(retry)retry.onclick=()=>loadLeaveOverview({force:true});
+      }
+      console.error('[Nakna] leave overview failed',error);
+    }
+  })();
+  leaveOverviewPending=task;
+  try{await task;}finally{if(leaveOverviewPending===task)leaveOverviewPending=null;}
 }
+
 function leaveOverviewRows(){
   const q=String($('#leaveOverviewSearch')?.value||'').trim().toLowerCase();
   return (state.leaveOverviewReport?.people||[]).filter(p=>!q||[p.first_name,p.last_name,p.nickname,p.employee_code,p.department_name].join(' ').toLowerCase().includes(q));

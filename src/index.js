@@ -4708,14 +4708,20 @@ async function handleApi(request, env, url, auth, ctx) {
     const year=Number(url.searchParams.get('year')||nowYear);
     if(period==='year'&&(!Number.isInteger(year)||year<2000||year>2100)) return json({error:'ปีไม่ถูกต้อง'},400);
     const start=`${year}-01-01`,end=`${year+1}-01-01`;
-    const [employeesRes,aggRes]=await env.DB.batch([
+    let employeesRes,aggRes;
+    try {
+      [employeesRes,aggRes]=await Promise.all([
       env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,d.name AS department_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id WHERE e.client_id=?1 ORDER BY e.first_name,e.last_name`).bind(clientId),
       env.DB.prepare(`SELECT l.employee_id,l.status,COALESCE(lp.name,l.leave_type,'ไม่ระบุ') AS type_name,
         COUNT(*) AS request_count, SUM(CASE WHEN l.status='approved' THEN COALESCE(l.duration_days,0) ELSE 0 END) AS approved_days
         FROM leave_requests l LEFT JOIN leave_policies lp ON lp.id=l.policy_id
         WHERE l.client_id=?1 AND (?2='all' OR (l.start_date < ?4 AND l.end_date >= ?3))
         GROUP BY l.employee_id,l.status,COALESCE(lp.name,l.leave_type,'ไม่ระบุ')`).bind(clientId,period,start,end)
-    ]);
+      ]);
+    } catch (error) {
+      console.error('[Nakna] leave-overview database error', String(error?.message||error));
+      return json({error:'ไม่สามารถอ่านสรุปการลาได้ กรุณาลองใหม่',code:'LEAVE_OVERVIEW_QUERY_FAILED'},503);
+    }
     const people=(employeesRes.results||[]).map(e=>({...e,approved_requests:0,approved_days:0,pending_requests:0,rejected_requests:0,types:[]}));
     const index=new Map(people.map(p=>[Number(p.id),p]));
     for(const row of aggRes.results||[]){
