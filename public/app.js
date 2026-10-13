@@ -1,4 +1,4 @@
-const NAKNA_FRONTEND_BUILD='P10.0-PRODUCT-UI'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
+const NAKNA_FRONTEND_BUILD='P10.1-ATTENDANCE-UX'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
 // P9.15.3 — Face settings render lifecycle + deployment visibility fix.
 // If a Face link is accidentally served by index.html, recover before booting the HR login page.
 try {
@@ -2493,6 +2493,23 @@ function renderAttendancePersonSummary({query='',dept='',status='all'}={}){
       <td><strong>${attendanceSummaryNumber(s.missing_checkout_days)} วัน</strong></td>
     </tr>`;
   }).join(''):`<tr><td colspan="10"><div class="leave-report-empty">ไม่พบข้อมูลสรุปที่ตรงกับตัวกรอง</div></td></tr>`;
+  // P10.1: a compact, accessible summary on phones; desktop report and CSV remain unchanged.
+  const mobileSummary=$('#nkAttendanceMobileSummary');
+  if(mobileSummary){
+    mobileSummary.innerHTML=summaries.length?summaries.map(s=>{
+      const name=`${s.nickname||s.first_name||'—'} ${s.last_name||''}`.trim();
+      const all=[['วันตามตาราง',s.scheduled_days],['มาทำงาน',s.present_days],['ตรงเวลา',s.on_time_days],['สาย',s.late_days],['ขาด',s.absent_days],['ลา',s.leave_days],['นอกพื้นที่',s.outside_days],['ยังไม่เช็กเอาต์',s.missing_checkout_days]];
+      const totals=all.slice(1).filter(([,value])=>Number(value||0)>0);
+      const note=totals.length?totals.map(([label,value])=>`${label} ${attendanceSummaryNumber(value)}`).join(' · '):'ยังไม่มียอดในช่วงที่เลือก';
+      return `<details class="nk-attendance-person-row"><summary>
+        <span class="nk-attendance-person-avatar">${escapeHtml((s.nickname||s.first_name||'?').slice(0,1))}</span>
+        <span class="nk-attendance-person-name"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(s.department_name||'—')} · ${escapeHtml(s.employee_code||'')}</small><small>${escapeHtml(note)}</small></span>
+        <span class="nk-attendance-person-expand" aria-hidden="true">⌄</span>
+      </summary><div class="nk-attendance-person-stats">${all.map(([label,value])=>`<div><span>${label}</span><strong>${attendanceSummaryNumber(value)} วัน</strong></div>`).join('')}
+        <div class="nk-attendance-person-leaves"><span>ประเภทการลา</span><strong>${attendanceLeaveBreakdown(s)}</strong></div>
+      </div></details>`;
+    }).join(''):'<div class="nk-attendance-empty">ไม่พบพนักงานที่ตรงกับตัวกรอง</div>';
+  }
   const asOf=$('#attendanceSummaryAsOf');
   if(asOf){
     const hasFuture=String(report.end_date||'')>String(report.as_of_date||report.end_date||'');
@@ -2576,6 +2593,41 @@ function renderTeamWorkLog(){
     if(status!=='all'&&![...p.days.values()].some(dayMatches))return false;
     return true;
   });
+  // P10.1: worklog mobile rows are derived from the same report as the unchanged desktop matrix.
+  const mobileLog=$('#nkTeamWorkLogMobile');
+  if(mobileLog){
+    const isSingleDay=dateKeys.length===1;
+    const summaries=new Map((report.employee_summary||[]).map(v=>[String(v.employee_id||v.id||v.employee_code||''),v]));
+    mobileLog.innerHTML=visiblePeople.length?visiblePeople.map(p=>{
+      const name=`${p.nickname||p.first_name||'—'} ${p.last_name||''}`.trim();
+      const day=isSingleDay?p.days.get(dateKeys[0]):null;
+      const id=String(p.employee_id||p.employee_code||'');
+      const sm=summaries.get(id)||{};
+      const statusMarkup=day?workLogStatus(day):'<span class="worklog-status future">ดูรายช่วง</span>';
+      let detail='';
+      if(isSingleDay){
+        const hours=[day?.check_in_at?`เข้า ${time(day.check_in_at)}`:'',day?.check_out_at?`ออก ${time(day.check_out_at)}`:''].filter(Boolean);
+        detail=`<span class="nk-attendance-day-meta">${hours.length?hours.map(escapeHtml).join(' · '):escapeHtml(day?.leave_name||day?.holiday_name||'ไม่มีรายการลงเวลา')}</span>`;
+        if(day?.check_in_at||day?.check_out_at){
+          detail+=`<button class="nk-attendance-detail-link" type="button" data-worklog-detail data-employee-id="${Number(day.employee_id||day.id||p.employee_id||0)}" data-work-date="${escapeHtml(day.work_date||'')}">ดูข้อมูลเวลาและพิกัด →</button>`;
+        }
+      }else{
+        detail=`<span class="nk-attendance-day-meta">มาทำงาน ${attendanceSummaryNumber(sm.present_days)} วัน · สาย ${attendanceSummaryNumber(sm.late_days)} · ลา ${attendanceSummaryNumber(sm.leave_days)} · ขาด ${attendanceSummaryNumber(sm.absent_days)}</span>`;
+      }
+      return `<article class="nk-attendance-work-row">
+        <span class="nk-attendance-person-avatar">${escapeHtml((p.nickname||p.first_name||'?').slice(0,1))}</span>
+        <div class="nk-attendance-work-copy"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(p.department_name||'—')} · ${escapeHtml(p.employee_code||'')}</small>
+        ${detail}</div><div class="nk-attendance-work-state">${statusMarkup}</div>
+      </article>`;
+    }).join(''):'<div class="nk-attendance-empty">ไม่พบพนักงานที่ตรงกับตัวกรอง</div>';
+  }
+  const dayNote=$('#nkAttendanceDayNote');
+  if(dayNote){
+    const dayRows=rows.filter(r=>!r.is_future&&r.is_active_date!==false);
+    const allNonWorking=dayRows.length>0&&dayRows.every(r=>r.is_workday===false);
+    dayNote.hidden=!allNonWorking;
+    if(allNonWorking)dayNote.textContent=`${dayRows.find(r=>r.holiday_name)?.holiday_name||'วันหยุด / นอกตารางงาน'} · รายการเช็กอินที่เกิดขึ้นยังแสดงตามจริง แต่ไม่ถือว่าทุกคนต้องมาทำงาน`;
+  }
   renderAttendancePersonSummary({query,dept,status});
   if($('#teamWorkLogRowCount')) $('#teamWorkLogRowCount').textContent=`${visiblePeople.length.toLocaleString('th-TH')} / ${people.length.toLocaleString('th-TH')} คน · ${dateKeys.length.toLocaleString('th-TH')} วัน`;
 

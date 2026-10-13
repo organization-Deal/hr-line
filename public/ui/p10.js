@@ -320,6 +320,22 @@
     initialized = true;
     document.documentElement.classList.add('nk-p10');
     initNavigation(); initLeave(); enhanceForms(document);
+    // P10.1: reports start compact on phones; native buttons remain keyboard-accessible.
+    const attendanceReport=$('#nkAttendanceReportContent');
+    const attendanceToggle=$('#nkAttendanceReportToggle');
+    const attendanceMatrix=$('#nkAttendanceMatrixContainer');
+    const matrixToggle=$('#nkAttendanceMatrixToggle');
+    let reportOpen=false, matrixOpen=false;
+    const syncAttendanceSections=()=>{
+      if(attendanceReport) attendanceReport.hidden=small.matches&&!reportOpen;
+      if(attendanceMatrix) attendanceMatrix.classList.toggle('nk-att-matrix-open',small.matches&&matrixOpen);
+      if(attendanceToggle){attendanceToggle.setAttribute('aria-expanded',String(!small.matches||reportOpen)); attendanceToggle.firstChild.textContent=reportOpen?'ย่อรายงาน':'ดูสรุปรายคน ';}
+      if(matrixToggle){matrixToggle.setAttribute('aria-expanded',String(matrixOpen));matrixToggle.firstChild.textContent=matrixOpen?'ซ่อนตารางรายละเอียด ':'ดูตารางแบบละเอียดทุกวัน ';}
+    };
+    attendanceToggle?.addEventListener('click',()=>{reportOpen=!reportOpen;syncAttendanceSections();});
+    matrixToggle?.addEventListener('click',()=>{matrixOpen=!matrixOpen;syncAttendanceSections();});
+    small.addEventListener('change',syncAttendanceSections);
+    syncAttendanceSections();
     const settings = $('#settingsDetail');
     if (settings && !$('.nk-settings-top', settings)) {
       const bar = make('div', 'nk-settings-top');
@@ -337,7 +353,7 @@
     });
     observe(); schedule();
   }
-  window.NaknaUI = Object.freeze({ version: 'P10.0-ui1', refresh: schedule, setLeaveTab, columnLabels, metrics });
+  window.NaknaUI = Object.freeze({ version: 'P10.1-attendance', refresh: schedule, setLeaveTab, columnLabels, metrics });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
   else init();
 })();
