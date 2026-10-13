@@ -4701,6 +4701,125 @@ async function handleApi(request, env, url, auth, ctx) {
 
 
 
+
+  // P9.40: Single source of truth for all Leave Dashboard periods/filters.
+  if (path === '/api/leave-analytics' && method === 'GET') {
+    if (!['owner','co_owner','hr_admin','hr'].includes(String(auth.role||''))) {
+      return json({error:'ไม่มีสิทธิ์ดูรายงานการลารายพนักงาน'},403);
+    }
+    const u=new URL(request.url);
+    const nowBkk=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
+    const allowedPeriods=['year','month','day','range','all'];
+    const period=String(u.searchParams.get('period')||'year');
+    if(!allowedPeriods.includes(period)) return json({error:'ช่วงเวลาไม่ถูกต้อง'},400);
+    const isValidDate=value=>{
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(String(value||'')))return false;
+      const d=new Date(value+'T00:00:00.000Z');
+      return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===value;
+    };
+    let from=null,to=null;
+    if(period==='year'){
+      const year=Number(u.searchParams.get('year')||nowBkk.slice(0,4));
+      if(!Number.isInteger(year)||year<2000||year>2100)return json({error:'ปีไม่ถูกต้อง'},400);
+      from=`${year}-01-01`;to=`${year}-12-31`;
+    }else if(period==='month'){
+      const month=String(u.searchParams.get('month')||nowBkk.slice(0,7));
+      if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return json({error:'เดือนไม่ถูกต้อง'},400);
+      const [y,m]=month.split('-').map(Number);
+      from=month+'-01';to=new Date(Date.UTC(y,m,0)).toISOString().slice(0,10);
+    }else if(period==='day'){
+      const date=String(u.searchParams.get('day')||nowBkk);
+      if(!isValidDate(date))return json({error:'วันที่ไม่ถูกต้อง'},400);
+      from=to=date;
+    }else if(period==='range'){
+      from=String(u.searchParams.get('from')||'');to=String(u.searchParams.get('to')||'');
+      if(!isValidDate(from)||!isValidDate(to)||from>to)return json({error:'ช่วงวันที่ไม่ถูกต้อง'},400);
+      if((Date.parse(to)-Date.parse(from))/86400000>3660)return json({error:'ช่วงวันที่ยาวเกิน 10 ปี'},400);
+    }
+    const employeeId=Number(u.searchParams.get('employee_id')||0);
+    const departmentId=Number(u.searchParams.get('department_id')||0);
+    const status=String(u.searchParams.get('status')||'all');
+    const type=String(u.searchParams.get('type')||'all');
+    const page=Math.max(1,Math.min(10000,Number.parseInt(u.searchParams.get('page')||'1',10)||1));
+    const limit=100,offset=(page-1)*limit;
+    if(!Number.isSafeInteger(employeeId)||employeeId<0||!Number.isSafeInteger(departmentId)||departmentId<0)return json({error:'ตัวกรองพนักงานหรือแผนกไม่ถูกต้อง'},400);
+    if(!['all','approved','pending','awaiting_evidence','rejected','cancelled'].includes(status))return json({error:'สถานะไม่ถูกต้อง'},400);
+    if(type.length>120)return json({error:'ประเภทลาไม่ถูกต้อง'},400);
+    const filters=[clientId,from,to,employeeId,departmentId,status,type];
+    const where=`l.client_id=?1
+      AND (?2 IS NULL OR l.end_date>=?2)
+      AND (?3 IS NULL OR l.start_date<=?3)
+      AND (?4=0 OR l.employee_id=?4)
+      AND (?5=0 OR e.department_id=?5)
+      AND (?6='all' OR l.status=?6)
+      AND (?7='all' OR COALESCE(lp.name,l.leave_type,'ไม่ระบุ')=?7)`;
+    // Day totals use the exact stored duration for complete requests; only
+    // multi-day requests that cross a selected boundary are apportioned.
+    // This boundary approximation is explained on the dashboard.
+    const daysInPeriod=`CASE WHEN ?2 IS NULL OR ?3 IS NULL
+      OR (l.start_date>=?2 AND l.end_date<=?3) THEN COALESCE(l.duration_days,0)
+      ELSE ROUND(COALESCE(l.duration_days,0) *
+        MAX(0, (julianday(MIN(l.end_date,?3))-julianday(MAX(l.start_date,?2))+1)) /
+        MAX(1, julianday(l.end_date)-julianday(l.start_date)+1),2) END`;
+    const base=`FROM leave_requests l JOIN employees e ON e.id=l.employee_id AND e.client_id=l.client_id
+      LEFT JOIN departments d ON d.id=e.department_id AND d.client_id=e.client_id
+      LEFT JOIN leave_policies lp ON lp.id=l.policy_id AND lp.client_id=l.client_id`;
+    try {
+      const [employeeQuery,aggregatesQuery,countQuery,detailsQuery,typesQuery]=await Promise.all([
+        env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.department_id,d.name AS department_name
+          FROM employees e LEFT JOIN departments d ON d.id=e.department_id AND d.client_id=e.client_id
+          WHERE e.client_id=?1 ORDER BY e.first_name,e.last_name`).bind(clientId).all(),
+        env.DB.prepare(`SELECT l.employee_id,l.status,COALESCE(lp.name,l.leave_type,'ไม่ระบุ') AS type_name,
+          COUNT(*) AS request_count,SUM(CASE WHEN l.status='approved' THEN ${daysInPeriod} ELSE 0 END) AS approved_days
+          ${base} WHERE ${where} GROUP BY l.employee_id,l.status,COALESCE(lp.name,l.leave_type,'ไม่ระบุ')`).bind(...filters).all(),
+        env.DB.prepare(`SELECT COUNT(*) AS total ${base} WHERE ${where}`).bind(...filters).first(),
+        env.DB.prepare(`SELECT l.id,l.employee_id,l.leave_type,l.start_date,l.end_date,l.day_part,l.duration_days,l.reason,
+            l.status,l.created_at,l.approved_at,l.decision_reason,
+            e.first_name,e.last_name,e.nickname,e.employee_code,d.name AS department_name,
+            COALESCE(lp.name,l.leave_type,'ไม่ระบุ') AS leave_type_name,
+            dec.nickname AS decided_by_employee_nickname,dec.first_name AS decided_by_employee_first_name,dec.last_name AS decided_by_employee_last_name,
+            du.name AS decided_by_user_name,du.email AS decided_by_user_email,
+            (SELECT ev.created_at FROM leave_approval_events ev WHERE ev.client_id=l.client_id AND ev.leave_request_id=l.id AND ev.action IN ('approved','rejected') ORDER BY ev.id DESC LIMIT 1) AS decision_at,
+            ${daysInPeriod} AS period_days
+          ${base}
+          LEFT JOIN employees dec ON dec.id=l.decided_by_employee_id AND dec.client_id=l.client_id
+          LEFT JOIN users du ON du.id=l.decided_by_user_id
+          WHERE ${where} ORDER BY l.start_date DESC,l.id DESC LIMIT ?8 OFFSET ?9`).bind(...filters,limit,offset).all(),
+        env.DB.prepare(`SELECT DISTINCT COALESCE(lp.name,l.leave_type,'ไม่ระบุ') AS name
+          FROM leave_requests l LEFT JOIN leave_policies lp ON lp.id=l.policy_id AND lp.client_id=l.client_id
+          WHERE l.client_id=?1 ORDER BY name`).bind(clientId).all()
+      ]);
+      const employeeOptions=employeeQuery.results||[];
+      const people=employeeOptions.filter(e=>(!employeeId||Number(e.id)===employeeId)&&(!departmentId||Number(e.department_id)===departmentId))
+        .map(e=>({...e,approved_requests:0,approved_days:0,pending_requests:0,awaiting_evidence_requests:0,rejected_requests:0,cancelled_requests:0,types:[]}));
+      const index=new Map(people.map(p=>[Number(p.id),p]));
+      const byType=new Map();
+      for(const record of aggregatesQuery.results||[]){
+        const p=index.get(Number(record.employee_id));if(!p)continue;
+        const cnt=Number(record.request_count||0),days=Number(record.approved_days||0),kind=String(record.type_name||'ไม่ระบุ');
+        if(record.status==='approved'){
+          p.approved_requests+=cnt;p.approved_days+=days;
+          p.types.push({name:kind,requests:cnt,days:Math.round(days*100)/100});
+          const t=byType.get(kind)||{name:kind,requests:0,days:0};t.requests+=cnt;t.days+=days;byType.set(kind,t);
+        }else if(record.status==='pending')p.pending_requests+=cnt;
+        else if(record.status==='awaiting_evidence')p.awaiting_evidence_requests+=cnt;
+        else if(record.status==='rejected')p.rejected_requests+=cnt;
+        else if(record.status==='cancelled')p.cancelled_requests+=cnt;
+      }
+      people.forEach(p=>p.approved_days=Math.round(p.approved_days*100)/100);
+      people.sort((a,b)=>b.approved_requests-a.approved_requests||b.approved_days-a.approved_days||String(a.first_name||'').localeCompare(String(b.first_name||''),'th'));
+      const total=key=>people.reduce((n,p)=>n+Number(p[key]||0),0);
+      const departments=[...new Map(employeeOptions.filter(e=>e.department_id).map(e=>[Number(e.department_id),{id:Number(e.department_id),name:e.department_name||'ไม่ระบุ'}])).values()].sort((a,b)=>a.name.localeCompare(b.name,'th'));
+      return json({period,from,to,page,page_size:limit,total_requests:Number(countQuery?.total||0),
+        summary:{employees:people.length,people_with_approved:people.filter(p=>p.approved_requests>0).length,approved_requests:total('approved_requests'),approved_days:Math.round(total('approved_days')*100)/100,pending_requests:total('pending_requests'),awaiting_evidence_requests:total('awaiting_evidence_requests'),rejected_requests:total('rejected_requests'),cancelled_requests:total('cancelled_requests')},
+        people,details:detailsQuery.results||[],by_type:[...byType.values()].map(t=>({...t,days:Math.round(t.days*100)/100})).sort((a,b)=>b.days-a.days),
+        employee_options:employeeOptions,department_options:departments,type_options:(typesQuery.results||[]).map(t=>t.name)});
+    }catch(error){
+      console.error('[Nakna] leave analytics query failed',String(error?.message||error));
+      return json({error:'โหลดสรุปการลาไม่สำเร็จ กรุณาลองอีกครั้ง',code:'LEAVE_ANALYTICS_DB_FAILED'},503);
+    }
+  }
+
   if (path === '/api/leave-overview' && method === 'GET') {
     const url=new URL(request.url);
     const period=url.searchParams.get('period')==='all'?'all':'year';
@@ -4711,12 +4830,12 @@ async function handleApi(request, env, url, auth, ctx) {
     let employeesRes,aggRes;
     try {
       [employeesRes,aggRes]=await Promise.all([
-      env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,d.name AS department_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id WHERE e.client_id=?1 ORDER BY e.first_name,e.last_name`).bind(clientId),
+      env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,d.name AS department_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id WHERE e.client_id=?1 ORDER BY e.first_name,e.last_name`).bind(clientId).all(),
       env.DB.prepare(`SELECT l.employee_id,l.status,COALESCE(lp.name,l.leave_type,'ไม่ระบุ') AS type_name,
         COUNT(*) AS request_count, SUM(CASE WHEN l.status='approved' THEN COALESCE(l.duration_days,0) ELSE 0 END) AS approved_days
         FROM leave_requests l LEFT JOIN leave_policies lp ON lp.id=l.policy_id
         WHERE l.client_id=?1 AND (?2='all' OR (l.start_date < ?4 AND l.end_date >= ?3))
-        GROUP BY l.employee_id,l.status,COALESCE(lp.name,l.leave_type,'ไม่ระบุ')`).bind(clientId,period,start,end)
+        GROUP BY l.employee_id,l.status,COALESCE(lp.name,l.leave_type,'ไม่ระบุ')`).bind(clientId,period,start,end).all()
       ]);
     } catch (error) {
       console.error('[Nakna] leave-overview database error', String(error?.message||error));
