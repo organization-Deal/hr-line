@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="th">
 <head>
-  <script>window.__NAKNA_BOOT_T0=performance.now();document.documentElement.classList.add('js');</script>
+  <script>window.__NAKNA_BOOT_T0=performance.now();document.documentElement.classList.add('js','nk-p10');</script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#F8FAF8" />
@@ -14,8 +14,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
-  <link rel="stylesheet" href="/styles.css?v=P9.15.3" />
-  <link rel="modulepreload" href="/app.js?v=P9.40" />
+  <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
+  <link rel="modulepreload" href="/app.js?v=P10.0-ui1" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -31,15 +31,18 @@
     #leaveUnifiedPanel .leave-unified-empty{color:#80918f;padding:14px 0}
     @media(max-width:650px){#leaveUnifiedPanel .leave-unified-filters{grid-template-columns:repeat(2,minmax(0,1fr))}#leaveUnifiedPanel .panel-head{flex-wrap:wrap}}
   </style>
+  <link rel="stylesheet" href="/ui/p10.css?v=P10.0-ui1" />
+  <script defer src="/ui/p10.js?v=P10.0-ui1"></script>
 </head>
 <body>
+  <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
     <div class="boot-ambient boot-ambient-a" aria-hidden="true"></div>
     <div class="boot-ambient boot-ambient-b" aria-hidden="true"></div>
     <div class="boot-stage">
       <div class="boot-logo-shell" aria-hidden="true">
         <span class="boot-logo-fallback">น</span>
-        <img id="bootLogo" class="boot-logo" src="/logo.png" alt="" />
+        <img id="bootLogo" class="boot-logo" src="/ui/nakna-mark.webp" alt="" />
         <span class="boot-logo-glow"></span>
       </div>
       <div class="boot-wordmark">นากนะ</div>
@@ -199,7 +202,7 @@
   <div id="appShell" class="app-shell hidden">
     <aside class="sidebar" aria-label="เมนูหลัก">
       <div class="brand-lockup sidebar-brand">
-        <div class="brand-mark small brand-logo-image"><img src="/logo.png" alt="นากนะ" onerror="this.parentElement.classList.add('logo-fallback');this.remove()"/></div>
+        <div class="brand-mark small brand-logo-image"><img src="/ui/nakna-mark.webp" alt="นากนะ" onerror="this.parentElement.classList.add('logo-fallback');this.remove()"/></div>
         <div class="brand-wordmark"><strong>นากนะ</strong><span>HR Tech สำหรับคนไทย</span></div>
       </div>
 
@@ -248,12 +251,12 @@
 
       <div class="sidebar-footer">
         <div class="line-status"><span class="line-logo">LINE</span><div><strong id="sidebarLineTitle">LINE พร้อมใช้งาน</strong><small id="sidebarLineText">Employee-first experience</small></div></div>
-        <div class="sidebar-meta"><span>นากนะ HR</span><span>V1.0-P9.15.3</span></div>
+        <div class="sidebar-meta"><span>นากนะ HR</span><span>UI P10.0</span></div>
         <button id="logoutBtn" class="logout-btn"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 4h5v16h-5"/></svg>ออกจากระบบ</button>
       </div>
     </aside>
 
-    <main>
+    <main id="nkMain" tabindex="-1">
       <header class="topbar">
         <div class="topbar-title">
           <button id="mobileMenuBtn" class="icon-btn mobile-menu-btn" aria-label="เปิดเมนู"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
@@ -287,8 +290,8 @@
         <div class="welcome-bar dashboard-hero-v2">
           <div class="dashboard-hero-copy">
             <p class="kicker">HR COMMAND CENTER</p>
-            <h1>วันนี้ทีมของเราเป็นยังไงบ้าง</h1>
-            <p id="heroSub">กำลังโหลดข้อมูลบริษัท...</p>
+            <h1>วันนี้ ทีมเป็นอย่างไรบ้าง</h1>
+            <p id="heroSub">กำลังโหลดข้อมูลบริษัท...</p><p id="nkDayContext" class="nk-day-context" hidden></p>
           </div>
           <div class="attention-summary dashboard-attention-summary">
             <div class="attention-ring"><strong id="attentionTotal">0</strong><span>เรื่อง</span></div>
@@ -377,13 +380,13 @@
           <div><span>ลิงก์เชิญที่ยังใช้ได้</span><strong id="peopleActiveInvites">0</strong></div>
         </div>
 
-        <article class="panel invite-center">
+        <details class="nk-disclosure" id="nkInviteDisclosure"><summary>ลิงก์เชิญเข้าทีม <span>สร้างลิงก์ · ตรวจสถานะ · ดูประวัติ</span></summary><article class="panel invite-center">
           <div class="panel-head">
             <div><p class="kicker">INVITE CENTER</p><h3>ลิงก์เชิญเข้าทีม</h3><p class="panel-subtitle">แต่ละลิงก์ผูกกับ Workspace นี้โดยตรง จึงไม่ทับกับบริษัทอื่น</p></div>
             <button id="inviteEmployeeBtnInline" class="text-btn">+ สร้างลิงก์เชิญ</button>
           </div>
           <div id="inviteList" class="invite-list"></div>
-        </article>
+        </article></details>
 
         <div class="toolbar">
           <div class="search-box"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="employeeSearch" type="search" placeholder="ค้นหาชื่อ รหัสพนักงาน แผนก หรือ LINE" /></div>
@@ -510,60 +513,53 @@
         </article>
       </section>
 
-      <section id="view-leave" class="view">
-        <div class="page-intro">
-          <div><p class="kicker">LEAVE CONTROL</p><h1>การลา</h1><p>สิทธิ์ลา ผู้อนุมัติ เหตุผล หลักฐาน และสถานะของทุกคำขออยู่ในที่เดียว</p></div>
-          <button id="addLeaveBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>บันทึกการลา</button>
-        </div>
-        <div class="table-summary" id="leaveSummary"></div>
-        <div class="leave-layout">
-          <article class="panel leave-queue-panel">
-            <div class="panel-head"><div><p class="kicker">APPROVAL QUEUE</p><h3>คำขอลา</h3><p class="panel-subtitle">เห็นทันทีว่าค้างอยู่ที่ใคร หลักฐานครบหรือยัง และเหลือสิทธิ์เท่าไร</p></div></div>
-            <div class="table-card embedded"><table><thead><tr><th>พนักงาน</th><th>ประเภท / วัน</th><th>ผู้อนุมัติ</th><th>หลักฐาน</th><th>สถานะ</th><th>จัดการ</th></tr></thead><tbody id="leaveBody"></tbody></table></div>
-          </article>
-          <article class="panel leave-calendar-panel">
-            <div class="panel-head"><div><p class="kicker">TEAM CALENDAR</p><h3>คนลาช่วงนี้</h3><p class="panel-subtitle">ช่วย Manager เห็นว่าทีมชนวันลากันหรือไม่ก่อนอนุมัติ</p></div><span class="badge badge-soft">14 วัน</span></div>
-            <div id="leaveCalendar" class="leave-calendar"></div>
-          </article>
-        </div>
+<section class="view" id="view-leave"><div class="page-intro">
+<div><p class="kicker">LEAVE CONTROL</p><h1>การลา</h1><p>สิทธิ์ลา ผู้อนุมัติ เหตุผล หลักฐาน และสถานะของทุกคำขออยู่ในที่เดียว</p></div>
+<button class="primary-btn" id="addLeaveBtn" type="button"><svg viewbox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>บันทึกการลา</button>
+</div><nav aria-label="มุมมองการลา" class="nk-tabs" id="nkLeaveTabs" role="tablist">
+<button aria-controls="nkLeaveOverviewPanel" aria-selected="true" data-nk-leave-tab="overview" id="nkLeaveTab-overview" role="tab" type="button">ภาพรวม</button>
+<button aria-controls="nkLeavePendingPanel" aria-selected="false" data-nk-leave-tab="queue" id="nkLeaveTab-queue" role="tab" tabindex="-1" type="button">รอจัดการ <span id="nkLeavePendingCount">—</span></button>
+<button aria-controls="nkLeaveHistoryPanel" aria-selected="false" data-nk-leave-tab="history" id="nkLeaveTab-history" role="tab" tabindex="-1" type="button">ประวัติ</button>
+<button aria-controls="nkLeaveCalendarPanel" aria-selected="false" data-nk-leave-tab="calendar" id="nkLeaveTab-calendar" role="tab" tabindex="-1" type="button">ปฏิทิน</button></nav><article aria-label="สรุปและประวัติการลา" class="panel" data-nk-report="" id="leaveUnifiedPanel">
+<div class="panel-head">
+<div><p class="kicker">LEAVE ANALYTICS</p><h3>สรุปการลา</h3>
+<p class="panel-subtitle">ดูจำนวนครั้ง วันลา ประเภท ผู้อนุมัติ และสถานะในรายงานเดียว</p></div>
+<div class="leave-report-controls"><button class="secondary-btn" id="leaveUnifiedRefresh" type="button">↻ โหลดใหม่</button>
+<button class="secondary-btn" id="leaveUnifiedExport" type="button">Export CSV สรุปรายคน</button></div>
+</div><details class="nk-filter-panel" id="nkLeaveFilterPanel" open=""><summary>ตัวกรองรายงาน<span id="nkLeaveFilterSummary">ช่วงเวลา · พนักงาน · สถานะ</span></summary><div class="leave-unified-filters">
+<label>ช่วงเวลา<select id="leaveUnifiedPeriod"><option value="year">รายปี</option><option value="month">รายเดือน</option><option value="day">รายวัน</option><option value="range">กำหนดช่วงเอง</option><option value="all">สะสมทั้งหมด</option></select></label>
+<label id="leaveUnifiedYearWrap">ปี<select id="leaveUnifiedYear"></select></label>
+<label hidden="" id="leaveUnifiedMonthWrap">เดือน<input id="leaveUnifiedMonth" type="month"/></label>
+<label hidden="" id="leaveUnifiedDayWrap">วันที่<input id="leaveUnifiedDay" type="date"/></label>
+<label hidden="" id="leaveUnifiedFromWrap">ตั้งแต่<input id="leaveUnifiedFrom" type="date"/></label>
+<label hidden="" id="leaveUnifiedToWrap">ถึงวันที่<input id="leaveUnifiedTo" type="date"/></label>
+<label>พนักงาน<select id="leaveUnifiedEmployee"><option value="0">พนักงานทุกคน</option></select></label>
+<label>แผนก<select id="leaveUnifiedDepartment"><option value="0">ทุกแผนก</option></select></label>
+<label>สถานะ<select id="leaveUnifiedStatus"><option value="all">ทุกสถานะ</option><option value="approved">อนุมัติแล้ว</option><option value="pending">รออนุมัติ</option><option value="awaiting_evidence">รอหลักฐาน</option><option value="rejected">ไม่อนุมัติ</option><option value="cancelled">ยกเลิก</option></select></label>
+<label>ประเภทลา<select id="leaveUnifiedType"><option value="all">ทุกประเภท</option></select></label>
+</div></details>
 
-
-        <!-- P9.40: one unified report. The approval queue/calendar above remain unchanged. -->
-        <article class="panel" id="leaveUnifiedPanel">
-          <div class="panel-head">
-            <div><p class="kicker">LEAVE ANALYTICS</p><h3>แดชบอร์ดสรุปการลา</h3>
-              <p class="panel-subtitle">ดูจำนวนครั้ง วันลา ประเภท ผู้อนุมัติ และสถานะในรายงานเดียว</p></div>
-            <div class="leave-report-controls"><button id="leaveUnifiedRefresh" class="secondary-btn" type="button">↻ โหลดใหม่</button>
-              <button id="leaveUnifiedExport" class="secondary-btn" type="button">Export CSV สรุปรายคน</button></div>
-          </div>
-          <div class="leave-unified-filters">
-            <label>ช่วงเวลา<select id="leaveUnifiedPeriod"><option value="year">รายปี</option><option value="month">รายเดือน</option><option value="day">รายวัน</option><option value="range">กำหนดช่วงเอง</option><option value="all">สะสมทั้งหมด</option></select></label>
-            <label id="leaveUnifiedYearWrap">ปี<select id="leaveUnifiedYear"></select></label>
-            <label id="leaveUnifiedMonthWrap" hidden>เดือน<input id="leaveUnifiedMonth" type="month"></label>
-            <label id="leaveUnifiedDayWrap" hidden>วันที่<input id="leaveUnifiedDay" type="date"></label>
-            <label id="leaveUnifiedFromWrap" hidden>ตั้งแต่<input id="leaveUnifiedFrom" type="date"></label>
-            <label id="leaveUnifiedToWrap" hidden>ถึงวันที่<input id="leaveUnifiedTo" type="date"></label>
-            <label>พนักงาน<select id="leaveUnifiedEmployee"><option value="0">พนักงานทุกคน</option></select></label>
-            <label>แผนก<select id="leaveUnifiedDepartment"><option value="0">ทุกแผนก</option></select></label>
-            <label>สถานะ<select id="leaveUnifiedStatus"><option value="all">ทุกสถานะ</option><option value="approved">อนุมัติแล้ว</option><option value="pending">รออนุมัติ</option><option value="awaiting_evidence">รอหลักฐาน</option><option value="rejected">ไม่อนุมัติ</option><option value="cancelled">ยกเลิก</option></select></label>
-            <label>ประเภทลา<select id="leaveUnifiedType"><option value="all">ทุกประเภท</option></select></label>
-          </div>
-          <p id="leaveUnifiedLoading" class="panel-subtitle" role="status" aria-live="polite">เลือกตัวกรองเพื่อดูสรุปการลา</p>
-          <div id="leaveUnifiedSummary" class="leave-report-summary"></div>
-          <div class="leave-report-grid">
-            <div class="leave-report-chart-card"><div class="mini-section-head"><strong>แยกประเภทลา (อนุมัติแล้ว)</strong></div><div id="leaveUnifiedTypes" class="leave-type-bars"></div></div>
-            <div class="leave-report-chart-card"><div class="mini-section-head"><strong>พนักงานที่ลาบ่อยที่สุด</strong></div><div id="leaveUnifiedTop" class="leave-top-people"></div></div>
-          </div>
-          <div class="mini-section-head leave-unified-subhead"><strong>ยอดลารายพนักงาน</strong><input type="search" id="leaveUnifiedSearch" placeholder="ค้นหาชื่อ / รหัส / แผนก" aria-label="ค้นหาพนักงานในรายงาน"></div>
-          <div class="leave-report-table-wrap"><table class="leave-report-table"><thead><tr><th>พนักงาน</th><th>แผนก</th><th>ลาอนุมัติ (ครั้ง)</th><th>วันลาที่อนุมัติ</th><th>แยกประเภท</th><th>รออนุมัติ</th><th>รอหลักฐาน</th><th>ไม่อนุมัติ</th></tr></thead>
-            <tbody id="leaveUnifiedPeople"><tr><td colspan="8">รอโหลดรายงาน</td></tr></tbody></table></div>
-          <div class="mini-section-head leave-unified-subhead"><strong>รายละเอียดคำขอและสถานะ</strong><small id="leaveUnifiedDetailCount">—</small></div>
-          <div class="leave-report-table-wrap"><table class="leave-report-table"><thead><tr><th>พนักงาน</th><th>ประเภทลา</th><th>วันที่ลา</th><th>จำนวนวันในช่วง</th><th>สถานะปัจจุบัน</th><th>ยื่นเมื่อ</th><th>ผู้ตัดสินใจ / เวลา</th><th>เหตุผล</th></tr></thead>
-            <tbody id="leaveUnifiedDetails"><tr><td colspan="8">รอโหลดรายงาน</td></tr></tbody></table></div>
-          <div class="leave-unified-pager"><button type="button" class="secondary-btn" id="leaveUnifiedPrev">← ก่อนหน้า</button><span id="leaveUnifiedPage">หน้า 1</span><button type="button" class="secondary-btn" id="leaveUnifiedNext">ถัดไป →</button></div>
-          <p class="panel-subtitle">นับ 1 ใบลาอนุมัติ = 1 ครั้ง แม้ลาหลายวัน · ใบลารออนุมัติและไม่อนุมัติไม่เพิ่มยอดวันลา · กรณีใบลาคร่อมช่วงที่กรอง ระบบเฉลี่ยจำนวนวันจากระยะเวลาตามปฏิทิน (ตัวเลขประมาณ)</p>
-        </article>
-      </section>
+<div aria-live="polite" class="panel-subtitle" id="leaveUnifiedLoading" role="status">เลือกตัวกรองเพื่อดูสรุปการลา</div>
+<div aria-labelledby="nkLeaveTab-overview" data-nk-leave-pane="overview" id="nkLeaveOverviewPanel" role="tabpanel"><div class="leave-report-summary" id="leaveUnifiedSummary"></div>
+<div class="leave-report-grid">
+<div class="leave-report-chart-card"><div class="mini-section-head"><strong>แยกประเภทลา (อนุมัติแล้ว)</strong></div><div class="leave-type-bars" id="leaveUnifiedTypes"></div></div>
+<div class="leave-report-chart-card"><div class="mini-section-head"><strong>จำนวนครั้งลาที่อนุมัติ</strong></div><div class="leave-top-people" id="leaveUnifiedTop"></div></div>
+</div>
+<div class="mini-section-head leave-unified-subhead"><strong>ยอดลารายพนักงาน</strong><input aria-label="ค้นหาพนักงานในรายงาน" id="leaveUnifiedSearch" placeholder="ค้นหาชื่อ / รหัส / แผนก" type="search"/></div>
+<div class="leave-report-table-wrap"><table class="leave-report-table"><thead><tr><th>พนักงาน</th><th>แผนก</th><th>ลาอนุมัติ (ครั้ง)</th><th>วันลาที่อนุมัติ</th><th>แยกประเภท</th><th>รออนุมัติ</th><th>รอหลักฐาน</th><th>ไม่อนุมัติ</th></tr></thead>
+<tbody id="leaveUnifiedPeople"><tr><td colspan="8">รอโหลดรายงาน</td></tr></tbody></table></div></div>
+<div aria-labelledby="nkLeaveTab-history" data-nk-leave-pane="history" hidden="" id="nkLeaveHistoryPanel" role="tabpanel"><div class="mini-section-head leave-unified-subhead"><strong>รายละเอียดคำขอและสถานะ</strong><small id="leaveUnifiedDetailCount">—</small></div>
+<div class="leave-report-table-wrap"><table class="leave-report-table"><thead><tr><th>พนักงาน</th><th>ประเภทลา</th><th>วันที่ลา</th><th>จำนวนวันในช่วง</th><th>สถานะปัจจุบัน</th><th>ยื่นเมื่อ</th><th>ผู้ตัดสินใจ / เวลา</th><th>เหตุผล</th></tr></thead>
+<tbody id="leaveUnifiedDetails"><tr><td colspan="8">รอโหลดรายงาน</td></tr></tbody></table></div>
+<div class="leave-unified-pager"><button class="secondary-btn" id="leaveUnifiedPrev" type="button">← ก่อนหน้า</button><span id="leaveUnifiedPage">หน้า 1</span><button class="secondary-btn" id="leaveUnifiedNext" type="button">ถัดไป →</button></div></div>
+<p class="panel-subtitle">นับ 1 ใบลาอนุมัติ = 1 ครั้ง แม้ลาหลายวัน · ใบลารออนุมัติและไม่อนุมัติไม่เพิ่มยอดวันลา · กรณีใบลาคร่อมช่วงที่กรอง ระบบเฉลี่ยจำนวนวันจากระยะเวลาตามปฏิทิน (ตัวเลขประมาณ)</p>
+</article><article aria-labelledby="nkLeaveTab-queue" class="panel leave-queue-panel" data-nk-leave-pane="queue" hidden="" id="nkLeavePendingPanel" role="tabpanel">
+<div class="panel-head"><div><p class="kicker">APPROVAL QUEUE</p><h3>คำขอที่รอจัดการ</h3><p class="panel-subtitle">รออนุมัติและรอหลักฐานทั้งหมด · ไม่รวมรายการที่จบแล้ว · ไม่จำกัดด้วยตัวกรองรายงาน</p></div></div><div class="table-summary" id="leaveSummary"></div>
+<div class="table-card embedded"><table><thead><tr><th>พนักงาน</th><th>ประเภท / วัน</th><th>ผู้อนุมัติ</th><th>หลักฐาน</th><th>สถานะ</th><th>จัดการ</th></tr></thead><tbody id="leaveBody"></tbody></table></div>
+</article><article aria-labelledby="nkLeaveTab-calendar" class="panel leave-calendar-panel" data-nk-leave-pane="calendar" hidden="" id="nkLeaveCalendarPanel" role="tabpanel">
+<div class="panel-head"><div><p class="kicker">TEAM CALENDAR</p><h3>คนลาช่วงนี้</h3><p class="panel-subtitle">ช่วย Manager เห็นว่าทีมชนวันลากันหรือไม่ก่อนอนุมัติ</p></div><span class="badge badge-soft">14 วัน</span></div>
+<div class="leave-calendar" id="leaveCalendar"></div>
+</article></section>
 
       <section id="view-hr-inbox" class="view">
         <div class="page-intro">
@@ -1010,7 +1006,7 @@
     <div class="help-center-shell">
       <aside class="help-center-nav">
         <div class="help-center-brand">
-          <div class="help-center-logo"><img src="/logo.png" alt="นากนะ" onerror="this.style.display='none';this.parentElement.classList.add('fallback')"/></div>
+          <div class="help-center-logo"><img src="/ui/nakna-mark.webp" alt="นากนะ" onerror="this.style.display='none';this.parentElement.classList.add('fallback')"/></div>
           <div><span>NAKNA GUIDE</span><strong>วิธีใช้นากนะ</strong></div>
         </div>
         <label class="help-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="helpSearchInput" type="search" placeholder="ค้นหาวิธีใช้..." autocomplete="off"/></label>
@@ -1498,7 +1494,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=P9.40" type="module"></script>
+  <script src="/app.js?v=P10.0-ui1" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
