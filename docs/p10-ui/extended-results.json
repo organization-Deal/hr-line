@@ -1,0 +1,137 @@
+[
+  {
+    "test": "Settings company at 390px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings worktime at 390px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings attendance at 390px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings leave at 390px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings approvals at 390px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings integrations at 390px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings payroll at 390px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings billing at 390px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings company at 1440px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings worktime at 1440px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings attendance at 1440px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings leave at 1440px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings approvals at 1440px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings integrations at 1440px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings payroll at 1440px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings billing at 1440px",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original form opens and fits mobile: openEmployeeModal()",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original form opens and fits mobile: openCandidateModal()",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original form opens and fits mobile: openDocumentGenerateModal()",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original form opens and fits mobile: openCourseModal()",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original form opens and fits mobile: openKpiModal()",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original form opens and fits mobile: openOneOnOneModal()",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original form opens and fits mobile: openProbationReviewModal()",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Payroll expandable edit retains input, decimal days and original handler",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Locked payroll hides editing using original logic; detail remains",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Grouped payroll colspan/rowspan column labels mapped correctly",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Runtime errors",
+    "pass": true,
+    "detail": []
+  }
+]

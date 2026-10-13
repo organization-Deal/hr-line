@@ -1,0 +1,72 @@
+--- base/public/app.js
++++ public/app.js
+@@ -1,4 +1,4 @@
+-const NAKNA_FRONTEND_BUILD='P9.35-MUTATION-PERFORMANCE-SWEEP'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
++const NAKNA_FRONTEND_BUILD='P10.0-PRODUCT-UI'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
+ // P9.15.3 — Face settings render lifecycle + deployment visibility fix.
+ // If a Face link is accidentally served by index.html, recover before booting the HR login page.
+ try {
+@@ -2613,7 +2613,10 @@
+   $('#attentionTotal').textContent = total;
+   $('#navAttention').textContent = total;
+   $('#navAttention').dataset.empty = total ? 'false' : 'true';
+-  $('#heroSub').textContent = `${d.client.name} · ${summaryData.employees} คน · ${formatDate(d.today)}${summaryData.holiday_name ? ` · 🎉 ${summaryData.holiday_name}` : ''}`;
++  $('#heroSub').textContent = `${d.client.name} · ${summaryData.employees} คน · ${formatDate(d.today)}${summaryData.holiday_name ? ` · ${summaryData.holiday_name}` : ''}`;
++
++  const dayContext = $('#nkDayContext');
++  if (dayContext) { dayContext.hidden = !summaryData.holiday_name; dayContext.textContent = summaryData.holiday_name ? 'วันหยุดบริษัท · ตัวเลขเช็กอินแสดงรายการที่บันทึกจริง ไม่ใช่จำนวนผู้ที่ต้องมาทำงาน' : ''; }
+ 
+   const summary = [
+     ['พนักงานทั้งหมด', summaryData.employees, 'brand', 'คน'],
+@@ -3113,6 +3116,9 @@
+ };
+ 
+ function renderAttendance() {
++  // P10: the current attendance screen is the work-log matrix, not the removed legacy table.
++  // A missing legacy target must not abort rendering of Leave, Payroll and Documents.
++  if (!$('#attendanceSummary') || !$('#attendanceBody')) { renderTeamWorkLog(); return; }
+   const checkedIn = state.attendance.filter(item => item.check_in_at).length;
+   const late = state.attendance.filter(item => item.status === 'late').length;
+   const checkedOut = state.attendance.filter(item => item.check_out_at).length;
+@@ -3232,7 +3238,7 @@
+   if($('#leaveUnifiedTypes'))$('#leaveUnifiedTypes').innerHTML=types.length?types.map(t=>`<div class="leave-type-bar"><label>${escapeHtml(t.name||'ไม่ระบุ')}</label><div class="leave-type-track"><div class="leave-type-fill" style="width:${Math.max(3,Math.round(Number(t.days||0)*100/max))}%"></div></div><b>${n(t.days)} วัน · ${n(t.requests)} ครั้ง</b></div>`).join(''):'<div class="leave-unified-empty">ไม่มีรายการลาที่อนุมัติในตัวกรองนี้</div>';
+   const top=[...people].filter(p=>Number(p.approved_requests||0)>0).sort((a,b)=>b.approved_requests-a.approved_requests||b.approved_days-a.approved_days).slice(0,6);
+   if($('#leaveUnifiedTop'))$('#leaveUnifiedTop').innerHTML=top.length?top.map(p=>`<div class="leave-top-row"><div class="person-mini"><span class="avatar-mini">${escapeHtml((p.nickname||p.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml([p.first_name,p.last_name].filter(Boolean).join(' ')||p.nickname||'—')}</strong><small>${escapeHtml(p.department_name||'ไม่ระบุแผนก')}</small></div></div><b>${n(p.approved_requests)} ครั้ง</b></div>`).join(''):'<div class="leave-unified-empty">ยังไม่มีประวัติลาอนุมัติ</div>';
+-  if($('#leaveUnifiedPeople'))$('#leaveUnifiedPeople').innerHTML=people.length?people.map(p=>`<tr>
++  if($('#leaveUnifiedPeople'))$('#leaveUnifiedPeople').innerHTML=people.length?people.map(p=>`<tr data-nk-employee-id="${Number(p.employee_id||p.id||0)}">
+     <td><strong>${escapeHtml([p.first_name,p.last_name].filter(Boolean).join(' ')||p.nickname||'—')}</strong><small>${escapeHtml(p.employee_code||'')}</small></td>
+     <td>${escapeHtml(p.department_name||'—')}</td><td><strong>${n(p.approved_requests)} ครั้ง</strong></td>
+     <td>${n(p.approved_days)} วัน</td><td>${(p.types||[]).map(t=>`<small>${escapeHtml(t.name)}: ${n(t.requests)} ครั้ง · ${n(t.days)} วัน</small>`).join('<br>')||'<small>ยังไม่มีรายการที่อนุมัติ</small>'}</td>
+@@ -3240,7 +3246,7 @@
+   </tr>`).join(''):'<tr><td colspan="8">ไม่พบพนักงานตามคำค้นหา</td></tr>';
+   const q=String($('#leaveUnifiedSearch')?.value||'').trim().toLowerCase();
+   const details=(r.details||[]).filter(x=>!q||[x.first_name,x.last_name,x.nickname,x.employee_code,x.department_name].join(' ').toLowerCase().includes(q));
+-  if($('#leaveUnifiedDetails'))$('#leaveUnifiedDetails').innerHTML=details.length?details.map(row=>`<tr>
++  if($('#leaveUnifiedDetails'))$('#leaveUnifiedDetails').innerHTML=details.length?details.map(row=>`<tr data-nk-leave-id="${Number(row.id||0)}">
+     <td><strong>${escapeHtml([row.first_name,row.last_name].filter(Boolean).join(' ')||row.nickname||'—')}</strong><small>${escapeHtml(row.employee_code||'')}</small></td>
+     <td>${escapeHtml(row.leave_type_name||row.leave_type||'—')}</td>
+     <td>${escapeHtml(formatDate(row.start_date))}${row.start_date!==row.end_date?' – '+escapeHtml(formatDate(row.end_date)):''}</td>
+@@ -3285,17 +3291,19 @@
+     <span><strong>${approved}</strong> อนุมัติแล้ว</span>
+     <span><strong>${rejected}</strong> ไม่อนุมัติ</span>`;
+ 
+-  $('#leaveBody').innerHTML = state.leaves.length
+-    ? state.leaves.map(leave => `
++  const pendingCounter=$('#nkLeavePendingCount'); if(pendingCounter) pendingCounter.textContent=String(pending+evidence);
++  const queueLeaves=state.leaves.filter(leave=>['pending','awaiting_evidence'].includes(String(leave.status)));
++  $('#leaveBody').innerHTML = queueLeaves.length
++    ? queueLeaves.map(leave => `
+       <tr>
+         <td data-label="พนักงาน"><div class="person"><div class="avatar">${initial(leave)}</div><div><strong>${escapeHtml(leave.nickname || leave.first_name)} ${escapeHtml(leave.last_name || '')}</strong><small>#LV-${String(leave.id).padStart(4, '0')}</small></div></div></td>
+         <td data-label="ประเภท / วัน"><strong class="table-primary">${escapeHtml(leave.leave_type_name || leaveLabels[leave.leave_type] || leave.leave_type)} ${Number(leave.is_retroactive||0)?'<span class="badge badge-warning">ย้อนหลัง</span>':''}</strong><small class="table-secondary">${formatDate(leave.start_date)}${leave.start_date !== leave.end_date ? ` – ${formatDate(leave.end_date)}` : ''} · ${formatLeaveDays(leave.duration_days)}</small><small class="table-secondary">ยื่นคำขอ ${escapeHtml(formatDateTime(leave.created_at))}</small></td>
+-        <td data-label="ผู้อนุมัติ">${leave.approver_employee_id ? `<div class="approver-inline"><strong>${escapeHtml(leave.approver_nickname || leave.approver_first_name || 'ผู้อนุมัติ')}</strong><small>${leave.status === 'pending' ? 'กำลังรอคนนี้' : 'ผู้อนุมัติที่กำหนดไว้'}</small></div>` : '<span class="badge badge-danger">ยังไม่กำหนด</span>'}${leaveDecisionInfo(leave)}</td>
++        <td data-label="ผู้อนุมัติ">${leave.approver_employee_id ? `<div class="approver-inline"><strong>${escapeHtml(leave.approver_nickname || leave.approver_first_name || 'ผู้อนุมัติ')}</strong><small>${leave.status === 'pending' ? 'กำลังรอคนนี้' : 'ผู้อนุมัติที่กำหนดไว้'}</small></div>` : '<span class="badge badge-soft">HR / Owner</span>'}${leaveDecisionInfo(leave)}</td>
+         <td data-label="หลักฐาน"><button class="text-btn ${Number(leave.evidence_count||0) ? '' : 'muted-btn'}" onclick="window.openLeaveDetail(${Number(leave.id)})">${Number(leave.evidence_count||0) ? `📎 ${Number(leave.evidence_count)} ไฟล์` : Number(leave.evidence_required) ? '⚠ ต้องแนบ' : 'ดูรายละเอียด'}</button></td>
+         <td data-label="สถานะ">${statusBadge(leave.status)}</td>
+         <td data-label="จัดการ">${leave.status === 'pending' && canHrOverrideLeave() ? `<button class="text-btn" onclick="window.leaveAction(${leave.id},'approve')">HR อนุมัติแทน</button> <button class="text-btn danger" onclick="window.leaveAction(${leave.id},'reject')">HR ไม่อนุมัติ</button>` : leave.status === 'pending' ? '<span class="muted">รอผู้อนุมัติใน LINE</span>' : '<span class="muted">—</span>'}</td>
+       </tr>`).join('')
+-    : `<tr><td colspan="6">${emptyState('ยังไม่มีคำขอลา', 'พนักงานกดขอลาผ่าน LINE หรือ HR บันทึกคำขอแทนได้')}</td></tr>`;
++    : `<tr><td colspan="6">${emptyState('ไม่มีคำขอรอจัดการ', 'รายการที่อนุมัติหรือไม่อนุมัติแล้วอยู่ในแท็บประวัติ')}</td></tr>`;
+ 
+   renderLeaveCalendar();
+ }

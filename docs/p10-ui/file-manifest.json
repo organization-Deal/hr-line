@@ -1,0 +1,72 @@
+{
+  "baseline": "assembled P9.40 (P9.39 not included)",
+  "release": "P10.0-ui1",
+  "files": {
+    "public/index.html": {
+      "before": "871488b3e7c5150ac34966f351930490d6ef7b4c1b93df33b9ab0ab339c6052d",
+      "after": "2d6bdc2ef51baa44756457957655d25e114da6084e1c3056667dba4d1dfdb2a3",
+      "bytes": 232141
+    },
+    "public/app.js": {
+      "before": "5faca430c8d3b9d48d62e12869aea58a8f82fcaeb297f2793dbf587022729a69",
+      "after": "cd6cc96d4ef9fb3245aeac0fb79eaff8ae5f58b9d9bb88a0b6fc7afd6ceeee53",
+      "bytes": 606532
+    },
+    "public/attendance.html": {
+      "before": "dfe2fb10b9e6d43107923e5148eeba896fc0d0b657d5c35046474106ae0f02a4",
+      "after": "e4730f50d6cc83e4c05248951c7442966f8feb371c17d5b2d2c8601628abaa10",
+      "bytes": 7209
+    },
+    "public/documents.html": {
+      "before": "4ffb50b06aa866982a61436da5a64236ce1390e63597001c194c51a0516afb81",
+      "after": "a8e2b3a63a9c98160ecce23e7dd7e6a36b331efc304becbeb8b7fdc05cf6d84a",
+      "bytes": 2805
+    },
+    "public/wellness.html": {
+      "before": "fbe2dbae6caf04c72e137cc86be40233444cf4711e90500174d75be820a336c3",
+      "after": "44e670d679ff1b6b03a3dd6c01d0d761b26cd7995ba55047373a019210389056",
+      "bytes": 8734
+    },
+    "public/learn.html": {
+      "before": "75d049f48e56448a31c085dc9c1e0941d23205254caecd5629fa16fa29f172d7",
+      "after": "8ecdec277b2535f8ee7ebb1e83e285d9ce440c1d9645b76d4b1c33d778ea22f3",
+      "bytes": 2508
+    },
+    "public/invite.html": {
+      "before": "4c763791129de90a046cda28a44ae995ab56c8afd9cc74dba7287e0c2736fd9b",
+      "after": "1389302fcef7edf9d76f500149c8a712a8188d75b4448bda73ea99cde0c03368",
+      "bytes": 9764
+    },
+    "public/hr-case.html": {
+      "before": "6253a5cbdaa0726aa941009d815c562a7f3be9e98abb084c0ab3384c9fc1734d",
+      "after": "1f4b76158f5b6ecfe4ec2dff412e2e412f1798737cf85e2459ece468b1f0a266",
+      "bytes": 7462
+    },
+    "public/leave.html": {
+      "before": "e36d45685e62293af14ef02680ca14ffc41932579fb9a847035722d2851d9fd3",
+      "after": "11c75470f4992969f436474b40833695fb89ed67771f39d8aa9cf99ba5c39e6e",
+      "bytes": 8035
+    },
+    "public/ui/p10.css": {
+      "before": null,
+      "after": "4120de0529f6bf9d1b1595c581cc4fcca9fcaea663d93a54edf186d8d7769ad7",
+      "bytes": 60009
+    },
+    "public/ui/portal-p10.css": {
+      "before": null,
+      "after": "fbed2174433dd8c1663a2567aaaeb4a858d27fb9f16512a153cdd17f2894f246",
+      "bytes": 2394
+    },
+    "public/ui/nakna-mark.webp": {
+      "before": null,
+      "after": "5f164c291a958ddce254fcd48ff336642045552d89748e8bb86aa31d571a4d2b",
+      "bytes": 2634
+    },
+    "public/ui/p10.js": {
+      "before": null,
+      "after": "e44875ba517116ebfd5d3aba96248ab3f1edbf6531924c2aaaf785fcf3094ea9",
+      "bytes": 17984
+    }
+  },
+  "backend_sha256": "aef4fb19a0bcabb42dc52735d3b92bc1ec5e9e22772c3bc478553507dd7d72d1"
+}

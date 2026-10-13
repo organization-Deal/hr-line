@@ -1,0 +1,330 @@
+[
+  {
+    "test": "src files byte-identical",
+    "pass": true,
+    "detail": 2
+  },
+  {
+    "test": "migrations files byte-identical",
+    "pass": true,
+    "detail": 36
+  },
+  {
+    "test": "scripts files byte-identical",
+    "pass": true,
+    "detail": 8
+  },
+  {
+    "test": "package.json unchanged",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "wrangler.jsonc unchanged",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "seed.sql unchanged",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "attendance JavaScript unchanged",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "documents JavaScript unchanged",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "hr-case JavaScript unchanged",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "invite JavaScript unchanged",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "learn JavaScript unchanged",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "leave JavaScript unchanged",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "wellness JavaScript unchanged",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "index HTML retains all existing element IDs",
+    "pass": true,
+    "detail": {
+      "before": 817,
+      "after": 832
+    }
+  },
+  {
+    "test": "index HTML has no duplicate IDs",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "index existing static form constraints/actions preserved",
+    "pass": true,
+    "detail": []
+  },
+  {
+    "test": "index new asset exists: /ui/p10.css?v=P10.0-ui1",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "index new asset exists: /ui/p10.js?v=P10.0-ui1",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "index new asset exists: /ui/nakna-mark.webp",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "index new asset exists: /ui/nakna-mark.webp",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "index new asset exists: /ui/nakna-mark.webp",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "attendance HTML retains all existing element IDs",
+    "pass": true,
+    "detail": {
+      "before": 40,
+      "after": 40
+    }
+  },
+  {
+    "test": "attendance HTML has no duplicate IDs",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "attendance existing static form constraints/actions preserved",
+    "pass": true,
+    "detail": []
+  },
+  {
+    "test": "attendance new asset exists: /ui/portal-p10.css?v=P10.0-ui1",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "attendance new asset exists: /ui/nakna-mark.webp",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "documents HTML retains all existing element IDs",
+    "pass": true,
+    "detail": {
+      "before": 15,
+      "after": 15
+    }
+  },
+  {
+    "test": "documents HTML has no duplicate IDs",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "documents existing static form constraints/actions preserved",
+    "pass": true,
+    "detail": []
+  },
+  {
+    "test": "documents new asset exists: /ui/portal-p10.css?v=P10.0-ui1",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "documents new asset exists: /ui/nakna-mark.webp",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "hr-case HTML retains all existing element IDs",
+    "pass": true,
+    "detail": {
+      "before": 22,
+      "after": 22
+    }
+  },
+  {
+    "test": "hr-case HTML has no duplicate IDs",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "hr-case existing static form constraints/actions preserved",
+    "pass": true,
+    "detail": []
+  },
+  {
+    "test": "hr-case new asset exists: /ui/portal-p10.css?v=P10.0-ui1",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "invite HTML retains all existing element IDs",
+    "pass": true,
+    "detail": {
+      "before": 35,
+      "after": 35
+    }
+  },
+  {
+    "test": "invite HTML has no duplicate IDs",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "invite existing static form constraints/actions preserved",
+    "pass": true,
+    "detail": []
+  },
+  {
+    "test": "invite new asset exists: /ui/portal-p10.css?v=P10.0-ui1",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "learn HTML retains all existing element IDs",
+    "pass": true,
+    "detail": {
+      "before": 17,
+      "after": 17
+    }
+  },
+  {
+    "test": "learn HTML has no duplicate IDs",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "learn existing static form constraints/actions preserved",
+    "pass": true,
+    "detail": []
+  },
+  {
+    "test": "learn new asset exists: /ui/portal-p10.css?v=P10.0-ui1",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "leave HTML retains all existing element IDs",
+    "pass": true,
+    "detail": {
+      "before": 29,
+      "after": 29
+    }
+  },
+  {
+    "test": "leave HTML has no duplicate IDs",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "leave existing static form constraints/actions preserved",
+    "pass": true,
+    "detail": []
+  },
+  {
+    "test": "leave new asset exists: /ui/portal-p10.css?v=P10.0-ui1",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "wellness HTML retains all existing element IDs",
+    "pass": true,
+    "detail": {
+      "before": 51,
+      "after": 51
+    }
+  },
+  {
+    "test": "wellness HTML has no duplicate IDs",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "wellness existing static form constraints/actions preserved",
+    "pass": true,
+    "detail": []
+  },
+  {
+    "test": "wellness new asset exists: /ui/portal-p10.css?v=P10.0-ui1",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "wellness new asset exists: /ui/nakna-mark.webp",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "Every existing API-bearing app.js source line unchanged",
+    "pass": true,
+    "detail": 248
+  },
+  {
+    "test": "New controller has no network or persistence calls",
+    "pass": true,
+    "detail": null
+  },
+  {
+    "test": "Only public presentation files changed",
+    "pass": true,
+    "detail": [
+      "public/index.html",
+      "public/app.js",
+      "public/attendance.html",
+      "public/documents.html",
+      "public/wellness.html",
+      "public/learn.html",
+      "public/invite.html",
+      "public/hr-case.html",
+      "public/leave.html",
+      "public/ui/p10.css",
+      "public/ui/portal-p10.css",
+      "public/ui/nakna-mark.webp",
+      "public/ui/p10.js"
+    ]
+  },
+  {
+    "test": "public/app.js syntax",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "test": "public/ui/p10.js syntax",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "test": "Original npm run check",
+    "pass": true,
+    "detail": "\n> nakna-hr@1.0.111 check\n> node --check src/index.js && node --check public/app.js && node --check public/documents.js && node --check public/hr-case.js && node --check public/invite.js && node --check public/learn.js && node --check public/leave.js && node --check public/attendance.js && node --check public/wellness.js\n\n"
+  }
+]

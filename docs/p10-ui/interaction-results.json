@@ -1,0 +1,157 @@
+[
+  {
+    "test": "Bottom navigation calls the existing employees route",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Mobile menu opens, Escape closes, background inert restored",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Employee search and expanded original actions/data remain available",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original employee Save PATCH endpoint/payload and bank zero preserved",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Leave tab overview uses existing data without extra API call",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Leave tab queue uses existing data without extra API call",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Leave tab history uses existing data without extra API call",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Leave tab calendar uses existing data without extra API call",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Pending queue excludes final history; pending actions still present",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Empty pending queue keeps approved/rejected/cancelled history intact",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "History displays statuses and retains per-request detail entry points",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original leave API filter period=day",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original leave API filter period=month",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original leave API filter period=year",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original leave API filter period=range",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original leave API filter period=all",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original leave filter leaveUnifiedEmployee",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original leave filter leaveUnifiedDepartment",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original leave filter leaveUnifiedStatus",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Original leave filter leaveUnifiedType",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Employee summary opens same report filtered to that employee",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Every mobile history cell has a real header label and readable font",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Report 503 exposes Retry; success restores rows rather than fake zeros",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "UI observer settles with no render feedback loop",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "ARIA tab keyboard navigation updates focused selected panel",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Settings category opens original form and returns to category hub",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Mobile shortcut mirrors existing hidden permission state",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Presentation refresh adds zero fetch requests",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "No duplicate DOM IDs after all UI interactions",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Reduced-motion preference respected",
+    "pass": true,
+    "detail": true
+  },
+  {
+    "test": "Browser runtime errors",
+    "pass": true,
+    "detail": []
+  }
+]

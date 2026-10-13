@@ -1,0 +1,890 @@
+{
+  "results": [
+    {
+      "width": 320,
+      "view": "view-dashboard",
+      "scroll": 320,
+      "body": 320,
+      "height": 2077.171875,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-employees",
+      "scroll": 320,
+      "body": 320,
+      "height": 2909.078125,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-organization",
+      "scroll": 320,
+      "body": 320,
+      "height": 2533.65625,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-recruitment",
+      "scroll": 320,
+      "body": 320,
+      "height": 1087.140625,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-attendance",
+      "scroll": 320,
+      "body": 320,
+      "height": 1986.34375,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-leave",
+      "scroll": 320,
+      "body": 320,
+      "height": 4625.1875,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-hr-inbox",
+      "scroll": 320,
+      "body": 320,
+      "height": 788.859375,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-broadcast",
+      "scroll": 320,
+      "body": 320,
+      "height": 693.46875,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-requests",
+      "scroll": 320,
+      "body": 320,
+      "height": 1406.609375,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-payroll",
+      "scroll": 320,
+      "body": 320,
+      "height": 4541.859375,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-documents",
+      "scroll": 320,
+      "body": 320,
+      "height": 2629.546875,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-benefits",
+      "scroll": 320,
+      "body": 320,
+      "height": 986.375,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-performance",
+      "scroll": 320,
+      "body": 320,
+      "height": 1644.375,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-engagement",
+      "scroll": 320,
+      "body": 320,
+      "height": 1488.28125,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-wellness",
+      "scroll": 320,
+      "body": 320,
+      "height": 2481,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-analytics",
+      "scroll": 320,
+      "body": 320,
+      "height": 1559.671875,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-saas-admin",
+      "scroll": 320,
+      "body": 320,
+      "height": 480.203125,
+      "pass": true
+    },
+    {
+      "width": 320,
+      "view": "view-settings",
+      "scroll": 320,
+      "body": 320,
+      "height": 1141.828125,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-dashboard",
+      "scroll": 390,
+      "body": 390,
+      "height": 2076.890625,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-employees",
+      "scroll": 390,
+      "body": 390,
+      "height": 2909.078125,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-organization",
+      "scroll": 390,
+      "body": 390,
+      "height": 2533.65625,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-recruitment",
+      "scroll": 390,
+      "body": 390,
+      "height": 1073.34375,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-attendance",
+      "scroll": 390,
+      "body": 390,
+      "height": 1907.171875,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-leave",
+      "scroll": 390,
+      "body": 390,
+      "height": 4581.015625,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-hr-inbox",
+      "scroll": 390,
+      "body": 390,
+      "height": 794.859375,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-broadcast",
+      "scroll": 390,
+      "body": 390,
+      "height": 686.71875,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-requests",
+      "scroll": 390,
+      "body": 390,
+      "height": 1411.859375,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-payroll",
+      "scroll": 390,
+      "body": 390,
+      "height": 4476.78125,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-documents",
+      "scroll": 390,
+      "body": 390,
+      "height": 2563.859375,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-benefits",
+      "scroll": 390,
+      "body": 390,
+      "height": 958.390625,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-performance",
+      "scroll": 390,
+      "body": 390,
+      "height": 1656.375,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-engagement",
+      "scroll": 390,
+      "body": 390,
+      "height": 1512.28125,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-wellness",
+      "scroll": 390,
+      "body": 390,
+      "height": 2455.8125,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-analytics",
+      "scroll": 390,
+      "body": 390,
+      "height": 1583.671875,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-saas-admin",
+      "scroll": 390,
+      "body": 390,
+      "height": 498.203125,
+      "pass": true
+    },
+    {
+      "width": 390,
+      "view": "view-settings",
+      "scroll": 390,
+      "body": 390,
+      "height": 1119.4375,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-dashboard",
+      "scroll": 430,
+      "body": 430,
+      "height": 2063.140625,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-employees",
+      "scroll": 430,
+      "body": 430,
+      "height": 2909.078125,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-organization",
+      "scroll": 430,
+      "body": 430,
+      "height": 2533.65625,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-recruitment",
+      "scroll": 430,
+      "body": 430,
+      "height": 1073.34375,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-attendance",
+      "scroll": 430,
+      "body": 430,
+      "height": 1869.171875,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-leave",
+      "scroll": 430,
+      "body": 430,
+      "height": 4581.015625,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-hr-inbox",
+      "scroll": 430,
+      "body": 430,
+      "height": 782.109375,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-broadcast",
+      "scroll": 430,
+      "body": 430,
+      "height": 686.71875,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-requests",
+      "scroll": 430,
+      "body": 430,
+      "height": 1392.0625,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-payroll",
+      "scroll": 430,
+      "body": 430,
+      "height": 4460.375,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-documents",
+      "scroll": 430,
+      "body": 430,
+      "height": 2501.265625,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-benefits",
+      "scroll": 430,
+      "body": 430,
+      "height": 958.390625,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-performance",
+      "scroll": 430,
+      "body": 430,
+      "height": 1606.375,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-engagement",
+      "scroll": 430,
+      "body": 430,
+      "height": 1512.28125,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-wellness",
+      "scroll": 430,
+      "body": 430,
+      "height": 2406.625,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-analytics",
+      "scroll": 430,
+      "body": 430,
+      "height": 1583.671875,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-saas-admin",
+      "scroll": 430,
+      "body": 430,
+      "height": 498.203125,
+      "pass": true
+    },
+    {
+      "width": 430,
+      "view": "view-settings",
+      "scroll": 430,
+      "body": 430,
+      "height": 1119.4375,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-dashboard",
+      "scroll": 768,
+      "body": 768,
+      "height": 1264.21875,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-employees",
+      "scroll": 768,
+      "body": 768,
+      "height": 1234.109375,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-organization",
+      "scroll": 768,
+      "body": 768,
+      "height": 1009.453125,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-recruitment",
+      "scroll": 768,
+      "body": 768,
+      "height": 987.875,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-attendance",
+      "scroll": 768,
+      "body": 768,
+      "height": 1614.78125,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-leave",
+      "scroll": 768,
+      "body": 768,
+      "height": 2148.8125,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-hr-inbox",
+      "scroll": 768,
+      "body": 768,
+      "height": 825.96875,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-broadcast",
+      "scroll": 768,
+      "body": 768,
+      "height": 742.875,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-requests",
+      "scroll": 768,
+      "body": 768,
+      "height": 1551.28125,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-payroll",
+      "scroll": 768,
+      "body": 768,
+      "height": 2084.8125,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-documents",
+      "scroll": 768,
+      "body": 768,
+      "height": 2361.265625,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-benefits",
+      "scroll": 768,
+      "body": 768,
+      "height": 987.953125,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-performance",
+      "scroll": 768,
+      "body": 768,
+      "height": 1555.546875,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-engagement",
+      "scroll": 768,
+      "body": 768,
+      "height": 1614.296875,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-wellness",
+      "scroll": 768,
+      "body": 768,
+      "height": 2241.4375,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-analytics",
+      "scroll": 768,
+      "body": 768,
+      "height": 1723.296875,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-saas-admin",
+      "scroll": 768,
+      "body": 768,
+      "height": 571.375,
+      "pass": true
+    },
+    {
+      "width": 768,
+      "view": "view-settings",
+      "scroll": 768,
+      "body": 768,
+      "height": 742.640625,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-dashboard",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 1226.265625,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-employees",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 1234.109375,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-organization",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 987.359375,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-recruitment",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 919.296875,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-attendance",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 1615.78125,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-leave",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 2148.8125,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-hr-inbox",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 825.96875,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-broadcast",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 742.875,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-requests",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 1551.28125,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-payroll",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 1870.234375,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-documents",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 2361.265625,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-benefits",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 602.34375,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-performance",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 1555.546875,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-engagement",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 1278.125,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-wellness",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 1698.953125,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-analytics",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 1314.125,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-saas-admin",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 424.578125,
+      "pass": true
+    },
+    {
+      "width": 1024,
+      "view": "view-settings",
+      "scroll": 1024,
+      "body": 1024,
+      "height": 742.640625,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-dashboard",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 1250.3125,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-employees",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 1234.109375,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-organization",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 959.765625,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-recruitment",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 919.296875,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-attendance",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 1463.703125,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-leave",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 2148.8125,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-hr-inbox",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 538.90625,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-broadcast",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 516.8125,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-requests",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 977.125,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-payroll",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 1716.484375,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-documents",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 1461.875,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-benefits",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 602.34375,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-performance",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 843.765625,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-engagement",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 1131.75,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-wellness",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 1568.375,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-analytics",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 1206.75,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-saas-admin",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 424.578125,
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "view": "view-settings",
+      "scroll": 1440,
+      "body": 1440,
+      "height": 742.640625,
+      "pass": true
+    }
+  ],
+  "page_errors": [],
+  "render_errors": [],
+  "views": [
+    "dashboard",
+    "employees",
+    "organization",
+    "recruitment",
+    "attendance",
+    "leave",
+    "hr-inbox",
+    "broadcast",
+    "requests",
+    "payroll",
+    "documents",
+    "benefits",
+    "performance",
+    "engagement",
+    "wellness",
+    "analytics",
+    "saas-admin",
+    "settings"
+  ]
+}
