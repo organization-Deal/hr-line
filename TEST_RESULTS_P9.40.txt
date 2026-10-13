@@ -1,0 +1,12 @@
+Nakna P9.40 QA — 2026-10-13
+- node --check public/app.js: PASS
+- node --check src/index.js: PASS
+- npm run check (on base full project with patched source): PASS
+- HTML parse, unique ids: PASS
+- Exactly one report panel (leaveUnifiedPanel); old two panels removed: PASS
+- Unified API SQL + behavior tests with in-memory SQLite (16): PASS
+  year, day, month boundary, previous month boundary, employee, department,
+  approved filter, pending filter, type filter, zero leave,
+  custom range, access control, invalid date, invalid range, pagination pages 1-2
+- Production Cloudflare D1 / LINE: NOT TESTED
+- Performance latency on real Worker: NOT MEASURED
