@@ -1,0 +1,24 @@
+/* Consistent employee portal chrome. Never changes camera geometry, canvas,
+   biometric code, geolocation, authentication, submission or API calls. */
+html.nk-portal{--primary:#04878a;--primary-dark:#153c45;--text:#20373e;--muted:#5c7178;--border:#dfe8eb;background:#f5f7f8;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+html.nk-portal body{background:#f5f7f8;color:#20373e;line-height:1.65}
+html.nk-portal :where(button,input,select,textarea){font-family:inherit}
+html.nk-portal :where(h1,h2,h3){letter-spacing:-.35px;color:#153c45;line-height:1.45}
+html.nk-portal :where(.card,.panel,.form-card,.section-card){border-color:#dfe8eb;border-radius:16px;box-shadow:0 2px 6px #183a4206}
+html.nk-portal :where(.field label,label.field-label){font-size:13px;color:#395862;font-weight:600}
+html.nk-portal :where(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=hidden]),select,textarea){box-sizing:border-box;min-width:0;max-width:100%;font-size:16px;min-height:46px;border-radius:10px;border:1px solid #ccdadd;background:#fff;color:#20373e;padding:10px 12px;line-height:1.55}
+html.nk-portal :where(input,textarea)::placeholder{color:#778a90}
+html.nk-portal :where(.primary,.primary-btn,.btn-primary,.secondary,.secondary-btn){border-radius:11px;min-height:46px;font-size:15px;line-height:1.5;white-space:normal;box-shadow:none}
+html.nk-portal :where(button,a,input,select,textarea):focus-visible{outline:3px solid #08777b;outline-offset:3px}
+html.nk-portal :where(button:disabled,input:disabled,select:disabled){opacity:.55;cursor:not-allowed}
+html.nk-portal :where(.muted,.hint,.field-hint,.subtitle){color:#5c7178;line-height:1.65}
+html.nk-portal [hidden]{display:none!important}
+@media(max-width:720px){
+ html.nk-portal :where(h1){font-size:24px}
+ html.nk-portal :where(h2){font-size:20px}
+ html.nk-portal :where(.field-grid,.form-grid,.two-col,.two-columns){grid-template-columns:minmax(0,1fr);gap:14px}
+ html.nk-portal :where(.field,.form-field){min-width:0}
+ html.nk-portal :where(.step-title,.section-title){font-size:17px}
+ html.nk-portal :where(.helper,.help-text,.field-hint){font-size:12px}
+}
+@media(prefers-reduced-motion:reduce){html.nk-portal *,html.nk-portal *::before,html.nk-portal *::after{transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
