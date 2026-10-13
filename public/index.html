@@ -15,7 +15,22 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P9.15.3" />
-  <link rel="modulepreload" href="/app.js?v=P9.15.3" />
+  <link rel="modulepreload" href="/app.js?v=P9.40" />
+  <style>
+    #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
+    #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
+    #leaveUnifiedPanel .leave-unified-filters select,#leaveUnifiedPanel .leave-unified-filters input{width:100%;min-width:0;border:1px solid #d8e6e2;border-radius:11px;background:#fff;padding:10px;color:#173f49;font:inherit;font-size:13px}
+    #leaveUnifiedPanel .leave-unified-filters [hidden]{display:none!important}
+    #leaveUnifiedPanel .leave-unified-subhead{margin:20px 0 10px;gap:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    #leaveUnifiedPanel .leave-unified-subhead input{border:1px solid #d8e6e2;border-radius:10px;padding:9px;min-width:175px;max-width:100%}
+    #leaveUnifiedPanel .leave-unified-pager{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:12px 0}
+    #leaveUnifiedPanel .leave-unified-pager button:disabled{opacity:.4;cursor:not-allowed}
+    #leaveUnifiedPanel .leave-report-table-wrap{overflow-x:auto}
+    #leaveUnifiedPanel .leave-report-table{min-width:860px}
+    #leaveUnifiedPanel .leave-unified-error{padding:12px;border:1px solid #f0cfc9;background:#fff4f1;border-radius:12px;color:#8e2e20}
+    #leaveUnifiedPanel .leave-unified-empty{color:#80918f;padding:14px 0}
+    @media(max-width:650px){#leaveUnifiedPanel .leave-unified-filters{grid-template-columns:repeat(2,minmax(0,1fr))}#leaveUnifiedPanel .panel-head{flex-wrap:wrap}}
+  </style>
 </head>
 <body>
   <div id="bootSplash" class="boot-splash" role="status" aria-live="polite" aria-label="กำลังเปิดนากนะ">
@@ -513,82 +528,40 @@
         </div>
 
 
-        <article class="panel" id="leaveOverviewPanel" style="margin-bottom:18px">
+        <!-- P9.40: one unified report. The approval queue/calendar above remain unchanged. -->
+        <article class="panel" id="leaveUnifiedPanel">
           <div class="panel-head">
-            <div><p class="kicker">LEAVE OVERVIEW</p><h3>สรุปการลารายพนักงาน</h3><p class="panel-subtitle">นับจำนวนครั้งจากคำขอที่อนุมัติแล้ว แยกจำนวนวันและประเภทลา · รวมพนักงานที่ยังไม่เคยลาด้วย</p></div>
-            <div class="leave-report-controls">
-              <select id="leaveOverviewPeriod" aria-label="ช่วงเวลาสรุปการลา"><option value="year">ปีปัจจุบัน</option><option value="all">สะสมทั้งหมด</option></select>
-              <select id="leaveOverviewYear" aria-label="เลือกปี"></select>
-              <input type="search" id="leaveOverviewSearch" placeholder="ค้นหาพนักงาน / แผนก" aria-label="ค้นหาพนักงานหรือแผนก" style="max-width:240px"/>
-              <button type="button" id="leaveOverviewExport" class="secondary-btn">Export CSV</button>
-            </div>
+            <div><p class="kicker">LEAVE ANALYTICS</p><h3>แดชบอร์ดสรุปการลา</h3>
+              <p class="panel-subtitle">ดูจำนวนครั้ง วันลา ประเภท ผู้อนุมัติ และสถานะในรายงานเดียว</p></div>
+            <div class="leave-report-controls"><button id="leaveUnifiedRefresh" class="secondary-btn" type="button">↻ โหลดใหม่</button>
+              <button id="leaveUnifiedExport" class="secondary-btn" type="button">Export CSV สรุปรายคน</button></div>
           </div>
-          <div class="leave-report-summary" id="leaveOverviewSummary" aria-live="polite"></div>
-          <div class="leave-report-table-wrap"><table class="leave-report-table">
-            <thead><tr><th>พนักงาน</th><th>แผนก</th><th>จำนวนครั้ง (อนุมัติ)</th><th>จำนวนวันลา</th><th>แยกประเภทลา</th><th>รออนุมัติ</th><th>ไม่อนุมัติ</th></tr></thead>
-            <tbody id="leaveOverviewBody"><tr><td colspan="7">กำลังโหลดสรุป…</td></tr></tbody>
-          </table></div>
-          <p class="panel-subtitle" style="margin-top:10px">หมายเหตุ: 1 ใบคำขอที่อนุมัติแล้ว = 1 ครั้ง แม้ลาหลายวัน · ใบลาที่ถูกปฏิเสธไม่นับเป็นวันลา</p>
-        </article>
-
-        <article class="panel leave-monthly-report-panel">
-          <div class="panel-head leave-report-head">
-            <div>
-              <p class="kicker">MONTHLY LEAVE LOG</p>
-              <h3>สรุปการลารายเดือน</h3>
-              <p class="panel-subtitle">ดูย้อนหลังว่าในรอบเดือนใครลาอะไร กี่วัน อนุมัติหรือไม่ และใช้ประกอบ Payroll ได้</p>
-            </div>
-            <div class="leave-report-controls">
-              <button id="leaveReportPrevBtn" class="icon-btn" type="button" aria-label="เดือนก่อน">‹</button>
-              <input id="leaveReportMonth" type="month" />
-              <button id="leaveReportNextBtn" class="icon-btn" type="button" aria-label="เดือนถัดไป">›</button>
-              <select id="leaveReportStatus">
-                <option value="all">ทุกสถานะ</option>
-                <option value="approved">อนุมัติแล้ว</option>
-                <option value="pending">รออนุมัติ</option>
-                <option value="awaiting_evidence">รอหลักฐาน</option>
-                <option value="rejected">ไม่อนุมัติ</option>
-              </select>
-              <button id="leaveReportExportBtn" class="secondary-btn" type="button">Export CSV</button>
-            </div>
+          <div class="leave-unified-filters">
+            <label>ช่วงเวลา<select id="leaveUnifiedPeriod"><option value="year">รายปี</option><option value="month">รายเดือน</option><option value="day">รายวัน</option><option value="range">กำหนดช่วงเอง</option><option value="all">สะสมทั้งหมด</option></select></label>
+            <label id="leaveUnifiedYearWrap">ปี<select id="leaveUnifiedYear"></select></label>
+            <label id="leaveUnifiedMonthWrap" hidden>เดือน<input id="leaveUnifiedMonth" type="month"></label>
+            <label id="leaveUnifiedDayWrap" hidden>วันที่<input id="leaveUnifiedDay" type="date"></label>
+            <label id="leaveUnifiedFromWrap" hidden>ตั้งแต่<input id="leaveUnifiedFrom" type="date"></label>
+            <label id="leaveUnifiedToWrap" hidden>ถึงวันที่<input id="leaveUnifiedTo" type="date"></label>
+            <label>พนักงาน<select id="leaveUnifiedEmployee"><option value="0">พนักงานทุกคน</option></select></label>
+            <label>แผนก<select id="leaveUnifiedDepartment"><option value="0">ทุกแผนก</option></select></label>
+            <label>สถานะ<select id="leaveUnifiedStatus"><option value="all">ทุกสถานะ</option><option value="approved">อนุมัติแล้ว</option><option value="pending">รออนุมัติ</option><option value="awaiting_evidence">รอหลักฐาน</option><option value="rejected">ไม่อนุมัติ</option><option value="cancelled">ยกเลิก</option></select></label>
+            <label>ประเภทลา<select id="leaveUnifiedType"><option value="all">ทุกประเภท</option></select></label>
           </div>
-
-          <div id="leaveReportSummary" class="leave-report-summary">
-            <article><small>พนักงานที่ลา</small><strong>0</strong><span>คน</span></article>
-            <article><small>คำขอลา</small><strong>0</strong><span>รายการ</span></article>
-            <article><small>วันลาอนุมัติ</small><strong>0</strong><span>วัน</span></article>
-            <article><small>รออนุมัติ</small><strong>0</strong><span>รายการ</span></article>
-          </div>
-
+          <p id="leaveUnifiedLoading" class="panel-subtitle" role="status" aria-live="polite">เลือกตัวกรองเพื่อดูสรุปการลา</p>
+          <div id="leaveUnifiedSummary" class="leave-report-summary"></div>
           <div class="leave-report-grid">
-            <div class="leave-report-chart-card">
-              <div class="mini-section-head"><strong>แยกตามประเภทลา</strong><small id="leaveReportRangeLabel">—</small></div>
-              <div id="leaveReportByType" class="leave-type-bars"></div>
-            </div>
-            <div class="leave-report-chart-card">
-              <div class="mini-section-head"><strong>พนักงานที่ใช้วันลาสูงสุด</strong><small>Approved</small></div>
-              <div id="leaveReportTopPeople" class="leave-top-people"></div>
-            </div>
+            <div class="leave-report-chart-card"><div class="mini-section-head"><strong>แยกประเภทลา (อนุมัติแล้ว)</strong></div><div id="leaveUnifiedTypes" class="leave-type-bars"></div></div>
+            <div class="leave-report-chart-card"><div class="mini-section-head"><strong>พนักงานที่ลาบ่อยที่สุด</strong></div><div id="leaveUnifiedTop" class="leave-top-people"></div></div>
           </div>
-
-          <div class="leave-report-table-wrap">
-            <table class="leave-report-table">
-              <thead>
-                <tr>
-                  <th>พนักงาน</th>
-                  <th>แผนก / ตำแหน่ง</th>
-                  <th>ประเภทลา</th>
-                  <th>ช่วงวันที่</th>
-                  <th>จำนวน</th>
-                  <th>เหตุผล</th>
-                  <th>สถานะ</th>
-                  <th>ผู้อนุมัติ</th>
-                  <th>วันที่ส่ง</th>
-                </tr>
-              </thead>
-              <tbody id="leaveReportBody"></tbody>
-            </table>
-          </div>
+          <div class="mini-section-head leave-unified-subhead"><strong>ยอดลารายพนักงาน</strong><input type="search" id="leaveUnifiedSearch" placeholder="ค้นหาชื่อ / รหัส / แผนก" aria-label="ค้นหาพนักงานในรายงาน"></div>
+          <div class="leave-report-table-wrap"><table class="leave-report-table"><thead><tr><th>พนักงาน</th><th>แผนก</th><th>ลาอนุมัติ (ครั้ง)</th><th>วันลาที่อนุมัติ</th><th>แยกประเภท</th><th>รออนุมัติ</th><th>รอหลักฐาน</th><th>ไม่อนุมัติ</th></tr></thead>
+            <tbody id="leaveUnifiedPeople"><tr><td colspan="8">รอโหลดรายงาน</td></tr></tbody></table></div>
+          <div class="mini-section-head leave-unified-subhead"><strong>รายละเอียดคำขอและสถานะ</strong><small id="leaveUnifiedDetailCount">—</small></div>
+          <div class="leave-report-table-wrap"><table class="leave-report-table"><thead><tr><th>พนักงาน</th><th>ประเภทลา</th><th>วันที่ลา</th><th>จำนวนวันในช่วง</th><th>สถานะปัจจุบัน</th><th>ยื่นเมื่อ</th><th>ผู้ตัดสินใจ / เวลา</th><th>เหตุผล</th></tr></thead>
+            <tbody id="leaveUnifiedDetails"><tr><td colspan="8">รอโหลดรายงาน</td></tr></tbody></table></div>
+          <div class="leave-unified-pager"><button type="button" class="secondary-btn" id="leaveUnifiedPrev">← ก่อนหน้า</button><span id="leaveUnifiedPage">หน้า 1</span><button type="button" class="secondary-btn" id="leaveUnifiedNext">ถัดไป →</button></div>
+          <p class="panel-subtitle">นับ 1 ใบลาอนุมัติ = 1 ครั้ง แม้ลาหลายวัน · ใบลารออนุมัติและไม่อนุมัติไม่เพิ่มยอดวันลา · กรณีใบลาคร่อมช่วงที่กรอง ระบบเฉลี่ยจำนวนวันจากระยะเวลาตามปฏิทิน (ตัวเลขประมาณ)</p>
         </article>
       </section>
 
@@ -1525,7 +1498,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=P9.15.3" type="module"></script>
+  <script src="/app.js?v=P9.40" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

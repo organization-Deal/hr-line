@@ -34,7 +34,8 @@ const state = {
   attendance: [],
   attendanceRetroRequests: [],
   leaves: [],
-  leaveMonthlyReport: null,
+  leaveUnifiedReport: null,
+  leaveUnifiedClientId: null,
   requests: [],
   employeeService: null,
   hrCases: [],
@@ -1366,19 +1367,21 @@ function bindEvents() {
   $('#peopleProfileSaveBtn').onclick = savePeopleProfile;
   if ($('#peopleFaceResetBtn')) $('#peopleFaceResetBtn').onclick = resetPeopleFaceProfile;
   $('#addLeaveBtn').onclick = openLeaveRequestModal;
-  if ($('#leaveReportMonth')) {
-    $('#leaveReportMonth').value = currentBangkokMonth();
-    $('#leaveReportMonth').onchange = () => loadLeaveMonthlyReport($('#leaveReportMonth').value);
-  }
-  if ($('#leaveReportStatus')) $('#leaveReportStatus').onchange = renderLeaveMonthlyReport;
-  if ($('#leaveReportPrevBtn')) $('#leaveReportPrevBtn').onclick = () => loadLeaveMonthlyReport(shiftMonthKey($('#leaveReportMonth').value,-1));
-  if ($('#leaveReportNextBtn')) $('#leaveReportNextBtn').onclick = () => loadLeaveMonthlyReport(shiftMonthKey($('#leaveReportMonth').value,1));
-  if ($('#leaveReportExportBtn')) $('#leaveReportExportBtn').onclick = exportLeaveMonthlyReportCsv;
-  if ($('#leaveOverviewPeriod')) $('#leaveOverviewPeriod').onchange = () => { updateLeaveOverviewYearVisibility(); loadLeaveOverview(); };
-  if ($('#leaveOverviewYear')) { const cy=Number(currentBangkokMonth().slice(0,4)); $('#leaveOverviewYear').innerHTML=Array.from({length:8},(_,i)=>`<option value="${cy-i}">${cy-i+543}</option>`).join(''); $('#leaveOverviewYear').onchange=loadLeaveOverview; }
-  if ($('#leaveOverviewSearch')) $('#leaveOverviewSearch').oninput=renderLeaveOverview;
-  if ($('#leaveOverviewExport')) $('#leaveOverviewExport').onclick=exportLeaveOverview;
-  updateLeaveOverviewYearVisibility();
+  const bkkToday=currentBangkokDateKey();
+  if ($('#leaveUnifiedYear')) { const cy=Number(bkkToday.slice(0,4)); $('#leaveUnifiedYear').innerHTML=Array.from({length:12},(_,i)=>`<option value="${cy-i}">${cy-i+543}</option>`).join(''); }
+  if ($('#leaveUnifiedMonth')) $('#leaveUnifiedMonth').value=bkkToday.slice(0,7);
+  if ($('#leaveUnifiedDay')) $('#leaveUnifiedDay').value=bkkToday;
+  if ($('#leaveUnifiedFrom')) $('#leaveUnifiedFrom').value=bkkToday.slice(0,4)+'-01-01';
+  if ($('#leaveUnifiedTo')) $('#leaveUnifiedTo').value=bkkToday;
+  ['leaveUnifiedPeriod','leaveUnifiedYear','leaveUnifiedMonth','leaveUnifiedDay','leaveUnifiedFrom','leaveUnifiedTo','leaveUnifiedEmployee','leaveUnifiedDepartment','leaveUnifiedStatus','leaveUnifiedType'].forEach(id=>{
+    if ($('#'+id)) $('#'+id).onchange=()=>{leaveUnifiedPage=1; if(id==='leaveUnifiedPeriod')updateLeaveUnifiedPeriodControls(); loadLeaveUnified();};
+  });
+  if ($('#leaveUnifiedSearch')) $('#leaveUnifiedSearch').oninput=renderLeaveUnified;
+  if ($('#leaveUnifiedRefresh')) $('#leaveUnifiedRefresh').onclick=()=>loadLeaveUnified({force:true});
+  if ($('#leaveUnifiedExport')) $('#leaveUnifiedExport').onclick=exportLeaveUnified;
+  if ($('#leaveUnifiedPrev')) $('#leaveUnifiedPrev').onclick=()=>{if(leaveUnifiedPage>1){leaveUnifiedPage--;loadLeaveUnified();}};
+  if ($('#leaveUnifiedNext')) $('#leaveUnifiedNext').onclick=()=>{if(leaveUnifiedPage*100<Number(state.leaveUnifiedReport?.total_requests||0)){leaveUnifiedPage++;loadLeaveUnified();}};
+  updateLeaveUnifiedPeriodControls();
   $('#addLeavePolicyBtn').onclick = () => openLeavePolicyModal();
   $('#leaveProfileSaveBtn').onclick = saveLeaveProfile;
   $('#leaveRequestSaveBtn').onclick = saveLeaveRequest;
@@ -2154,8 +2157,7 @@ function renderAll() {
   renderBenefits();
   renderAttendance();
   renderLeaves();
-  if ($('#leaveReportMonth') && !state.leaveMonthlyReport) loadLeaveMonthlyReport($('#leaveReportMonth').value || currentBangkokMonth());
-  if ($('#leaveOverviewBody') && !state.leaveOverviewReport) loadLeaveOverview();
+  if (state.currentView==='leave' && $('#leaveUnifiedPanel') && (!state.leaveUnifiedReport || Number(state.leaveUnifiedClientId)!==Number(activeCompany()?.id||state.dashboard?.client?.id||0))) {state.leaveUnifiedReport=null;leaveUnifiedFiltersKey='';loadLeaveUnified();}
   renderRequests();
   renderEmployeeService();
   renderInviteCenter();
@@ -3138,132 +3140,127 @@ function renderAttendance() {
 
 
 
-function updateLeaveOverviewYearVisibility(){
-  if($('#leaveOverviewYear')) $('#leaveOverviewYear').hidden=$('#leaveOverviewPeriod')?.value==='all';
+// P9.40 unified leave analytics: one API, one report, no loadAll() on filters.
+let leaveUnifiedSeq=0;
+let leaveUnifiedPending=null;
+let leaveUnifiedInFlightKey='';
+let leaveUnifiedPage=1;
+let leaveUnifiedFiltersKey='';
+let leaveUnifiedLoadedAt=0;
+function updateLeaveUnifiedPeriodControls(){
+  const period=$('#leaveUnifiedPeriod')?.value||'year';
+  const map={year:'year',month:'month',day:'day',range:'range'};
+  ['Year','Month','Day','From','To'].forEach(key=>{
+    const wrap=$('#leaveUnified'+key+'Wrap');if(!wrap)return;
+    wrap.hidden=!(key==='From'||key==='To'?period==='range':map[key.toLowerCase()]===period);
+  });
 }
-let leaveOverviewPending = null;
-let leaveOverviewRequestId = 0;
-async function loadLeaveOverview({force=false}={}){
-  if(leaveOverviewPending && !force) return leaveOverviewPending;
-  const requestId=++leaveOverviewRequestId;
-  const period=$('#leaveOverviewPeriod')?.value||'year';
-  const year=$('#leaveOverviewYear')?.value||currentBangkokMonth().slice(0,4);
-  const body=$('#leaveOverviewBody');
-  if(body) body.innerHTML='<tr><td colspan="7">กำลังโหลดสรุปการลา…</td></tr>';
+function getLeaveUnifiedParams(){
+  const period=$('#leaveUnifiedPeriod')?.value||'year';
+  const vals={period,year:$('#leaveUnifiedYear')?.value||'',month:$('#leaveUnifiedMonth')?.value||'',day:$('#leaveUnifiedDay')?.value||'',from:$('#leaveUnifiedFrom')?.value||'',to:$('#leaveUnifiedTo')?.value||'',employee_id:$('#leaveUnifiedEmployee')?.value||'0',department_id:$('#leaveUnifiedDepartment')?.value||'0',status:$('#leaveUnifiedStatus')?.value||'all',type:$('#leaveUnifiedType')?.value||'all'};
+  const p=new URLSearchParams({period,page:String(leaveUnifiedPage),limit:'100',employee_id:vals.employee_id,department_id:vals.department_id,status:vals.status,type:vals.type});
+  if(period==='year')p.set('year',vals.year);
+  if(period==='month')p.set('month',vals.month);
+  if(period==='day')p.set('day',vals.day);
+  if(period==='range'){p.set('from',vals.from);p.set('to',vals.to);}
+  return p;
+}
+function reconcileLeaveUnifiedOptions(id,items,valueField,label){
+  const select=$('#'+id);if(!select)return;
+  const prev=select.value;
+  const first=select.options[0]?.outerHTML||'';
+  select.innerHTML=first+items.map(item=>`<option value="${escapeHtml(String(item[valueField]))}">${escapeHtml(label(item))}</option>`).join('');
+  if([...select.options].some(o=>o.value===prev))select.value=prev;
+}
+async function loadLeaveUnified({force=false}={}){
+  const req=getLeaveUnifiedParams();
+  const key=req.toString();
+  const workspaceId=Number(activeCompany()?.id||state.dashboard?.client?.id||0);
+  const cacheKey=workspaceId+'|'+key;
+  if(!force && state.leaveUnifiedReport && leaveUnifiedFiltersKey===cacheKey && Date.now()-leaveUnifiedLoadedAt<60000){renderLeaveUnified();return;}
+  if(!force && leaveUnifiedPending && leaveUnifiedInFlightKey===cacheKey)return leaveUnifiedPending;
+  const seq=++leaveUnifiedSeq;
+  leaveUnifiedInFlightKey=cacheKey;
+  const loading=$('#leaveUnifiedLoading');
+  if(loading)loading.textContent='กำลังโหลดข้อมูลการลาตามตัวกรอง…';
+  const refresh=$('#leaveUnifiedRefresh');if(refresh)refresh.disabled=true;
+  // Invalidated requests never overwrite a newer period/person selection.
   const task=(async()=>{
     try{
-      const report=await api(`/api/leave-overview?period=${encodeURIComponent(period)}&year=${encodeURIComponent(year)}`,{timeoutMs:12000,silentStatus:true});
-      if(requestId!==leaveOverviewRequestId)return;
-      if(!report || !Array.isArray(report.people))throw new Error('ข้อมูลรายงานไม่ครบ');
-      state.leaveOverviewReport=report;
-      renderLeaveOverview();
-    }catch(error){
-      if(requestId!==leaveOverviewRequestId)return;
-      state.leaveOverviewReport=null;
-      const reason=error?.message?.startsWith('API_TIMEOUT:')?'ระบบตอบช้าเกิน 12 วินาที':(error?.message||'โหลดข้อมูลไม่สำเร็จ');
-      if(body){
-        body.innerHTML='<tr><td colspan="7"><div role="alert" class="leave-overview-error">โหลดสรุปการลาไม่สำเร็จ: '+escapeHtml(reason)+' <button type="button" id="leaveOverviewRetry" class="btn btn-small">ลองโหลดใหม่</button></div></td></tr>';
-        const retry=$('#leaveOverviewRetry');if(retry)retry.onclick=()=>loadLeaveOverview({force:true});
-      }
-      console.error('[Nakna] leave overview failed',error);
-    }
+      const result=await api(`/api/leave-analytics?${key}`,{timeoutMs:18000,silentStatus:true});
+      if(seq!==leaveUnifiedSeq)return;
+      if(!result || !Array.isArray(result.people)||!Array.isArray(result.details))throw new Error('รูปแบบข้อมูลรายงานไม่ถูกต้อง');
+      state.leaveUnifiedReport=result;
+      state.leaveUnifiedClientId=workspaceId;
+      leaveUnifiedFiltersKey=cacheKey;leaveUnifiedLoadedAt=Date.now();
+      reconcileLeaveUnifiedOptions('leaveUnifiedEmployee',result.employee_options||[],'id',e=>`${[e.first_name,e.last_name].filter(Boolean).join(' ')||e.nickname||'ไม่ระบุ'} (${e.employee_code||e.id})`);
+      reconcileLeaveUnifiedOptions('leaveUnifiedDepartment',result.department_options||[],'id',d=>d.name||'ไม่ระบุ');
+      reconcileLeaveUnifiedOptions('leaveUnifiedType',(result.type_options||[]).map(name=>({name})),'name',d=>d.name);
+      if(loading)loading.textContent=`ข้อมูลล่าสุด · ${result.total_requests||0} คำขอที่ตรงตัวกรอง`;
+      renderLeaveUnified();
+    }catch(e){
+      if(seq!==leaveUnifiedSeq)return;
+      state.leaveUnifiedReport=null;leaveUnifiedFiltersKey='';
+      if($('#leaveUnifiedSummary'))$('#leaveUnifiedSummary').innerHTML='';
+      if($('#leaveUnifiedTypes'))$('#leaveUnifiedTypes').innerHTML='';
+      if($('#leaveUnifiedTop'))$('#leaveUnifiedTop').innerHTML='';
+      if(loading)loading.innerHTML=`<div role="alert" class="leave-unified-error">โหลดสรุปไม่สำเร็จ: ${escapeHtml(e?.message||'ระบบไม่ตอบสนอง')} <button type="button" id="leaveUnifiedRetryBtn" class="secondary-btn">ลองใหม่</button></div>`;
+      const retry=$('#leaveUnifiedRetryBtn');if(retry)retry.onclick=()=>loadLeaveUnified({force:true});
+      if($('#leaveUnifiedPeople'))$('#leaveUnifiedPeople').innerHTML='<tr><td colspan="8">ไม่สามารถโหลดข้อมูลใหม่ได้ กรุณาลองอีกครั้ง</td></tr>';
+      if($('#leaveUnifiedDetails'))$('#leaveUnifiedDetails').innerHTML='<tr><td colspan="8">ไม่สามารถโหลดรายละเอียดได้</td></tr>';
+    }finally{if(seq===leaveUnifiedSeq && refresh)refresh.disabled=false;}
   })();
-  leaveOverviewPending=task;
-  try{await task;}finally{if(leaveOverviewPending===task)leaveOverviewPending=null;}
+  leaveUnifiedPending=task;
+  try{await task;}finally{if(leaveUnifiedPending===task)leaveUnifiedPending=null;}
 }
-
-function leaveOverviewRows(){
-  const q=String($('#leaveOverviewSearch')?.value||'').trim().toLowerCase();
-  return (state.leaveOverviewReport?.people||[]).filter(p=>!q||[p.first_name,p.last_name,p.nickname,p.employee_code,p.department_name].join(' ').toLowerCase().includes(q));
+function filteredLeaveUnifiedPeople(){
+  const q=String($('#leaveUnifiedSearch')?.value||'').trim().toLowerCase();
+  return (state.leaveUnifiedReport?.people||[]).filter(p=>!q||[p.first_name,p.last_name,p.nickname,p.employee_code,p.department_name].join(' ').toLowerCase().includes(q));
 }
-function renderLeaveOverview(){
-  const r=state.leaveOverviewReport||{}; const people=leaveOverviewRows();
-  const n=x=>Number(x||0).toLocaleString('th-TH',{maximumFractionDigits:2});
-  if($('#leaveOverviewSummary')) $('#leaveOverviewSummary').innerHTML=`
-    <article><small>พนักงานทั้งหมด</small><strong>${n(r.total_employees)}</strong><span>คน</span></article>
-    <article><small>คนที่เคยลา</small><strong>${n(r.people_with_approved)}</strong><span>คน</span></article>
-    <article><small>ครั้งที่อนุมัติ</small><strong>${n(r.approved_requests)}</strong><span>ครั้ง</span></article>
-    <article><small>วันลารวม</small><strong>${n(r.approved_days)}</strong><span>วัน</span></article>`;
-  if($('#leaveOverviewBody')) $('#leaveOverviewBody').innerHTML=people.length?people.map(p=>`<tr>
+function renderLeaveUnified(){
+  const r=state.leaveUnifiedReport;if(!r)return;
+  const people=filteredLeaveUnifiedPeople();
+  const sum=r.summary||{};
+  const n=v=>Number(v||0).toLocaleString('th-TH',{maximumFractionDigits:2});
+  if($('#leaveUnifiedSummary'))$('#leaveUnifiedSummary').innerHTML=`
+    <article><small>พนักงานที่ลาอนุมัติ</small><strong>${n(sum.people_with_approved)}</strong><span>คน</span></article>
+    <article><small>ลาอนุมัติ</small><strong>${n(sum.approved_requests)}</strong><span>ครั้ง</span></article>
+    <article><small>วันลาอนุมัติ</small><strong>${n(sum.approved_days)}</strong><span>วัน</span></article>
+    <article><small>รออนุมัติ / หลักฐาน</small><strong>${n(Number(sum.pending_requests||0)+Number(sum.awaiting_evidence_requests||0))}</strong><span>รายการ</span></article>
+    <article><small>ไม่อนุมัติ</small><strong>${n(sum.rejected_requests)}</strong><span>รายการ</span></article>`;
+  const types=r.by_type||[];const max=Math.max(1,...types.map(x=>Number(x.days||0)));
+  if($('#leaveUnifiedTypes'))$('#leaveUnifiedTypes').innerHTML=types.length?types.map(t=>`<div class="leave-type-bar"><label>${escapeHtml(t.name||'ไม่ระบุ')}</label><div class="leave-type-track"><div class="leave-type-fill" style="width:${Math.max(3,Math.round(Number(t.days||0)*100/max))}%"></div></div><b>${n(t.days)} วัน · ${n(t.requests)} ครั้ง</b></div>`).join(''):'<div class="leave-unified-empty">ไม่มีรายการลาที่อนุมัติในตัวกรองนี้</div>';
+  const top=[...people].filter(p=>Number(p.approved_requests||0)>0).sort((a,b)=>b.approved_requests-a.approved_requests||b.approved_days-a.approved_days).slice(0,6);
+  if($('#leaveUnifiedTop'))$('#leaveUnifiedTop').innerHTML=top.length?top.map(p=>`<div class="leave-top-row"><div class="person-mini"><span class="avatar-mini">${escapeHtml((p.nickname||p.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml([p.first_name,p.last_name].filter(Boolean).join(' ')||p.nickname||'—')}</strong><small>${escapeHtml(p.department_name||'ไม่ระบุแผนก')}</small></div></div><b>${n(p.approved_requests)} ครั้ง</b></div>`).join(''):'<div class="leave-unified-empty">ยังไม่มีประวัติลาอนุมัติ</div>';
+  if($('#leaveUnifiedPeople'))$('#leaveUnifiedPeople').innerHTML=people.length?people.map(p=>`<tr>
     <td><strong>${escapeHtml([p.first_name,p.last_name].filter(Boolean).join(' ')||p.nickname||'—')}</strong><small>${escapeHtml(p.employee_code||'')}</small></td>
-    <td>${escapeHtml(p.department_name||'—')}</td>
-    <td><strong>${n(p.approved_requests)} ครั้ง</strong></td><td>${n(p.approved_days)} วัน</td>
-    <td>${(p.types||[]).map(t=>`<div><small>${escapeHtml(t.name)}: ${n(t.requests)} ครั้ง · ${n(t.days)} วัน</small></div>`).join('')||'<small>ยังไม่เคยลา</small>'}</td>
-    <td>${n(p.pending_requests)}</td><td>${n(p.rejected_requests)}</td>
-  </tr>`).join(''):'<tr><td colspan="7">ไม่พบพนักงานที่ตรงกับคำค้นหา</td></tr>';
+    <td>${escapeHtml(p.department_name||'—')}</td><td><strong>${n(p.approved_requests)} ครั้ง</strong></td>
+    <td>${n(p.approved_days)} วัน</td><td>${(p.types||[]).map(t=>`<small>${escapeHtml(t.name)}: ${n(t.requests)} ครั้ง · ${n(t.days)} วัน</small>`).join('<br>')||'<small>ยังไม่มีรายการที่อนุมัติ</small>'}</td>
+    <td>${n(p.pending_requests)}</td><td>${n(p.awaiting_evidence_requests)}</td><td>${n(p.rejected_requests)}</td>
+  </tr>`).join(''):'<tr><td colspan="8">ไม่พบพนักงานตามคำค้นหา</td></tr>';
+  const q=String($('#leaveUnifiedSearch')?.value||'').trim().toLowerCase();
+  const details=(r.details||[]).filter(x=>!q||[x.first_name,x.last_name,x.nickname,x.employee_code,x.department_name].join(' ').toLowerCase().includes(q));
+  if($('#leaveUnifiedDetails'))$('#leaveUnifiedDetails').innerHTML=details.length?details.map(row=>`<tr>
+    <td><strong>${escapeHtml([row.first_name,row.last_name].filter(Boolean).join(' ')||row.nickname||'—')}</strong><small>${escapeHtml(row.employee_code||'')}</small></td>
+    <td>${escapeHtml(row.leave_type_name||row.leave_type||'—')}</td>
+    <td>${escapeHtml(formatDate(row.start_date))}${row.start_date!==row.end_date?' – '+escapeHtml(formatDate(row.end_date)):''}</td>
+    <td>${n(row.period_days)} / ${n(row.duration_days)} วัน</td>
+    <td>${row.status==='cancelled'?'<span class="badge badge-neutral">ยกเลิก</span>':statusBadge(row.status)}</td><td>${escapeHtml(formatDateTime(row.created_at))}</td>
+    <td><strong>${escapeHtml(leaveDecisionName(row)||(['approved','rejected'].includes(row.status)?'ไม่พบผู้อนุมัติ':'—'))}</strong>${['approved','rejected'].includes(row.status)?`<small>${escapeHtml(row.decision_at?formatDateTime(row.decision_at):row.approved_at?formatDateTime(row.approved_at):'ไม่พบเวลาบันทึก')}</small>`:''}</td>
+    <td>${escapeHtml(row.reason||'—')}</td>
+  </tr>`).join(''):'<tr><td colspan="8">ไม่มีคำขอตามตัวกรองนี้</td></tr>';
+  if($('#leaveUnifiedDetailCount'))$('#leaveUnifiedDetailCount').textContent=`พบ ${n(r.total_requests)} รายการ · แสดงหน้า ${leaveUnifiedPage}`;
+  if($('#leaveUnifiedPage'))$('#leaveUnifiedPage').textContent=`หน้า ${leaveUnifiedPage} / ${Math.max(1,Math.ceil(Number(r.total_requests||0)/100))}`;
+  if($('#leaveUnifiedPrev'))$('#leaveUnifiedPrev').disabled=leaveUnifiedPage<=1;
+  if($('#leaveUnifiedNext'))$('#leaveUnifiedNext').disabled=leaveUnifiedPage*100>=Number(r.total_requests||0);
 }
-function exportLeaveOverview(){
-  const r=state.leaveOverviewReport;if(!r)return toast('รอโหลดข้อมูลก่อน',true);
-  const head=['รหัสพนักงาน','ชื่อพนักงาน','แผนก','จำนวนครั้งอนุมัติ','วันลาอนุมัติ','รายละเอียดประเภทลา','รออนุมัติ','ไม่อนุมัติ'];
-  const rows=leaveOverviewRows().map(p=>[p.employee_code||'', [p.first_name,p.last_name].filter(Boolean).join(' '),p.department_name||'',p.approved_requests||0,p.approved_days||0,(p.types||[]).map(t=>`${t.name}: ${t.requests} ครั้ง ${t.days} วัน`).join('; '),p.pending_requests||0,p.rejected_requests||0]);
-  const csv=[head,...rows].map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`nakna-leave-overview-${r.period==='all'?'all':r.year}.csv`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
-}
-
-function currentBangkokMonth(){
-  return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit'}).format(new Date()).slice(0,7);
-}
-function shiftMonthKey(monthKey, delta){
-  const [y,m]=String(monthKey||currentBangkokMonth()).split('-').map(Number);
-  const d=new Date(Date.UTC(y,m-1+delta,1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
-}
-async function loadLeaveMonthlyReport(monthKey){
-  const month = monthKey || $('#leaveReportMonth')?.value || currentBangkokMonth();
-  if ($('#leaveReportMonth')) $('#leaveReportMonth').value = month;
-  try{
-    const result=await api(`/api/leave-report?month=${encodeURIComponent(month)}`);
-    state.leaveMonthlyReport=result||{month,summary:{},by_type:[],top_people:[],rows:[]};
-    renderLeaveMonthlyReport();
-  }catch(error){
-    const body=$('#leaveReportBody');
-    if(body) body.innerHTML=`<tr><td colspan="9"><div class="leave-report-empty">${escapeHtml(error.message||'โหลดรายงานการลาไม่สำเร็จ')}</div></td></tr>`;
-  }
-}
-function renderLeaveMonthlyReport(){
-  const report=state.leaveMonthlyReport||{};
-  const summary=report.summary||{};
-  const status=$('#leaveReportStatus')?.value||'all';
-  const rows=(report.rows||[]).filter(r=>status==='all'||String(r.status)===status);
-  if($('#leaveReportRangeLabel')) $('#leaveReportRangeLabel').textContent=report.range_label||report.month||'—';
-  if($('#leaveReportSummary')) $('#leaveReportSummary').innerHTML=`
-    <article><small>พนักงานที่ลา</small><strong>${Number(summary.employees_with_leave||0).toLocaleString('th-TH')}</strong><span>คน</span></article>
-    <article><small>คำขอลา</small><strong>${Number(summary.requests||0).toLocaleString('th-TH')}</strong><span>รายการ</span></article>
-    <article><small>วันลาอนุมัติ</small><strong>${Number(summary.approved_days||0).toLocaleString('th-TH',{maximumFractionDigits:1})}</strong><span>วัน</span></article>
-    <article><small>รออนุมัติ</small><strong>${Number(summary.pending_requests||0).toLocaleString('th-TH')}</strong><span>รายการ</span></article>`;
-  const maxType=Math.max(1,...(report.by_type||[]).map(x=>Number(x.days||0)));
-  if($('#leaveReportByType')) $('#leaveReportByType').innerHTML=(report.by_type||[]).length
-    ? report.by_type.map(x=>`<div class="leave-type-bar"><label>${escapeHtml(x.name||'ไม่ระบุ')}</label><div class="leave-type-track"><div class="leave-type-fill" style="width:${Math.max(3,Math.round(Number(x.days||0)/maxType*100))}%"></div></div><b>${Number(x.days||0).toLocaleString('th-TH',{maximumFractionDigits:1})} วัน · ${Number(x.requests||0)} ครั้ง</b></div>`).join('')
-    : '<div class="leave-report-empty">เดือนนี้ยังไม่มีการลา</div>';
-  if($('#leaveReportTopPeople')) $('#leaveReportTopPeople').innerHTML=(report.top_people||[]).length
-    ? report.top_people.map((x,i)=>`<div class="leave-top-row"><div class="person-mini"><span class="avatar-mini">${escapeHtml((x.nickname||x.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml(x.nickname||x.first_name||'—')} ${escapeHtml(x.last_name||'')}</strong><small>${escapeHtml(x.department_name||'ยังไม่ระบุแผนก')}</small></div></div><b>${Number(x.days||0).toLocaleString('th-TH',{maximumFractionDigits:1})} วัน</b></div>`).join('')
-    : '<div class="leave-report-empty">ยังไม่มีวันลาที่อนุมัติ</div>';
-  if($('#leaveReportBody')) $('#leaveReportBody').innerHTML=rows.length?rows.map(r=>`
-    <tr>
-      <td><strong>${escapeHtml(r.nickname||r.first_name||'—')} ${escapeHtml(r.last_name||'')}</strong><small>${escapeHtml(r.employee_code||'')}</small></td>
-      <td><strong>${escapeHtml(r.department_name||'—')}</strong><small>${escapeHtml(r.position_name||'ยังไม่ระบุตำแหน่ง')}</small></td>
-      <td><strong>${escapeHtml(r.leave_type_name||r.leave_type||'—')}</strong><small>#LV-${String(r.id).padStart(4,'0')}</small></td>
-      <td><strong>${formatDate(r.start_date)}${r.start_date!==r.end_date?` – ${formatDate(r.end_date)}`:''}</strong><small>${escapeHtml(r.day_part==='am'?'ครึ่งวันเช้า':r.day_part==='pm'?'ครึ่งวันบ่าย':'เต็มวัน')}</small></td>
-      <td><strong>${Number(r.duration_days||0).toLocaleString('th-TH',{maximumFractionDigits:1})} วัน</strong></td>
-      <td><span>${escapeHtml(r.reason||'—')}</span></td>
-      <td>${statusBadge(r.status)}</td>
-      <td><strong>${escapeHtml(leaveDecisionName(r)||r.approver_nickname||r.approver_first_name||'ยังไม่ระบุ')}</strong><small>${r.decision_reason?escapeHtml(r.decision_reason):''}</small></td>
-      <td><strong>${escapeHtml(formatDateTime(r.created_at))}</strong>${leaveDecisionInfo(r)}</td>
-    </tr>`).join(''):`<tr><td colspan="9"><div class="leave-report-empty">ไม่มีรายการตามตัวกรองนี้</div></td></tr>`;
-}
-function exportLeaveMonthlyReportCsv(){
-  const report=state.leaveMonthlyReport||{};
-  const status=$('#leaveReportStatus')?.value||'all';
-  const rows=(report.rows||[]).filter(r=>status==='all'||String(r.status)===status);
-  if(!rows.length) return toast('ไม่มีข้อมูลสำหรับ Export',true);
-  const headers=['รหัสพนักงาน','ชื่อ','แผนก','ตำแหน่ง','ประเภทลา','วันเริ่ม','วันสิ้นสุด','จำนวนวัน','เหตุผล','สถานะ','ผู้อนุมัติ','วันที่ส่ง','วันที่อนุมัติ'];
-  const csv=[headers,...rows.map(r=>[
-    r.employee_code||'',`${r.nickname||r.first_name||''} ${r.last_name||''}`.trim(),r.department_name||'',r.position_name||'',r.leave_type_name||r.leave_type||'',
-    r.start_date||'',r.end_date||'',r.duration_days||0,r.reason||'',r.status||'',r.approver_nickname||r.approver_first_name||'HR / Owner',r.created_at||'',r.approved_at||''
-  ])].map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+function exportLeaveUnified(){
+  const r=state.leaveUnifiedReport;if(!r){toast('กรุณารอข้อมูลก่อน',true);return;}
+  const rows=[['รหัสพนักงาน','ชื่อพนักงาน','แผนก','ลาอนุมัติครั้ง','วันอนุมัติ','ประเภทลา','รออนุมัติ','รอหลักฐาน','ไม่อนุมัติ','ยกเลิก']];
+  for(const p of filteredLeaveUnifiedPeople())rows.push([p.employee_code||'',[p.first_name,p.last_name].filter(Boolean).join(' '),p.department_name||'',p.approved_requests||0,p.approved_days||0,(p.types||[]).map(t=>`${t.name} ${t.requests} ครั้ง ${t.days} วัน`).join('; '),p.pending_requests||0,p.awaiting_evidence_requests||0,p.rejected_requests||0,p.cancelled_requests||0]);
+  const csv=rows.map(row=>row.map(v=>`"${String(v??'').replace(/^[=+\-@]/,m=>"'"+m).replace(/"/g,'""')}"`).join(',')).join('\r\n');
   const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
-  const url=URL.createObjectURL(blob); const a=document.createElement('a');
-  a.href=url;a.download=`nakna-leave-${report.month||currentBangkokMonth()}.csv`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='nakna-leave-unified-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
 function leaveDecisionName(r) {
@@ -3324,7 +3321,7 @@ window.leaveAction = async (id, action) => {
     await api(`/api/leaves/${id}/${action}`, { method: 'PATCH', body: JSON.stringify({ reason }) });
     const leave=state.leaves.find(x=>Number(x.id)===Number(id));
     if(leave){ leave.status=action==='approve'?'approved':'rejected'; if(reason)leave.decision_reason=reason; }
-    renderLeaves(); markViewLoaded('leave'); state.leaveOverviewReport=null; loadLeaveOverview(); refreshDashboardSoon(80); api('/api/leaves').then(res=>{state.leaves=res.data||[];renderLeaves();}).catch(()=>{});
+    renderLeaves(); markViewLoaded('leave'); state.leaveUnifiedReport=null; leaveUnifiedFiltersKey=''; loadLeaveUnified({force:true}); refreshDashboardSoon(80); api('/api/leaves').then(res=>{state.leaves=res.data||[];renderLeaves();}).catch(()=>{});
     toast(action === 'approve' ? 'อนุมัติคำขอลาเรียบร้อยแล้ว' : 'บันทึกเหตุผลและไม่อนุมัติแล้ว');
   } catch (error) { toast(error.message, true); }
 };
@@ -3596,6 +3593,7 @@ function showView(name) {
   // Route-based lazy loading: opening one menu no longer downloads every HR
   // module. This is especially important on mobile / 4G.
   loadViewData(name).catch(error=>console.warn('[Nakna] route load failed',name,error));
+  if(name==='leave' && (!state.leaveUnifiedReport || Number(state.leaveUnifiedClientId)!==Number(activeCompany()?.id||state.dashboard?.client?.id||0) || Date.now()-leaveUnifiedLoadedAt>60000)) loadLeaveUnified();
 }
 
 function showSettingsHome({ scroll = true } = {}) {
