@@ -1,0 +1,11 @@
+  // P10.4: same company-scoped document resource; DELETE stays soft archive.
+  const employeeDocumentEditMatch = path.match(/^\/api\/employee-documents\/(\d+)$/);
+  const employeeDocumentRestoreMatch = path.match(/^\/api\/employee-documents\/(\d+)\/restore$/);
+  if ((employeeDocumentEditMatch && ['PATCH','DELETE'].includes(method)) || (employeeDocumentRestoreMatch && method==='POST')) {
+    if (!canManagePeopleAdmin(auth.role)) return json({error:'ไม่มีสิทธิ์แก้ไขหรือลบเอกสารพนักงาน'},403);
+    await ensureDocumentFoundationReady(env.DB);
+    const id=Number((employeeDocumentEditMatch||employeeDocumentRestoreMatch)[1]);
+    const action=method==='PATCH'?'edit':method==='DELETE'?'archive':'restore';
+    return await manageEmployeeDocument(request,env.DB,{clientId:Number(clientId),userId:Number(auth.user.id),canEdit:canManagePeopleAdmin(auth.role)},id,action);
+  }
+

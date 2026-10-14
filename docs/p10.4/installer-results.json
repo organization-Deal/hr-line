@@ -1,0 +1,24 @@
+{
+  "passed": 19,
+  "cases": [
+    "P10.0: dry-run leaves files unchanged",
+    "P10.0: applies exact document changes",
+    "P10.0: frontend outside document block byte-identical",
+    "P10.0: backend outside document routes byte-identical",
+    "P10.0: installer idempotent",
+    "P10.0: rollback returns exact original source",
+    "P10.1-Workspace: dry-run leaves files unchanged",
+    "P10.1-Workspace: applies exact document changes",
+    "P10.1-Workspace: frontend outside document block byte-identical",
+    "P10.1-Workspace: backend outside document routes byte-identical",
+    "P10.1-Workspace: installer idempotent",
+    "P10.1-Workspace: rollback returns exact original source",
+    "P10.2: dry-run leaves files unchanged",
+    "P10.2: applies exact document changes",
+    "P10.2: frontend outside document block byte-identical",
+    "P10.2: backend outside document routes byte-identical",
+    "P10.2: installer idempotent",
+    "P10.2: rollback returns exact original source",
+    "Unknown source changes: refusal before any write"
+  ]
+}

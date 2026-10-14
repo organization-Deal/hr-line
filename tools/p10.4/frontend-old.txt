@@ -1,0 +1,119 @@
+function ensureEmployeeDocumentsDialog(){
+  let dialog = $('#employeeDocumentsModal');
+  if (dialog) return dialog;
+  dialog = document.createElement('dialog');
+  dialog.id = 'employeeDocumentsModal';
+  dialog.className = 'modal employee-documents-modal';
+  dialog.innerHTML = `<div class="modal-box employee-documents-box">
+    <div class="modal-head"><div><p class="kicker">EMPLOYEE FILES</p><h3 id="employeeDocumentsTitle">เอกสารพนักงาน</h3><p>สัญญาจ้าง บัตรประชาชน สมุดบัญชี ประกันสังคม และเอกสารประกอบ Payroll</p></div><button type="button" class="icon-btn" data-close-employee-docs>×</button></div>
+    <input type="hidden" id="employeeDocumentsEmployeeId" />
+    <div class="employee-doc-upload-grid">
+      <label><span>ประเภทเอกสาร</span><select id="employeeDocumentType"><optgroup label="การจ้างงาน"><option value="employment_contract">สัญญาจ้างงาน</option><option value="job_description">Job Description</option><option value="nda">ข้อตกลงรักษาความลับ</option><option value="probation">เอกสารทดลองงาน</option><option value="salary_adjustment">เอกสารปรับเงินเดือน</option></optgroup><optgroup label="ข้อมูลส่วนตัว"><option value="id_card_copy">สำเนาบัตรประชาชน</option><option value="house_registration">สำเนาทะเบียนบ้าน</option><option value="bank_book_copy">หน้าสมุดบัญชี</option><option value="education_certificate">วุฒิการศึกษา</option></optgroup><optgroup label="Payroll / ภาษี"><option value="social_security">เอกสารประกันสังคม</option><option value="tax_document">เอกสารภาษี</option><option value="salary_certificate">หนังสือรับรองเงินเดือน</option></optgroup><optgroup label="HR / สิ้นสุดการจ้าง"><option value="performance">เอกสารประเมินผลงาน</option><option value="warning">หนังสือเตือน</option><option value="resignation">เอกสารลาออก</option><option value="asset_return">เอกสารคืนทรัพย์สิน</option><option value="final_pay">Final Pay</option><option value="employment_certificate">หนังสือรับรองการทำงาน</option><option value="other">เอกสารอื่น</option></optgroup></select></label>
+      <label><span>วันที่เอกสาร</span><input id="employeeDocumentDate" type="date" /></label>
+      <label><span>วันหมดอายุ (ถ้ามี)</span><input id="employeeDocumentExpires" type="date" /></label>
+      <label><span>การมองเห็น</span><select id="employeeDocumentVisibility"><option value="hr_only">HR เท่านั้น</option><option value="employee">พนักงานเห็นได้</option><option value="manager">ผู้จัดการเห็นได้</option></select></label>
+      <label><span>ระดับความลับ</span><select id="employeeDocumentConfidentiality"><option value="confidential">Confidential</option><option value="internal">Internal</option><option value="restricted">Restricted</option></select></label>
+      <label class="employee-doc-file-field"><span>ไฟล์</span><input id="employeeDocumentFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx" /></label>
+    </div>
+    <div class="employee-doc-upload-actions"><div><small>PDF / รูป / Word · สูงสุด 10 MB · ระบบจะใช้ Google Drive ของบริษัท และสำรองลงพื้นที่เก็บไฟล์ของนากนะเมื่อ Drive ใช้งานไม่ได้</small><div id="employeeDocumentUploadStatus" role="status" aria-live="polite" style="margin-top:6px;font-size:12px;color:var(--muted,#6b787a)"></div></div><button id="employeeDocumentUploadBtn" class="btn primary" type="button">อัปโหลดไฟล์</button></div>
+    <div id="employeeDocumentsList" class="employee-documents-list"></div>
+  </div>`;
+  document.body.appendChild(dialog);
+  dialog.querySelector('[data-close-employee-docs]').onclick = () => dialog.close();
+  $('#employeeDocumentUploadBtn').onclick = uploadEmployeeDocument;
+  return dialog;
+}
+
+const employeeDocumentTypeLabel = type => ({employment_contract:'สัญญาจ้างงาน',job_description:'Job Description',nda:'ข้อตกลงรักษาความลับ',id_card_copy:'สำเนาบัตรประชาชน',house_registration:'สำเนาทะเบียนบ้าน',bank_book_copy:'หน้าสมุดบัญชี',social_security:'เอกสารประกันสังคม',tax_document:'เอกสารภาษี',education_certificate:'วุฒิการศึกษา',salary_certificate:'หนังสือรับรองเงินเดือน',employment_certificate:'หนังสือรับรองการทำงาน',probation:'เอกสารทดลองงาน',salary_adjustment:'เอกสารปรับเงินเดือน',performance:'เอกสารประเมินผลงาน',warning:'หนังสือเตือน',resignation:'เอกสารลาออก',asset_return:'เอกสารคืนทรัพย์สิน',final_pay:'Final Pay',other:'เอกสารอื่น'})[type] || 'เอกสาร';
+
+async function loadEmployeeDocuments(employeeId){
+  const result = await api(`/api/employees/${employeeId}/documents`);
+  const list = $('#employeeDocumentsList');
+  const docs = result.data || [];
+  list.innerHTML = docs.length ? docs.map(doc => `<div class="employee-document-row ${doc.status==='archived'?'is-archived':''}">
+    <div class="employee-document-icon">${iconSvg('document')}</div>
+    <div class="employee-document-copy"><strong>${escapeHtml(doc.title || employeeDocumentTypeLabel(doc.document_type))} <span class="doc-version">v${Number(doc.version||1)}</span></strong><span>${escapeHtml(employeeDocumentTypeLabel(doc.document_type))} · ${doc.document_date ? formatDate(doc.document_date) : formatDate(String(doc.created_at||'').slice(0,10))}${doc.expires_at ? ` · หมดอายุ ${formatDate(doc.expires_at)}` : ''}</span><small>${escapeHtml(doc.file_name || '')} · ${escapeHtml(doc.confidentiality||'internal')} ${doc.status==='archived'?'· เก็บถาวร':''}</small></div>
+    <div class="employee-document-actions">${(doc.drive_url || doc.storage_provider==='r2') ? `<a class="text-btn" href="/api/employee-documents/${Number(doc.id)}/file" target="_blank" rel="noopener">เปิดไฟล์</a>` : ''}<button type="button" class="text-btn" onclick="window.openEmployeeDocumentHistory(${Number(doc.id)})">ประวัติ</button>${doc.status!=='archived'?`<button type="button" class="text-btn danger-text" onclick="window.deleteEmployeeDocument(${Number(doc.id)},${Number(employeeId)})">เก็บถาวร</button>`:''}</div>
+  </div>`).join('') : emptyState('ยังไม่มีเอกสาร', 'อัปโหลดสัญญาจ้าง สำเนาบัตรประชาชน หน้าสมุดบัญชี หรือเอกสาร Payroll ได้จากด้านบน');
+  return result;
+}
+
+window.openEmployeeDocuments = async id => {
+  const employee = state.employees.find(item => Number(item.id) === Number(id));
+  if (!employee) return toast('ไม่พบข้อมูลพนักงาน', true);
+  const dialog = ensureEmployeeDocumentsDialog();
+  $('#employeeDocumentsEmployeeId').value = String(id);
+  $('#employeeDocumentsTitle').textContent = `เอกสาร · ${employee.nickname || employee.first_name}`;
+  $('#employeeDocumentDate').value = localDateKey(new Date());
+  $('#employeeDocumentExpires').value = '';
+  $('#employeeDocumentFile').value = '';
+  $('#employeeDocumentsList').innerHTML = `<div class="employee-doc-loading">กำลังโหลดเอกสาร…</div>`;
+  dialog.showModal();
+  try { await loadEmployeeDocuments(id); } catch (error) { $('#employeeDocumentsList').innerHTML = emptyState('โหลดเอกสารไม่สำเร็จ', error.message); }
+};
+
+async function uploadEmployeeDocument(){
+  const employeeId = Number($('#employeeDocumentsEmployeeId').value || 0);
+  const file = $('#employeeDocumentFile').files?.[0];
+  const status = $('#employeeDocumentUploadStatus');
+  if (!employeeId || !file) return toast('กรุณาเลือกไฟล์ก่อน', true);
+  if (file.size > 10 * 1024 * 1024) return toast('ไฟล์ต้องไม่เกิน 10 MB', true);
+  const extension = String(file.name || '').toLowerCase().split('.').pop();
+  if (!['pdf','png','jpg','jpeg','webp','doc','docx'].includes(extension)) return toast('รองรับเฉพาะ PDF รูปภาพ และ Word', true);
+  const button = $('#employeeDocumentUploadBtn');
+  button.disabled = true; button.textContent = 'กำลังอัปโหลด…';
+  if(status) status.textContent = `กำลังส่ง ${file.name} (${Math.max(1,Math.round(file.size/1024))} KB)…`;
+  try {
+    const form = new FormData();
+    form.append('file',file);
+    form.append('document_type',$('#employeeDocumentType').value);
+    form.append('document_date',$('#employeeDocumentDate').value);
+    form.append('expires_at',$('#employeeDocumentExpires').value);
+    form.append('visibility',$('#employeeDocumentVisibility').value);
+    form.append('confidentiality',$('#employeeDocumentConfidentiality').value);
+    const data = await api(`/api/employees/${employeeId}/documents`,{method:'POST',body:form,timeoutMs:60000,silentStatus:true});
+    if(status) status.textContent = data.storage_provider==='r2' ? 'อัปโหลดสำเร็จ · เก็บในพื้นที่ไฟล์สำรองของนากนะ' : 'อัปโหลดสำเร็จ · เก็บใน Google Drive ของบริษัท';
+    $('#employeeDocumentFile').value='';
+    await loadEmployeeDocuments(employeeId);
+    const localEmployee = state.employees.find(item => Number(item.id) === employeeId);
+    if(localEmployee) localEmployee.document_count = Number(localEmployee.document_count || 0) + 1;
+    renderEmployees($('#employeeSearch')?.value || '');
+    // Refresh only the employee list in the background. Do not reload the entire
+    // HR dashboard after one file upload; that made a successful upload look stuck.
+    api('/api/employees',{timeoutMs:10000,silentStatus:true}).then(result=>{
+      if(Array.isArray(result?.data)){
+        state.employees=result.data;
+        renderEmployees($('#employeeSearch')?.value || '');
+      }
+    }).catch(()=>{});
+    toast('อัปโหลดเอกสารแล้ว');
+  } catch(error) {
+    const message = String(error?.message || 'อัปโหลดเอกสารไม่สำเร็จ');
+    if(status) status.textContent = `อัปโหลดไม่สำเร็จ · ${message}`;
+    toast(message,true);
+  } finally {
+    button.disabled=false;
+    button.textContent='อัปโหลดไฟล์';
+  }
+}
+
+window.openEmployeeDocumentHistory = async documentId => {
+  try {
+    const result=await api(`/api/employee-documents/${documentId}/events`);
+    const events=result.data||[];
+    const lines=events.length?events.map(e=>`${formatDateTime(e.created_at)} — ${e.event_type==='uploaded'?'อัปโหลดเอกสาร':e.event_type==='archived'?'เก็บเข้าคลังถาวร':e.event_type}${e.actor_email?` · ${e.actor_email}`:''}`).join('\n'):'ยังไม่มีประวัติ';
+    window.alert(`ประวัติ · ${result.document?.title||'เอกสาร'}\nVersion ${result.document?.version||1} · ${result.document?.status||'active'}\n\n${lines}`);
+  } catch(error){ toast(error.message||'โหลดประวัติเอกสารไม่สำเร็จ',true); }
+};
+
+window.deleteEmployeeDocument = async (documentId,employeeId) => {
+  if (!window.confirm('เก็บเอกสารนี้เข้าคลังถาวร?\nประวัติและไฟล์ต้นฉบับจะยังคงอยู่เพื่อการตรวจสอบย้อนหลัง')) return;
+  try {
+    await api(`/api/employee-documents/${documentId}`,{method:'DELETE',body:'{}'});
+    await loadEmployeeDocuments(employeeId);
+    // Archiving changes only this employee's document state. Never reload all HR modules.
+    toast('เก็บเอกสารเข้าคลังถาวรแล้ว');
+  }
+  catch(error){ toast(error.message || 'ลบเอกสารไม่สำเร็จ',true); }
+};
+

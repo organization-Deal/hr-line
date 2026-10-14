@@ -1,0 +1,144 @@
+// P10.4 EMPLOYEE DOCUMENTS START — shared by P10.0/P10.1/P10.2 frontends.
+const employeeDocumentUi = {generation:0,request:0,employeeId:0,companyId:0,docs:[],permissions:{},tab:'active',query:'',busy:false,pane:'list',editId:0};
+const employeeDocumentTypeNames={employment_contract:'สัญญาจ้างงาน',job_description:'Job Description',nda:'ข้อตกลงรักษาความลับ',id_card_copy:'สำเนาบัตรประชาชน',house_registration:'สำเนาทะเบียนบ้าน',bank_book_copy:'หน้าสมุดบัญชี',social_security:'เอกสารประกันสังคม',tax_document:'เอกสารภาษี',education_certificate:'วุฒิการศึกษา',salary_certificate:'หนังสือรับรองเงินเดือน',employment_certificate:'หนังสือรับรองการทำงาน',probation:'เอกสารทดลองงาน',salary_adjustment:'เอกสารปรับเงินเดือน',performance:'เอกสารประเมินผลงาน',warning:'หนังสือเตือน',resignation:'เอกสารลาออก',asset_return:'เอกสารคืนทรัพย์สิน',final_pay:'Final Pay',other:'เอกสารอื่น'};
+const employeeDocumentTypeLabel = type => employeeDocumentTypeNames[type] || 'เอกสาร';
+const employeeDocumentFieldLabels={title:'ชื่อเอกสาร',document_type:'ประเภทเอกสาร',document_date:'วันที่เอกสาร',expires_at:'วันหมดอายุ',visibility:'การมองเห็น',confidentiality:'ระดับความลับ',note:'หมายเหตุ',status:'สถานะ',archived_at:'วันที่ลบ'};
+function employeeDocumentDateText(value){if(!value)return 'ไม่ระบุ';const d=new Date(String(value).slice(0,10)+'T00:00:00Z');return Number.isNaN(d.getTime())?String(value):new Intl.DateTimeFormat('th-TH',{day:'numeric',month:'short',year:'numeric',timeZone:'Asia/Bangkok'}).format(d);}
+function employeeDocumentStamp(value){if(!value)return 'ไม่พบเวลา';let s=String(value).replace(' ','T');if(!/([zZ]|[+-]\d{2}:?\d{2})$/.test(s))s+='Z';const d=new Date(s);return Number.isNaN(d.getTime())?String(value):new Intl.DateTimeFormat('th-TH',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Bangkok'}).format(d);}
+function employeeDocumentContext(){return `${employeeDocumentUi.generation}:${employeeDocumentUi.companyId}:${employeeDocumentUi.employeeId}`;}
+function employeeDocumentContextValid(key){return key===employeeDocumentContext()&&Number(state.me?.active_company_id||0)===employeeDocumentUi.companyId&&Boolean($('#employeeDocumentsModal')?.open);}
+function employeeDocumentError(error){if(String(error?.message||'').startsWith('API_TIMEOUT'))return 'รอนานเกินไป ข้อมูลที่กรอกยังอยู่ กดโหลดรายการเพื่อตรวจว่าบันทึกสำเร็จหรือไม่ก่อนส่งซ้ำ';return error?.message||'ทำรายการไม่สำเร็จ กรุณาลองอีกครั้ง';}
+function employeeDocumentSetMessage(message,isError=false){const el=$('#employeeDocumentsMessage');if(el){el.textContent=message;el.hidden=!message;el.className=isError?'ed-message is-error':'ed-message';if(isError){const body=$('#employeeDocumentsModal .ed-body');if(body)body.scrollTop=0;}}}
+function employeeDocumentShowPane(pane){employeeDocumentUi.pane=pane;const scroller=$('#employeeDocumentsModal .ed-body');if(scroller)scroller.scrollTop=0;for(const el of document.querySelectorAll('#employeeDocumentsModal [data-ed-pane]'))el.hidden=el.dataset.edPane!==pane;}
+function employeeDocumentGuardClose(){if(employeeDocumentUi.busy){employeeDocumentSetMessage('กำลังบันทึก กรุณารอผลก่อนปิดหน้าต่าง');return false;}if(employeeDocumentUi.pane==='edit'&&!window.confirm('ปิดโดยไม่บันทึกการแก้ไข?'))return false;return true;}
+function ensureEmployeeDocumentsDialog(){
+  if(!$('#nkEmployeeDocumentStyle104')){const link=document.createElement('link');link.id='nkEmployeeDocumentStyle104';link.rel='stylesheet';link.href='/ui/employee-documents-p10_4.css?v=P10.4';document.head.appendChild(link);}
+  let dialog=$('#employeeDocumentsModal');if(dialog)return dialog;
+  dialog=document.createElement('dialog');dialog.id='employeeDocumentsModal';dialog.className='modal employee-documents-modal nk-ed104';dialog.setAttribute('aria-labelledby','employeeDocumentsTitle');
+  const options=Object.entries(employeeDocumentTypeNames).map(([v,t])=>`<option value="${v}">${escapeHtml(t)}</option>`).join('');
+  dialog.innerHTML=`<div class="modal-box employee-documents-box ed-shell">
+    <header class="modal-head ed-head"><div><p class="kicker">EMPLOYEE FILES · P10.4</p><h3 id="employeeDocumentsTitle">เอกสารพนักงาน</h3><p id="employeeDocumentsSubtitle"></p></div><button type="button" class="icon-btn" data-ed-close aria-label="ปิดเอกสารพนักงาน">×</button></header>
+    <input type="hidden" id="employeeDocumentsEmployeeId"><div class="ed-body">
+    <div id="employeeDocumentsMessage" class="ed-message" role="status" aria-live="polite" hidden></div>
+    <section data-ed-pane="list">
+      <div class="ed-toolbar"><div class="ed-tabs" role="group" aria-label="รายการเอกสาร"><button type="button" data-ed-tab="active" aria-pressed="true">ใช้งานอยู่ <b id="edActiveCount">—</b></button><button type="button" data-ed-tab="archived" aria-pressed="false">ลบ / เก็บถาวร <b id="edArchiveCount">—</b></button></div><button type="button" class="btn primary" id="edAddButton">+ เพิ่มเอกสาร</button></div>
+      <div class="ed-upload" id="edUploadPanel" hidden><h4>เพิ่มเอกสารใหม่</h4><div class="ed-form-grid">
+        <label class="ed-wide"><span>ชื่อเอกสาร (เว้นว่างเพื่อใช้ชื่อประเภท)</span><input id="employeeDocumentTitle" maxlength="200" placeholder="เช่น สัญญาจ้างงาน ปี 2569"></label>
+        <label><span>ประเภทเอกสาร</span><select id="employeeDocumentType">${options}</select></label>
+        <label><span>วันที่เอกสาร</span><input id="employeeDocumentDate" type="date"></label>
+        <label><span>วันหมดอายุ (ไม่บังคับ)</span><input id="employeeDocumentExpires" type="date"></label>
+        <label><span>การมองเห็น</span><select id="employeeDocumentVisibility"><option value="hr_only">HR เท่านั้น</option><option value="employee">พนักงานเห็นได้</option><option value="manager">ผู้จัดการเห็นได้</option></select></label>
+        <label><span>ระดับความลับ</span><select id="employeeDocumentConfidentiality"><option value="confidential">Confidential</option><option value="internal">Internal</option><option value="restricted">Restricted</option></select></label>
+        <label><span>ไฟล์ · สูงสุด 10 MB</span><input id="employeeDocumentFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx"></label>
+        <label class="ed-wide"><span>หมายเหตุ</span><textarea id="employeeDocumentNote" maxlength="4000" rows="2"></textarea></label>
+      </div><p class="ed-muted">PDF / PNG / JPG / WEBP / Word · เก็บใน Google Drive หรือพื้นที่สำรองเดิมของบริษัท</p><div id="employeeDocumentUploadStatus" role="status" aria-live="polite"></div><div class="ed-footer"><button type="button" class="btn" id="edUploadCancel">ยกเลิก</button><button type="button" class="btn primary" id="employeeDocumentUploadBtn">อัปโหลดไฟล์</button></div></div>
+      <div class="ed-search"><label><span class="sr-only">ค้นหาเอกสาร</span><input id="edSearch" type="search" placeholder="ค้นหาชื่อเอกสาร / ชื่อไฟล์"></label><button type="button" class="btn" id="edReload">โหลดรายการ</button></div>
+      <div id="employeeDocumentsList" class="employee-documents-list"></div>
+    </section>
+    <section data-ed-pane="edit" hidden><button type="button" class="text-btn" data-ed-back>← กลับรายการเอกสาร</button><h4>แก้ไขข้อมูลเอกสาร</h4><p class="ed-note">แก้ข้อมูลกำกับเอกสารเท่านั้น ไม่เปลี่ยนข้อความในไฟล์ต้นฉบับ ไม่แก้วันสิ้นสุดสัญญาในโปรไฟล์พนักงาน</p><p id="edSealedNotice" class="ed-message" hidden>เอกสารที่สร้างจากระบบหรือผ่านการลงนามแล้ว แก้ได้เฉพาะหมายเหตุ หากเนื้อหาไม่ถูกต้องต้องออกฉบับใหม่</p>
+      <form id="edEditForm"><div class="ed-form-grid">
+        <label class="ed-wide"><span>ชื่อเอกสาร *</span><input name="title" maxlength="200" required></label>
+        <label><span>ประเภทเอกสาร</span><select name="document_type">${options}</select></label>
+        <label><span>วันที่เอกสาร</span><input name="document_date" type="date"></label>
+        <label><span>วันหมดอายุ</span><input name="expires_at" type="date"><small>ล้างวันที่ได้เมื่อเอกสารไม่มีวันหมดอายุ</small></label>
+        <label><span>การมองเห็น</span><select name="visibility"><option value="hr_only">HR เท่านั้น</option><option value="employee">พนักงานเห็นได้</option><option value="manager">ผู้จัดการเห็นได้</option></select></label>
+        <label><span>ระดับความลับ</span><select name="confidentiality"><option value="internal">Internal</option><option value="confidential">Confidential</option><option value="restricted">Restricted</option></select></label>
+        <label class="ed-wide"><span>หมายเหตุ</span><textarea name="note" rows="3" maxlength="4000"></textarea></label>
+        <label class="ed-wide"><span>เหตุผลที่แก้ไข *</span><textarea name="reason" rows="2" maxlength="1000" required placeholder="เช่น กรอกวันหมดอายุผิด ขอแก้ให้ตรงกับสัญญา"></textarea></label>
+      </div><div class="ed-footer"><button type="button" class="btn" data-ed-back>ยกเลิก</button><button type="submit" class="btn primary" id="edSaveButton">บันทึกการแก้ไข</button></div></form>
+    </section>
+    <section data-ed-pane="confirm" hidden><button type="button" class="text-btn" data-ed-back>← กลับรายการเอกสาร</button><h4 id="edConfirmTitle"></h4><p id="edConfirmCopy" class="ed-note"></p><p id="edConfirmDocument" class="ed-confirm-doc"></p><form id="edConfirmForm"><label><span>เหตุผล *</span><textarea id="edConfirmReason" maxlength="1000" rows="3" required placeholder="ระบุเหตุผลเพื่อเก็บในประวัติ"></textarea></label><div class="ed-footer"><button type="button" class="btn" data-ed-back>ยกเลิก</button><button type="submit" class="btn primary" id="edConfirmButton">ยืนยัน</button></div></form></section>
+    <section data-ed-pane="history" hidden><button type="button" class="text-btn" data-ed-back>← กลับรายการเอกสาร</button><h4>ประวัติการเปลี่ยนแปลง</h4><p class="ed-muted">วันเวลาแสดงตามประเทศไทย · ประวัติเดิมที่ไม่บันทึกรายละเอียดจะไม่ถูกสร้างย้อนหลัง</p><div id="edHistoryList"></div></section>
+    </div></div>`;
+  document.body.appendChild(dialog);
+  dialog.querySelector('[data-ed-close]').onclick=()=>{if(employeeDocumentGuardClose())dialog.close();};
+  dialog.addEventListener('cancel',event=>{if(!employeeDocumentGuardClose())event.preventDefault();});
+  dialog.addEventListener('close',()=>{employeeDocumentUi.generation++;employeeDocumentUi.docs=[];employeeDocumentUi.editId=0;});
+  dialog.querySelectorAll('[data-ed-back]').forEach(btn=>btn.onclick=()=>{if(employeeDocumentUi.busy)return;if(employeeDocumentUi.pane==='edit'&&!window.confirm('กลับโดยไม่บันทึกการแก้ไข?'))return;employeeDocumentSetMessage('');employeeDocumentShowPane('list');});
+  dialog.querySelectorAll('[data-ed-tab]').forEach(btn=>btn.onclick=()=>{employeeDocumentUi.tab=btn.dataset.edTab;employeeDocumentRenderList();});
+  $('#edSearch').oninput=()=>{employeeDocumentUi.query=$('#edSearch').value;employeeDocumentRenderList();};
+  $('#edReload').onclick=()=>loadEmployeeDocuments(employeeDocumentUi.employeeId).catch(error=>employeeDocumentSetMessage(employeeDocumentError(error),true));
+  $('#edAddButton').onclick=()=>{if(!employeeDocumentUi.busy)$('#edUploadPanel').hidden=!$('#edUploadPanel').hidden;};
+  $('#edUploadCancel').onclick=()=>{if(!employeeDocumentUi.busy)$('#edUploadPanel').hidden=true;};
+  $('#employeeDocumentUploadBtn').onclick=uploadEmployeeDocument;
+  $('#edEditForm').onsubmit=employeeDocumentSaveEdit;
+  $('#edConfirmForm').onsubmit=employeeDocumentConfirmMutation;
+  $('#employeeDocumentsList').onclick=event=>{const button=event.target.closest('button[data-ed-action]');if(!button||employeeDocumentUi.busy)return;const id=Number(button.dataset.id);if(button.dataset.edAction==='edit')window.editEmployeeDocument(id);else if(button.dataset.edAction==='history')window.openEmployeeDocumentHistory(id);else employeeDocumentOpenConfirm(id,button.dataset.edAction);};
+  return dialog;
+}
+function employeeDocumentRenderList(){
+  const u=employeeDocumentUi,list=$('#employeeDocumentsList');if(!list)return;
+  const all=u.docs,active=all.filter(d=>d.status!=='archived');
+  $('#edActiveCount').textContent=String(active.length);$('#edArchiveCount').textContent=String(all.length-active.length);
+  for(const btn of document.querySelectorAll('#employeeDocumentsModal [data-ed-tab]'))btn.setAttribute('aria-pressed',String(btn.dataset.edTab===u.tab));
+  $('#edAddButton').hidden=!u.permissions.can_edit;
+  if(!u.permissions.can_edit)$('#edUploadPanel').hidden=true;
+  const query=u.query.trim().toLocaleLowerCase();
+  const docs=all.filter(d=>(d.status==='archived')===(u.tab==='archived')).filter(d=>!query||[d.title,d.file_name,employeeDocumentTypeLabel(d.document_type)].join(' ').toLocaleLowerCase().includes(query));
+  list.innerHTML=docs.length?docs.map(d=>`<article class="ed-doc ${d.status==='archived'?'is-archived':''}" data-document-id="${Number(d.id)}"><div class="ed-doc-main"><div class="ed-doc-icon" aria-hidden="true">${iconSvg('document')}</div><div class="ed-doc-copy"><strong>${escapeHtml(d.title||employeeDocumentTypeLabel(d.document_type))}</strong><div class="ed-doc-meta">${escapeHtml(employeeDocumentTypeLabel(d.document_type))} · <span>${d.status==='archived'?'ลบ / เก็บถาวร':'ใช้งานอยู่'}</span></div><dl><div><dt>วันที่เอกสาร</dt><dd>${escapeHtml(employeeDocumentDateText(d.document_date))}</dd></div><div><dt>วันหมดอายุ</dt><dd>${escapeHtml(employeeDocumentDateText(d.expires_at))}</dd></div></dl><p class="ed-file">${escapeHtml(d.file_name||'ไม่มีชื่อไฟล์')} · ${escapeHtml(d.confidentiality||'internal')} · ${{hr_only:'HR เท่านั้น',employee:'พนักงานเห็นได้',manager:'ผู้จัดการเห็นได้'}[d.visibility]||'ไม่ระบุ'}</p>${d.note?`<p class="ed-file">หมายเหตุ: ${escapeHtml(d.note)}</p>`:''}</div></div><div class="ed-doc-actions">${d.drive_url||d.storage_provider==='r2'?`<a class="btn" href="/api/employee-documents/${Number(d.id)}/file" target="_blank" rel="noopener">เปิดไฟล์</a>`:''}${d.editable_fields?.length?`<button type="button" class="btn" data-ed-action="edit" data-id="${Number(d.id)}">${d.editable_fields.length===1?'แก้หมายเหตุ':'แก้ไข'}</button>`:''}<button type="button" class="btn" data-ed-action="history" data-id="${Number(d.id)}">ประวัติ</button>${d.can_archive?`<button type="button" class="btn ed-danger" data-ed-action="archive" data-id="${Number(d.id)}">ลบเอกสาร</button>`:''}${d.can_restore?`<button type="button" class="btn" data-ed-action="restore" data-id="${Number(d.id)}">กู้คืน</button>`:''}</div></article>`).join(''):`<div class="ed-empty">${query?'ไม่พบเอกสารที่ตรงกับคำค้น':u.tab==='archived'?'ยังไม่มีเอกสารที่ลบ / เก็บถาวร':'ยังไม่มีเอกสารที่ใช้งานอยู่'}</div>`;
+}
+function employeeDocumentUpdateCount(){const e=state.employees.find(item=>Number(item.id)===employeeDocumentUi.employeeId);if(e)e.document_count=employeeDocumentUi.docs.filter(d=>d.status!=='archived').length;try{renderEmployees($('#employeeSearch')?.value||'');}catch{} }
+async function loadEmployeeDocuments(employeeId){
+  const context=employeeDocumentContext(),ticket=++employeeDocumentUi.request;
+  const result=await api(`/api/employees/${Number(employeeId)}/documents`,{timeoutMs:15000,silentStatus:true});
+  if(!employeeDocumentContextValid(context)||ticket!==employeeDocumentUi.request||Number(employeeId)!==employeeDocumentUi.employeeId)return result;
+  if(!Array.isArray(result.data))throw new Error('ข้อมูลเอกสารไม่ครบ กรุณาลองโหลดใหม่');
+  employeeDocumentUi.docs=result.data;employeeDocumentUi.permissions=result.permissions||{};
+  employeeDocumentRenderList();employeeDocumentUpdateCount();
+  if(!result.management_version)employeeDocumentSetMessage('Backend ยังไม่เป็น P10.4 · ยังดูไฟล์ได้ แต่ต้องอัป Backend ก่อนใช้แก้ไข/กู้คืน',true);
+  return result;
+}
+window.openEmployeeDocuments=async id=>{
+  const employee=state.employees.find(x=>Number(x.id)===Number(id));if(!employee)return toast('ไม่พบข้อมูลพนักงาน',true);
+  if(employeeDocumentUi.busy)return toast('กรุณารอการบันทึกเอกสารให้เสร็จก่อน',true);
+  const dialog=ensureEmployeeDocumentsDialog();Object.assign(employeeDocumentUi,{generation:employeeDocumentUi.generation+1,employeeId:Number(id),companyId:Number(state.me?.active_company_id||0),docs:[],permissions:{},tab:'active',query:'',pane:'list',editId:0});
+  $('#employeeDocumentsEmployeeId').value=String(id);$('#employeeDocumentsTitle').textContent=`เอกสาร · ${employee.nickname||employee.first_name||'พนักงาน'}`;$('#employeeDocumentsSubtitle').textContent=`${employee.employee_code||''} · แก้ไขข้อมูลและดูประวัติเอกสารได้ที่นี่`;
+  $('#employeeDocumentDate').value=localDateKey(new Date());for(const field of ['employeeDocumentTitle','employeeDocumentExpires','employeeDocumentFile','employeeDocumentNote','edSearch'])$('#'+field).value='';
+  $('#employeeDocumentVisibility').value='hr_only';$('#employeeDocumentConfidentiality').value='confidential';$('#employeeDocumentType').value='employment_contract';
+  $('#employeeDocumentUploadStatus').textContent='';$('#edUploadPanel').hidden=true;$('#edAddButton').hidden=true;employeeDocumentSetMessage('');employeeDocumentShowPane('list');$('#employeeDocumentsList').innerHTML='<div class="ed-empty">กำลังโหลดเอกสาร…</div>';
+  if(!dialog.open)dialog.showModal();const context=employeeDocumentContext();
+  try{await loadEmployeeDocuments(id);}catch(error){if(employeeDocumentContextValid(context)){$('#employeeDocumentsList').innerHTML='<div class="ed-empty">โหลดไม่สำเร็จ กด “โหลดรายการ” เพื่อลองใหม่</div>';employeeDocumentSetMessage(employeeDocumentError(error),true);}}
+};
+function employeeDocumentBusy(value){employeeDocumentUi.busy=value;for(const el of document.querySelectorAll('#employeeDocumentsModal button, #employeeDocumentsModal input, #employeeDocumentsModal select, #employeeDocumentsModal textarea')){if(value){el.dataset.edWasDisabled=String(el.disabled);el.disabled=true;}else if(el.dataset.edWasDisabled!==undefined){el.disabled=el.dataset.edWasDisabled==='true';delete el.dataset.edWasDisabled;}}}
+async function uploadEmployeeDocument(){
+  if(employeeDocumentUi.busy||!employeeDocumentUi.permissions.can_edit)return;
+  const file=$('#employeeDocumentFile').files?.[0];if(!file)return employeeDocumentSetMessage('กรุณาเลือกไฟล์',true);
+  if(file.size>10*1024*1024)return employeeDocumentSetMessage('ไฟล์ต้องไม่เกิน 10 MB',true);
+  if(!/\.(pdf|png|jpe?g|webp|docx?)$/i.test(file.name))return employeeDocumentSetMessage('รองรับ PDF รูปภาพ PNG/JPG/WEBP และ Word เท่านั้น',true);
+  if($('#employeeDocumentExpires').value&&$('#employeeDocumentDate').value&&$('#employeeDocumentExpires').value<$('#employeeDocumentDate').value)return employeeDocumentSetMessage('วันหมดอายุต้องไม่ก่อนวันที่เอกสาร',true);
+  const context=employeeDocumentContext(),employeeId=employeeDocumentUi.employeeId,status=$('#employeeDocumentUploadStatus');employeeDocumentBusy(true);status.textContent=`กำลังอัปโหลด ${file.name}…`;employeeDocumentSetMessage('');
+  let saved=false;
+  try{
+    const form=new FormData();form.append('file',file);for(const [key,id] of Object.entries({title:'employeeDocumentTitle',document_type:'employeeDocumentType',document_date:'employeeDocumentDate',expires_at:'employeeDocumentExpires',visibility:'employeeDocumentVisibility',confidentiality:'employeeDocumentConfidentiality',note:'employeeDocumentNote'}))form.append(key,$('#'+id).value);
+    await api(`/api/employees/${employeeId}/documents`,{method:'POST',body:form,timeoutMs:60000,silentStatus:true});saved=true;
+    if(!employeeDocumentContextValid(context))return;
+    $('#employeeDocumentFile').value='';$('#edUploadPanel').hidden=true;status.textContent='อัปโหลดสำเร็จ';employeeDocumentSetMessage('อัปโหลดสำเร็จ');
+    try{await loadEmployeeDocuments(employeeId);}catch{if(employeeDocumentContextValid(context))employeeDocumentSetMessage('ไฟล์บันทึกแล้ว แต่โหลดรายการไม่สำเร็จ กด “โหลดรายการ” ไม่ต้องอัปไฟล์ซ้ำ',true);}
+  }catch(error){if(employeeDocumentContextValid(context)){status.textContent=saved?'บันทึกแล้ว':'อัปโหลดไม่สำเร็จ';employeeDocumentSetMessage(employeeDocumentError(error),true);}}
+  finally{employeeDocumentBusy(false);}
+}
+window.editEmployeeDocument=id=>{
+  const doc=employeeDocumentUi.docs.find(d=>Number(d.id)===Number(id));if(!doc?.editable_fields?.length)return;
+  employeeDocumentUi.editId=Number(id);employeeDocumentUi.editSnapshot={...doc};employeeDocumentSetMessage('');const form=$('#edEditForm');form.reset();
+  for(const name of ['title','document_type','document_date','expires_at','visibility','confidentiality','note']){const field=form.elements[name];if(field.tagName==='SELECT'&&doc[name]&&!Array.from(field.options).some(o=>o.value===doc[name]))field.add(new Option(String(doc[name]),String(doc[name])));field.value=doc[name]||'';field.disabled=!doc.editable_fields.includes(name);}
+  $('#edSealedNotice').hidden=doc.editable_fields.length!==1;employeeDocumentShowPane('edit');form.elements[doc.editable_fields[0]].focus();
+};
+async function employeeDocumentSaveEdit(event){
+  event.preventDefault();if(employeeDocumentUi.busy)return;const form=$('#edEditForm');if(!form.reportValidity())return;
+  const doc=employeeDocumentUi.editSnapshot;if(!doc)return;
+  const body={edit_token:doc.edit_token,reason:form.elements.reason.value.trim()};for(const field of doc.editable_fields)body[field]=form.elements[field].value;
+  if(!body.reason)return employeeDocumentSetMessage('กรุณาระบุเหตุผลที่แก้ไข',true);
+  if(body.document_date&&body.expires_at&&body.expires_at<body.document_date)return employeeDocumentSetMessage('วันหมดอายุต้องไม่ก่อนวันที่เอกสาร',true);
+  const context=employeeDocumentContext();employeeDocumentBusy(true);$('#edSaveButton').textContent='กำลังบันทึก…';employeeDocumentSetMessage('');
+  try{const result=await api(`/api/employee-documents/${Number(doc.id)}`,{method:'PATCH',body:JSON.stringify(body),timeoutMs:15000,silentStatus:true});if(!employeeDocumentContextValid(context))return;if(!result.ok||!result.document)throw new Error('ผลบันทึกไม่ครบ กรุณาโหลดรายการเพื่อตรวจสอบก่อนส่งซ้ำ');employeeDocumentApplyResult(result.document);employeeDocumentShowPane('list');employeeDocumentSetMessage(result.unchanged?'ข้อมูลเหมือนเดิม ไม่มีการเปลี่ยนแปลง':'บันทึกการแก้ไขแล้ว · ไฟล์ต้นฉบับยังเป็นไฟล์เดิม');}
+  catch(error){if(employeeDocumentContextValid(context))employeeDocumentSetMessage(employeeDocumentError(error),true);}
+  finally{employeeDocumentBusy(false);$('#edSaveButton').textContent='บันทึกการแก้ไข';}
+}
+function employeeDocumentApplyResult(doc){employeeDocumentUi.request++;const i=employeeDocumentUi.docs.findIndex(d=>Number(d.id)===Number(doc.id));if(i>=0)employeeDocumentUi.docs[i]=doc;employeeDocumentRenderList();employeeDocumentUpdateCount();}
+function employeeDocumentOpenConfirm(id,action){const doc=employeeDocumentUi.docs.find(d=>Number(d.id)===Number(id));if(!doc||(action==='archive'&&!doc.can_archive)||(action==='restore'&&!doc.can_restore))return;employeeDocumentUi.editId=Number(id);employeeDocumentUi.confirmAction=action;employeeDocumentUi.confirmSnapshot={...doc};$('#edConfirmTitle').textContent=action==='archive'?'ลบเอกสารจากรายการใช้งาน?':'กู้คืนเอกสาร?';$('#edConfirmCopy').textContent=action==='archive'?'เอกสารจะย้ายไป “ลบ / เก็บถาวร” และซ่อนจากพนักงาน ไฟล์ต้นฉบับและประวัติยังเก็บไว้ ผู้มีสิทธิ์สามารถกู้คืนได้ ไม่ใช่การลบไฟล์ถาวร':'เอกสารจะกลับไปใช้งานด้วยการมองเห็นเดิม ไม่มีการส่ง LINE ซ้ำอัตโนมัติ';$('#edConfirmDocument').textContent=doc.title||doc.file_name||'เอกสาร';$('#edConfirmReason').value='';$('#edConfirmButton').textContent=action==='archive'?'ยืนยันลบ / เก็บถาวร':'ยืนยันกู้คืน';employeeDocumentSetMessage('');employeeDocumentShowPane('confirm');$('#edConfirmReason').focus();}
+window.deleteEmployeeDocument=(documentId,employeeId)=>{if(Number(employeeId)===employeeDocumentUi.employeeId)employeeDocumentOpenConfirm(documentId,'archive');};
+async function employeeDocumentConfirmMutation(event){event.preventDefault();if(employeeDocumentUi.busy||!$('#edConfirmForm').reportValidity())return;const doc=employeeDocumentUi.confirmSnapshot;if(!doc)return;const reason=$('#edConfirmReason').value.trim();if(!reason)return employeeDocumentSetMessage('กรุณาระบุเหตุผล',true);const action=employeeDocumentUi.confirmAction,context=employeeDocumentContext();employeeDocumentBusy(true);employeeDocumentSetMessage('กำลังบันทึก…');try{const r=await api(`/api/employee-documents/${Number(doc.id)}${action==='restore'?'/restore':''}`,{method:action==='restore'?'POST':'DELETE',body:JSON.stringify({edit_token:doc.edit_token,reason}),timeoutMs:15000,silentStatus:true});if(!employeeDocumentContextValid(context))return;if(!r.ok||!r.document)throw new Error('ผลบันทึกไม่ครบ กรุณาโหลดรายการเพื่อตรวจสอบ');employeeDocumentApplyResult(r.document);employeeDocumentShowPane('list');employeeDocumentSetMessage(action==='archive'?'ลบจากรายการใช้งานแล้ว · กู้คืนได้ใน “ลบ / เก็บถาวร”':'กู้คืนเอกสารแล้ว');}catch(error){if(employeeDocumentContextValid(context))employeeDocumentSetMessage(employeeDocumentError(error),true);}finally{employeeDocumentBusy(false);}}
+function employeeDocumentHistoryValue(field,value){if(value==null||value==='')return 'ไม่ระบุ';if(field==='document_type')return employeeDocumentTypeLabel(value);if(['document_date','expires_at'].includes(field))return employeeDocumentDateText(value);if(field==='archived_at')return employeeDocumentStamp(value);if(field==='visibility')return {hr_only:'HR เท่านั้น',employee:'พนักงานเห็นได้',manager:'ผู้จัดการเห็นได้'}[value]||String(value);if(field==='status')return value==='archived'?'ลบ / เก็บถาวร':value==='active'?'ใช้งานอยู่':String(value);return String(value);}
+window.openEmployeeDocumentHistory=async id=>{const context=employeeDocumentContext();employeeDocumentSetMessage('');employeeDocumentShowPane('history');employeeDocumentUi.editId=Number(id);$('#edHistoryList').innerHTML='<div class="ed-empty">กำลังโหลดประวัติ…</div>';try{const r=await api(`/api/employee-documents/${Number(id)}/events`,{timeoutMs:15000,silentStatus:true});if(!employeeDocumentContextValid(context)||employeeDocumentUi.pane!=='history'||employeeDocumentUi.editId!==Number(id))return;const labels={uploaded:'อัปโหลดเอกสาร',archived:'ลบ / เก็บถาวร',restored:'กู้คืนเอกสาร',metadata_edited:'แก้ไขข้อมูลเอกสาร',line_sent:'ส่ง LINE',viewed:'เปิดดูเอกสาร',hr_signed:'HR ลงนาม',employee_signed:'พนักงานลงนาม'};$('#edHistoryList').innerHTML=(r.data||[]).map(e=>{let detail={};try{detail=JSON.parse(e.detail_json||'{}')||{};}catch{}const changes=detail.changes&&typeof detail.changes==='object'?detail.changes:{};return `<article class="ed-history-event"><strong>${escapeHtml(labels[e.event_type]||e.event_type)}</strong><p class="ed-muted">${escapeHtml(employeeDocumentStamp(e.created_at))} · ${escapeHtml(e.actor_email||(e.actor_user_id?`บัญชีผู้ใช้ #${e.actor_user_id}`:e.actor_type==='system'?'ระบบ':'ไม่พบชื่อผู้ดำเนินการ'))}</p>${detail.reason?`<p>เหตุผล: ${escapeHtml(detail.reason)}</p>`:''}${Object.entries(changes).map(([key,v])=>`<div class="ed-change"><b>${escapeHtml(employeeDocumentFieldLabels[key]||key)}</b><span>${escapeHtml(employeeDocumentHistoryValue(key,v?.before))} → ${escapeHtml(employeeDocumentHistoryValue(key,v?.after))}</span></div>`).join('')}</article>`;}).join('')||'<div class="ed-empty">ยังไม่มีประวัติ</div>';}catch(error){if(employeeDocumentContextValid(context)&&employeeDocumentUi.editId===Number(id)){$('#edHistoryList').innerHTML='<div class="ed-empty">โหลดประวัติไม่สำเร็จ กลับรายการแล้วกดประวัติอีกครั้ง</div>';employeeDocumentSetMessage(employeeDocumentError(error),true);}}};
+// P10.4 EMPLOYEE DOCUMENTS END
+

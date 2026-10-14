@@ -1,0 +1,10 @@
+PASS 1 original P9.40 SQL reproduces undefined alias error
+PASS 2 employee profile/approver name and approved-pending leave balances
+PASS 3 override entitlement and adjustment unaffected
+PASS 4 GET public leave form with live SELECT, mocked token, no 500
+PASS 5 employee without preselected leave approver is supported
+PASS 6 probation restrictions and sick leave exception remain
+PASS 7 HR-granted individual leave access override remains
+PASS 8 explicit HR lock 0 still blocks and displays correct reason
+PASS 9 expired token receives 401 instead of revealing employee data
+ALL 9 CASES PASS

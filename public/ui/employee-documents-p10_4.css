@@ -1,0 +1,76 @@
+/* P10.4 — intentionally scoped: does not restyle attendance, payroll or dialogs elsewhere. */
+#employeeDocumentsModal.nk-ed104{width:min(860px,calc(100vw - 32px));max-width:none;max-height:92vh;max-height:92dvh;padding:0;border:1px solid #dce6e6;border-radius:22px;box-shadow:0 24px 80px #12303930;color:#173740;background:#fff;overflow:hidden;margin:auto;}
+#employeeDocumentsModal.nk-ed104::backdrop{background:#14282c65;}
+#employeeDocumentsModal.nk-ed104 .ed-shell{margin:0;padding:0;width:100%;max-width:none;max-height:92vh;max-height:92dvh;overflow:hidden;display:flex;flex-direction:column;border:0;border-radius:0;box-shadow:none;}
+#employeeDocumentsModal.nk-ed104 .ed-head{position:static;flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:22px 26px 18px;border-bottom:1px solid #e4ecec;background:#fff;}
+#employeeDocumentsModal.nk-ed104 .ed-head h3{font-size:22px;line-height:1.4;margin:4px 0;color:#173740;}
+#employeeDocumentsModal.nk-ed104 .ed-head p{font-size:12px;color:#62777d;line-height:1.6;margin:0;}
+#employeeDocumentsModal.nk-ed104 .ed-head .kicker{font-size:10px;letter-spacing:1.3px;color:#04878a;font-weight:700;}
+#employeeDocumentsModal.nk-ed104 .ed-head .icon-btn{flex-shrink:0;width:40px;height:40px;font-size:24px;}
+#employeeDocumentsModal.nk-ed104 .ed-body{padding:20px 26px 24px;overflow-y:auto;min-height:0;overscroll-behavior:contain;scrollbar-gutter:stable;}
+#employeeDocumentsModal.nk-ed104 [hidden]{display:none!important;}
+#employeeDocumentsModal.nk-ed104 h4{font-size:19px;margin:16px 0 8px;}
+#employeeDocumentsModal.nk-ed104 .ed-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
+#employeeDocumentsModal.nk-ed104 .ed-tabs{display:flex;background:#f1f6f6;gap:4px;border-radius:12px;padding:4px;}
+#employeeDocumentsModal.nk-ed104 .ed-tabs button{border:0;background:transparent;padding:9px 12px;min-height:42px;border-radius:9px;color:#5a7177;font:inherit;font-size:13px;cursor:pointer;}
+#employeeDocumentsModal.nk-ed104 .ed-tabs button[aria-pressed=true]{background:#fff;color:#087d81;box-shadow:0 1px 4px #16363b15;}
+#employeeDocumentsModal.nk-ed104 .ed-tabs b{margin-left:6px;font-variant-numeric:tabular-nums;}
+#employeeDocumentsModal.nk-ed104 .btn{min-height:42px;padding:9px 14px;font:inherit;font-size:13px;line-height:1.4;border-radius:10px;cursor:pointer;background:#fff;color:#17434a;border:1px solid #d6e3e4;box-shadow:none;text-decoration:none;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;}
+#employeeDocumentsModal.nk-ed104 .btn.primary{background:#04878a;color:#fff;border-color:#04878a;}
+#employeeDocumentsModal.nk-ed104 .btn.ed-danger{color:#b12d36;border-color:#f0dce0;}
+#employeeDocumentsModal.nk-ed104 button:disabled{opacity:.55;cursor:wait;}
+#employeeDocumentsModal.nk-ed104 :focus-visible{outline:3px solid #80c9cc;outline-offset:2px;}
+#employeeDocumentsModal.nk-ed104 .ed-search{display:flex;gap:10px;margin:12px 0 16px;}
+#employeeDocumentsModal.nk-ed104 .ed-search label{flex:1;min-width:0;}
+#employeeDocumentsModal.nk-ed104 label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#385a62;min-width:0;}
+#employeeDocumentsModal.nk-ed104 input,#employeeDocumentsModal.nk-ed104 select,#employeeDocumentsModal.nk-ed104 textarea{box-sizing:border-box;min-width:0;width:100%;min-height:44px;border:1px solid #cedddd;border-radius:10px;background:#fff;padding:10px 12px;color:#193941;font:inherit;font-size:15px;box-shadow:none;}
+#employeeDocumentsModal.nk-ed104 input[type=file]{font-size:12px;padding:9px;}
+#employeeDocumentsModal.nk-ed104 textarea{resize:vertical;min-height:76px;}
+#employeeDocumentsModal.nk-ed104 input:disabled,#employeeDocumentsModal.nk-ed104 select:disabled{background:#f3f6f6;color:#667d84;}
+#employeeDocumentsModal.nk-ed104 .ed-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;}
+#employeeDocumentsModal.nk-ed104 .ed-wide{grid-column:1/-1;}
+#employeeDocumentsModal.nk-ed104 .ed-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid #e5eded;}
+#employeeDocumentsModal.nk-ed104 .ed-upload{background:#f7fafa;border:1px solid #e2ebec;border-radius:14px;padding:18px;margin-bottom:18px;}
+#employeeDocumentsModal.nk-ed104 .ed-upload h4{margin-top:0;}
+#employeeDocumentsModal.nk-ed104 .ed-message{padding:12px 14px;border-radius:10px;background:#eaf7f2;color:#21674d;line-height:1.6;font-size:13px;margin-bottom:14px;overflow-wrap:anywhere;}
+#employeeDocumentsModal.nk-ed104 .ed-message.is-error{background:#fff3df;color:#7f531b;}
+#employeeDocumentsModal.nk-ed104 .ed-note,#employeeDocumentsModal.nk-ed104 .ed-muted,#employeeDocumentsModal.nk-ed104 small{font-size:12px;color:#647c83;line-height:1.65;margin:6px 0;overflow-wrap:anywhere;}
+#employeeDocumentsModal.nk-ed104 .employee-documents-list{display:flex;flex-direction:column;gap:12px;max-height:none;overflow:visible;}
+#employeeDocumentsModal.nk-ed104 .ed-doc{border:1px solid #dfe9e9;border-radius:14px;padding:18px;}
+#employeeDocumentsModal.nk-ed104 .ed-doc.is-archived{background:#fafcfc;}
+#employeeDocumentsModal.nk-ed104 .ed-doc-main{display:flex;gap:12px;align-items:flex-start;}
+#employeeDocumentsModal.nk-ed104 .ed-doc-icon{height:40px;width:40px;flex:0 0 40px;border-radius:10px;background:#eaf5f5;color:#088487;display:grid;place-items:center;}
+#employeeDocumentsModal.nk-ed104 .ed-doc-icon svg{height:20px;width:20px;}
+#employeeDocumentsModal.nk-ed104 .ed-doc-copy{flex:1;min-width:0;}
+#employeeDocumentsModal.nk-ed104 .ed-doc-copy strong{font-size:16px;line-height:1.5;overflow-wrap:anywhere;}
+#employeeDocumentsModal.nk-ed104 .ed-doc-meta{font-size:12px;color:#667e85;line-height:1.8;}
+#employeeDocumentsModal.nk-ed104 .ed-doc-meta span{color:#087e78;}
+#employeeDocumentsModal.nk-ed104 dl{margin:10px 0;display:flex;gap:28px;flex-wrap:wrap;}
+#employeeDocumentsModal.nk-ed104 dt{font-size:11px;color:#6b8086;}
+#employeeDocumentsModal.nk-ed104 dd{font-size:13px;margin:4px 0 0;font-variant-numeric:tabular-nums;}
+#employeeDocumentsModal.nk-ed104 .ed-file{color:#6e858c;line-height:1.6;font-size:11px;margin:3px 0;overflow-wrap:anywhere;}
+#employeeDocumentsModal.nk-ed104 .ed-doc-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0;justify-content:flex-end;}
+#employeeDocumentsModal.nk-ed104 .ed-empty{text-align:center;padding:34px 16px;font-size:14px;color:#6a8188;border-radius:12px;background:#f7fafa;}
+#employeeDocumentsModal.nk-ed104 .ed-history-event{padding:18px 0;border-bottom:1px solid #e1eaea;line-height:1.6;overflow-wrap:anywhere;font-size:13px;}
+#employeeDocumentsModal.nk-ed104 .ed-change{display:grid;grid-template-columns:120px 1fr;gap:12px;background:#f6f9f9;margin-top:6px;padding:10px;border-radius:8px;}
+#employeeDocumentsModal.nk-ed104 .ed-confirm-doc{font-weight:600;border-left:3px solid #04878a;padding:10px 14px;background:#f3f8f8;overflow-wrap:anywhere;}
+@media(max-width:600px){
+ #employeeDocumentsModal.nk-ed104{width:calc(100vw - 16px);max-height:94vh;max-height:94dvh;border-radius:18px;}
+ #employeeDocumentsModal.nk-ed104 .ed-shell{max-height:94vh;max-height:94dvh;}
+ #employeeDocumentsModal.nk-ed104 .ed-head{padding:16px;}
+ #employeeDocumentsModal.nk-ed104 .ed-head h3{font-size:20px;}
+ #employeeDocumentsModal.nk-ed104 .ed-body{padding:16px;scrollbar-gutter:auto;}
+ #employeeDocumentsModal.nk-ed104 .ed-toolbar{align-items:stretch;}
+ #employeeDocumentsModal.nk-ed104 .ed-tabs{width:100%;}
+ #employeeDocumentsModal.nk-ed104 .ed-tabs button{flex:1;padding:8px 6px;font-size:12px;}
+ #employeeDocumentsModal.nk-ed104 .ed-form-grid{grid-template-columns:1fr;gap:14px;}
+ #employeeDocumentsModal.nk-ed104 input,#employeeDocumentsModal.nk-ed104 select,#employeeDocumentsModal.nk-ed104 textarea{font-size:16px;}
+ #employeeDocumentsModal.nk-ed104 .ed-doc{padding:14px;}
+ #employeeDocumentsModal.nk-ed104 .ed-doc-icon{display:none;}
+ #employeeDocumentsModal.nk-ed104 .ed-doc-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+ #employeeDocumentsModal.nk-ed104 .ed-doc-actions .btn{width:100%;min-height:44px;}
+ #employeeDocumentsModal.nk-ed104 .ed-footer{position:sticky;bottom:-16px;padding:12px 0;background:#fff;z-index:1;}
+ #employeeDocumentsModal.nk-ed104 .ed-footer .btn{flex:1;min-height:46px;}
+ #employeeDocumentsModal.nk-ed104 .ed-upload .ed-footer{background:#f7fafa;}
+ #employeeDocumentsModal.nk-ed104 .ed-change{grid-template-columns:1fr;gap:2px;}
+}

@@ -1,0 +1,14 @@
+  const employeeDocumentDeleteMatch = path.match(/^\/api\/employee-documents\/(\d+)$/);
+  if (employeeDocumentDeleteMatch && method === 'DELETE') {
+    if (!canManagePeopleAdmin(auth.role)) return json({ error: 'ไม่มีสิทธิ์ลบเอกสารพนักงาน' }, 403);
+    await ensureV100P3Ready(env.DB);
+    const id = Number(employeeDocumentDeleteMatch[1]);
+    const row = await env.DB.prepare('SELECT * FROM employee_documents WHERE id=?1 AND client_id=?2').bind(id,clientId).first();
+    if (!row) return json({ error:'ไม่พบเอกสาร' },404);
+    await ensureDocumentFoundationReady(env.DB);
+    await env.DB.prepare(`UPDATE employee_documents SET status='archived',archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
+    await env.DB.prepare(`INSERT INTO employee_document_events (client_id,document_id,employee_id,actor_type,actor_user_id,event_type,detail_json) VALUES (?1,?2,?3,'user',?4,'archived',?5)`).bind(clientId,id,row.employee_id||null,Number(auth.user.id),JSON.stringify({file_name:row.file_name})).run();
+    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'employee.document.archive','employee_document',String(id),{employee_id:row.employee_id,file_name:row.file_name});
+    return json({ok:true,archived:true});
+  }
+

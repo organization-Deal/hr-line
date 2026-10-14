@@ -1,0 +1,10 @@
+  if (employeeDocumentsMatch && method === 'GET') {
+    if (!canManagePeopleAdmin(auth.role) && !canManagePayroll(auth.role)) return json({ error: 'ไม่มีสิทธิ์ดูเอกสารพนักงาน' }, 403);
+    await ensureDocumentFoundationReady(env.DB);
+    const employeeId = Number(employeeDocumentsMatch[1]);
+    const employee = await env.DB.prepare('SELECT id,employee_code,first_name,last_name,nickname FROM employees WHERE id=?1 AND client_id=?2').bind(employeeId,clientId).first();
+    if (!employee) return json({ error: 'ไม่พบพนักงาน' }, 404);
+    const rows = await env.DB.prepare(`SELECT id,document_type,title,file_name,storage_provider,drive_url,content_type,file_size,document_date,expires_at,visibility,note,status,version,source,confidentiality,sha256,archived_at,supersedes_document_id,created_at,updated_at FROM employee_documents WHERE client_id=?1 AND employee_id=?2 ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, created_at DESC`).bind(clientId,employeeId).all();
+    return json({ employee, data: rows.results || [] });
+  }
+

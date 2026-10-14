@@ -1,0 +1,324 @@
+TAP version 13
+# (node:2595) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: edit dates and title; return authoritative metadata without storage keys
+ok 1 - edit dates and title; return authoritative metadata without storage keys
+  ---
+  duration_ms: 33.313899
+  type: 'test'
+  ...
+# Subtest: clear optional expiry and date with empty string/null
+ok 2 - clear optional expiry and date with empty string/null
+  ---
+  duration_ms: 3.432102
+  type: 'test'
+  ...
+# Subtest: audit captures actor, time, reason, old and new values atomically
+ok 3 - audit captures actor, time, reason, old and new values atomically
+  ---
+  duration_ms: 3.220007
+  type: 'test'
+  ...
+# Subtest: edit preserves file bytes identity, sha, version, owner and signature statuses
+ok 4 - edit preserves file bytes identity, sha, version, owner and signature statuses
+  ---
+  duration_ms: 2.382652
+  type: 'test'
+  ...
+# Subtest: reject invalid date 2026-02-30
+ok 5 - reject invalid date 2026-02-30
+  ---
+  duration_ms: 2.425175
+  type: 'test'
+  ...
+# Subtest: reject invalid date 2026-13-01
+ok 6 - reject invalid date 2026-13-01
+  ---
+  duration_ms: 1.534571
+  type: 'test'
+  ...
+# Subtest: reject invalid date 2026-2-1
+ok 7 - reject invalid date 2026-2-1
+  ---
+  duration_ms: 3.193166
+  type: 'test'
+  ...
+# Subtest: reject invalid date not-date
+ok 8 - reject invalid date not-date
+  ---
+  duration_ms: 1.993423
+  type: 'test'
+  ...
+# Subtest: reject invalid date 2026-04-31
+ok 9 - reject invalid date 2026-04-31
+  ---
+  duration_ms: 1.636763
+  type: 'test'
+  ...
+# Subtest: reject invalid date 2026-01-01T00:00:00Z
+ok 10 - reject invalid date 2026-01-01T00:00:00Z
+  ---
+  duration_ms: 1.452089
+  type: 'test'
+  ...
+# Subtest: leap day valid; year-end allowed
+ok 11 - leap day valid; year-end allowed
+  ---
+  duration_ms: 1.981796
+  type: 'test'
+  ...
+# Subtest: expiry before document date rejected on changed dates
+ok 12 - expiry before document date rejected on changed dates
+  ---
+  duration_ms: 2.271095
+  type: 'test'
+  ...
+# Subtest: existing bad dates do not block a note-only correction
+ok 13 - existing bad dates do not block a note-only correction
+  ---
+  duration_ms: 1.783802
+  type: 'test'
+  ...
+# Subtest: cannot inject protected field client_id
+ok 14 - cannot inject protected field client_id
+  ---
+  duration_ms: 1.685505
+  type: 'test'
+  ...
+# Subtest: cannot inject protected field employee_id
+ok 15 - cannot inject protected field employee_id
+  ---
+  duration_ms: 1.661319
+  type: 'test'
+  ...
+# Subtest: cannot inject protected field drive_file_id
+ok 16 - cannot inject protected field drive_file_id
+  ---
+  duration_ms: 2.432136
+  type: 'test'
+  ...
+# Subtest: cannot inject protected field storage_key
+ok 17 - cannot inject protected field storage_key
+  ---
+  duration_ms: 1.322206
+  type: 'test'
+  ...
+# Subtest: cannot inject protected field sha256
+ok 18 - cannot inject protected field sha256
+  ---
+  duration_ms: 2.528619
+  type: 'test'
+  ...
+# Subtest: cannot inject protected field version
+ok 19 - cannot inject protected field version
+  ---
+  duration_ms: 1.10294
+  type: 'test'
+  ...
+# Subtest: cannot inject protected field workflow_status
+ok 20 - cannot inject protected field workflow_status
+  ---
+  duration_ms: 1.024442
+  type: 'test'
+  ...
+# Subtest: cannot inject protected field hr_signed_at
+ok 21 - cannot inject protected field hr_signed_at
+  ---
+  duration_ms: 1.122288
+  type: 'test'
+  ...
+# Subtest: enum validated visibility
+ok 22 - enum validated visibility
+  ---
+  duration_ms: 1.295956
+  type: 'test'
+  ...
+# Subtest: enum validated confidentiality
+ok 23 - enum validated confidentiality
+  ---
+  duration_ms: 1.057382
+  type: 'test'
+  ...
+# Subtest: enum validated document_type
+ok 24 - enum validated document_type
+  ---
+  duration_ms: 1.025905
+  type: 'test'
+  ...
+# Subtest: title required, length bound and non-text values rejected
+ok 25 - title required, length bound and non-text values rejected
+  ---
+  duration_ms: 4.423335
+  type: 'test'
+  ...
+# Subtest: blank reason rejected, blank metadata not confused with omission
+ok 26 - blank reason rejected, blank metadata not confused with omission
+  ---
+  duration_ms: 1.097101
+  type: 'test'
+  ...
+# Subtest: stale token rejected; refreshed value kept
+ok 27 - stale token rejected; refreshed value kept
+  ---
+  duration_ms: 2.037028
+  type: 'test'
+  ...
+# Subtest: TOCTOU CAS rejects second writer even after token check
+ok 28 - TOCTOU CAS rejects second writer even after token check
+  ---
+  duration_ms: 1.311519
+  type: 'test'
+  ...
+# Subtest: failed audit/history rolls back metadata update
+ok 29 - failed audit/history rolls back metadata update
+  ---
+  duration_ms: 1.441323
+  type: 'test'
+  ...
+# Subtest: unchanged edits do not create fake history
+ok 30 - unchanged edits do not create fake history
+  ---
+  duration_ms: 1.402385
+  type: 'test'
+  ...
+# Subtest: cross-company ID returns not found and no write
+ok 31 - cross-company ID returns not found and no write
+  ---
+  duration_ms: 0.576667
+  type: 'test'
+  ...
+# Subtest: read-only and employee contexts denied
+ok 32 - read-only and employee contexts denied
+  ---
+  duration_ms: 0.488045
+  type: 'test'
+  ...
+# Subtest: invalid tenant/user/id denied
+ok 33 - invalid tenant/user/id denied
+  ---
+  duration_ms: 0.734852
+  type: 'test'
+  ...
+# Subtest: token required for edit and restore
+ok 34 - token required for edit and restore
+  ---
+  duration_ms: 5.061624
+  type: 'test'
+  ...
+# Subtest: legacy DELETE {} still soft archives, repeat is idempotent
+ok 35 - legacy DELETE {} still soft archives, repeat is idempotent
+  ---
+  duration_ms: 1.858753
+  type: 'test'
+  ...
+# Subtest: archive then restore preserves metadata and evidence and records two events
+ok 36 - archive then restore preserves metadata and evidence and records two events
+  ---
+  duration_ms: 5.207571
+  type: 'test'
+  ...
+# Subtest: cannot edit archived or restore active doc
+ok 37 - cannot edit archived or restore active doc
+  ---
+  duration_ms: 1.911051
+  type: 'test'
+  ...
+# Subtest: sealed record locks dates but allows notes: source='generated'
+ok 38 - sealed record locks dates but allows notes: source='generated'
+  ---
+  duration_ms: 1.859434
+  type: 'test'
+  ...
+# Subtest: sealed record locks dates but allows notes: hr_signature_status='signed'
+ok 39 - sealed record locks dates but allows notes: hr_signature_status='signed'
+  ---
+  duration_ms: 1.921466
+  type: 'test'
+  ...
+# Subtest: sealed record locks dates but allows notes: employee_signed_at='2026-10-01T01:00:00Z'
+ok 40 - sealed record locks dates but allows notes: employee_signed_at='2026-10-01T01:00:00Z'
+  ---
+  duration_ms: 2.306178
+  type: 'test'
+  ...
+# Subtest: sealed record locks dates but allows notes: acknowledgement_status='acknowledged'
+ok 41 - sealed record locks dates but allows notes: acknowledgement_status='acknowledged'
+  ---
+  duration_ms: 2.006422
+  type: 'test'
+  ...
+# Subtest: decorated read-only list has no management actions or sensitive storage fields
+ok 42 - decorated read-only list has no management actions or sensitive storage fields
+  ---
+  duration_ms: 0.69904
+  type: 'test'
+  ...
+# Subtest: malformed JSON and oversize payload do not mutate
+ok 43 - malformed JSON and oversize payload do not mutate
+  ---
+  duration_ms: 0.762003
+  type: 'test'
+  ...
+# Subtest: SQL injection characters kept as data only
+ok 44 - SQL injection characters kept as data only
+  ---
+  duration_ms: 1.623272
+  type: 'test'
+  ...
+# Subtest: integrated GET scopes company, retains old fields and adds management metadata
+ok 45 - integrated GET scopes company, retains old fields and adds management metadata
+  ---
+  duration_ms: 1.829319
+  type: 'test'
+  ...
+# Subtest: integrated GET payroll is read-only
+ok 46 - integrated GET payroll is read-only
+  ---
+  duration_ms: 1.719135
+  type: 'test'
+  ...
+# Subtest: integrated GET wrong-company employee is denied
+ok 47 - integrated GET wrong-company employee is denied
+  ---
+  duration_ms: 0.822022
+  type: 'test'
+  ...
+# Subtest: integrated GET regular employee/manager role denied as before
+ok 48 - integrated GET regular employee/manager role denied as before
+  ---
+  duration_ms: 0.604088
+  type: 'test'
+  ...
+# Subtest: integrated PATCH reaches metadata writer
+ok 49 - integrated PATCH reaches metadata writer
+  ---
+  duration_ms: 1.969528
+  type: 'test'
+  ...
+# Subtest: integrated legacy DELETE reaches archive, no physical delete
+ok 50 - integrated legacy DELETE reaches archive, no physical delete
+  ---
+  duration_ms: 1.430386
+  type: 'test'
+  ...
+# Subtest: integrated POST restore reaches restore writer
+ok 51 - integrated POST restore reaches restore writer
+  ---
+  duration_ms: 3.797345
+  type: 'test'
+  ...
+# Subtest: integrated PATCH cannot use payroll-only privilege
+ok 52 - integrated PATCH cannot use payroll-only privilege
+  ---
+  duration_ms: 0.673762
+  type: 'test'
+  ...
+1..52
+# tests 52
+# suites 0
+# pass 52
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 187.028357
