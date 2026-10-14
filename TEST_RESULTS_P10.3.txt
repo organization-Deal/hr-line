@@ -1,0 +1,8 @@
+P10.3 NAKNA Leave Form 500 Hotfix — local verification
+Source: src/index.js from P9.40 patch; P10.x frontend unchanged
+Syntax: node --check PASSED
+Runtime: Node 22 SQLite in-memory fixture, mocked portal token (no Production credentials)
+Reproduced: original SQL fails on dec/du/l undefined aliases
+Fixed: GET public leave form, balances, entitlement, lock status 0/NULL/1
+Result: 9/9 cases passed
+Limit: no live D1/LINE request, no deployment

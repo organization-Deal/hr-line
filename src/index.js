@@ -8775,7 +8775,7 @@ async function getPublicLeaveForm(env,token){
     id:Number(b.id),code:b.code,name:b.name,is_unlimited:Boolean(Number(b.is_unlimited)),
     entitlement_days:Number(b.entitlement_days||0),adjustment_days:Number(b.adjustment_days||0),
     used_days:Number(b.used_days||0),pending_days:Number(b.pending_days||0),remaining_days:Number(b.remaining_days||0),
-    available_now:b.available_now!==false,lock_reason:b.lock_reason||null,requires_reason:Boolean(Number(b.requires_reason)),
+    available_now:b.available_now!==false,lock_reason:b.locked_reason||b.lock_reason||null,requires_reason:Boolean(Number(b.requires_reason)),
     evidence_required_after_days:b.evidence_required_after_days==null?null:Number(b.evidence_required_after_days),
     notice_days:Number(b.notice_days||0),allow_negative:Boolean(Number(b.allow_negative)),
   }));
@@ -10210,8 +10210,11 @@ async function calculateEmployeeLeaveDuration(db,employee,startDate,endDate,dayP
 
 async function leaveEligibility(db,employee,policy){
   const client=await getClient(db,Number(employee.client_id));
-  if(Number(employee.leave_access_override)===0) return {allowed:false,reason:'HR ล็อกสิทธิ์การลาของบัญชีนี้อยู่'};
-  if(Number(employee.leave_access_override)===1) return {allowed:true,source:'employee_override'};
+  // P10.3: NULL means "use company policy", NOT "HR has disabled leave".
+  // Number(null) === 0 silently locked every employee with no per-person override.
+  const leaveOverride=employee.leave_access_override;
+  if(leaveOverride!==null && leaveOverride!==undefined && leaveOverride!=='' && Number(leaveOverride)===0) return {allowed:false,reason:'HR ล็อกสิทธิ์การลาของบัญชีนี้อยู่'};
+  if(leaveOverride!==null && leaveOverride!==undefined && leaveOverride!=='' && Number(leaveOverride)===1) return {allowed:true,source:'employee_override'};
   const probation=String(employee.people_status||'')==='probation' || (employee.probation_end_date && !employee.confirmed_at && String(employee.status)==='active');
   if(probation && Number(client?.lock_leave_during_probation ?? 1) && !Number(policy.available_during_probation||0)){
     return {allowed:false,reason:'สิทธิ์ลานี้จะเปิดหลังผ่านทดลองงาน กรุณาติดต่อ HR หากต้องการขออนุมัติเป็นกรณีพิเศษ'};
@@ -10221,7 +10224,11 @@ async function leaveEligibility(db,employee,policy){
 
 async function getEmployeeLeaveProfile(db,employeeId,clientId,year){
   await ensureDefaultLeavePolicies(db,clientId);
-  const employee=await db.prepare(`SELECT e.*,ap.nickname AS approver_nickname,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,dec.nickname AS decided_by_employee_nickname,dec.first_name AS decided_by_employee_first_name,dec.last_name AS decided_by_employee_last_name, du.name AS decided_by_user_name,du.email AS decided_by_user_email, (SELECT ev.created_at FROM leave_approval_events ev WHERE ev.leave_request_id=l.id AND ev.action IN ('approved','rejected') ORDER BY ev.id DESC LIMIT 1) AS decision_at,c.lock_leave_during_probation FROM employees e LEFT JOIN employees ap ON ap.id=e.leave_approver_employee_id JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.client_id=?2`).bind(employeeId,clientId).first();
+  // P10.3: A leave profile belongs to an employee, not a leave request.
+  // Do not reference `dec`, `du` or `l` aliases here: those joins exist only in
+  // the HR leave-history SELECT. Their accidental inclusion caused SQLite 500
+  // on GET /api/public/leave/:token and in employee leave entitlement screens.
+  const employee=await db.prepare(`SELECT e.*,ap.nickname AS approver_nickname,ap.first_name AS approver_first_name,ap.last_name AS approver_last_name,c.lock_leave_during_probation FROM employees e LEFT JOIN employees ap ON ap.id=e.leave_approver_employee_id JOIN clients c ON c.id=e.client_id WHERE e.id=?1 AND e.client_id=?2`).bind(employeeId,clientId).first();
   if(!employee) throw httpError('ไม่พบพนักงาน',404);
   const policies=(await db.prepare('SELECT * FROM leave_policies WHERE client_id=?1 AND is_active=1 ORDER BY sort_order,name').bind(clientId).all()).results||[];
   const ent=(await db.prepare('SELECT * FROM employee_leave_entitlements WHERE employee_id=?1 AND year=?2').bind(employeeId,year).all()).results||[];
