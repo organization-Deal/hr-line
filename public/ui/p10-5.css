@@ -1,0 +1,172 @@
+/* NAKNA P10.5 · Simplified HR UX
+   Progressive enhancements only. Existing API, table data and controls remain intact. */
+html.nk105{
+  --nk105-ink:#153c42;--nk105-muted:#6c8182;--nk105-line:#e5eceb;
+  --nk105-mint:#eaf5f2;--nk105-brand:#04878a;
+}
+html.nk105 .nk105-aria-description{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+html.nk105 :is(.nk105-reveal,.nk105-period-toggle,.nk105-person-btn){appearance:none;-webkit-appearance:none;cursor:pointer;font:inherit}
+html.nk105 :is(.nk105-reveal,.nk105-period-toggle,.nk105-person-btn):focus-visible,
+html.nk105 :is(.nk105-person>summary,.nk105-leave-person>summary):focus-visible{outline:2px solid var(--nk105-brand);outline-offset:2px}
+html.nk105 .nk105-reveal{display:none;align-items:center;justify-content:center;gap:9px;border:1px solid var(--nk105-line);color:var(--nk105-ink);background:#fff;border-radius:11px;padding:10px 14px;min-height:44px;font-weight:600;font-size:13px}
+html.nk105 .nk105-reveal-icon{font-size:18px;color:var(--nk105-brand)}
+html.nk105 .nk105-people-list,html.nk105 .nk105-leave-people-list{display:none}
+html.nk105 .nk105-period-toggle{display:none}
+html.nk105 .nk105-hint{display:none}
+html.nk105 #view-dashboard .nk105-neutral-missing .summary-dot{background:#a1b3af!important}
+@media(max-width:720px){
+  html.nk105 .view{max-width:100%;min-width:0}
+  html.nk105 :is(#view-dashboard,#view-employees,#view-attendance,#view-leave,#view-payroll) .page-intro{margin:0 0 12px!important;gap:7px!important}
+  html.nk105 :is(#view-dashboard,#view-employees,#view-attendance,#view-leave,#view-payroll) .page-intro h1{font-size:23px!important;line-height:1.25!important;letter-spacing:-.03em!important}
+  html.nk105 :is(#view-employees,#view-attendance,#view-leave,#view-payroll) .page-intro>div>p:not(.kicker){display:none!important}
+  html.nk105 :is(#view-employees,#view-attendance,#view-leave,#view-payroll) .kicker{font-size:9px!important;letter-spacing:.07em!important}
+  html.nk105 :is(#view-dashboard,#view-employees,#view-attendance,#view-leave,#view-payroll) :is(button,input,select){scroll-margin-top:100px}
+
+  /* Overview: one screen of decisions first; supporting modules remain available on request. */
+  html.nk105 #view-dashboard .welcome-bar{margin:0 0 10px!important;padding:15px 16px!important;border-radius:17px!important;min-height:0!important}
+  html.nk105 #view-dashboard .dashboard-hero-copy h1{font-size:23px!important;line-height:1.3!important;margin:0 0 5px!important}
+  html.nk105 #view-dashboard .dashboard-hero-copy .kicker{display:none!important}
+  html.nk105 #view-dashboard .dashboard-hero-copy p{font-size:11px!important;line-height:1.45!important}
+  html.nk105 #view-dashboard .dashboard-attention-summary{padding:10px 0 0!important;margin:10px 0 0!important;min-height:0!important;gap:10px!important;border-top:1px solid #dfebe8}
+  html.nk105 #view-dashboard .attention-ring{width:39px!important;height:39px!important;min-width:39px!important;box-shadow:none!important;background:#fff!important;border:1px solid #dce9e5!important}
+  html.nk105 #view-dashboard .attention-ring strong{font-size:18px!important}
+  html.nk105 #view-dashboard .dashboard-attention-summary>div:last-child strong{font-size:13px!important}
+  html.nk105 #view-dashboard .dashboard-attention-summary>div:last-child span{display:none!important}
+  html.nk105 #view-dashboard .summary-strip{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:0!important;background:#fff!important;border-radius:13px!important;border:1px solid var(--nk105-line)!important;padding:8px 2px!important;margin:0 0 10px!important;box-shadow:none!important;min-width:0!important}
+  html.nk105 #view-dashboard .summary-strip .summary-item{min-width:0!important;min-height:0!important;padding:7px 8px!important;border:0!important;border-right:1px solid var(--nk105-line)!important;border-radius:0!important;background:none!important;box-shadow:none!important}
+  html.nk105 #view-dashboard .summary-strip .summary-item:nth-child(3){border-right:0!important}
+  html.nk105 #view-dashboard .summary-strip .summary-item:nth-child(n+4){display:none!important}
+  html.nk105 #view-dashboard .summary-strip .summary-value{font-size:24px!important;line-height:1.2!important;margin:4px 0 0!important}
+  html.nk105 #view-dashboard .summary-strip .summary-value small{font-size:10px!important}
+  html.nk105 #view-dashboard .summary-strip .summary-label{font-size:10px!important;gap:4px!important;white-space:normal!important;line-height:1.4!important}
+  html.nk105 #view-dashboard .primary-dashboard-grid{display:block!important;gap:0!important;margin:0 0 9px!important}
+  html.nk105 #view-dashboard .primary-dashboard-grid .radar-panel{padding:12px 14px!important;border-radius:13px!important;margin-bottom:0!important}
+  html.nk105 #view-dashboard .primary-dashboard-grid .radar-panel .panel-head{margin-bottom:7px!important}
+  html.nk105 #view-dashboard .primary-dashboard-grid .radar-panel h3{font-size:16px!important}
+  html.nk105 #view-dashboard .dashboard-grid .kicker{display:none!important}
+  html.nk105 #view-dashboard .primary-dashboard-grid .radar-panel .panel-subtitle{display:none!important}
+  html.nk105 #view-dashboard .primary-dashboard-grid .attendance-panel-v2{display:none!important}
+  html.nk105 #view-dashboard .dashboard-quick-actions{display:flex!important;gap:7px!important;flex-wrap:nowrap!important;overflow-x:auto!important;scrollbar-width:none!important;margin:8px 0 11px!important;padding:0 0 3px!important}
+  html.nk105 #view-dashboard .dashboard-quick-actions button{flex:0 0 auto!important;min-width:98px!important;width:auto!important;min-height:41px!important;border:1px solid #dfebe8!important;border-radius:9px!important;padding:7px 10px!important;background:#fff!important;box-shadow:none!important}
+  html.nk105 #view-dashboard .dashboard-quick-actions button span{font-size:12px!important;white-space:nowrap}
+  html.nk105 #view-dashboard .dashboard-quick-actions button small{display:none!important}
+  html.nk105 #view-dashboard .operations-dashboard-grid,html.nk105 #view-dashboard .secondary-dashboard-grid{display:none!important}
+  html.nk105 #view-dashboard.nk105-dashboard-expanded .operations-dashboard-grid,
+  html.nk105 #view-dashboard.nk105-dashboard-expanded .secondary-dashboard-grid{display:grid!important;grid-template-columns:1fr!important;gap:10px!important;margin:10px 0 0!important}
+  html.nk105 #view-dashboard .dashboard-grid .panel{padding:14px!important;border-radius:13px!important}
+  html.nk105 #view-dashboard .nk105-reveal{display:flex!important;width:100%!important;margin:6px 0 9px!important}
+
+  /* People: compact employee list, all original actions delegated unchanged. */
+  html.nk105 #view-employees .people-overview{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important;margin:10px 0!important}
+  html.nk105 #view-employees .people-overview>div{min-height:0!important;padding:11px 12px!important;border-radius:11px!important}
+  html.nk105 #view-employees .people-overview>div:nth-child(n+3){display:none!important}
+  html.nk105 #view-employees .people-overview strong{font-size:20px!important}
+  html.nk105 #view-employees .people-overview span{font-size:11px!important}
+  html.nk105 #view-employees .toolbar{margin:8px 0!important;padding:0!important}
+  html.nk105 #view-employees .toolbar input{min-height:42px!important;font-size:14px!important}
+  html.nk105 #view-employees .employee-master-table-card{display:none!important}
+  html.nk105 #view-employees .nk-table-tools{display:none!important}
+  html.nk105 #view-employees .nk105-people-list{display:block!important;border-top:1px solid var(--nk105-line);background:#fff;border-bottom:1px solid var(--nk105-line);margin:8px 0 15px}
+  html.nk105 .nk105-person{border-bottom:1px solid #ecf1f0;padding:0}
+  html.nk105 .nk105-person:last-child{border:0}
+  html.nk105 .nk105-person>summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:74px;padding:11px 0;cursor:pointer}
+  html.nk105 .nk105-person>summary::-webkit-details-marker{display:none}
+  html.nk105 .nk105-person-avatar{display:grid;place-items:center;flex:0 0 39px;width:39px;height:39px;background:#ecf6f3;color:var(--nk105-brand);border-radius:50%;font-weight:700;font-size:14px}
+  html.nk105 .nk105-person-main{display:grid;min-width:0;flex:1;gap:3px}
+  html.nk105 .nk105-person-main strong{font-size:13px!important;font-weight:650;color:var(--nk105-ink);overflow-wrap:anywhere}
+  html.nk105 .nk105-person-main small{font-size:11px;color:var(--nk105-muted)}
+  html.nk105 .nk105-line-state{display:inline-block;font-size:10px;background:#f1f4f3;color:#748785;padding:4px 6px;border-radius:7px;white-space:nowrap}
+  html.nk105 .nk105-line-state.is-connected{background:#e7f5ed;color:#278360}
+  html.nk105 .nk105-chevron{font-size:18px;color:#849a98;transition:transform .16s}
+  html.nk105 .nk105-person[open] .nk105-chevron,html.nk105 .nk105-leave-person[open] .nk105-chevron{transform:rotate(180deg)}
+  html.nk105 .nk105-person-details{padding:4px 0 13px 49px;border-top:1px solid #f0f4f3}
+  html.nk105 .nk105-person-details>small{color:var(--nk105-muted);font-size:11px;margin:6px 8px 4px 0;display:inline-block}
+  html.nk105 .nk105-person-buttons{display:flex;flex-wrap:wrap;gap:7px;padding-top:4px}
+  html.nk105 .nk105-person-btn{min-height:42px;border:1px solid #d9e7e4;background:#fff;color:var(--nk105-brand);border-radius:9px;padding:8px 11px;font-size:12px;font-weight:600}
+  html.nk105 .nk105-person-btn.is-danger{color:#b74c52;border-color:#f3d9da}
+  html.nk105 .nk105-empty{padding:15px 8px;text-align:center;color:var(--nk105-muted);font-size:13px}
+
+  /* Attendance: list before reports, no long descriptions or punitive absence labels. */
+  html.nk105 #view-attendance .page-intro{display:none!important}
+  html.nk105 #view-attendance .nk-attendance-day-note{font-size:11px!important;padding:8px 10px!important;margin:6px 0 8px!important}
+  html.nk105 #view-attendance #teamWorkLogSummary{margin:8px 0 0!important}
+  html.nk105 #view-attendance #nkAttendanceMetricsToggle{margin-bottom:4px!important}
+  html.nk105 #view-attendance .nk-attendance-list-heading{margin-top:6px!important}
+  html.nk105 #view-attendance #nk105AttendanceContext{display:block!important;margin:0 0 8px!important;font-size:10px!important;line-height:1.5;color:#6f8381}
+  html.nk105 #view-attendance #nkTeamWorkLogMobile{margin-top:2px!important}
+  html.nk105 #view-attendance #teamWorkLogSummary .nk105-unconfirmed strong{color:#688680!important}
+
+  /* Leave: show useful totals and people, charts on demand. */
+  html.nk105 #view-leave .nk-tabs{gap:3px!important;overflow-x:auto!important}
+  html.nk105 #view-leave .nk-tabs button{font-size:12px!important;min-height:41px!important;padding:7px 10px!important}
+  html.nk105 #view-leave #leaveUnifiedPanel{padding:13px!important}
+  html.nk105 #view-leave #leaveUnifiedPanel .panel-head .panel-subtitle{display:none!important}
+  html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:5px!important;margin:8px 0 9px!important}
+  html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary>article{display:flex!important;flex-direction:column!important;gap:1px!important;min-width:0!important;min-height:75px!important;padding:10px 7px!important;border:0!important;background:#f3f7f6!important;border-radius:9px!important;grid-column:auto!important}
+  html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary>article:nth-child(n+4){display:none!important}
+  html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary.nk105-all-stats>article:nth-child(n+4){display:flex!important}
+  html.nk105 #view-leave .nk105-mini-reveal{display:block;width:100%;text-align:center;border:0;background:transparent;color:#04878a;font:inherit;font-size:11px;font-weight:650;min-height:32px;padding:4px 8px;margin:0 0 8px;cursor:pointer}
+  html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary>article>small{font-size:10px!important;line-height:1.25!important;min-height:24px!important;margin:0!important;color:#6a8480}
+  html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary>article>strong{font-size:23px!important;line-height:1.25!important}
+  html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary>article>span{font-size:10px!important;margin:0!important;padding:0!important}
+  html.nk105 #view-leave .leave-report-grid{display:none!important}
+  html.nk105 #view-leave.nk105-leave-charts-open .leave-report-grid{display:grid!important;grid-template-columns:1fr!important;gap:9px!important}
+  html.nk105 #view-leave .nk105-reveal{display:flex!important;width:100%!important;margin:8px 0 12px!important}
+  html.nk105 #view-leave .leave-report-chart-card{padding:12px!important}
+  html.nk105 #view-leave .leave-type-bar{min-height:0!important;gap:8px!important;padding:6px 0!important}
+  html.nk105 #view-leave .leave-top-row{min-height:0!important;padding:9px 0!important}
+  html.nk105 #view-leave #nkLeaveFilterPanel>summary{min-height:43px!important}
+  html.nk105 #view-leave .leave-report-table-wrap:has(#leaveUnifiedPeople){display:none!important}
+  html.nk105 #view-leave .nk105-leave-people-list{display:block!important;margin:9px 0 15px;border-top:1px solid #e8efed}
+  html.nk105 .nk105-leave-person{border-bottom:1px solid #e8efed}
+  html.nk105 .nk105-leave-person>summary{display:flex;align-items:center;gap:11px;min-height:67px;padding:10px 0;list-style:none;cursor:pointer}
+  html.nk105 .nk105-leave-person>summary::-webkit-details-marker{display:none}
+  html.nk105 .nk105-leave-person-name{min-width:0;flex:1;display:grid;gap:3px}
+  html.nk105 .nk105-leave-person-name strong{font-size:12px;line-height:1.35;color:var(--nk105-ink);overflow-wrap:anywhere}
+  html.nk105 .nk105-leave-person-name small{font-size:10px;color:var(--nk105-muted)}
+  html.nk105 .nk105-leave-counts{display:grid;gap:2px;text-align:right;flex-shrink:0}
+  html.nk105 .nk105-leave-counts b{font-size:13px;color:var(--nk105-brand)}
+  html.nk105 .nk105-leave-counts small{font-size:10px;color:#748481}
+  html.nk105 .nk105-leave-person-extra{padding:5px 0 14px 8px;border-top:1px solid #edf1ef}
+  html.nk105 .nk105-detail-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0;font-size:11px;color:#4f6665}
+  html.nk105 .nk105-detail-row span:last-child{text-align:right}
+
+  /* Payroll: prioritize net pay and current period, others expandable without losing data. */
+  html.nk105 #view-payroll .payroll-page-intro .page-actions{gap:6px!important;flex-wrap:wrap!important}
+  html.nk105 #view-payroll #payrollSummary{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
+  html.nk105 #view-payroll #payrollSummary .payroll-summary-card{min-height:0!important;padding:13px 12px!important;border:1px solid #e5edeb!important;border-radius:11px!important;min-width:0!important}
+  html.nk105 #view-payroll #payrollSummary .payroll-summary-card.nk105-payroll-secondary{display:none!important}
+  html.nk105 #view-payroll #payrollSummary.nk105-payroll-expanded .payroll-summary-card.nk105-payroll-secondary{display:block!important}
+  html.nk105 #view-payroll #payrollSummary .payroll-summary-card strong{font-size:19px!important;overflow-wrap:anywhere!important}
+  html.nk105 #view-payroll #payrollSummary .payroll-summary-card small{display:none!important}
+  html.nk105 #view-payroll #nk105PayrollSummaryMore{display:flex!important;min-height:35px!important;width:100%!important;margin:5px 0 8px!important;color:#557a76!important;border:0!important;background:none!important;font-size:11px}
+  html.nk105 #view-payroll .payroll-workspace{display:flex!important;flex-direction:column!important;gap:9px!important}
+  html.nk105 #view-payroll.nk105-has-payroll-detail .payroll-detail-panel{order:0!important}
+  html.nk105 #view-payroll.nk105-has-payroll-detail .payroll-period-panel{order:1!important}
+  html.nk105 #view-payroll .payroll-period-panel{padding:12px!important;border-radius:12px!important}
+  html.nk105 #view-payroll .payroll-period-panel .panel-head{display:flex!important;align-items:center;gap:6px;flex-wrap:wrap!important}
+  html.nk105 #view-payroll .nk105-period-toggle{display:inline-flex!important;align-items:center;border:1px solid #dde9e6;background:#fff;color:#04878a;border-radius:9px;min-height:39px;padding:5px 8px;font-size:11px;font-weight:600}
+  html.nk105 #view-payroll.nk105-has-payroll-detail:not(.nk105-periods-open) #payrollPeriods{display:none!important}
+  html.nk105 #view-payroll:not(.nk105-has-payroll-detail) #nk105PayrollPeriodToggle{display:none!important}
+  html.nk105 #view-payroll .payroll-detail-panel{padding:13px!important;border-radius:12px!important}
+  html.nk105 #view-payroll .payroll-detail-head h2{font-size:18px!important;line-height:1.4!important}
+  html.nk105 #view-payroll .payroll-command-row{gap:8px!important}
+  html.nk105 #view-payroll .payroll-detail-totals{gap:5px!important}
+  html.nk105 #view-payroll .payroll-detail-totals>div{min-height:0!important;padding:10px!important}
+  html.nk105 #view-payroll .payroll-detail-totals>div strong{font-size:18px!important}
+  html.nk105 #view-payroll .payroll-detail-totals .net{background:#e9f5f1!important;border-radius:10px!important}
+  html.nk105 #view-payroll .payroll-period-row{min-height:50px!important;padding:10px!important}
+  html.nk105 #view-payroll .payroll-grid-toolbar{padding:6px 0!important}
+
+  /* Keep all validation and errors visible on all screens. */
+  html.nk105 #dataLoadBanner:not(.hidden){display:flex!important}
+  html.nk105 #dataLoadBanner :is(button,[role=button]){min-height:42px}
+}
+@media(max-width:380px){
+ html.nk105 #view-dashboard .summary-strip .summary-label{font-size:9px!important}
+ html.nk105 #view-payroll #payrollSummary{grid-template-columns:1fr!important}
+ html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary>article>strong{font-size:20px!important}
+}
+@media(prefers-reduced-motion:reduce){html.nk105 .nk105-chevron,html.nk105 *{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
+
+html.nk105 #nk105PayrollSummaryMore[hidden]{display:none!important}

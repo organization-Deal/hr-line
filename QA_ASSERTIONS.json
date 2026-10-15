@@ -1,0 +1,278 @@
+[
+  {
+    "check": "320: runtime initialized",
+    "passed": true
+  },
+  {
+    "check": "320: three compact employee rows",
+    "passed": true
+  },
+  {
+    "check": "320: leave list populated",
+    "passed": true
+  },
+  {
+    "check": "320: missing checkin neutral label",
+    "passed": true
+  },
+  {
+    "check": "320: dashboard extra control",
+    "passed": true
+  },
+  {
+    "check": "320: payroll toggle control",
+    "passed": true
+  },
+  {
+    "check": "320: attendance wording",
+    "passed": true
+  },
+  {
+    "check": "320: dense people table hidden",
+    "passed": true
+  },
+  {
+    "check": "320: compact list visible",
+    "passed": true
+  },
+  {
+    "check": "320: auxiliary dashboard initially compact",
+    "passed": true
+  },
+  {
+    "check": "320: dashboard expands",
+    "passed": true
+  },
+  {
+    "check": "320: original profile handler preserved",
+    "passed": true
+  },
+  {
+    "check": "320: payroll extras expand",
+    "passed": true
+  },
+  {
+    "check": "320: leave chart expands",
+    "passed": true
+  },
+  {
+    "check": "320: people no section overflow",
+    "passed": true
+  },
+  {
+    "check": "320: dashboard no section overflow",
+    "passed": true
+  },
+  {
+    "check": "320: no JS page errors []",
+    "passed": true
+  },
+  {
+    "check": "390: runtime initialized",
+    "passed": true
+  },
+  {
+    "check": "390: three compact employee rows",
+    "passed": true
+  },
+  {
+    "check": "390: leave list populated",
+    "passed": true
+  },
+  {
+    "check": "390: missing checkin neutral label",
+    "passed": true
+  },
+  {
+    "check": "390: dashboard extra control",
+    "passed": true
+  },
+  {
+    "check": "390: payroll toggle control",
+    "passed": true
+  },
+  {
+    "check": "390: attendance wording",
+    "passed": true
+  },
+  {
+    "check": "390: dense people table hidden",
+    "passed": true
+  },
+  {
+    "check": "390: compact list visible",
+    "passed": true
+  },
+  {
+    "check": "390: auxiliary dashboard initially compact",
+    "passed": true
+  },
+  {
+    "check": "390: dashboard expands",
+    "passed": true
+  },
+  {
+    "check": "390: original profile handler preserved",
+    "passed": true
+  },
+  {
+    "check": "390: payroll extras expand",
+    "passed": true
+  },
+  {
+    "check": "390: leave chart expands",
+    "passed": true
+  },
+  {
+    "check": "390: people no section overflow",
+    "passed": true
+  },
+  {
+    "check": "390: dashboard no section overflow",
+    "passed": true
+  },
+  {
+    "check": "390: no JS page errors []",
+    "passed": true
+  },
+  {
+    "check": "430: runtime initialized",
+    "passed": true
+  },
+  {
+    "check": "430: three compact employee rows",
+    "passed": true
+  },
+  {
+    "check": "430: leave list populated",
+    "passed": true
+  },
+  {
+    "check": "430: missing checkin neutral label",
+    "passed": true
+  },
+  {
+    "check": "430: dashboard extra control",
+    "passed": true
+  },
+  {
+    "check": "430: payroll toggle control",
+    "passed": true
+  },
+  {
+    "check": "430: attendance wording",
+    "passed": true
+  },
+  {
+    "check": "430: dense people table hidden",
+    "passed": true
+  },
+  {
+    "check": "430: compact list visible",
+    "passed": true
+  },
+  {
+    "check": "430: auxiliary dashboard initially compact",
+    "passed": true
+  },
+  {
+    "check": "430: dashboard expands",
+    "passed": true
+  },
+  {
+    "check": "430: original profile handler preserved",
+    "passed": true
+  },
+  {
+    "check": "430: payroll extras expand",
+    "passed": true
+  },
+  {
+    "check": "430: leave chart expands",
+    "passed": true
+  },
+  {
+    "check": "430: people no section overflow",
+    "passed": true
+  },
+  {
+    "check": "430: dashboard no section overflow",
+    "passed": true
+  },
+  {
+    "check": "430: no JS page errors []",
+    "passed": true
+  },
+  {
+    "check": "768: runtime initialized",
+    "passed": true
+  },
+  {
+    "check": "768: three compact employee rows",
+    "passed": true
+  },
+  {
+    "check": "768: leave list populated",
+    "passed": true
+  },
+  {
+    "check": "768: missing checkin neutral label",
+    "passed": true
+  },
+  {
+    "check": "768: dashboard extra control",
+    "passed": true
+  },
+  {
+    "check": "768: payroll toggle control",
+    "passed": true
+  },
+  {
+    "check": "768: attendance wording",
+    "passed": true
+  },
+  {
+    "check": "768: native people table present",
+    "passed": true
+  },
+  {
+    "check": "768: no JS page errors []",
+    "passed": true
+  },
+  {
+    "check": "1440: runtime initialized",
+    "passed": true
+  },
+  {
+    "check": "1440: three compact employee rows",
+    "passed": true
+  },
+  {
+    "check": "1440: leave list populated",
+    "passed": true
+  },
+  {
+    "check": "1440: missing checkin neutral label",
+    "passed": true
+  },
+  {
+    "check": "1440: dashboard extra control",
+    "passed": true
+  },
+  {
+    "check": "1440: payroll toggle control",
+    "passed": true
+  },
+  {
+    "check": "1440: attendance wording",
+    "passed": true
+  },
+  {
+    "check": "1440: native people table present",
+    "passed": true
+  },
+  {
+    "check": "1440: no JS page errors []",
+    "passed": true
+  }
+]
