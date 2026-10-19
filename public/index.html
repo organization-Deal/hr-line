@@ -44,7 +44,7 @@
   <link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A" />
   <link rel="stylesheet" href="/ui/nk-multi-gmail.css?v=MGMAIL20261020A" />
   <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A" />
-  <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020b">
+  <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-bulk1">
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -442,7 +442,15 @@
         <section class="panel nk-screening" id="nkScreeningPanel" aria-label="คิวคัดกรองอีเมลรับสมัครงาน">
           <div class="nk-screening-top"><div><p class="kicker">APPLICATION SCREENING</p><h3>คิวคัดกรองอีเมล</h3><p>เมลที่ Sync เข้ามายังไม่ใช่ผู้สมัคร HR ตรวจแล้วกดรับจึงเข้าสู่ Pipeline</p></div><button class="secondary-btn" id="nkScreeningReload" type="button">↻ โหลดคิวใหม่</button></div>
           <div class="nk-screening-metrics" id="nkScreeningMetrics"></div>
-          <div class="nk-screening-tools"><input type="search" id="nkScreeningSearch" placeholder="ค้นหาผู้ส่ง / หัวข้อ / อีเมล" aria-label="ค้นหาคิวคัดกรอง"/><select id="nkScreeningFilter" aria-label="กรองผลคัดกรอง"><option value="pending">ยังไม่ตัดสินใจ</option><option value="all">ทั้งหมด</option><option value="likely">น่าจะสมัครจริง</option><option value="review">รอตรวจ</option><option value="noise">ไม่เกี่ยวข้อง</option><option value="accepted">รับเป็นผู้สมัครแล้ว</option><option value="rejected">คัดออกแล้ว</option></select></div>
+          <div class="nk-screening-tools"><input type="search" id="nkScreeningSearch" placeholder="ค้นหาผู้ส่ง / หัวข้อ / อีเมล" aria-label="ค้นหาคิวคัดกรอง"/><select id="nkScreeningFilter" aria-label="กรองผลคัดกรอง"><option value="pending">ยังไม่ตัดสินใจ</option><option value="all">ทั้งหมด</option><option value="likely">น่าจะสมัครจริง</option><option value="review">รอตรวจ</option><option value="noise">ไม่เกี่ยวข้อง</option><option value="accepted">รับเป็นผู้สมัครแล้ว</option><option value="rejected">คัดออกแล้ว</option><option value="archived">ลบจากคิว (กู้คืนได้)</option></select></div>
+          <div class="nk-screening-bulk" id="nkScreeningBulk" aria-label="เลือกอีเมลหลายรายการ">
+            <label class="nk-screening-select-all"><input type="checkbox" id="nkScreeningSelectAll"/> เลือกทั้งหมดที่แสดง (สูงสุด 50)</label>
+            <strong id="nkScreeningSelectedCount" aria-live="polite">เลือก 0 รายการ</strong>
+            <button type="button" class="secondary-btn" id="nkScreeningBulkReject" disabled>คัดออกที่เลือก</button>
+            <button type="button" class="secondary-btn nk-screening-delete" id="nkScreeningBulkArchive" disabled>ลบออกจากคิว</button>
+            <button type="button" class="secondary-btn" id="nkScreeningBulkRestore" hidden disabled>กู้คืนที่เลือก</button>
+            <button type="button" class="nk-screening-clear" id="nkScreeningClearSelection" disabled>ยกเลิกเลือก</button>
+          </div>
           <div class="nk-screening-result" id="nkScreeningResult" role="status" aria-live="polite">กำลังโหลดคิวอีเมล…</div>
           <div class="nk-screening-list" id="nkScreeningList"></div>
           <p class="nk-screening-note">การจัดประเภทเป็นเพียงคำแนะนำจากกติกา ไม่ได้ตัดสินผู้สมัครโดยอัตโนมัติ • เมลที่คัดออกยังตรวจย้อนหลังได้</p>

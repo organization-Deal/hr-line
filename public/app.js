@@ -1421,9 +1421,30 @@ function bindEvents() {
   });
   $('#recruitmentGmailAccountList')?.addEventListener('click', handleRecruitmentGmailAccountAction);
   $('#nkScreeningReload')?.addEventListener('click',()=>reloadRecruitmentScreening());
-  $('#nkScreeningSearch')?.addEventListener('input',renderRecruitmentScreening);
-  $('#nkScreeningFilter')?.addEventListener('change',renderRecruitmentScreening);
+  $('#nkScreeningSearch')?.addEventListener('input',()=>{nkScreeningSelected.clear();renderRecruitmentScreening();});
+  $('#nkScreeningFilter')?.addEventListener('change',()=>{nkScreeningSelected.clear();renderRecruitmentScreening();});
   $('#nkScreeningList')?.addEventListener('click',handleRecruitmentScreeningAction);
+  $('#nkScreeningList')?.addEventListener('change',event=>{
+    const checkbox=event.target.closest('[data-screening-select]');if(!checkbox)return;
+    const key=String(checkbox.dataset.screeningSelect||'');
+    if(checkbox.checked){
+      if(nkScreeningSelected.size>=50){checkbox.checked=false;toast('เลือกได้สูงสุดครั้งละ 50 รายการ',true);return;}
+      nkScreeningSelected.add(key);
+    }else nkScreeningSelected.delete(key);
+    refreshRecruitmentScreeningBulkControls();
+  });
+  $('#nkScreeningSelectAll')?.addEventListener('change',event=>{
+    const checked=event.target.checked;
+    const keys=[...$('#nkScreeningList').querySelectorAll('[data-screening-select]')].map(el=>el.dataset.screeningSelect);
+    if(checked){keys.slice(0,50).forEach(key=>nkScreeningSelected.add(key));if(keys.length>50)toast('เลือกสูงสุด 50 รายการต่อครั้ง',true);}
+    else keys.forEach(key=>nkScreeningSelected.delete(key));
+    $('#nkScreeningList').querySelectorAll('[data-screening-select]').forEach(el=>{el.checked=nkScreeningSelected.has(el.dataset.screeningSelect);});
+    refreshRecruitmentScreeningBulkControls();
+  });
+  $('#nkScreeningClearSelection')?.addEventListener('click',()=>{nkScreeningSelected.clear();renderRecruitmentScreening();});
+  $('#nkScreeningBulkReject')?.addEventListener('click',()=>bulkRecruitmentScreeningAction('reject'));
+  $('#nkScreeningBulkArchive')?.addEventListener('click',()=>bulkRecruitmentScreeningAction('archive'));
+  $('#nkScreeningBulkRestore')?.addEventListener('click',()=>bulkRecruitmentScreeningAction('restore'));
   $('#addBenefitBtn').onclick = openBenefitCreate;
   $('#employeeSearch').addEventListener('input', event => renderEmployees(event.target.value));
 
@@ -3005,34 +3026,85 @@ function showInviteCreated(url, expiresAt, maxUses) {
   toast('สร้างและคัดลอกลิงก์เชิญแล้ว');
 }
 
-// NAKNA_RECRUITMENT_SCREENING_V1 — controlled list; no global DOM MutationObserver.
+// Bulk selection is scoped to this page; never selects or deletes Gmail messages.
+const nkScreeningSelected=new Set();
+let nkScreeningBulkBusy=false;
+function nkScreeningRowsVisible(data,filter,query){
+  return data.filter(x=>{
+    if(filter==='archived')return Boolean(x.archived_at);
+    if(x.archived_at)return false;
+    if(filter==='all')return true;
+    if(filter==='pending')return !['accepted','rejected'].includes(x.decision);
+    if(filter==='accepted'||filter==='rejected')return x.decision===filter;
+    return !['accepted','rejected'].includes(x.decision)&&x.kind===filter;
+  }).filter(x=>!query||[x.sender_name,x.sender_email,x.subject,x.snippet,x.source_email].some(v=>String(v||'').toLowerCase().includes(query)));
+}
+function refreshRecruitmentScreeningBulkControls(){
+  const archivedView=$('#nkScreeningFilter')?.value==='archived';
+  const n=nkScreeningSelected.size;
+  const count=$('#nkScreeningSelectedCount');if(count)count.textContent=`เลือก ${n} รายการ`;
+  const canAct=n>0&&!nkScreeningBulkBusy;
+  const rej=$('#nkScreeningBulkReject'),arc=$('#nkScreeningBulkArchive'),restore=$('#nkScreeningBulkRestore'),clear=$('#nkScreeningClearSelection');
+  if(rej){rej.hidden=archivedView;rej.disabled=!canAct;}
+  if(arc){arc.hidden=archivedView;arc.disabled=!canAct;}
+  if(restore){restore.hidden=!archivedView;restore.disabled=!canAct;}
+  if(clear)clear.disabled=!canAct;
+  const shown=[...($('#nkScreeningList')?.querySelectorAll('[data-screening-select]')||[])];
+  const checkall=$('#nkScreeningSelectAll');
+  if(checkall){checkall.disabled=nkScreeningBulkBusy||shown.length===0;const selectedVisible=shown.filter(el=>nkScreeningSelected.has(el.dataset.screeningSelect)).length;checkall.checked=shown.length>0&&selectedVisible===shown.length;checkall.indeterminate=selectedVisible>0&&selectedVisible<shown.length;}
+}
 function renderRecruitmentScreening(){
   const root=$('#nkScreeningList'),metrics=$('#nkScreeningMetrics'),result=$('#nkScreeningResult');
   if(!root||!metrics||!result)return;
   if(!['owner','primary_owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''))){$('#nkScreeningPanel')?.classList.add('hidden');return;}
   $('#nkScreeningPanel')?.classList.remove('hidden');
   const data=state.recruitmentScreening?.data||[];
-  const counts={all:data.length,pending:0,likely:0,review:0,noise:0,accepted:0,rejected:0};
-  data.forEach(x=>{if(x.decision==='accepted'||x.decision==='rejected')counts[x.decision]++;else{counts.pending++;counts[x.kind]++;}});
-  metrics.innerHTML=[['pending','ยังไม่ตัดสินใจ'],['likely','น่าจะสมัคร'],['review','รอตรวจ'],['noise','ไม่เกี่ยวข้อง'],['accepted','รับแล้ว'],['rejected','คัดออก']].map(([k,label])=>`<div class="nk-screening-stat"><small>${label}</small><strong>${counts[k]||0}</strong></div>`).join('');
+  const counts={all:data.length,pending:0,likely:0,review:0,noise:0,accepted:0,rejected:0,archived:0};
+  data.forEach(x=>{if(x.archived_at){counts.archived++;return;}if(x.decision==='accepted'||x.decision==='rejected')counts[x.decision]++;else{counts.pending++;counts[x.kind]++;}});
+  metrics.innerHTML=[['pending','ยังไม่ตัดสินใจ'],['likely','น่าจะสมัคร'],['review','รอตรวจ'],['noise','ไม่เกี่ยวข้อง'],['accepted','รับแล้ว'],['rejected','คัดออก'],['archived','ลบจากคิว']].map(([k,label])=>`<div class="nk-screening-stat"><small>${label}</small><strong>${counts[k]||0}</strong></div>`).join('');
   const filter=$('#nkScreeningFilter')?.value||'pending',query=($('#nkScreeningSearch')?.value||'').toLowerCase().trim();
-  let shown=data.filter(x=>(filter==='all'||(filter==='pending'?!['accepted','rejected'].includes(x.decision):filter==='accepted'||filter==='rejected'?x.decision===filter:!['accepted','rejected'].includes(x.decision)&&x.kind===filter)) && (!query||[x.sender_name,x.sender_email,x.subject,x.snippet,x.source_email].some(v=>String(v||'').toLowerCase().includes(query))));
-  shown=shown.slice(0,150);
-  result.textContent=state.recruitmentScreening?.error||`แสดง ${shown.length} จาก ${data.length} อีเมลล่าสุด • คัดกรองด้วย HR ก่อนเข้าระบบผู้สมัคร`;
+  const allShown=nkScreeningRowsVisible(data,filter,query);
+  const shown=allShown.slice(0,150);
+  const allowedKeys=new Set(shown.filter(x=>x.decision!=='accepted').map(x=>x.source_kind+':'+x.id));
+  for(const key of [...nkScreeningSelected])if(!allowedKeys.has(key))nkScreeningSelected.delete(key);
+  result.textContent=state.recruitmentScreening?.error||`แสดง ${shown.length} จาก ${allShown.length} รายการที่ตรงตัวกรอง • เลือกได้สูงสุด 50 รายการต่อครั้ง`;
   root.innerHTML=shown.length?shown.map(x=>{
     const kindLabel={likely:'น่าจะสมัครจริง',review:'รอตรวจ',noise:'ไม่น่าใช่ใบสมัคร'}[x.kind]||'รอตรวจ';
-    const stateLabel=x.decision==='accepted'?'รับเป็นผู้สมัครแล้ว':x.decision==='rejected'?'คัดออกแล้ว':x.decision==='review'?'HR รอตรวจ':kindLabel;
+    const stateLabel=x.archived_at?'ลบจากคิวแล้ว':x.decision==='accepted'?'รับเป็นผู้สมัครแล้ว':x.decision==='rejected'?'คัดออกแล้ว':x.decision==='review'?'HR รอตรวจ':kindLabel;
     const badges=(x.reasons||[]).map(t=>`<span class="nk-screening-reason">${escapeHtml(t)}</span>`).join('');
     const date=x.received_at?formatDateTime(x.received_at):'ไม่ทราบเวลา';
-    const key=escapeHtml(x.source_kind+':'+x.id);
-    return `<article class="nk-screening-row"><div class="nk-screening-content"><div class="nk-screening-line"><span class="nk-screening-status nk-screening-${x.decision||x.kind}">${stateLabel}</span><span class="nk-screening-score">คะแนน ${Number(x.score)||0} · ${date}</span></div>
+    const rawKey=x.source_kind+':'+x.id;
+    const key=escapeHtml(rawKey);
+    const selectable=x.decision!=='accepted';
+    return `<article class="nk-screening-row ${nkScreeningSelected.has(rawKey)?'nk-screening-row-selected':''}">
+      ${selectable?`<label class="nk-screening-select-box" title="เลือกรายการนี้"><input type="checkbox" data-screening-select="${key}" aria-label="เลือกรายการ ${escapeHtml(x.subject||'อีเมล')}" ${nkScreeningSelected.has(rawKey)?'checked':''}/></label>`:''}
+      <div class="nk-screening-content"><div class="nk-screening-line"><span class="nk-screening-status nk-screening-${x.archived_at?'rejected':x.decision||x.kind}">${stateLabel}</span><span class="nk-screening-score">คะแนน ${Number(x.score)||0} · ${date}</span></div>
       <strong class="nk-screening-subject">${escapeHtml(x.subject||'(ไม่มีหัวข้อ)')}</strong>
       <div class="nk-screening-sender">${escapeHtml(x.sender_name||'ไม่ทราบผู้ส่ง')} · ${escapeHtml(x.sender_email||'ไม่มีอีเมล')} <span>· ${escapeHtml(x.source_email||'Gmail หลัก')}</span></div>
       <p class="nk-screening-snippet">${escapeHtml(x.snippet||'ไม่มีตัวอย่างเนื้อหา')}</p>
       <div class="nk-screening-reasons">${badges}${x.imported_as_candidate&&!x.decision?'<span class="nk-screening-reason nk-screening-prior">เคยนำเข้าระบบเก่า · รอยืนยัน</span>':''}${x.possible_duplicate_id?`<span class="nk-screening-reason nk-screening-prior">พบ Candidate เดิม #${Number(x.possible_duplicate_id)}</span>`:''}${x.candidate_id&&!x.possible_duplicate_id?`<span class="nk-screening-reason">Candidate #${Number(x.candidate_id)}</span>`:''}</div>
       ${x.attachments?.length?`<details><summary>ไฟล์แนบ ${x.attachments.length} รายการ</summary><p>${x.attachments.map(a=>escapeHtml(a)).join(' · ')}</p></details>`:''}
-      </div><div class="nk-screening-actions">${x.decision==='accepted'?'<span class="nk-screening-done">ยืนยันแล้ว</span>':`<button class="primary-btn" data-screening="accepted" data-key="${key}" type="button">รับเป็นผู้สมัคร</button><button class="secondary-btn" data-screening="review" data-key="${key}" type="button">รอตรวจ</button><button class="secondary-btn" data-screening="rejected" data-key="${key}" type="button">คัดออก</button>`}</div></article>`;
+      </div><div class="nk-screening-actions">${x.archived_at?`<button class="secondary-btn" data-screening="restore" data-key="${key}" type="button">กู้คืน</button>`:x.decision==='accepted'?'<span class="nk-screening-done">ยืนยันแล้ว</span>':`<button class="primary-btn" data-screening="accepted" data-key="${key}" type="button">รับเป็นผู้สมัคร</button><button class="secondary-btn" data-screening="review" data-key="${key}" type="button">รอตรวจ</button><button class="secondary-btn" data-screening="rejected" data-key="${key}" type="button">คัดออก</button>`}</div></article>`;
   }).join(''):`<div class="nk-screening-empty"><strong>ไม่มีอีเมลในกลุ่มนี้</strong><p>ลองเปลี่ยนตัวกรองหรือกด Sync ที่บัญชี Gmail ด้านบน</p></div>`;
+  refreshRecruitmentScreeningBulkControls();
+}
+async function bulkRecruitmentScreeningAction(action){
+  if(nkScreeningBulkBusy||!nkScreeningSelected.size)return;
+  const items=[...nkScreeningSelected].map(key=>{const [source_kind,id]=key.split(':');return {source_kind,id:Number(id)};});
+  if(items.length>50){toast('เลือกรายการได้สูงสุดครั้งละ 50 รายการ',true);return;}
+  const messages={reject:`คัดออก ${items.length} อีเมลที่เลือก? สามารถย้อนดูได้ในตัวกรอง “คัดออกแล้ว”`,archive:`ลบ ${items.length} อีเมลออกจากคิวคัดกรอง? Gmail ต้นฉบับและผู้สมัครที่รับแล้วจะไม่ถูกลบ และสามารถกู้คืนได้`,restore:`กู้คืน ${items.length} รายการกลับเข้าคิวหรือไม่?`};
+  if(!confirm(messages[action]||'ยืนยันการทำรายการ?'))return;
+  nkScreeningBulkBusy=true;
+  refreshRecruitmentScreeningBulkControls();
+  try{
+    const response=await api('/api/recruitment/screening/bulk',{method:'POST',body:JSON.stringify({action,items}),timeoutMs:30000});
+    if(!response?.ok)throw new Error(response?.error||'จัดการรายการไม่สำเร็จ');
+    nkScreeningSelected.clear();
+    const skipped=response.skipped?.length||0;
+    toast(`ทำรายการสำเร็จ ${Number(response.updated)||0} รายการ${skipped?' · ข้าม '+skipped+' รายการ (อาจเป็นผู้สมัครที่รับแล้ว)':''}`);
+    await reloadRecruitmentScreening();
+  }catch(error){toast(error.message||'จัดการรายการไม่สำเร็จ',true);}
+  finally{nkScreeningBulkBusy=false;refreshRecruitmentScreeningBulkControls();}
 }
 async function reloadRecruitmentScreening(){
   const btn=$('#nkScreeningReload');if(btn)btn.disabled=true;
@@ -3044,6 +3116,14 @@ async function handleRecruitmentScreeningAction(event){
   const btn=event.target.closest('[data-screening][data-key]');if(!btn)return;
   const [source_kind,id]=String(btn.dataset.key||'').split(':');const decision=btn.dataset.screening;
   const current=(state.recruitmentScreening?.data||[]).find(x=>x.source_kind===source_kind&&Number(x.id)===Number(id));
+  if(decision==='restore'){
+    if(!confirm('กู้คืนอีเมลนี้กลับเข้าคิวคัดกรอง?'))return;
+    btn.disabled=true;
+    try{const response=await api('/api/recruitment/screening/bulk',{method:'POST',body:JSON.stringify({action:'restore',items:[{source_kind,id:Number(id)}]})});
+      if(!response?.ok)throw new Error(response?.error||'กู้คืนไม่สำเร็จ');toast('กู้คืนอีเมลแล้ว');await reloadRecruitmentScreening();
+    }catch(error){toast(error.message||'กู้คืนไม่สำเร็จ',true);btn.disabled=false;}
+    return;
+  }
   if(decision==='accepted'&&current?.kind==='noise'&&!confirm('ระบบประเมินว่าเมลนี้ไม่เกี่ยวกับการสมัครงาน ยืนยันให้เป็นผู้สมัครจริงหรือไม่?'))return;
   if(decision==='rejected'&&!confirm('คัดอีเมลนี้ออกจากคิวรับสมัคร? ข้อมูลอีเมลยังอยู่ตรวจย้อนหลังได้'))return;
   btn.disabled=true;
@@ -3051,6 +3131,7 @@ async function handleRecruitmentScreeningAction(event){
     const response=await api('/api/recruitment/screening/decision',{method:'POST',body:JSON.stringify({source_kind,id:Number(id),decision})});
     if(!response?.ok)throw new Error(response?.error||'ไม่สามารถบันทึกผล');
     toast(decision==='accepted'?'ยืนยันผู้สมัครเข้าระบบแล้ว':decision==='rejected'?'คัดออกแล้ว':'ตั้งเป็นรอตรวจแล้ว');
+    nkScreeningSelected.delete(source_kind+':'+id);
     await Promise.all([reloadRecruitmentScreening(),refreshRecruitmentOnly({render:true})]);
   }catch(error){toast(error.message||'บันทึกการคัดกรองไม่สำเร็จ',true);btn.disabled=false;}
 }

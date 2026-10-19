@@ -1836,6 +1836,12 @@ async function handleApi(request, env, url, auth, ctx) {
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูอีเมลคัดกรอง'},403);
     return json({data:await getRecruitmentScreeningRows(env,clientId)});
   }
+  if(path==='/api/recruitment/screening/bulk' && method==='POST'){
+    if(!clientId)return json({error:'COMPANY_REQUIRED'},409);
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดการคิวคัดกรอง'},403);
+    const result=await bulkRecruitmentScreening(env,clientId,Number(auth.user.id),await safeJson(request));
+    return json(result,result.error?400:200);
+  }
   if(path==='/api/recruitment/screening/decision' && method==='POST'){
     if(!clientId)return json({error:'COMPANY_REQUIRED'},409);
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์คัดกรองผู้สมัคร'},403);
@@ -11973,6 +11979,16 @@ async function ensureRecruitmentScreeningReady(db){
     UNIQUE(client_id,source_kind,message_id)
   )`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_screening_client_decision ON recruitment_screening_decisions(client_id,decision)`).run();
+  // Hide from HR review only; retain Gmail evidence and accepted candidate records.
+  await db.prepare(`CREATE TABLE IF NOT EXISTS recruitment_screening_archives (
+    client_id INTEGER NOT NULL,
+    source_kind TEXT NOT NULL CHECK(source_kind IN ('dedicated','legacy')),
+    message_id INTEGER NOT NULL,
+    archived_by_user_id INTEGER,
+    archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(client_id,source_kind,message_id)
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_screening_archives_client ON recruitment_screening_archives(client_id,archived_at)`).run();
 }
 function classifyRecruitmentEmail(message){
   const subject=String(message.subject||'');
@@ -12006,8 +12022,8 @@ async function getRecruitmentScreeningRows(env,clientId){
   await ensureRecruitmentScreeningReady(env.DB);
   await ensureV100P7Ready(env.DB);
   const [dedicated,legacy]=await Promise.all([
-    env.DB.prepare(`SELECT m.*,a.email AS inbox_email,c.stage AS candidate_stage,(SELECT cc.id FROM candidates cc WHERE cc.client_id=m.client_id AND lower(cc.email)=lower(m.sender_email) ORDER BY cc.id LIMIT 1) AS matching_candidate_id,d.decision,d.decided_at,d.decided_by_user_id,d.candidate_id AS approved_candidate_id FROM recruitment_inbox_messages m JOIN recruitment_gmail_accounts a ON a.id=m.account_id LEFT JOIN candidates c ON c.id=m.candidate_id AND c.client_id=m.client_id LEFT JOIN recruitment_screening_decisions d ON d.client_id=m.client_id AND d.source_kind='dedicated' AND d.message_id=m.id WHERE m.client_id=?1 ORDER BY m.id DESC LIMIT 250`).bind(clientId).all(),
-    env.DB.prepare(`SELECT m.*,g.email AS inbox_email,c.stage AS candidate_stage,(SELECT cc.id FROM candidates cc WHERE cc.client_id=m.client_id AND lower(cc.email)=lower(m.sender_email) ORDER BY cc.id LIMIT 1) AS matching_candidate_id,d.decision,d.decided_at,d.decided_by_user_id,d.candidate_id AS approved_candidate_id FROM recruitment_email_messages m LEFT JOIN google_workspace_integrations g ON g.client_id=m.client_id LEFT JOIN candidates c ON c.id=m.candidate_id AND c.client_id=m.client_id LEFT JOIN recruitment_screening_decisions d ON d.client_id=m.client_id AND d.source_kind='legacy' AND d.message_id=m.id WHERE m.client_id=?1 ORDER BY m.id DESC LIMIT 250`).bind(clientId).all()
+    env.DB.prepare(`SELECT m.*,a.email AS inbox_email,c.stage AS candidate_stage,(SELECT cc.id FROM candidates cc WHERE cc.client_id=m.client_id AND lower(cc.email)=lower(m.sender_email) ORDER BY cc.id LIMIT 1) AS matching_candidate_id,d.decision,d.decided_at,d.decided_by_user_id,d.candidate_id AS approved_candidate_id,ar.archived_at FROM recruitment_inbox_messages m JOIN recruitment_gmail_accounts a ON a.id=m.account_id LEFT JOIN candidates c ON c.id=m.candidate_id AND c.client_id=m.client_id LEFT JOIN recruitment_screening_decisions d ON d.client_id=m.client_id AND d.source_kind='dedicated' AND d.message_id=m.id LEFT JOIN recruitment_screening_archives ar ON ar.client_id=m.client_id AND ar.source_kind='dedicated' AND ar.message_id=m.id WHERE m.client_id=?1 ORDER BY m.id DESC LIMIT 250`).bind(clientId).all(),
+    env.DB.prepare(`SELECT m.*,g.email AS inbox_email,c.stage AS candidate_stage,(SELECT cc.id FROM candidates cc WHERE cc.client_id=m.client_id AND lower(cc.email)=lower(m.sender_email) ORDER BY cc.id LIMIT 1) AS matching_candidate_id,d.decision,d.decided_at,d.decided_by_user_id,d.candidate_id AS approved_candidate_id,ar.archived_at FROM recruitment_email_messages m LEFT JOIN google_workspace_integrations g ON g.client_id=m.client_id LEFT JOIN candidates c ON c.id=m.candidate_id AND c.client_id=m.client_id LEFT JOIN recruitment_screening_decisions d ON d.client_id=m.client_id AND d.source_kind='legacy' AND d.message_id=m.id LEFT JOIN recruitment_screening_archives ar ON ar.client_id=m.client_id AND ar.source_kind='legacy' AND ar.message_id=m.id WHERE m.client_id=?1 ORDER BY m.id DESC LIMIT 250`).bind(clientId).all()
   ]);
   const pack=(row,source_kind)=>{
     const attachments=recruitmentAttachmentList(row.attachment_names);
@@ -12015,11 +12031,48 @@ async function getRecruitmentScreeningRows(env,clientId){
     return {id:Number(row.id),source_kind,source_email:row.inbox_email||null,
       sender_name:row.sender_name||'',sender_email:row.sender_email||'',subject:row.subject||'',snippet:row.snippet||'',
       received_at:row.received_at||row.created_at,attachments,candidate_id:row.approved_candidate_id||row.candidate_id||null,
-      candidate_stage:row.candidate_stage||null,decision:row.decision||null,decided_at:row.decided_at||null,
+      candidate_stage:row.candidate_stage||null,decision:row.decision||null,decided_at:row.decided_at||null,archived_at:row.archived_at||null,
       imported_as_candidate:Boolean(row.candidate_id),possible_duplicate_id:row.matching_candidate_id||null,...classification};
   };
   return [...(dedicated.results||[]).map(r=>pack(r,'dedicated')),...(legacy.results||[]).map(r=>pack(r,'legacy'))]
     .sort((a,b)=>String(b.received_at||'').localeCompare(String(a.received_at||''))||b.id-a.id).slice(0,300);
+}
+// Bulk HR actions use stable source_kind/id keys. Never delete source Gmail messages.
+async function bulkRecruitmentScreening(env,clientId,userId,input){
+  const action=String(input?.action||'');
+  if(!['reject','archive','restore'].includes(action))return {error:'INVALID_BULK_ACTION'};
+  const items=input?.items;
+  if(!Array.isArray(items)||items.length<1||items.length>50)return {error:'BULK_SIZE_1_TO_50'};
+  await ensureRecruitmentScreeningReady(env.DB);
+  const seen=new Set(),work=[],skipped=[];
+  for(const inputItem of items){
+    const source=String(inputItem?.source_kind||'');
+    const id=Number(inputItem?.id);
+    if(!['dedicated','legacy'].includes(source)||!Number.isSafeInteger(id)||id<1)return {error:'INVALID_BULK_ITEM'};
+    const key=source+':'+id;
+    if(seen.has(key))continue;
+    seen.add(key);
+    // Validate client ownership of *every* record before making writes.
+    const table=source==='dedicated'?'recruitment_inbox_messages':'recruitment_email_messages';
+    const row=await env.DB.prepare(`SELECT id FROM ${table} WHERE client_id=?1 AND id=?2`).bind(clientId,id).first();
+    if(!row){skipped.push({source_kind:source,id,reason:'NOT_FOUND'});continue;}
+    const previous=await env.DB.prepare(`SELECT decision FROM recruitment_screening_decisions WHERE client_id=?1 AND source_kind=?2 AND message_id=?3`).bind(clientId,source,id).first();
+    if(previous?.decision==='accepted'){
+      skipped.push({source_kind:source,id,reason:'ALREADY_ACCEPTED'});
+      continue;
+    }
+    work.push({source,id});
+  }
+  if(work.length){
+    const queries=work.map(({source,id})=>action==='archive'
+      ? env.DB.prepare(`INSERT INTO recruitment_screening_archives(client_id,source_kind,message_id,archived_by_user_id) VALUES(?1,?2,?3,?4) ON CONFLICT(client_id,source_kind,message_id) DO UPDATE SET archived_at=CURRENT_TIMESTAMP,archived_by_user_id=excluded.archived_by_user_id`).bind(clientId,source,id,userId)
+      : action==='restore'
+      ? env.DB.prepare(`DELETE FROM recruitment_screening_archives WHERE client_id=?1 AND source_kind=?2 AND message_id=?3`).bind(clientId,source,id)
+      : env.DB.prepare(`INSERT INTO recruitment_screening_decisions(client_id,source_kind,message_id,decision,candidate_id,decided_by_user_id) VALUES(?1,?2,?3,'rejected',NULL,?4) ON CONFLICT(client_id,source_kind,message_id) DO UPDATE SET decision='rejected',decided_by_user_id=excluded.decided_by_user_id,decided_at=CURRENT_TIMESTAMP`).bind(clientId,source,id,userId));
+    await env.DB.batch(queries);
+    await safeAudit(env.DB,clientId,'user',String(userId),'recruitment.screening.bulk_'+action,'recruitment_email','batch',{count:work.length,items:work.map(x=>x.source+':'+x.id),skipped:skipped.length});
+  }
+  return {ok:true,action,updated:work.length,skipped};
 }
 async function decideRecruitmentScreening(env,clientId,userId,input){
   const source=String(input.source_kind||'');const msgId=Number(input.id);
