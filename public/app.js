@@ -353,7 +353,12 @@ async function loadViewData(name,{force=false}={}){
       }else if(name==='performance'){
         if(canReadBroadcasts){ const [learning,performance]=await Promise.all([load('/api/learning/overview',state.learning),load('/api/performance/overview',state.performance)]); state.learning=learning||state.learning; state.performance=performance||state.performance; }
       }else if(name==='engagement'){
-        if(canViewPeople){ state.engagement=await load('/api/engagement/overview',state.engagement)||state.engagement; }
+        if(canViewPeople){
+          try {
+            const fresh = await api('/api/engagement/overview', {timeoutMs:15000, silentStatus:true});
+            if(fresh) { state.engagement=fresh; state.engagementLoadError=''; }
+          } catch(error) {state.engagementLoadError=String(error?.message||'โหลดข้อมูลแต้มไม่สำเร็จ'); console.warn('[Nakna] Engagement load failed',error);}
+        }
       }else if(name==='analytics'){
         if(canViewPeople){ state.analytics=await load('/api/analytics/overview',state.analytics)||state.analytics; }
       }else if(name==='saas-admin'){
@@ -557,9 +562,16 @@ async function refreshPerformanceOnly({ render = true } = {}) {
 }
 
 async function refreshEngagementOnly({ render = true } = {}) {
-  const result = await api('/api/engagement/overview', { timeoutMs: 15000, silentStatus: true });
-  if (result) state.engagement = result;
-  if (render) { try { renderEngagement(); } catch {} }
+  try {
+    const result = await api('/api/engagement/overview', { timeoutMs: 15000, silentStatus: true });
+    if (result) state.engagement = result;
+    state.engagementLoadError = '';
+  } catch (error) {
+    state.engagementLoadError = String(error?.message || 'โหลดข้อมูลแต้มไม่สำเร็จ');
+    if(render) renderEngagement();
+    throw error;
+  }
+  if (render) renderEngagement();
   markViewLoaded('engagement');
   return state.engagement;
 }
@@ -5926,32 +5938,131 @@ async function generateEmployeeDocument(){
   }catch(e){toast(e.message,true)}finally{button.disabled=false;nkdocsUpdateWizard();}
 }
 
+// NAKNA_GROWTH_WORKSPACE_20261019A — first-party UI backed by existing read-only overviews
+let nkGrowthTab='overview';
+let nkGrowthEmployeeId='all';
+const nkGrowthValidTabs=new Set(['overview','kpi','learning','one','probation']);
+function nkGrowthFilter(rows){return nkGrowthEmployeeId==='all'?(rows||[]):(rows||[]).filter(x=>String(x.employee_id??x.id)===nkGrowthEmployeeId);}
+function nkGrowthAccessPeople(){
+  const role=String(activeCompanyRole()||'');
+  const employeeIds=new Set();
+  const isHr=['owner','co_owner','hr_admin','hr'].includes(role);
+  const out=new Map();
+  const add=(e,id=e?.employee_id??e?.id)=>{
+    if(id==null || !Number(id))return;
+    const key=String(id); employeeIds.add(key);
+    const label=[e?.nickname||e?.first_name||'',e?.last_name||''].join(' ').trim();
+    if(!out.has(key))out.set(key,{id:key,name:label||e?.employee_code||`พนักงาน #${key}`,code:e?.employee_code||''});
+    else if(label && (!out.get(key).name || out.get(key).name.startsWith('พนักงาน #')))out.set(key,{id:key,name:label,code:e?.employee_code||''});
+  };
+  for(const e of state.performance?.goals||[])add(e);
+  for(const e of state.performance?.one_on_ones||[])add(e);
+  for(const e of state.performance?.probation_reviews||[])add(e);
+  for(const e of state.performance?.probation_due||[])add(e,e.id);
+  for(const e of state.learning?.assignments||[])add(e);
+  if(isHr)for(const e of state.employees||[])if(e.status==='active')add(e,e.id);
+  // Manager only sees employee IDs returned by role-scoped API; no client-side role expansion.
+  return [...out.values()].sort((a,b)=>a.name.localeCompare(b.name,'th'));
+}
+window.nkGrowthSelectTab=tab=>{
+  if(!nkGrowthValidTabs.has(tab))return;
+  nkGrowthTab=tab;
+  nkGrowthApplyTab();
+};
+window.nkGrowthSelectEmployee=id=>{
+  const permitted=new Set(nkGrowthAccessPeople().map(x=>x.id));
+  nkGrowthEmployeeId=id==='all'||permitted.has(String(id))?String(id):'all';
+  renderGrowth();
+};
+window.nkGrowthJump=(tab,person='all')=>{
+  const permitted=new Set(nkGrowthAccessPeople().map(x=>x.id));
+  nkGrowthEmployeeId=person==='all'||permitted.has(String(person))?String(person):'all';
+  nkGrowthTab=nkGrowthValidTabs.has(tab)?tab:'overview';
+  renderGrowth();
+  $('#view-performance')?.scrollIntoView({behavior:'smooth',block:'start'});
+};
+function nkGrowthApplyTab(){
+  document.querySelectorAll('#view-performance [data-growth-panel]').forEach(el=>{
+    const isActive=el.dataset.growthPanel===nkGrowthTab;
+    el.hidden=!isActive;
+  });
+  document.querySelectorAll('#view-performance [data-growth-tab]').forEach(b=>{
+    const active=b.dataset.growthTab===nkGrowthTab;
+    b.setAttribute('aria-selected',String(active));
+    b.tabIndex=active?0:-1;
+  });
+}
+function nkGrowthEmployeeTitle(e){const record=nkGrowthAccessPeople().find(x=>x.id===String(e.employee_id??e.id));return escapeHtml([e.nickname||e.first_name||'',e.last_name||''].join(' ').trim()||record?.name||e.employee_code||'พนักงาน');}
+function nkGrowthRenderQueue(){
+  const node=$('#growthActionList'); if(!node)return;
+  const actions=[];const today=localDateKey(new Date());
+  const relevant=(rows)=>nkGrowthFilter(rows);
+  for(const e of relevant(state.performance?.probation_due||[])){
+    const date=String(e.probation_end_date||'').slice(0,10);
+    if(!date || date>localDateKey(new Date(Date.now()+14*86400000)))continue;
+    actions.push({priority:date<today?0:1,date:date,title:`ครบกำหนดทดลองงาน · ${nkGrowthEmployeeTitle(e)}`,desc:date<today?`เลยกำหนด ${formatDate(date)}`:`กำหนด ${formatDate(date)}`,tab:'probation',eid:e.id});
+  }
+  for(const a of relevant(state.learning?.assignments||[])){
+    const date=String(a.due_date||'').slice(0,10);
+    if(date && date<today && a.status!=='completed')actions.push({priority:0,date,title:`เรียนเกินกำหนด · ${nkGrowthEmployeeTitle(a)}`,desc:`${escapeHtml((state.learning?.courses||[]).find(c=>Number(c.id)===Number(a.course_id))?.title||'หลักสูตร')} · กำหนด ${formatDate(date)}`,tab:'learning',eid:a.employee_id});
+  }
+  for(const o of relevant(state.performance?.one_on_ones||[])){
+    if(o.status!=='scheduled')continue;
+    const date=String(o.scheduled_at||'').slice(0,10);
+    actions.push({priority:date && date<today?0:2,date,title:`นัดพูดคุย 1:1 · ${nkGrowthEmployeeTitle(o)}`,desc:date?formatDateTime(o.scheduled_at):'ยังไม่กำหนดเวลา',tab:'one',eid:o.employee_id});
+  }
+  for(const g of relevant(state.performance?.goals||[])){
+    if(g.status==='active' && !g.latest_update){
+      actions.push({priority:3,date:'',title:`KPI ยังไม่มีผลอัปเดต · ${nkGrowthEmployeeTitle(g)}`,desc:escapeHtml(g.title),tab:'kpi',eid:g.employee_id});
+    }
+  }
+  actions.sort((a,b)=>a.priority-b.priority||(a.date||'9999').localeCompare(b.date||'9999'));
+  $('#growthActionBadge').textContent=`${actions.length} รายการ`;
+  node.innerHTML=actions.length?actions.slice(0,8).map(a=>`<button class="nk-growth-task" type="button" onclick="window.nkGrowthJump('${a.tab}','${Number(a.eid)}')"><span class="nk-growth-task-dot ${a.priority===0?'urgent':''}"></span><span><strong>${a.title}</strong><small>${a.desc}</small></span><span aria-hidden="true">›</span></button>`).join(''):`<div class="nk-growth-empty"><strong>ไม่มีรายการที่ต้องติดตามตามเงื่อนไขปัจจุบัน</strong><p>สร้างเป้าหมาย มอบหมายหลักสูตร หรือบันทึกนัด 1:1 เพื่อเริ่มติดตามทีม</p><button class="secondary-btn" type="button" onclick="window.nkGrowthSelectTab('kpi')">ดูเป้าหมาย KPI →</button></div>`;
+  if(actions.length>8)node.insertAdjacentHTML('beforeend',`<p class="nk-growth-more">แสดง 8 จาก ${actions.length} รายการ · เลือกแต่ละแท็บเพื่อดูทั้งหมด</p>`);
+}
+function nkGrowthRenderProfile(){
+  const root=$('#growthProfile');if(!root)return;
+  const people=nkGrowthAccessPeople(),selected=people.find(p=>p.id===nkGrowthEmployeeId);
+  if(!selected){root.innerHTML=`<div class="nk-growth-empty"><strong>${people.length?'เลือกพนักงานด้านบนเพื่อดูรายคน':'ยังไม่มีข้อมูลพนักงานในส่วนนี้'}</strong><p>${people.length?'ดู KPI, งานเรียน, นัด 1:1 และกำหนดทดลองงานของพนักงานคนเดียวกัน':'เริ่มจากตั้ง KPI หรือเพิ่มการมอบหมาย แล้วข้อมูลจะแสดงที่นี่'}</p></div>`;return;}
+  const goals=nkGrowthFilter(state.performance?.goals),ones=nkGrowthFilter(state.performance?.one_on_ones),assigns=nkGrowthFilter(state.learning?.assignments),due=nkGrowthFilter(state.performance?.probation_due);
+  const reviews=nkGrowthFilter(state.performance?.probation_reviews),lastOne=ones[0],lastReview=reviews[0],completed=assigns.filter(a=>a.status==='completed').length;
+  root.innerHTML=`<div class="nk-growth-person"><span class="nk-growth-avatar">${escapeHtml(selected.name.slice(0,1).toUpperCase())}</span><div><strong>${escapeHtml(selected.name)}</strong><small>${escapeHtml(selected.code||'ข้อมูลพนักงาน')}</small></div></div><div class="nk-growth-person-stats"><button onclick="window.nkGrowthSelectTab('kpi')"><strong>${goals.filter(g=>g.status==='active').length}</strong><small>KPI ที่ใช้งาน</small></button><button onclick="window.nkGrowthSelectTab('learning')"><strong>${completed}/${assigns.length}</strong><small>หลักสูตรเรียนจบ</small></button><button onclick="window.nkGrowthSelectTab('one')"><strong>${ones.length}</strong><small>บันทึก 1:1</small></button></div><div class="nk-growth-person-foot"><div><span>1:1 ล่าสุด</span><b>${lastOne?(lastOne.occurred_at||lastOne.scheduled_at?formatDateTime(lastOne.occurred_at||lastOne.scheduled_at):oneStatusLabel(lastOne.status)):'ยังไม่มีข้อมูล'}</b></div><div><span>ทดลองงาน</span><b>${due[0]?.probation_end_date?'ครบ '+formatDate(due[0].probation_end_date):(lastReview?reviewStatusLabel(lastReview.status):'ไม่มีรายการที่ต้องประเมิน')}</b></div></div>${lastOne?.action_items?`<div class="nk-growth-followup"><strong>สิ่งที่ตกลงจาก 1:1</strong><span>${escapeHtml(lastOne.action_items)}</span>${lastOne.next_followup_at?`<small>ติดตามต่อ ${formatDateTime(lastOne.next_followup_at)}</small>`:''}</div>`:''}<p class="nk-growth-caution">แสดงจากข้อมูลที่บันทึกในระบบ ไม่ได้คำนวณเป็นคะแนนตัดสินพนักงาน</p>`;
+}
 function renderGrowth(){
-  const learning=state.learning||{courses:[],summary:{}}; const performance=state.performance||{goals:[],one_on_ones:[],probation_due:[],probation_reviews:[],summary:{}}; const canAdmin=['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));
-  for(const id of ['createCourseBtn','createPerformanceCycleBtn']){const el=$(`#${id}`);if(el)el.classList.toggle('hidden',!canAdmin);}
-  const ls=learning.summary||{},ps=performance.summary||{};
-  $('#performanceSummary').innerHTML=[['หลักสูตร',ls.published||0,'คอร์สที่ Publish'],['เรียนจบ',ls.completed||0,`จาก ${ls.assigned||0} Assignment`],['KPI Active',ps.active_goals||0,`${ps.kpi_on_track||0} อยู่ในเกณฑ์`],['1:1 รอคุย',ps.one_on_one_pending||0,'รายการ'],['Probation',ps.probation_due||0,'คนรอประเมิน']].map(([label,value,sub])=>`<div><span>${label}</span><strong>${value}</strong><small>${sub}</small></div>`).join('');
-  $('#learningProgressBadge').textContent=`${(learning.courses||[]).length} คอร์ส`; $('#probationDueBadge').textContent=`${(performance.probation_due||[]).length} คน`;
-  renderLearningCourses(); renderKpiGoals(); renderOneOnOnes(); renderProbationReviews();
+  const learning=state.learning||{courses:[],summary:{}};
+  const pf=state.performance||{goals:[],one_on_ones:[],probation_due:[],probation_reviews:[],summary:{}};
+  const canAdmin=['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));
+  for(const id of ['createCourseBtn','createPerformanceCycleBtn']){$(`#${id}`)?.classList.toggle('hidden',!canAdmin);}
+  const people=nkGrowthAccessPeople();
+  if(nkGrowthEmployeeId!=='all' && !people.some(p=>p.id===nkGrowthEmployeeId))nkGrowthEmployeeId='all';
+  const sel=$('#growthEmployeeSelect');if(sel){sel.innerHTML='<option value="all">ทุกคนในสิทธิ์ของฉัน</option>'+people.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}${p.code?' · '+escapeHtml(p.code):''}</option>`).join('');sel.value=nkGrowthEmployeeId;}
+  const filteredGoals=nkGrowthFilter(pf.goals),filteredOnes=nkGrowthFilter(pf.one_on_ones),filteredAssignments=nkGrowthFilter(learning.assignments),filteredDue=nkGrowthFilter(pf.probation_due);
+  const stats=[['KPI ที่ใช้งาน',filteredGoals.filter(g=>g.status==='active').length,'เป้าหมาย'],['หลักสูตรเรียนจบ',filteredAssignments.filter(a=>a.status==='completed').length,`จาก ${filteredAssignments.length} งานที่มอบหมาย`],['นัด 1:1',filteredOnes.filter(o=>o.status==='scheduled').length,'รอคุย'],['รอประเมินโปร',filteredDue.length,'พนักงาน']];
+  $('#performanceSummary').innerHTML=stats.map(([label,value,sub])=>`<div><span>${label}</span><strong>${value}</strong><small>${sub}</small></div>`).join('');
+  $('#learningProgressBadge').textContent=`${nkGrowthEmployeeId==='all'?(learning.courses||[]).length:(learning.courses||[]).filter(c=>(c.assignments||[]).some(a=>String(a.employee_id)===nkGrowthEmployeeId)).length} คอร์ส`;
+  $('#probationDueBadge').textContent=`${filteredDue.length} คน`;
+  nkGrowthRenderQueue();nkGrowthRenderProfile();
+  renderLearningCourses();renderKpiGoals();renderOneOnOnes();renderProbationReviews();nkGrowthApplyTab();
 }
 
 function renderLearningCourses(){
-  const courses=state.learning?.courses||[]; const root=$('#learningCourseList'); if(!root)return;
+  const courses=(state.learning?.courses||[]).filter(c=>nkGrowthEmployeeId==='all'||(c.assignments||[]).some(a=>String(a.employee_id)===nkGrowthEmployeeId)); const root=$('#learningCourseList'); if(!root)return;
   root.innerHTML=courses.length?courses.map(c=>{const modules=c.modules||[], stats=c.stats||{};const progress=stats.assigned?Math.round(stats.completed/stats.assigned*100):0;return `<article class="learning-course-card"><div class="course-top"><div class="course-icon">${c.status==='published'?'▶':'✦'}</div><div class="course-copy"><div class="course-title-line"><strong>${escapeHtml(c.title)}</strong><span class="badge ${c.status==='published'?'badge-success':'badge-neutral'}">${c.status==='published'?'Published':'Draft'}</span></div><p>${escapeHtml(c.description||'ยังไม่มีคำอธิบาย')}</p><small>${modules.length} บท · ${Number(c.estimated_minutes||0)} นาที · ผ่าน ${Number(c.passing_score||80)}%</small></div></div><div class="course-progress"><span><b>${stats.completed||0}</b> / ${stats.assigned||0} เรียนจบ</span><div><i style="width:${progress}%"></i></div></div><div class="course-module-strip">${modules.length?modules.map(m=>`<span title="${escapeHtml(m.title)}">${moduleTypeIcon(m.module_type)} ${escapeHtml(m.title)}${m.module_type==='quiz'?` · ${(m.questions||[]).length} ข้อ`:''}</span>`).join(''):'<span class="empty-module">ยังไม่มีบทเรียน</span>'}</div><div class="course-actions"><button class="text-btn" onclick="window.openLearningModule(${c.id})">+ บทเรียน</button>${modules.filter(m=>m.module_type==='quiz').map(m=>`<button class="text-btn" onclick="window.openQuizQuestion(${m.id})">+ คำถาม · ${escapeHtml(m.title)}</button>`).join('')}<button class="secondary-btn" onclick="window.openCourseAssign(${c.id})">Assign</button></div></article>`}).join(''):emptyState('ยังไม่มีหลักสูตร','สร้าง Onboarding Course แล้วเพิ่มวิดีโอจาก Google Drive หรือ Quiz ได้ทันที');
 }
 function moduleTypeIcon(type){return ({video:'🎬',document:'📄',text:'📝',link:'🔗',quiz:'🧠'})[type]||'•';}
 
 function renderKpiGoals(){
-  const goals=state.performance?.goals||[]; const root=$('#kpiGoalList'); if(!root)return;
+  const goals=nkGrowthFilter(state.performance?.goals); const root=$('#kpiGoalList'); if(!root)return;
   root.innerHTML=goals.length?goals.map(g=>{const pct=Math.max(0,Math.min(100,Number(g.current_progress||0)));return `<article class="kpi-card"><div class="kpi-person"><div class="avatar">${initial(g)}</div><div><strong>${escapeHtml(g.nickname||g.first_name)}</strong><small>${escapeHtml(g.department_name||g.employee_code||'')}</small></div><span class="badge ${pct>=80?'badge-success':pct>=50?'badge-soft':'badge-warning'}">${Math.round(pct)}%</span></div><h4>${escapeHtml(g.title)}</h4><p>${escapeHtml(g.description||'')}</p><div class="kpi-progress"><i style="width:${pct}%"></i></div><div class="kpi-foot"><span>${kpiTargetText(g)}</span><span>${frequencyLabel(g.update_frequency)}</span><button class="text-btn" onclick="window.openKpiUpdate(${g.id})">อัปเดต</button></div></article>`}).join(''):emptyState('ยังไม่มี KPI','สร้าง KPI ให้พนักงาน แล้วให้เจ้าตัวอัปเดตรายวัน/สัปดาห์/เดือนจาก LINE Portal');
 }
 function kpiTargetText(g){if(g.metric_type==='text')return 'อัปเดตเป็นข้อความ';if(g.target_value==null)return 'ไม่กำหนด Target';return `เป้า ${Number(g.target_value).toLocaleString('th-TH')} ${escapeHtml(g.unit||'')}`;}
 function frequencyLabel(v){return ({daily:'ทุกวัน',weekly:'ทุกสัปดาห์',monthly:'ทุกเดือน',once:'ครั้งเดียว'})[v]||v;}
 
-function renderOneOnOnes(){const rows=state.performance?.one_on_ones||[];$('#oneOnOneList').innerHTML=rows.length?rows.slice(0,12).map(o=>`<article class="timeline-card"><div class="timeline-dot ${o.status==='completed'?'done':''}"></div><div><strong>${escapeHtml(o.nickname||o.first_name)}</strong><p>${o.status==='completed'?'คุยแล้ว':'นัด 1:1'} · ${o.scheduled_at?formatDateTime(o.scheduled_at):'ยังไม่กำหนดเวลา'}</p>${o.action_items?`<small>Action: ${escapeHtml(o.action_items)}</small>`:''}</div><span class="badge ${o.status==='completed'?'badge-success':'badge-soft'}">${oneStatusLabel(o.status)}</span></article>`).join(''):emptyState('ยังไม่มี 1:1','นัดคุยกับทีมและเก็บ Action item ไว้เป็น Timeline');}
+function renderOneOnOnes(){const rows=nkGrowthFilter(state.performance?.one_on_ones);$('#oneOnOneList').innerHTML=rows.length?rows.slice(0,12).map(o=>`<article class="timeline-card"><div class="timeline-dot ${o.status==='completed'?'done':''}"></div><div><strong>${escapeHtml(o.nickname||o.first_name)}</strong><p>${o.status==='completed'?'คุยแล้ว':'นัด 1:1'} · ${o.scheduled_at?formatDateTime(o.scheduled_at):'ยังไม่กำหนดเวลา'}</p>${o.action_items?`<small>Action: ${escapeHtml(o.action_items)}</small>`:''}</div><span class="badge ${o.status==='completed'?'badge-success':'badge-soft'}">${oneStatusLabel(o.status)}</span></article>`).join(''):emptyState('ยังไม่มี 1:1','นัดคุยกับทีมและเก็บ Action item ไว้เป็น Timeline');}
 function oneStatusLabel(s){return ({scheduled:'นัดไว้',completed:'คุยแล้ว',cancelled:'ยกเลิก',missed:'ไม่ได้คุย'})[s]||s;}
 
-function renderProbationReviews(){const due=state.performance?.probation_due||[], reviews=state.performance?.probation_reviews||[];const latest=new Map();for(const r of reviews){if(!latest.has(Number(r.employee_id)))latest.set(Number(r.employee_id),r);}$('#probationReviewList').innerHTML=due.length?due.map(e=>{const r=latest.get(Number(e.id));const days=e.probation_end_date?Math.ceil((new Date(`${e.probation_end_date}T12:00:00+07:00`)-new Date())/86400000):null;return `<article class="probation-card"><div><strong>${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</strong><p>ครบโปร ${formatDate(e.probation_end_date)}${days!=null?` · ${days>=0?`อีก ${days} วัน`:`เลยมา ${Math.abs(days)} วัน`}`:''}</p><small>${r?`ล่าสุด: ${reviewStatusLabel(r.status)}${r.score!=null?` · ${r.score}/100`:''}`:'ยังไม่มีผลประเมิน'}</small></div><button class="secondary-btn" onclick="window.openProbationReview(${e.id})">ประเมิน</button></article>`}).join(''):emptyState('ไม่มีคนรอประเมิน','พนักงานทดลองงานที่มีวันครบโปรจะขึ้นที่นี่');}
+function renderProbationReviews(){const due=nkGrowthFilter(state.performance?.probation_due), reviews=nkGrowthFilter(state.performance?.probation_reviews);const latest=new Map();for(const r of reviews){if(!latest.has(Number(r.employee_id)))latest.set(Number(r.employee_id),r);}$('#probationReviewList').innerHTML=due.length?due.map(e=>{const r=latest.get(Number(e.id));const days=e.probation_end_date?Math.ceil((new Date(`${e.probation_end_date}T12:00:00+07:00`)-new Date())/86400000):null;return `<article class="probation-card"><div><strong>${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</strong><p>ครบโปร ${formatDate(e.probation_end_date)}${days!=null?` · ${days>=0?`อีก ${days} วัน`:`เลยมา ${Math.abs(days)} วัน`}`:''}</p><small>${r?`ล่าสุด: ${reviewStatusLabel(r.status)}${r.score!=null?` · ${r.score}/100`:''}`:'ยังไม่มีผลประเมิน'}</small></div><button class="secondary-btn" onclick="window.openProbationReview(${e.id})">ประเมิน</button></article>`}).join(''):emptyState('ไม่มีคนรอประเมิน','พนักงานทดลองงานที่มีวันครบโปรจะขึ้นที่นี่');}
 function reviewStatusLabel(s){return ({pending:'รอประเมิน',submitted:'ส่งประเมิน',passed:'ผ่าน',extended:'ต่อโปร',not_passed:'ไม่ผ่าน'})[s]||s;}
 
 async function refreshGrowth(){const role=String(activeCompanyRole()||'');if(!['owner','co_owner','hr_admin','hr','manager'].includes(role))return;try{const [learning,performance]=await Promise.all([api('/api/learning/overview'),api('/api/performance/overview')]);state.learning=learning;state.performance=performance;renderGrowth();}catch(e){toast(e.message,true);}}
@@ -6090,7 +6201,76 @@ function renderEngagement(){
   const rules=d.rules||[];$('#pointRulesList').innerHTML=rules.length?rules.map(r=>`<div class="phase5-row"><div class="rule-state ${Number(r.is_active)?'on':''}"></div><div class="phase5-copy"><strong>${escapeHtml(r.name)}</strong><p>${escapeHtml(eventRuleLabel(r.event_type))} · +${Number(r.points||0).toLocaleString('th-TH')} แต้ม${Number(r.cash_value||0)>0?` · ${money(r.cash_value)} เข้า Payroll`:''}${r.event_type==='attendance_streak'?` · ทุก ${Number(r.threshold_count||1)} ครั้ง`:''}</p></div><span class="badge ${Number(r.is_active)?'badge-success':'badge-neutral'}">${Number(r.is_active)?'เปิด':'ปิด'}</span>${canManage?`<button class="text-btn" onclick="window.togglePointRule(${r.id},${Number(r.is_active)?0:1})">${Number(r.is_active)?'ปิด':'เปิด'}</button>`:''}</div>`).join(''):emptyState('ยังไม่มีกติกา','สร้างกติกาเพื่อให้แต้มจากพฤติกรรมที่บริษัทต้องการ');
   const board=d.leaderboard||[];$('#leaderboardList').innerHTML=board.length?board.slice(0,10).map((w,i)=>`<div class="leaderboard-row"><span class="rank ${i<3?'top':''}">${i+1}</span><span class="mini-avatar">${initial(w)}</span><div><strong>${escapeHtml(w.nickname||w.first_name)}</strong><small>${escapeHtml(w.department_name||'ไม่ระบุแผนก')}</small></div><b>${Number(w.balance||0).toLocaleString('th-TH')} <small>pts</small></b></div>`).join(''):emptyState('ยังไม่มีคะแนน','เมื่อเริ่มให้แต้ม Leaderboard จะขึ้นที่นี่');
   const rewards=d.rewards||[];$('#rewardCatalogList').innerHTML=rewards.length?rewards.map(r=>`<article class="reward-card ${r.status!=='active'?'inactive':''}"><div class="reward-emoji">${rewardEmoji(r.reward_type)}</div><div><strong>${escapeHtml(r.title)}</strong><p>${escapeHtml(r.description||'')}</p><small>${Number(r.points_cost||0).toLocaleString('th-TH')} แต้ม${Number(r.cash_value||0)>0?` · มูลค่า ${money(r.cash_value)}`:''}${r.stock_qty!=null?` · เหลือ ${r.stock_qty}`:' · ไม่จำกัดจำนวน'}</small></div><span class="badge ${r.status==='active'?'badge-success':'badge-neutral'}">${r.status==='active'?'พร้อมแลก':'ปิด'}</span></article>`).join(''):emptyState('ยังไม่มีของรางวัล','เพิ่มของขวัญ เงินรางวัล หรือสิทธิพิเศษให้ทีม');
-  const reds=d.redemptions||[],pending=reds.filter(x=>x.status==='pending').length;$('#redemptionQueueBadge').textContent=`${pending} รอจัดการ`;$('#redemptionList').innerHTML=reds.length?reds.slice(0,30).map(r=>`<div class="phase5-row"><div class="reward-emoji small">${rewardEmoji(r.reward_type)}</div><div class="phase5-copy"><strong>${escapeHtml(r.nickname||r.first_name)} · ${escapeHtml(r.reward_title)}</strong><p>${Number(r.points_cost||0).toLocaleString('th-TH')} แต้ม · ${formatDateTime(r.requested_at)}</p></div><span class="badge ${r.status==='pending'?'badge-warning':r.status==='approved'?'badge-success':r.status==='delivered'?'badge-soft':'badge-neutral'}">${redemptionLabel(r.status)}</span>${canManage?redemptionActions(r):''}</div>`).join(''):emptyState('ยังไม่มีคำขอแลก','คำขอจาก Employee Portal จะมาอยู่ตรงนี้');
+  const reds=d.redemptions||[],pending=reds.filter(x=>x.status==='pending').length;$('#redemptionQueueBadge').textContent=`${pending} รอจัดการ`;$('#redemptionList').innerHTML=reds.length?[...reds].sort((a,b)=>Number(b.status==='pending')-Number(a.status==='pending')).slice(0,30).map(r=>`<div class="phase5-row"><div class="reward-emoji small">${rewardEmoji(r.reward_type)}</div><div class="phase5-copy"><strong>${escapeHtml(r.nickname||r.first_name)} · ${escapeHtml(r.reward_title)}</strong><p>${Number(r.points_cost||0).toLocaleString('th-TH')} แต้ม · ${formatDateTime(r.requested_at)}</p></div><span class="badge ${r.status==='pending'?'badge-warning':r.status==='approved'?'badge-success':r.status==='delivered'?'badge-soft':'badge-neutral'}">${redemptionLabel(r.status)}</span>${canManage?redemptionActions(r):''}</div>`).join(''):emptyState('ยังไม่มีคำขอแลก','คำขอจาก Employee Portal จะมาอยู่ตรงนี้');
+  nkRenderRewardsExtras(d,canManage);
+}
+// Nakna Rewards UI: local tab state; no MutationObserver or DOM relocation.
+let nkRewardActiveTab='queue';
+function nkSetRewardTab(next){
+  nkRewardActiveTab=String(next||'queue');
+  document.querySelectorAll('#engagementTabs [data-reward-tab]').forEach(b=>{
+    const yes=b.dataset.rewardTab===nkRewardActiveTab;
+    b.classList.toggle('active',yes); b.setAttribute('aria-selected',String(yes));
+  });
+  document.querySelectorAll('#view-engagement [data-reward-pane]').forEach(p=>p.classList.toggle('active',p.dataset.rewardPane===nkRewardActiveTab));
+}
+function nkRenderRewardsExtras(d,canManage){
+  const settings=d.settings||{};
+  const err=document.querySelector('#engagementError');
+  document.querySelector('#view-engagement')?.classList.toggle('nk-rewards-has-error',Boolean(state.engagementLoadError));
+  const msg=document.querySelector('#engagementErrorMessage');
+  if(err){ const active=Boolean(state.engagementLoadError); err.classList.toggle('hidden',!active); if(msg)msg.textContent=state.engagementLoadError||''; }
+  const reds=Array.isArray(d.redemptions)?d.redemptions:[];
+  const pending=reds.filter(x=>x.status==='pending').length;
+  const badge=document.querySelector('#nkRewardsQueueCount'); if(badge)badge.textContent=String(pending);
+  const setup=document.querySelector('#engagementSetupGuide');
+  const rules=Array.isArray(d.rules)?d.rules:[];const rewards=Array.isArray(d.rewards)?d.rewards:[];
+  if(setup){
+    const needs=!rules.some(r=>Number(r.is_active)) || !rewards.some(r=>r.status==='active');
+    setup.classList.toggle('hidden',!needs);
+    if(needs){
+      const hasRules=rules.some(r=>Number(r.is_active));const hasRewards=rewards.some(r=>r.status==='active');
+      setup.innerHTML=`<div class="nk-setup-copy"><strong>เริ่มระบบแต้มให้ทีมอย่างเป็นขั้นตอน</strong><p>กำหนดกติกาที่เหมาะสมก่อน แล้วเพิ่มรางวัลที่พนักงานแลกได้</p></div><div class="nk-setup-steps"><span class="${hasRules?'done':''}">${hasRules?'✓':'1'} กติกาแต้ม</span><span class="${hasRewards?'done':''}">${hasRewards?'✓':'2'} ของรางวัล</span><span>3 เปิดให้ทีมใช้งานผ่าน LINE</span></div><button type="button" id="nkRewardsStartSetup" class="secondary-btn">${hasRules?'เพิ่มของรางวัล':'ตั้งค่ากติกา'}</button>`;
+      setup.querySelector('#nkRewardsStartSetup')?.addEventListener('click',()=>{nkSetRewardTab(hasRules?'catalog':'rules');});
+    }
+  }
+  const history=document.querySelector('#engagementHistoryList');
+  if(history){
+    const items=Array.isArray(d.recent_transactions)?d.recent_transactions:[];
+    history.innerHTML=items.length?items.slice(0,60).map(t=>`<div class="nk-history-row"><div class="nk-history-person"><strong>${escapeHtml(t.nickname||t.first_name||'พนักงาน')}</strong><span>${escapeHtml(t.note||t.rule_name||'รายการแต้ม')} · ${escapeHtml(formatDateTime(t.created_at)||'—')}</span></div><b class="${Number(t.points||0)>=0?'pos':'neg'}">${Number(t.points||0)>0?'+':''}${Number(t.points||0).toLocaleString('th-TH')} แต้ม</b></div>`).join(''):emptyState('ยังไม่มีรายการแต้ม','เมื่อมีการให้หรือใช้แต้ม รายการจะปรากฏที่นี่');
+  }
+  const toggle=document.querySelector('#engagementLeaderboardToggle');
+  const wrap=document.querySelector('#engagementLeaderboardToggleWrap');
+  if(toggle){toggle.checked=Number(settings.leaderboard_enabled||0)===1;toggle.disabled=!canManage;}
+  if(wrap)wrap.classList.toggle('hidden',!canManage);
+  const board=document.querySelector('#leaderboardList');
+  if(board && Number(settings.leaderboard_enabled||0)!==1){board.innerHTML=emptyState('ปิดการแสดงอันดับอยู่','บริษัทเลือกไม่จัดอันดับพนักงานในขณะนี้');}
+  const tabs=document.querySelector('#engagementTabs');
+  if(tabs&&!tabs.dataset.nkBound){
+    tabs.dataset.nkBound='1';
+    tabs.addEventListener('click',e=>{const b=e.target.closest('[data-reward-tab]');if(b)nkSetRewardTab(b.dataset.rewardTab);});
+  }
+  if(toggle&&!toggle.dataset.nkBound){
+    toggle.dataset.nkBound='1';
+    toggle.addEventListener('change',async e=>{
+      const enabled=e.target.checked;e.target.disabled=true;
+      try{
+        await api('/api/engagement/settings',{method:'PATCH',body:JSON.stringify({
+          points_enabled:Number(state.engagement?.settings?.points_enabled??1)!==0,
+          leaderboard_enabled:enabled,
+          birthday_moment_enabled:Number(state.engagement?.settings?.birthday_moment_enabled??1)!==0,
+          anniversary_moment_enabled:Number(state.engagement?.settings?.anniversary_moment_enabled??1)!==0
+        })});
+        await refreshEngagementOnly();toast(enabled?'เปิดแสดงอันดับแล้ว':'ซ่อนอันดับแล้ว');
+      }catch(error){e.target.checked=!enabled;toast(error.message,true);}finally{e.target.disabled=!canManageEngagementUi();}
+    });
+  }
+  const retry=document.querySelector('#engagementRetryBtn');
+  if(retry&&!retry.dataset.nkBound){retry.dataset.nkBound='1';retry.addEventListener('click',async()=>{
+    retry.disabled=true;
+    try{await refreshEngagementOnly();}catch(e){console.warn('[Nakna] Engagement retry failed',e);}finally{retry.disabled=false;}
+  });}
+  nkSetRewardTab(nkRewardActiveTab);
 }
 function eventRuleLabel(v){return ({attendance_streak:'มาตรงเวลาเป็นชุด' ,learning_complete:'เรียนจบหลักสูตร',kpi_complete:'KPI สำเร็จ',birthday:'วันเกิด',work_anniversary:'ครบรอบงาน',manual:'HR ให้เอง',custom:'กำหนดเอง'})[v]||v;}
 function rewardEmoji(v){return ({gift:'🎁',cash:'💸',leave:'🌴',perk:'✨',custom:'⭐'})[v]||'🎁';}

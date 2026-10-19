@@ -1,0 +1,41 @@
+/* Nakna employee rewards — light, readable, mobile first */
+#tab-rewards{--nakna:#04878A;--line:#DEEBE8}
+#tab-rewards .hidden{display:none!important}
+#tab-rewards .rewards-hero{background:#EDF8F6;border-color:#C7E6E3;grid-template-columns:minmax(0,1fr) auto;padding:22px;border-radius:18px;margin-bottom:8px}
+#tab-rewards .rewards-hero strong{font-size:40px;line-height:1.1;color:#086B70}
+#tab-rewards .rewards-hero small{font-size:12px}
+#tab-rewards .nk-wallet-note{font-size:12px;color:#627E80;padding:8px 2px 0;line-height:1.6}
+#tab-rewards .reward-section{margin-top:26px}
+#tab-rewards .section-head h2{font-size:18px;margin:5px 0 12px}
+#tab-rewards .portal-rewards{grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:11px}
+#tab-rewards .portal-reward-card{grid-template-columns:46px minmax(0,1fr);grid-template-rows:auto auto;gap:8px;padding:15px;border-radius:16px}
+#tab-rewards .reward-icon{background:#E9F5F2}
+#tab-rewards .portal-reward-card h3{font-size:14px;line-height:1.5}
+#tab-rewards .portal-reward-card p{font-size:12px;line-height:1.6}
+#tab-rewards .portal-reward-card small{font-size:11px}
+#tab-rewards .reward-cost{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;text-align:left;padding-top:9px;border-top:1px solid var(--line)}
+#tab-rewards .reward-cost strong{font-size:19px}
+#tab-rewards .reward-cost span{font-size:11px;margin:0 auto 0 0}
+#tab-rewards .reward-cost button{padding:10px 17px;background:var(--nakna);font-size:12px;border-radius:10px;min-width:90px}
+#tab-rewards .reward-cost button:disabled{background:#ECF0F0;color:#718282}
+#tab-rewards .nk-point-transaction{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border-bottom:1px solid var(--line)}
+#tab-rewards .nk-point-transaction:last-child{border:0}
+#tab-rewards .nk-point-transaction strong{font-size:13px;display:block;line-height:1.5}
+#tab-rewards .nk-point-transaction small{display:block;color:#71868A;font-size:11px;margin-top:3px}
+#tab-rewards .nk-point-transaction b{white-space:nowrap;font-size:13px}
+#tab-rewards .nk-point-transaction b.credit{color:var(--nakna)}
+#tab-rewards .nk-point-transaction b.debit{color:#B85E50}
+#tab-rewards .redemption-row{grid-template-columns:minmax(0,1fr) auto;padding:14px}
+#tab-rewards .redemption-row strong{font-size:12px}
+#tab-rewards .redemption-row small{font-size:11px;line-height:1.4}
+#tab-rewards .redemption-row b{font-size:11px;text-align:right}
+#tab-rewards .leader-row strong,#tab-rewards .leader-row>b{font-size:12px}
+#tab-rewards .leader-row small{font-size:10px}
+@media(max-width:620px){
+ #tab-rewards .rewards-hero{padding:17px}
+ #tab-rewards .rewards-hero strong{font-size:35px}
+ #tab-rewards .portal-rewards{grid-template-columns:1fr}
+ #tab-rewards .reward-cost{grid-template-columns:none}
+ #tab-rewards .reward-cost button{margin-left:auto}
+ #tab-rewards .nk-point-transaction{padding:13px 11px}
+}

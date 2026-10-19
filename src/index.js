@@ -5002,7 +5002,6 @@ async function handleApi(request, env, url, auth, ctx) {
   // Phase 5 — Engagement / Rewards / People Analytics / SaaS Billing
   if (path === '/api/engagement/overview' && method === 'GET') {
     if (!canViewEngagement(auth.role)) return json({error:'ไม่มีสิทธิ์ดู Engagement'},403);
-    await ensurePhase5Defaults(env.DB,clientId);
     return json(await getEngagementOverview(env.DB,clientId));
   }
 
@@ -8277,7 +8276,7 @@ async function runEngagementAutomationForClient(db,clientId){
 }
 
 async function getEngagementOverview(db,clientId){
-  const cid=Number(clientId); await ensurePhase5Defaults(db,cid); await runEngagementAutomationForClient(db,cid);
+  const cid=Number(clientId); // Read-only: automated awards run in scheduled/manual workers, not during page loads.
   const [settings,rules,rewards,redemptions,leaderboard,tx,pendingCash]=await Promise.all([
     db.prepare('SELECT * FROM engagement_settings WHERE client_id=?1').bind(cid).first(),
     db.prepare('SELECT * FROM point_rules WHERE client_id=?1 ORDER BY is_active DESC,id').bind(cid).all(),
@@ -8288,7 +8287,7 @@ async function getEngagementOverview(db,clientId){
     db.prepare(`SELECT COALESCE(SUM(cash_value),0) AS amount,COUNT(*) AS n FROM point_transactions WHERE client_id=?1 AND cash_value>0 AND payroll_adjustment_id IS NULL`).bind(cid).first(),
   ]);
   const leaderboardRows=leaderboard.results||[]; const wallets=await db.prepare('SELECT COALESCE(SUM(balance),0) AS outstanding,COALESCE(SUM(lifetime_earned),0) AS earned FROM employee_point_wallets WHERE client_id=?1').bind(cid).first();
-  return {settings,rules:rules.results||[],rewards:rewards.results||[],redemptions:redemptions.results||[],leaderboard:leaderboardRows,recent_transactions:tx.results||[],summary:{points_outstanding:Number(wallets?.outstanding||0),lifetime_earned:Number(wallets?.earned||0),active_rewards:(rewards.results||[]).filter(x=>x.status==='active').length,pending_redemptions:(redemptions.results||[]).filter(x=>x.status==='pending').length,pending_cash_payroll:Number(pendingCash?.amount||0),pending_cash_count:Number(pendingCash?.n||0)}};
+  return {settings,rules:rules.results||[],rewards:rewards.results||[],redemptions:redemptions.results||[],leaderboard:Number(settings?.leaderboard_enabled||0)===1?leaderboardRows:[],recent_transactions:tx.results||[],summary:{points_outstanding:Number(wallets?.outstanding||0),lifetime_earned:Number(wallets?.earned||0),active_rewards:(rewards.results||[]).filter(x=>x.status==='active').length,pending_redemptions:(redemptions.results||[]).filter(x=>x.status==='pending').length,pending_cash_payroll:Number(pendingCash?.amount||0),pending_cash_count:Number(pendingCash?.n||0)}};
 }
 
 async function requestRewardRedemption(db,clientId,employeeId,rewardId,note=''){
@@ -8943,13 +8942,15 @@ async function getPublicLearningPortal(env,token){
   const courses=assignments.map(a=>({...a,modules:modulesByCourse.get(Number(a.course_id))||[]}));
   const updates=updatesRes.results||[]; const latest=new Map(); for(const u of updates){if(!latest.has(Number(u.goal_id)))latest.set(Number(u.goal_id),u);} const goals=(goalsRes.results||[]).map(g=>({...g,latest_update:latest.get(Number(g.id))||null,current_progress:Number(latest.get(Number(g.id))?.progress_pct||0)}));
   await ensurePhase5Defaults(env.DB,Number(access.client_id));
-  const [wallet,rewards,redemptions,leaderboard]=await Promise.all([
+  const [wallet,rewards,redemptions,leaderboard,transactions,rewardSettings]=await Promise.all([
     ensurePointWallet(env.DB,Number(access.client_id),Number(access.employee_id)),
     env.DB.prepare(`SELECT id,title,description,reward_type,points_cost,cash_value,stock_qty FROM reward_catalog WHERE client_id=?1 AND status='active' AND (stock_qty IS NULL OR stock_qty>0) ORDER BY points_cost,id`).bind(Number(access.client_id)).all(),
     env.DB.prepare(`SELECT rr.id,rr.reward_id,rr.points_cost,rr.cash_value,rr.status,rr.requested_at,rr.decided_at,rr.delivered_at,rc.title AS reward_title FROM reward_redemptions rr JOIN reward_catalog rc ON rc.id=rr.reward_id WHERE rr.client_id=?1 AND rr.employee_id=?2 ORDER BY rr.requested_at DESC LIMIT 30`).bind(Number(access.client_id),Number(access.employee_id)).all(),
-    env.DB.prepare(`SELECT w.employee_id,w.balance,e.nickname,e.first_name FROM employee_point_wallets w JOIN employees e ON e.id=w.employee_id WHERE w.client_id=?1 AND e.status='active' ORDER BY w.balance DESC LIMIT 10`).bind(Number(access.client_id)).all()
+    env.DB.prepare(`SELECT w.employee_id,w.balance,e.nickname,e.first_name FROM employee_point_wallets w JOIN employees e ON e.id=w.employee_id WHERE w.client_id=?1 AND e.status='active' ORDER BY w.balance DESC LIMIT 10`).bind(Number(access.client_id)).all(),
+    env.DB.prepare(`SELECT id,points,transaction_type,note,created_at FROM point_transactions WHERE client_id=?1 AND employee_id=?2 ORDER BY created_at DESC,id DESC LIMIT 30`).bind(Number(access.client_id),Number(access.employee_id)).all(),
+    env.DB.prepare(`SELECT leaderboard_enabled FROM engagement_settings WHERE client_id=?1`).bind(Number(access.client_id)).first()
   ]);
-  return json({employee:{id:access.employee_id,employee_code:access.employee_code,name:access.nickname||access.first_name,company_name:access.company_name,people_status:access.people_status},courses,goals,engagement:{wallet,rewards:rewards.results||[],redemptions:redemptions.results||[],leaderboard:leaderboard.results||[]},summary:{courses:courses.length,completed:courses.filter(c=>c.status==='completed').length,goals:goals.length,points:Number(wallet?.balance||0)}});
+  return json({employee:{id:access.employee_id,employee_code:access.employee_code,name:access.nickname||access.first_name,company_name:access.company_name,people_status:access.people_status},courses,goals,engagement:{wallet,rewards:rewards.results||[],redemptions:redemptions.results||[],leaderboard:Number(rewardSettings?.leaderboard_enabled||0)===1?(leaderboard.results||[]):[],leaderboard_enabled:Number(rewardSettings?.leaderboard_enabled||0)===1,transactions:transactions.results||[]},summary:{courses:courses.length,completed:courses.filter(c=>c.status==='completed').length,goals:goals.length,points:Number(wallet?.balance||0)}});
 }
 
 async function redeemPublicReward(request,env,token,rewardId){

@@ -1,0 +1,71 @@
+/* Nakna Engagement workspace — scoped to one view, CI #04878A */
+#view-engagement{--reward-accent:#04878A;--reward-ink:#16383D;--reward-line:#DDE9E7;--reward-wash:#F1F9F8}
+#view-engagement .page-intro{margin-bottom:16px}
+#view-engagement .page-intro p:not(.kicker){max-width:600px}
+#view-engagement button:focus-visible,#view-engagement input:focus-visible{outline:3px solid rgba(4,135,138,.28);outline-offset:2px}
+#view-engagement .nk-reward-summary{grid-template-columns:repeat(5,minmax(0,1fr));margin:0 0 14px;gap:10px;border:0;background:transparent;overflow:visible}
+#view-engagement .nk-reward-summary article{padding:13px 16px;min-height:87px;border:1px solid var(--reward-line);background:#fff;border-radius:14px}
+#view-engagement .nk-reward-summary article+article:before{display:none}
+#view-engagement .nk-reward-summary span{font-size:10px;letter-spacing:.03em}
+#view-engagement .nk-reward-summary strong{font-size:24px;color:var(--reward-ink)}
+#view-engagement .nk-reward-summary p{font-size:11px;line-height:1.45;margin:6px 0 0}
+#view-engagement .nk-reward-alert{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;margin:0 0 14px;background:#FFF5F1;border:1px solid #F7D4C5;border-radius:14px;color:#A24C29;font-size:13px}
+#view-engagement .hidden{display:none!important}
+#view-engagement .nk-reward-setup{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;padding:16px 18px;margin:0 0 14px;border:1px solid #CFE4E2;border-radius:16px;background:var(--reward-wash)}
+#view-engagement .nk-setup-copy strong{font-size:14px;color:var(--reward-ink)}
+#view-engagement .nk-setup-copy p{margin:3px 0;color:#687F83;font-size:12px}
+#view-engagement .nk-setup-steps{display:flex;flex-wrap:wrap;gap:7px}
+#view-engagement .nk-setup-steps span{border-radius:99px;padding:6px 10px;font-size:11px;color:#677F80;background:#fff;border:1px solid #DCE9E6}
+#view-engagement .nk-setup-steps span.done{color:var(--reward-accent);border-color:#9CCBC9;background:#E8F5F3}
+#view-engagement .nk-reward-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:18px 0 14px;border-bottom:1px solid var(--reward-line);padding-bottom:9px}
+#view-engagement .nk-reward-tabs button{border:1px solid transparent;background:transparent;border-radius:10px;padding:10px 14px;color:#567178;font:600 13px/1.2 inherit;cursor:pointer;min-height:40px}
+#view-engagement .nk-reward-tabs button:hover{background:#EDF5F4}
+#view-engagement .nk-reward-tabs button.active{color:var(--reward-accent);background:#E7F5F4;border-color:#BBDAD8}
+#view-engagement .nk-reward-tabs span{display:inline-block;background:#fff;padding:3px 6px;border-radius:7px;font-size:11px;margin-left:4px}
+#view-engagement .nk-reward-pane{display:none;min-height:180px;box-shadow:none!important;border-radius:18px}
+#view-engagement .nk-reward-pane.active{display:block}
+#view-engagement .nk-reward-pane .panel-head h3{font-size:17px}
+#view-engagement .nk-reward-pane .phase5-row{min-height:63px;gap:12px;padding:12px 4px;grid-template-columns:auto minmax(0,1fr) auto auto}
+#view-engagement .nk-reward-pane .phase5-copy strong{font-size:13px;white-space:normal;line-height:1.45}
+#view-engagement .nk-reward-pane .phase5-copy p{font-size:11px;line-height:1.55}
+#view-engagement .nk-reward-pane .reward-card{padding:16px;min-height:112px}
+#view-engagement .nk-reward-pane .reward-card strong{font-size:13px}
+#view-engagement .nk-reward-pane .reward-card p,#view-engagement .nk-reward-pane .reward-card small{font-size:11px;line-height:1.6}
+#view-engagement .nk-reward-pane .reward-catalog-list{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+#view-engagement .nk-leader-toggle{display:flex;gap:8px;align-items:center;cursor:pointer;color:#43676A;font-size:12px}
+#view-engagement .nk-leader-toggle input{accent-color:var(--reward-accent)}
+#view-engagement .nk-reward-history{display:grid}
+#view-engagement .nk-history-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 2px;border-bottom:1px solid #E7EFED}
+#view-engagement .nk-history-row:last-child{border-bottom:0}
+#view-engagement .nk-history-person{min-width:0}
+#view-engagement .nk-history-person strong{display:block;font-size:13px;color:var(--reward-ink);line-height:1.5}
+#view-engagement .nk-history-person span{display:block;color:#688087;font-size:11px;line-height:1.6}
+#view-engagement .nk-history-row b{white-space:nowrap;font-size:13px}
+#view-engagement .nk-history-row b.pos{color:var(--reward-accent)}
+#view-engagement .nk-history-row b.neg{color:#B65E4D}
+#view-engagement .nk-reward-pane .leaderboard-row strong{font-size:12px}
+#view-engagement .nk-reward-pane .leaderboard-row small{font-size:10px}
+#view-engagement .nk-reward-pane .leaderboard-row>b{font-size:14px}
+@media(max-width:950px){#view-engagement .nk-reward-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:680px){
+ #view-engagement .nk-reward-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+ #view-engagement .nk-reward-summary article{min-height:74px;padding:11px}
+ #view-engagement .nk-reward-summary strong{font-size:21px}
+ #view-engagement .nk-reward-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:12px -12px 12px;padding:0 12px 9px}
+ #view-engagement .nk-reward-tabs button{white-space:nowrap;padding:10px 12px;font-size:12px}
+ #view-engagement .nk-reward-pane .phase5-row{grid-template-columns:30px minmax(0,1fr) auto;gap:7px}
+ #view-engagement .nk-reward-pane .phase5-row>.row-actions{grid-column:2/-1;justify-content:flex-start;gap:6px}
+ #view-engagement .nk-reward-setup{padding:12px}
+ #view-engagement .nk-reward-pane .panel-head{gap:9px;flex-wrap:wrap}
+ #view-engagement .nk-reward-alert{flex-wrap:wrap}
+}
+
+#view-engagement .nk-rule-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:0 0 13px;border-bottom:1px solid var(--reward-line)}
+#view-engagement .nk-rule-toolbar small{font-size:11px;color:#738A89}
+#view-engagement.nk-rewards-has-error .nk-reward-summary{opacity:.45}
+@media(max-width:680px){
+ #view-engagement .page-intro{display:flex;flex-wrap:wrap;gap:10px;min-width:0}
+ #view-engagement .page-intro>div{min-width:0;max-width:100%}
+ #view-engagement .page-actions{width:100%;flex-wrap:wrap;justify-content:flex-start}
+ #view-engagement .nk-reward-tabs{max-width:100%;min-width:0;overflow-x:auto}
+}

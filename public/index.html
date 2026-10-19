@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_BOOT_FIX_20261019A" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_GROWTH20261019A" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -38,7 +38,9 @@
 
 <link rel="stylesheet" href="/ui/p10-5.css?v=P10.5-ux1" />
 <link rel="stylesheet" href="/ui/nk-documents-redesign.css?v=DOCS20261019" />
+<link rel="stylesheet" href="/ui/nk-growth-workspace.css?v=GROWTH20261019A" />
 <script defer src="/ui/p10-5.js?v=P10.5-ux1"></script>
+  <link rel="stylesheet" href="/ui/nk-rewards-workspace.css?v=20261019-r1"/>
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -701,24 +703,64 @@
         </div>
       </section>
 
-      <section id="view-performance" class="view">
-        <div class="page-intro"><div><p class="kicker">GROWTH OS</p><h1>Learning & Performance</h1><p>Onboarding วิดีโอจาก Google Drive · Quiz · KPI · 1:1 · Probation Review ใน Timeline เดียว</p></div><div class="page-actions"><button id="createCourseBtn" class="primary-btn" type="button">+ สร้างคอร์ส</button><button id="createKpiBtn" class="secondary-btn" type="button">+ KPI</button><button id="createOneOnOneBtn" class="secondary-btn" type="button">+ 1:1</button><button id="createProbationReviewBtn" class="secondary-btn" type="button">ประเมิน Probation</button></div></div>
-        <div id="performanceSummary" class="performance-summary"></div>
-        <div class="growth-grid">
-          <article class="panel growth-learning-panel"><div class="panel-head"><div><p class="kicker">ONBOARDING / LEARNING</p><h3>หลักสูตรของบริษัท</h3></div><span id="learningProgressBadge" class="badge badge-soft">0 คอร์ส</span></div><div id="learningCourseList" class="learning-course-list"></div></article>
-          <article class="panel growth-kpi-panel"><div class="panel-head"><div><p class="kicker">KPI / GOALS</p><h3>เป้าหมายและการอัปเดต</h3></div><button id="createPerformanceCycleBtn" class="text-btn" type="button">+ รอบประเมิน</button></div><div id="kpiGoalList" class="kpi-goal-list"></div></article>
-          <article class="panel growth-one-panel"><div class="panel-head"><div><p class="kicker">1:1</p><h3>คุยกับทีม</h3></div></div><div id="oneOnOneList" class="one-on-one-list"></div></article>
-          <article class="panel growth-probation-panel"><div class="panel-head"><div><p class="kicker">PROBATION</p><h3>การทดลองงาน</h3></div><span id="probationDueBadge" class="badge badge-warning">0 คน</span></div><div id="probationReviewList" class="probation-review-list"></div></article>
+      <section id="view-performance" class="view nk-growth-view">
+        <div class="page-intro nk-growth-head">
+          <div><p class="kicker">PEOPLE DEVELOPMENT</p><h1>Learning & Performance</h1><p>ติดตามการเรียนรู้ เป้าหมาย และการพัฒนาทีม จากข้อมูลที่มีอยู่จริง</p></div>
+          <div class="page-actions nk-growth-actions">
+            <button id="createCourseBtn" class="primary-btn" type="button">+ สร้างหลักสูตร</button>
+            <button id="createKpiBtn" class="secondary-btn" type="button">+ ตั้ง KPI</button>
+            <button id="createOneOnOneBtn" class="secondary-btn" type="button">+ นัด 1:1</button>
+            <button id="createProbationReviewBtn" class="secondary-btn" type="button">+ ประเมินทดลองงาน</button>
+          </div>
+        </div>
+        <div id="performanceSummary" class="performance-summary nk-growth-summary" aria-live="polite"></div>
+        <div class="nk-growth-toolbar">
+          <div class="nk-growth-tabs" role="tablist" aria-label="หมวดหมู่ Learning และ Performance">
+            <button type="button" id="growth-tab-overview" data-growth-tab="overview" role="tab" aria-selected="true" onclick="window.nkGrowthSelectTab('overview')">ภาพรวมงาน</button>
+            <button type="button" id="growth-tab-kpi" data-growth-tab="kpi" role="tab" aria-selected="false" onclick="window.nkGrowthSelectTab('kpi')">KPI / Goals</button>
+            <button type="button" id="growth-tab-learning" data-growth-tab="learning" role="tab" aria-selected="false" onclick="window.nkGrowthSelectTab('learning')">หลักสูตร</button>
+            <button type="button" id="growth-tab-one" data-growth-tab="one" role="tab" aria-selected="false" onclick="window.nkGrowthSelectTab('one')">1:1</button>
+            <button type="button" id="growth-tab-probation" data-growth-tab="probation" role="tab" aria-selected="false" onclick="window.nkGrowthSelectTab('probation')">ทดลองงาน</button>
+          </div>
+          <label class="nk-growth-employee-filter"><span>พนักงาน</span><select id="growthEmployeeSelect" aria-label="เลือกพนักงานเพื่อดูผลงานรายคน" onchange="window.nkGrowthSelectEmployee(this.value)"><option value="all">ทุกคนในสิทธิ์ของฉัน</option></select></label>
+        </div>
+        <div data-growth-panel="overview" id="growth-overview-panel" role="tabpanel" aria-labelledby="growth-tab-overview">
+          <div class="nk-growth-overview-grid">
+            <article class="panel nk-growth-task-panel">
+              <div class="panel-head"><div><p class="kicker">WORK QUEUE</p><h3>งานที่ควรติดตาม</h3><p class="panel-subtitle">เรียงจากรายการที่มีวันครบกำหนด หรือรอการอัปเดต</p></div><span id="growthActionBadge" class="badge badge-soft">0 รายการ</span></div>
+              <div id="growthActionList" class="nk-growth-task-list" aria-live="polite"></div>
+            </article>
+            <article class="panel nk-growth-profile-panel">
+              <div class="panel-head"><div><p class="kicker">EMPLOYEE PROFILE</p><h3>ภาพรวมรายพนักงาน</h3><p class="panel-subtitle">KPI, หลักสูตร, 1:1 และทดลองงาน เชื่อมตามพนักงานคนเดียวกัน</p></div></div>
+              <div id="growthProfile" aria-live="polite"></div>
+            </article>
+          </div>
+        </div>
+        <div class="nk-growth-content-panels">
+          <article class="panel growth-kpi-panel" data-growth-panel="kpi" id="growth-kpi-panel" role="tabpanel" aria-labelledby="growth-tab-kpi" hidden><div class="panel-head"><div><p class="kicker">KPI / GOALS</p><h3>เป้าหมายและการอัปเดต</h3><p class="panel-subtitle">ความคืบหน้าเป็นรายเป้าหมาย ไม่ใช่คะแนนตัดสินพนักงานอัตโนมัติ</p></div><button id="createPerformanceCycleBtn" class="text-btn" type="button">+ รอบประเมิน</button></div><div id="kpiGoalList" class="kpi-goal-list"></div></article>
+          <article class="panel growth-learning-panel" data-growth-panel="learning" id="growth-learning-panel" role="tabpanel" aria-labelledby="growth-tab-learning" hidden><div class="panel-head"><div><p class="kicker">ONBOARDING / LEARNING</p><h3>หลักสูตรและการมอบหมาย</h3></div><span id="learningProgressBadge" class="badge badge-soft">0 คอร์ส</span></div><div id="learningCourseList" class="learning-course-list"></div></article>
+          <article class="panel growth-one-panel" data-growth-panel="one" id="growth-one-panel" role="tabpanel" aria-labelledby="growth-tab-one" hidden><div class="panel-head"><div><p class="kicker">1:1 / FOLLOW-UP</p><h3>นัดคุยกับทีม</h3><p class="panel-subtitle">กำหนดนัด ประเด็นที่ตกลง และวันติดตาม</p></div></div><div id="oneOnOneList" class="one-on-one-list"></div></article>
+          <article class="panel growth-probation-panel" data-growth-panel="probation" id="growth-probation-panel" role="tabpanel" aria-labelledby="growth-tab-probation" hidden><div class="panel-head"><div><p class="kicker">PROBATION</p><h3>การทดลองงาน</h3><p class="panel-subtitle">วันครบกำหนดและผลประเมินล่าสุด</p></div><span id="probationDueBadge" class="badge badge-warning">0 คน</span></div><div id="probationReviewList" class="probation-review-list"></div></article>
         </div>
       </section>
       <section id="view-engagement" class="view">
-        <div class="page-intro"><div><p class="kicker">ENGAGEMENT</p><h1>แต้ม & ของรางวัล</h1><p>เปลี่ยนพฤติกรรมที่บริษัทอยากเห็นให้เป็นแต้ม รางวัล และ Incentive ที่ต่อเข้า Payroll ได้</p></div><div class="page-actions"><button id="runPointRulesBtn" class="secondary-btn" type="button">รันกติกาตอนนี้</button><button id="manualAwardBtn" class="primary-btn" type="button">+ ให้แต้ม</button></div></div>
-        <div id="engagementSummary" class="engagement-summary"></div>
-        <div class="engagement-grid">
-          <article class="panel"><div class="panel-head"><div><p class="kicker">POINT RULES</p><h3>กติกาการได้แต้ม</h3><p class="panel-subtitle">ปิดไว้เป็นค่าเริ่มต้น HR เลือกเปิดเฉพาะกติกาที่บริษัทต้องการ</p></div><button id="createPointRuleBtn" class="text-btn" type="button">+ กติกา</button></div><div id="pointRulesList" class="phase5-list"></div></article>
-          <article class="panel"><div class="panel-head"><div><p class="kicker">LEADERBOARD</p><h3>คนที่มีแต้มสูงสุด</h3></div><span class="badge badge-soft">Live</span></div><div id="leaderboardList" class="leaderboard-list"></div></article>
-          <article class="panel engagement-reward-panel"><div class="panel-head"><div><p class="kicker">REWARD CATALOG</p><h3>ของรางวัล</h3></div><button id="createRewardBtn" class="text-btn" type="button">+ ของรางวัล</button></div><div id="rewardCatalogList" class="reward-catalog-list"></div></article>
-          <article class="panel"><div class="panel-head"><div><p class="kicker">REDEMPTION QUEUE</p><h3>คำขอแลกรางวัล</h3></div><span id="redemptionQueueBadge" class="badge badge-warning">0 รอจัดการ</span></div><div id="redemptionList" class="phase5-list"></div></article>
+        <div class="page-intro"><div><p class="kicker">ENGAGEMENT</p><h1>แต้ม & ของรางวัล</h1><p>กำหนดกติกาที่เป็นธรรม ติดตามแต้ม และจัดการของรางวัลจากที่เดียว</p></div><div class="page-actions"><button id="manualAwardBtn" class="primary-btn" type="button">+ ให้แต้ม</button></div></div>
+        <div id="engagementError" class="nk-reward-alert hidden" role="alert"><span id="engagementErrorMessage">เชื่อมต่อข้อมูลแต้มไม่สำเร็จ</span><button id="engagementRetryBtn" type="button" class="secondary-btn">ลองโหลดอีกครั้ง</button></div>
+        <div id="engagementSummary" class="engagement-summary nk-reward-summary"></div>
+        <div id="engagementSetupGuide" class="nk-reward-setup hidden"></div>
+        <div class="nk-reward-tabs" id="engagementTabs" role="tablist" aria-label="จัดการแต้มและของรางวัล">
+          <button class="active" type="button" data-reward-tab="queue" role="tab" aria-selected="true">งานที่ต้องทำ <span id="nkRewardsQueueCount">0</span></button>
+          <button type="button" data-reward-tab="catalog" role="tab" aria-selected="false">ของรางวัล</button>
+          <button type="button" data-reward-tab="rules" role="tab" aria-selected="false">กติกาแต้ม</button>
+          <button type="button" data-reward-tab="history" role="tab" aria-selected="false">ประวัติแต้ม</button>
+          <button type="button" data-reward-tab="ranking" role="tab" aria-selected="false">อันดับ (เลือกเปิดได้)</button>
+        </div>
+        <div class="nk-reward-workspace">
+          <section class="panel nk-reward-pane active" data-reward-pane="queue"><div class="panel-head"><div><p class="kicker">TO DO</p><h3>คำขอแลกรางวัลที่ต้องจัดการ</h3><p class="panel-subtitle">ตรวจสิทธิ์และแต้มก่อนอนุมัติ · หลังอนุมัติให้ยืนยันการส่งมอบ</p></div><span id="redemptionQueueBadge" class="badge badge-warning">0 รออนุมัติ</span></div><div id="redemptionList" class="phase5-list"></div></section>
+          <section class="panel nk-reward-pane" data-reward-pane="catalog"><div class="panel-head"><div><p class="kicker">REWARD CATALOG</p><h3>ของรางวัล</h3><p class="panel-subtitle">รายการที่พนักงานจะเห็นและขอแลกผ่าน LINE</p></div><button id="createRewardBtn" class="text-btn" type="button">+ ของรางวัล</button></div><div id="rewardCatalogList" class="reward-catalog-list"></div></section>
+          <section class="panel nk-reward-pane" data-reward-pane="rules"><div class="panel-head"><div><p class="kicker">POINT RULES</p><h3>กติกาการได้แต้ม</h3><p class="panel-subtitle">ทุกกติกาปิดไว้ก่อน จนกว่า HR จะเปิดใช้งาน</p></div><button id="createPointRuleBtn" class="text-btn" type="button">+ กติกา</button></div><div class="nk-rule-toolbar"><button id="runPointRulesBtn" class="secondary-btn" type="button">ประมวลผลกติกาตอนนี้</button><small>เฉพาะ HR ที่ได้รับสิทธิ์ · ระบบป้องกันการให้แต้มซ้ำตามเงื่อนไขเดิม</small></div><div id="pointRulesList" class="phase5-list"></div></section>
+          <section class="panel nk-reward-pane" data-reward-pane="history"><div class="panel-head"><div><p class="kicker">POINT HISTORY</p><h3>ประวัติการให้และใช้แต้ม</h3><p class="panel-subtitle">ข้อมูลบันทึกจริง พร้อมพนักงาน เหตุผล และเวลา</p></div></div><div id="engagementHistoryList" class="nk-reward-history"></div></section>
+          <section class="panel nk-reward-pane" data-reward-pane="ranking"><div class="panel-head"><div><p class="kicker">OPTIONAL</p><h3>อันดับแต้มของทีม</h3><p class="panel-subtitle">แสดงอันดับเฉพาะเมื่อบริษัทเปิดใช้ เหมาะสำหรับองค์กรที่สมัครใจแข่งขัน</p></div><label id="engagementLeaderboardToggleWrap" class="nk-leader-toggle"><input type="checkbox" id="engagementLeaderboardToggle"/> เปิดการแสดงอันดับ</label></div><div id="leaderboardList" class="leaderboard-list"></div></section>
         </div>
       </section>
 
@@ -1469,7 +1511,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_BOOT_FIX_20261019A" type="module"></script>
+  <script src="/app.js?v=NAKNA_GROWTH20261019A" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
