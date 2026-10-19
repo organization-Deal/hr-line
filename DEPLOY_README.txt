@@ -1,26 +1,38 @@
-NAKNA HR — REMOVE COMPANY LINE OA SETTINGS (UI ONLY)
-===============================================
-ชุดนี้ต่อจาก Nakna-HR-REMOVE-STRETCH-CHANGED-ONLY.zip รอบก่อน
-ไฟล์ที่แก้: public/index.html, public/app.js
-ไฟล์ตรวจ: scripts/verify-line-oa-settings-retired.mjs
+NAKNA HR — BOOT RECOVERY (19 Oct 2026)
 
-แก้แล้ว:
-- เอาหัวข้อ LINE Official Account ของบริษัทและช่องเชื่อม OA ออกทั้งหมด
-- เอา shortcut / ปุ่มเชื่อม / modal ใส่ Token และ Webhook ของ OA บริษัทออก
-- สถานะ LINE นากนะกลางยังมองเห็นได้ (ไม่มีปุ่มตั้งค่าเพิ่มเติม)
-- 2/3 readiness จะนับ LINE กลางที่พร้อมใช้งานเป็นพร้อม โดยไม่บังคับ OA ของบริษัท
-- หน้า Google ยังอยู่และใช้งานเหมือนเดิม
-- API, database, LINE messaging และ OA ที่เคยเชื่อมไว้ ไม่ถูกลบหรือยกเลิกโดยอัตโนมัติ
+Root cause found in previous REMOVE-COMPANY-LINE-OA patch:
+- public/index.html removed element id="googleWorkspaceShortcut"
+- public/app.js still used $('#googleWorkspaceShortcut').onclick in bindEvents()
+- Browser error: Cannot set properties of null (setting 'onclick')
+- bindEvents() ran before the boot try/catch, trapping startup on the splash screen.
 
-วิธี Deploy:
-1. อัปไฟล์จาก ZIP ลง Root ของ Repo hr-line โดยให้ public/index.html และ public/app.js ทับที่เดิม
-2. Commit/Push ไป Branch ที่ Cloudflare ใช้จริง
-3. Cloudflare Deploy command (แนะนำ):
-   node scripts/verify-line-oa-settings-retired.mjs && npx wrangler deploy
-4. หลัง Deploy กด Ctrl+Shift+R เพื่อโหลดไฟล์ใหม่ แล้วไป ตั้งค่า > การเชื่อมต่อ
-5. ควรเหลือเพียงสถานะ LINE สำหรับพนักงาน (ดูอย่างเดียว) และ Google พร้อมการเชื่อมต่อ
+This hotfix:
+1. Guards the optional Google shortcut binding.
+2. Preserves the removal of company-owned LINE OA configuration UI.
+3. Preserves the previous removal of the wellness/stretch feature UI/runtime.
+4. Keeps the central Nakna LINE channel and Google workspace features.
+5. Adds startup error handling + retry feedback rather than infinite splash.
+6. Cache-busts the app.js asset query to NAKNA_BOOT_FIX_20261019A.
 
-ข้อจำกัด:
-- ไม่ได้ยกเลิก/ลบการเชื่อม OA บริษัทที่เคยมีอยู่ และไม่ได้ปิด backend endpoints
-- หากต้องการถอดระบบ OA บริษัทถาวร ต้องสำรวจผลกระทบกับลูกค้าที่ยังเชื่อมอยู่ก่อน
-- ไม่ต้องทำ Migration และไม่ต้องแก้ Secrets
+FILES TO COPY INTO REPO ROOT (DO NOT NEST FOLDERS):
+  public/app.js
+  public/index.html
+  scripts/verify-boot-fix.mjs
+
+After committing the files to the branch deployed by Cloudflare Workers, use:
+  node scripts/verify-boot-fix.mjs && npm run check && npx wrangler deploy
+
+TESTING PERFORMED OFFLINE:
+- node --check public/app.js: PASS
+- npm run check in original project + patched web files: PASS
+- node --test tests/document-management.test.mjs tests/test-public-leave-form.mjs: PASS 53/53
+- Headless Chromium on *broken* prior build produced expected null-onclick pageerror.
+- Headless Chromium on *fixed* build produced no JS pageerrors during startup, and removed boot splash.
+  Smoke tests used no live user authentication or production API responses.
+
+NOT TESTED:
+- Real production sign-in or live workspace API, LINE delivery, Google OAuth.
+- D1/R2 and secrets remain unchanged.
+
+When the previous deployed site is unusable, optionally roll back to the last known-good
+Cloudflare Worker version before deploying this patch.

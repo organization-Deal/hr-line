@@ -1,0 +1,14 @@
+import fs from 'node:fs';
+const html = fs.readFileSync('public/index.html', 'utf8');
+const js = fs.readFileSync('public/app.js', 'utf8');
+const check=(ok,msg)=>{if(!ok)throw new Error('❌ '+msg);console.log('✅ '+msg)};
+check(html.includes('NAKNA_BOOT_RECOVERY_20261019'),'HTML correct patched build');
+check(js.includes('NAKNA_BOOT_RECOVERY_20261019'),'JS correct patched build');
+check(!js.includes("$('#googleWorkspaceShortcut').onclick"), 'No dereference of deleted Google shortcut');
+check(!html.includes('id="googleWorkspaceShortcut"'),'Removed shortcut is not reintroduced');
+check(!html.includes('id="lineIntegrationModal"'),'Company LINE OA modal remains retired');
+check(!html.includes('id="view-wellness"'),'Retired wellness view is not reintroduced');
+check(!js.includes('function renderWellness(){'),'Retired wellness runtime is not reintroduced');
+check(js.includes('startup event binding failed'),'Boot errors now expose an actionable retry instead of endless loading');
+check(html.includes('/app.js?v=NAKNA_BOOT_FIX_20261019A'),'Cache-bust is in place');
+console.log('✅ Nakna boot recovery files are consistent; proceed to deployment');
