@@ -3960,15 +3960,30 @@ async function handleApi(request, env, url, auth, ctx) {
     if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ดูเอกสารพนักงาน'},403);
     await ensureDocumentWorkflowReady(env.DB);
     const rows=await env.DB.prepare(`SELECT d.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.line_user_id,
+      u.name AS created_by_name,
       (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='line_sent') AS line_sent_at,
       (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='viewed') AS employee_viewed_at,
       (SELECT MAX(ev.created_at) FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='delivery_failed') AS delivery_failed_at,
       (SELECT ev.detail_json FROM employee_document_events ev WHERE ev.document_id=d.id AND ev.client_id=d.client_id AND ev.event_type='delivery_failed' ORDER BY ev.id DESC LIMIT 1) AS delivery_error_json,
       (SELECT a.acknowledged_pdf_url FROM document_acknowledgements a WHERE a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version LIMIT 1) AS final_signed_url,
       (SELECT a.signed_at FROM document_acknowledgements a WHERE a.document_id=d.id AND a.employee_id=d.employee_id AND a.document_version=d.version LIMIT 1) AS final_signed_at
-      FROM employee_documents d LEFT JOIN employees e ON e.id=d.employee_id WHERE d.client_id=?1 ORDER BY d.created_at DESC LIMIT 200`).bind(clientId).all();
+      FROM employee_documents d LEFT JOIN employees e ON e.id=d.employee_id LEFT JOIN users u ON u.id=d.created_by_user_id WHERE d.client_id=?1 ORDER BY d.created_at DESC LIMIT 200`).bind(clientId).all();
     const payslips=await env.DB.prepare(`SELECT pd.*,e.employee_code,e.first_name,e.last_name,e.nickname,pp.period_key FROM payroll_documents pd JOIN employees e ON e.id=pd.employee_id JOIN payroll_periods pp ON pp.id=pd.period_id WHERE pd.client_id=?1 ORDER BY pd.created_at DESC LIMIT 200`).bind(clientId).all();
     return json({data:rows.results||[],payslips:payslips.results||[]});
+  }
+
+  // Nakna Documents Workspace: authorized, tenant-scoped evidence timeline for a single document.
+  const documentHistoryMatch=path.match(/^\/api\/employee-documents\/(\d+)\/history$/);
+  if(documentHistoryMatch && method==='GET'){
+    if(!canManagePayroll(auth.role) && !canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูประวัติเอกสาร'},403);
+    const documentId=Number(documentHistoryMatch[1]);
+    await ensureDocumentWorkflowReady(env.DB);
+    const document=await env.DB.prepare(`SELECT id FROM employee_documents WHERE id=?1 AND client_id=?2`).bind(documentId,clientId).first();
+    if(!document)return json({error:'ไม่พบเอกสาร'},404);
+    const result=await env.DB.prepare(`SELECT ev.id,ev.event_type,ev.actor_type,ev.created_at,u.name AS actor_name
+      FROM employee_document_events ev LEFT JOIN users u ON u.id=ev.actor_user_id
+      WHERE ev.document_id=?1 AND ev.client_id=?2 ORDER BY ev.created_at DESC,ev.id DESC LIMIT 100`).bind(documentId,clientId).all();
+    return json({data:result.results||[]});
   }
 
   if(path==='/api/documents/generate' && method==='POST'){

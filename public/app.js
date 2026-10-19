@@ -1292,7 +1292,7 @@ function bindEvents() {
   $('#reviewSaveBtn').onclick = saveProbationReview;
   $('#moduleType').onchange = renderModuleFields;
   $('#assignAudience').onchange = renderCourseAssignFields;
-  $('#documentGenerateSaveBtn').onclick = generateEmployeeDocument;
+  $('#documentGenerateSaveBtn').onclick = nkdocsHandleWizardNext;
   $('#runPointRulesBtn').onclick = runPointRules;
   $('#manualAwardBtn').onclick = openManualAward;
   if($('#wellnessSaveBtn')) $('#wellnessSaveBtn').onclick = saveWellnessSettings;
@@ -5693,6 +5693,141 @@ window.publishPayroll=async id=>{if(!confirm('Publish แล้วระบบ�
 
 async function refreshPayroll(render=true){const role=String(activeCompanyRole()||'');if(!['owner','co_owner','hr_admin','hr','payroll_admin'].includes(role))return;state.payroll=await api('/api/payroll/overview');if(render)renderPayroll();}
 
+// Nakna Documents Workspace — native, event-driven (no global DOM observers).
+const nkdocsUi={tab:'all',query:'',status:'all',type:'all',sort:'new',wizardStep:1};
+function nkdocsStatus(x){
+  const workflow=String(x.workflow_status||'final'),approval=String(x.approval_status||'');
+  if(approval==='pending')return {key:'draft',text:'รอ HR ลงนาม',cls:'wait'};
+  if(workflow==='draft')return {key:'draft',text:'ฉบับร่าง',cls:'draft'};
+  if(workflow==='awaiting_employee_signature')return {key:'awaiting',text:'รอพนักงานลงนาม',cls:'wait'};
+  if(workflow==='final')return {key:'final',text:'เสร็จสมบูรณ์',cls:'final'};
+  return {key:'draft',text:'อยู่ระหว่างดำเนินการ',cls:'draft'};
+}
+function nkdocsEmployeeName(x){
+  const full=[x.first_name,x.last_name].filter(Boolean).join(' ').trim();
+  return full||String(x.nickname||'').trim()||'ยังไม่ระบุพนักงาน';
+}
+function nkdocsDelivery(x){
+  const visible=String(x.visibility||'')==='employee';
+  if(!visible)return 'เฉพาะ HR';
+  if(x.employee_viewed_at)return 'พนักงานเปิดแล้ว';
+  if(x.delivery_failed_at)return 'ส่ง LINE ไม่สำเร็จ';
+  if(x.line_sent_at)return 'ส่ง LINE แล้ว';
+  if(!x.line_user_id)return 'ยังไม่เชื่อม LINE';
+  return 'ยังไม่ส่ง LINE';
+}
+function nkdocsValidUrl(raw){
+  try{const u=new URL(String(raw||''),location.origin);return ['https:','http:'].includes(u.protocol)?u.href:'';}catch{return '';}
+}
+function nkdocsDocActions(x){
+  const id=Number(x.id),status=nkdocsStatus(x),url=nkdocsValidUrl(x.final_signed_url||x.drive_url||'');
+  const needsSend=['awaiting','final'].includes(status.key)&&String(x.visibility||'')==='employee';
+  const canSign=String(x.approval_status||'')==='pending';
+  return `<div class="nkdocs-row-actions">
+     ${url?`<a class="nkdocs-action-link" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer" aria-label="เปิด PDF ${escapeAttr(x.document_number||'')}">PDF</a>`:''}
+     ${canSign?`<button type="button" class="nkdocs-action-link strong" onclick="window.openDocumentHrSignModal(${id})">ลงนาม</button>`:''}
+     ${needsSend?`<button type="button" class="nkdocs-action-link" onclick="window.sendEmployeeDocument(${id},this)">ส่ง LINE</button>`:''}
+     <button type="button" class="nkdocs-action-link detail" onclick="window.openNaknaDocumentDetail(${id})">รายละเอียด</button></div>`;
+}
+function nkdocsRenderTable(){
+  const slot=$('#employeeDocumentList');if(!slot)return;
+  const docs=(state.documents?.data||[]);
+  const getType=x=>String(x.document_type||x.template_id||'other');
+  const typeSelect=$('#nkdocsType');
+  if(typeSelect){
+    const prev=nkdocsUi.type,types=[...new Set(docs.map(getType))].filter(Boolean).sort();
+    typeSelect.innerHTML='<option value="all">ทุกประเภท</option>'+types.map(t=>`<option value="${escapeAttr(t)}">${escapeHtml((state.documentSystem?.templates||[]).find(z=>z.document_type===t)?.name||t)}</option>`).join('');
+    if(types.includes(prev)){typeSelect.value=prev;}else{nkdocsUi.type='all';typeSelect.value='all';}
+  }
+  const q=nkdocsUi.query.toLocaleLowerCase('th-TH');
+  const filtered=docs.filter(x=>{
+    const person=nkdocsEmployeeName(x);
+    const hay=[x.title,x.document_number,x.document_type,x.created_by_name,person,x.employee_code,x.nickname].map(String).join(' ').toLocaleLowerCase('th-TH');
+    return (!q||hay.includes(q))&&(nkdocsUi.status==='all'||nkdocsStatus(x).key===nkdocsUi.status)&&(nkdocsUi.type==='all'||getType(x)===nkdocsUi.type);
+  }).sort((a,b)=>{
+    const ta=Date.parse(String(a.created_at||''))||0,tb=Date.parse(String(b.created_at||''))||0;
+    return (nkdocsUi.sort==='old' ? ta-tb : tb-ta) || (Number(b.id||0)-Number(a.id||0));
+  });
+  const total=$('#nkdocsResultCount');if(total)total.textContent=`แสดง ${filtered.length} จาก ${docs.length} รายการ${docs.length>=200?' · ระบบโหลดได้สูงสุด 200 รายการต่อครั้ง':''}`;
+  if(!filtered.length){slot.innerHTML=`<div class="nkdocs-empty"><strong>${docs.length?'ไม่พบเอกสารตามตัวกรอง':'ยังไม่มีเอกสารในระบบ'}</strong><p>${docs.length?'ลองเปลี่ยนคำค้นหาหรือเลือกทุกสถานะ':'เริ่มออกเอกสารจากปุ่มด้านบน'}</p></div>`;return;}
+  slot.innerHTML=`<div class="nkdocs-scroll"><table class="nkdocs-table"><thead><tr><th>เอกสาร / เลขอ้างอิง</th><th>ออกให้</th><th>สร้างโดย / เมื่อ</th><th>สถานะ</th><th>การส่ง</th><th class="nkdocs-actions-title">ดำเนินการ</th></tr></thead><tbody>${filtered.map(x=>{
+    const st=nkdocsStatus(x),person=nkdocsEmployeeName(x);
+    return `<tr>
+      <td data-label="เอกสาร"><button type="button" class="nkdocs-document-name" onclick="window.openNaknaDocumentDetail(${Number(x.id)})">${escapeHtml(x.title||'เอกสารพนักงาน')}</button><span class="nkdocs-sub">${escapeHtml(x.document_number||`#${Number(x.id)}`)} · v${Number(x.version||1)}</span></td>
+      <td data-label="ออกให้"><b class="nkdocs-cell-main">${escapeHtml(person)}</b><span class="nkdocs-sub">${escapeHtml(x.employee_code||'')}</span></td>
+      <td data-label="สร้างโดย"><b class="nkdocs-cell-main">${escapeHtml(x.created_by_name||'ไม่พบข้อมูลผู้สร้าง')}</b><span class="nkdocs-sub">${escapeHtml(formatDateTime(x.created_at))}</span></td>
+      <td data-label="สถานะ"><span class="nkdocs-pill ${st.cls}">${escapeHtml(st.text)}</span></td>
+      <td data-label="การส่ง"><span class="nkdocs-delivery">${escapeHtml(nkdocsDelivery(x))}</span></td>
+      <td data-label="ดำเนินการ">${nkdocsDocActions(x)}</td>
+    </tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+function nkdocsSelectTab(tab){
+  const allowed=['all','action','templates','payslips'];
+  if(!allowed.includes(tab))return;
+  nkdocsUi.tab=tab;
+  for(const k of allowed){
+    const el=$(`#nkdocs-panel-${k}`);if(el)el.hidden=k!==tab;
+    const btn=document.querySelector(`[data-nkdocs-tab="${k}"]`);
+    if(btn){btn.classList.toggle('is-active',k===tab);btn.setAttribute('aria-selected',String(k===tab));}
+  }
+}
+function nkdocsBindControls(){
+  const root=$('#view-documents');if(!root||root.dataset.nkdocsBound)return;
+  root.dataset.nkdocsBound='1';
+  root.querySelectorAll('[data-nkdocs-tab]').forEach(btn=>btn.addEventListener('click',()=>nkdocsSelectTab(btn.dataset.nkdocsTab)));
+  const search=$('#nkdocsSearch'),status=$('#nkdocsStatus'),type=$('#nkdocsType'),sort=$('#nkdocsSort');
+  search?.addEventListener('input',()=>{nkdocsUi.query=search.value.trim();nkdocsRenderTable()});
+  status?.addEventListener('change',()=>{nkdocsUi.status=status.value;nkdocsRenderTable()});
+  type?.addEventListener('change',()=>{nkdocsUi.type=type.value;nkdocsRenderTable()});
+  sort?.addEventListener('change',()=>{nkdocsUi.sort=sort.value;nkdocsRenderTable()});
+  $('#nkdocsDetailClose')?.addEventListener('click',()=>$('#nkdocsDetailDialog')?.close());
+  $('#nkdocsWizardBack')?.addEventListener('click',()=>nkdocsShowWizardStep(nkdocsUi.wizardStep-1));
+  nkdocsSelectTab(nkdocsUi.tab);
+}
+window.openNaknaDocumentDetail=async id=>{
+  const doc=(state.documents?.data||[]).find(x=>Number(x.id)===Number(id));if(!doc)return;
+  const dlg=$('#nkdocsDetailDialog');if(!dlg)return;
+  const st=nkdocsStatus(doc),person=nkdocsEmployeeName(doc),url=nkdocsValidUrl(doc.final_signed_url||doc.drive_url||'');
+  $('#nkdocsDetailTitle').textContent=doc.title||'เอกสารพนักงาน';
+  $('#nkdocsDetailSub').textContent=`${doc.document_number||'#'+id} · ${person}`;
+  const pairs=[['ออกให้',person],['รหัสพนักงาน',doc.employee_code||'—'],['สร้างโดย',doc.created_by_name||'ไม่พบข้อมูลผู้สร้าง'],['วันเวลาสร้าง',formatDateTime(doc.created_at)],['วันที่เอกสาร',formatDate(doc.document_date||doc.created_at)],['เลขเอกสาร',doc.document_number||'ยังไม่มีเลขอ้างอิง'],['เวอร์ชัน','v'+Number(doc.version||1)],['สถานะ',st.text],['HR ลงนามโดย',doc.hr_signer_name||'ยังไม่ระบุ'],['HR ลงนามเมื่อ',formatDateTime(doc.hr_signed_at)],['พนักงานลงนามเมื่อ',formatDateTime(doc.employee_signed_at||doc.final_signed_at)],['การส่ง',nkdocsDelivery(doc)],['ส่ง LINE ล่าสุด',formatDateTime(doc.line_sent_at)],['เปิดอ่านล่าสุด',formatDateTime(doc.employee_viewed_at)]];
+  $('#nkdocsDetailBody').innerHTML=`<dl class="nkdocs-metadata">${pairs.map(([k,v])=>`<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`).join('')}</dl><div class="nkdocs-timeline"><strong>ประวัติการดำเนินการ</strong><div id="nkdocsHistory">กำลังโหลดประวัติ…</div></div>`;
+  $('#nkdocsDetailActions').innerHTML=`${url?`<a class="primary-btn" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">เปิดไฟล์เอกสาร</a>`:''}<button type="button" class="secondary-btn" id="nkdocsDetailDone">ปิด</button>`;
+  $('#nkdocsDetailDone').onclick=()=>dlg.close();
+  dlg.showModal();
+  try{
+    const result=await api(`/api/employee-documents/${Number(id)}/history`,{timeoutMs:20000,silentStatus:true});
+    if(!dlg.open)return;
+    const names={draft_created:'สร้างฉบับร่าง',uploaded:'อัปโหลดเอกสาร',hr_signed:'HR ลงนาม',auto_hr_signed:'ระบบลงนามตามการตั้งค่า',pdf_materialized:'สร้าง PDF',viewed:'พนักงานเปิดอ่าน',line_sent:'ส่ง LINE',final_line_sent:'ส่ง Final LINE',delivery_failed:'ส่งไม่สำเร็จ',employee_signed:'พนักงานลงนาม',acknowledged:'รับทราบ',archived:'เก็บถาวร',auto_finalize_failed:'สร้าง Final ไม่สำเร็จ'};
+    const rows=result.data||[];
+    $('#nkdocsHistory').innerHTML=rows.length?rows.map(ev=>`<div class="nkdocs-event"><span class="nkdocs-event-dot"></span><div><b>${escapeHtml(names[ev.event_type]||ev.event_type||'เปลี่ยนสถานะ')}</b><small>${escapeHtml(ev.actor_name||({employee:'พนักงาน',system:'ระบบ'}[ev.actor_type]||'ไม่ระบุผู้ดำเนินการ'))} · ${escapeHtml(formatDateTime(ev.created_at))}</small></div></div>`).join(''):'<p class="nkdocs-muted">ยังไม่มีประวัติที่บันทึกไว้</p>';
+  }catch(err){if(dlg.open)$('#nkdocsHistory').textContent='โหลดประวัติไม่สำเร็จ: '+String(err.message||'กรุณาลองใหม่');}
+};
+function nkdocsUpdateWizard(){
+  const modal=$('#documentGenerateModal');if(!modal)return;
+  const step=nkdocsUi.wizardStep;
+  modal.classList.add('nkdocs-wizard-active');
+  modal.dataset.step=String(step);
+  modal.querySelectorAll('[data-nkdocs-step]').forEach(el=>el.classList.toggle('is-active',Number(el.dataset.nkdocsStep)===step));
+  const type=$('#documentTypeCards')?.closest('.field'),employee=$('#documentEmployee')?.closest('.field'),form=$('#documentDynamicFields'),preview=$('#documentDraftPreview');
+  for(const [el,show] of [[type,step===1],[employee,step===2],[form,step===3],[preview,step===4]])if(el)el.hidden=!show;
+  const hints=['','เลือกแบบฟอร์มที่ต้องการออกเอกสาร','เลือกพนักงานที่จะได้รับเอกสาร','กรอกเฉพาะรายละเอียดที่จำเป็น','ตรวจตัวอย่างก่อนสร้างฉบับร่าง — ยังไม่ส่งให้พนักงาน'];
+  const hint=$('#nkdocsWizardHint');if(hint)hint.textContent=hints[step];
+  const back=$('#nkdocsWizardBack');if(back)back.classList.toggle('hidden',step===1);
+  const save=$('#documentGenerateSaveBtn');if(save){save.disabled=step===4&&selectedDocumentCode==='WARNING';save.textContent=step===4?'สร้าง Draft เพื่อตรวจสอบ':'ถัดไป →';}
+}
+function nkdocsShowWizardStep(step){nkdocsUi.wizardStep=Math.max(1,Math.min(4,step));nkdocsUpdateWizard();}
+function nkdocsHandleWizardNext(){
+  const step=nkdocsUi.wizardStep;
+  if(step===1&&!selectedDocumentCode)return toast('กรุณาเลือกประเภทเอกสาร',true);
+  if(step===1&&selectedDocumentCode==='WARNING')return toast('หนังสือเตือนต้องสร้างจาก HR Case',true);
+  if(step===2&&!Number($('#documentEmployee')?.value||0))return toast('กรุณาเลือกพนักงาน',true);
+  if(step===3){const data=collectDocumentForm();if(selectedDocumentCode==='SAL_ADJ'&&!(Number(data.new_salary)>0))return toast('กรุณาระบุเงินเดือนใหม่',true);if(selectedDocumentCode==='ACK_NOTICE'&&(!data.subject||!data.note))return toast('กรุณาระบุหัวข้อและรายละเอียดเอกสาร',true);}
+  if(step<4)return nkdocsShowWizardStep(step+1);
+  return generateEmployeeDocument();
+}
+
 function renderDocuments(){
   const canHr=['owner','co_owner','hr_admin','hr','payroll_admin'].includes(String(activeCompanyRole()||''));
   $('#generateDocumentBtn').classList.toggle('hidden',!canHr);
@@ -5709,8 +5844,9 @@ function renderDocuments(){
     pending_approvals:Math.max(Number(sum.pending_approvals||0),computed.pending_approvals),
     pending_employee_signatures:Math.max(Number(sum.pending_employee_signatures||0),computed.pending_employee_signatures)
   };
-  const lineCount=pays.filter(x=>x.line_notified_at).length+docs.filter(x=>x.line_sent_at).length;
-  $('#documentSummary').innerHTML=`<div><span>เอกสารทั้งหมด</span><strong>${summary.total}</strong></div><div><span>Draft</span><strong>${summary.drafts}</strong></div><div><span>รอ HR เซ็น</span><strong>${summary.pending_approvals}</strong></div><div><span>รอพนักงานเซ็น</span><strong>${summary.pending_employee_signatures}</strong></div><div><span>Payslip</span><strong>${pays.length}</strong></div><div><span>แจ้ง LINE</span><strong>${lineCount}</strong></div>`;
+  const actionCount=summary.pending_approvals+summary.pending_employee_signatures;
+  $('#documentSummary').innerHTML=`<div><span>เอกสารทั้งหมด</span><strong>${summary.total}</strong></div><div><span>ฉบับร่าง</span><strong>${summary.drafts}</strong></div><div><span>รอ HR ลงนาม</span><strong>${summary.pending_approvals}</strong></div><div><span>รอพนักงานลงนาม</span><strong>${summary.pending_employee_signatures}</strong></div>`;
+  const count=$('#nkdocsActionCount');if(count)count.textContent=actionCount?String(actionCount):'';
 
   const apiApprovals=sys.pending_approvals||[];
   const approvalIds=new Set(apiApprovals.map(x=>Number(x.document_id)));
@@ -5727,37 +5863,9 @@ function renderDocuments(){
 
   $('#payslipDocumentList').innerHTML=pays.length?pays.map(p=>{const share=p.share_token_value?`${location.origin}/payslip/${p.share_token_value}`:p.drive_url;return `<article class="document-row"><div class="document-file-icon">PDF</div><div><strong>${escapeHtml(p.nickname||p.first_name)} · ${escapeHtml(p.period_key)}</strong><p>${escapeHtml(p.file_name)}</p><small>${p.email_sent_at?'✓ Email ':''}${p.line_notified_at?'✓ LINE ':''}· ${formatDateTime(p.created_at)}</small></div>${share?`<a class="secondary-btn" href="${escapeHtml(share)}" target="_blank" rel="noopener">เปิด</a>`:''}</article>`}).join(''):emptyState('ยังไม่มี Payslip','เมื่อ Lock และ Publish Payroll เอกสารจะมาอยู่ตรงนี้อัตโนมัติ');
 
-  $('#employeeDocumentList').innerHTML=docs.length?docs.map(x=>{
-    const workflow=String(x.workflow_status||'final');
-    const awaiting=workflow==='awaiting_employee_signature';
-    const final=workflow==='final';
-    const employeeVisible=String(x.visibility||'')==='employee';
-    const fullySigned=String(x.employee_signature_status||'')==='signed'||Boolean(x.final_signed_url);
-    let statusText='Draft';
-    let statusClass='';
-    if(String(x.approval_status||'')==='pending'){statusText='รอ HR ตรวจและลงนาม';statusClass='hr';}
-    else if(awaiting){statusText='HR ลงนามแล้ว · รอพนักงานเซ็น';statusClass='wait';}
-    else if(final&&fullySigned){statusText='Final · ลงนามครบ 2 ฝ่าย';statusClass='done';}
-    else if(final){statusText='Final · HR ลงนามแล้ว';statusClass='done';}
-
-    let delivery='';
-    if((awaiting||final)&&employeeVisible){
-      if(x.employee_viewed_at)delivery='พนักงานเปิดแล้ว';
-      else if(x.line_sent_at)delivery='ส่ง LINE แล้ว';
-      else if(!x.line_user_id)delivery='ยังไม่เชื่อม LINE';
-      else if(x.delivery_failed_at)delivery='LINE ส่งไม่สำเร็จ';
-      else delivery='ยังไม่ส่ง LINE';
-    }
-
-    let sendBtn='';
-    if((awaiting||final)&&employeeVisible){
-      const label=awaiting?(x.line_sent_at?'เตือนให้เซ็น':'ส่งให้เซ็น'):(fullySigned?'ส่ง Final อีกครั้ง':(x.line_sent_at?'ส่งอีกครั้ง':'ส่งให้พนักงาน'));
-      sendBtn=`<button class="secondary-btn" type="button" onclick="window.sendEmployeeDocument(${Number(x.id)},this)">${label}</button>`;
-    }
-    const pdfUrl=x.final_signed_url||x.drive_url||'';
-    const pdfLabel=x.final_signed_url?'Final PDF':awaiting?'PDF ที่ HR เซ็น':'PDF';
-    return `<article class="document-row"><div class="document-file-icon">${pdfUrl?'PDF':'DOC'}</div><div><strong>${escapeHtml(x.title)} <span class="document-status-pill ${statusClass}">${escapeHtml(statusText)}</span></strong><p>${escapeHtml(x.nickname||x.first_name||'เอกสารบริษัท')} · ${escapeHtml(x.document_number||'')} · ${formatDate(x.document_date||x.created_at)}</p><small>${escapeHtml(x.document_type)} · v${Number(x.version||1)}${x.hr_signed_at?` · HR เซ็น ${escapeHtml(formatDateTime(x.hr_signed_at))}`:''}${x.employee_signed_at?` · พนักงานเซ็น ${escapeHtml(formatDateTime(x.employee_signed_at))}`:''}${delivery?` · ${escapeHtml(delivery)}`:''}</small></div><div class="document-row-actions">${pdfUrl?`<a class="secondary-btn" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noopener">${pdfLabel}</a>`:''}${sendBtn}</div></article>`;
-  }).join(''):emptyState('ยังไม่มีเอกสาร','สร้างเอกสารจาก Template ได้จากปุ่มด้านบน');
+  // The former tall employee document card list is now rendered as a searchable register.
+  nkdocsBindControls();
+  nkdocsRenderTable();
 
   const acks=sys.pending_acknowledgements||[];
   $('#documentAckList').innerHTML=acks.length?acks.map(x=>`<article class="document-row"><div class="document-file-icon">SIGN</div><div><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.nickname||x.first_name||'')} · ${escapeHtml(x.document_number||'')}</p><small>${x.status==='viewed'?'พนักงานเปิดแล้ว · รอลงลายเซ็น':'ส่งแล้ว · รอลงลายเซ็นพนักงาน'}</small></div></article>`).join(''):emptyState('ไม่มีรายการรอลายเซ็น','เมื่อ HR ลงนามแล้วและส่งให้พนักงาน รายการที่รอลายเซ็นจะแสดงตรงนี้');
@@ -5896,7 +6004,7 @@ function selectDocumentTemplateByCode(code){
   const hidden=$('#documentTemplate'); if(hidden){hidden.dataset.code=code; const t=(state.documentSystem?.templates||[]).find(x=>x.code===code);hidden.value=t?.id?String(t.id):'';}
   renderDocumentTypeCards();
   renderDocumentDynamicForm();
-  const save=$('#documentGenerateSaveBtn'); if(save){save.disabled=code==='WARNING'; save.textContent=code==='WARNING'?'สร้างผ่าน HR Case':'สร้าง Draft เพื่อตรวจสอบ';}
+  nkdocsUpdateWizard();
 }
 window.selectDocumentTemplate=(id,code)=>selectDocumentTemplateByCode(code);
 window.selectDocumentTemplateByCode=selectDocumentTemplateByCode;
@@ -5904,11 +6012,12 @@ window.selectDocumentTemplateByCode=selectDocumentTemplateByCode;
 function openDocumentGenerateModal(){
   selectedDocumentCode='';
   const employee=$('#documentEmployee');
-  if(employee){employee.innerHTML=(state.employees||[]).map(e=>`<option value="${Number(e.id)}">${escapeHtml(e.nickname||employeeDisplayName(e))} · ${escapeHtml(e.employee_code||'')}</option>`).join(''); employee.onchange=renderDocumentA4Preview;}
+  if(employee){employee.innerHTML='<option value="">เลือกพนักงานที่ต้องการออกเอกสาร</option>'+(state.employees||[]).map(e=>`<option value="${Number(e.id)}">${escapeHtml(employeeDisplayName(e))} · ${escapeHtml(e.employee_code||'')}</option>`).join(''); employee.value=''; employee.onchange=renderDocumentA4Preview;}
   const hidden=$('#documentTemplate'); if(hidden){hidden.value=''; hidden.dataset.code='';}
   const fields=$('#documentDynamicFields'); if(fields)fields.innerHTML='';
   const save=$('#documentGenerateSaveBtn'); if(save){save.disabled=false;save.textContent='สร้าง Draft เพื่อตรวจสอบ';}
   renderDocumentTypeCards(); renderDocumentA4Preview();
+  nkdocsBindControls(); nkdocsShowWizardStep(1);
   $('#documentGenerateModal')?.showModal();
 }
 window.openDocumentGenerateModal=openDocumentGenerateModal;
@@ -5931,9 +6040,10 @@ async function generateEmployeeDocument(){
       state.documents.data=[result.document,...state.documents.data.filter(x=>Number(x.id)!==Number(result.document.id))];
       renderDocuments();
     }
+    nkdocsSelectTab('action');
     queueBackgroundRefresh('documents:create',()=>refreshDocuments({silent:true}));
     toast(`สร้าง Draft ${result.document_number} แล้ว · อยู่ใน “งานที่ต้องดำเนินการ” เพื่อให้ HR ตรวจและอนุมัติ`);
-  }catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='สร้าง Draft เพื่อตรวจสอบ';}
+  }catch(e){toast(e.message,true)}finally{button.disabled=false;nkdocsUpdateWizard();}
 }
 
 function renderGrowth(){

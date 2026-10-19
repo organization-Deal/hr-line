@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=P10.1-attendance" />
+  <link rel="modulepreload" href="/app.js?v=DOCS20261019" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -36,6 +36,7 @@
 <link rel="stylesheet" href="/ui/p10-attendance.css?v=P10.1-attendance" />
 
 <link rel="stylesheet" href="/ui/p10-5.css?v=P10.5-ux1" />
+<link rel="stylesheet" href="/ui/nk-documents-redesign.css?v=DOCS20261019" />
 <script defer src="/ui/p10-5.js?v=P10.5-ux1"></script>
 </head>
 <body>
@@ -645,13 +646,50 @@
           <article class="panel payroll-detail-panel"><div id="payrollDetail" class="payroll-detail-empty"><div class="module-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M16 15h2"/></svg></div><h3>เลือกรอบเงินเดือน</h3><p>เลือกเดือนด้านซ้ายเพื่อดูตารางปิดเงินเดือนแบบเต็ม และปรับเงินเพิ่ม/หัก/ภาษีรายคนได้</p></div></article>
         </div>
       </section>
-      <section id="view-documents" class="view">
-        <div class="page-intro"><div><p class="kicker">EMPLOYEE DOCUMENTS</p><h1>เอกสาร HR</h1><p>แฟ้มเอกสารพนักงานแบบตรวจสอบย้อนหลังได้ · Version · สิทธิ์การมองเห็น · ประวัติหลักฐาน และ Payslip</p></div><button id="generateDocumentBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>ออกเอกสาร</button></div>
-        <div id="documentSummary" class="document-summary"></div>
-        <div class="document-system-toolbar"><button id="documentSettingsBtn" class="secondary-btn" type="button">ตั้งค่าเอกสาร & ลายเซ็น</button><button id="seedDocumentTemplatesBtn" class="secondary-btn" type="button">คืนค่า Template มาตรฐาน</button><button id="openDocumentCaseBtn" class="secondary-btn" type="button">+ เปิด HR Case</button><button id="bulkApproveDocumentsBtn" class="secondary-btn" type="button">ลงนามที่รอทั้งหมด</button><button id="refreshDocumentSystemBtn" class="secondary-btn" type="button">รีเฟรช</button></div>
-        <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">ACTION CENTER</p><h3>งานที่ต้องดำเนินการ</h3></div></div><div id="documentActionList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">TEMPLATES</p><h3>Template เอกสาร</h3></div></div><div id="documentTemplateList" class="document-list"></div></article></div>
-        <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">MONTHLY PAYSLIPS</p><h3>สลิปเงินเดือน</h3></div></div><div id="payslipDocumentList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">HR DOCUMENTS</p><h3>เอกสารพนักงาน</h3></div></div><div id="employeeDocumentList" class="document-list"></div></article></div>
-        <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">EVIDENCE</p><h3>รอพนักงานรับทราบ</h3></div></div><div id="documentAckList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">HR CASES</p><h3>Case ที่กำลังดำเนินการ</h3></div></div><div id="documentCaseList" class="document-list"></div></article></div>
+      <section id="view-documents" class="view nkdocs-workspace">
+        <div class="page-intro nkdocs-intro">
+          <div><p class="kicker">DOCUMENT WORKSPACE</p><h1>เอกสาร HR</h1><p>ออกเอกสาร · ติดตามการลงนาม · ตรวจสอบหลักฐานย้อนหลังจากที่เดียว</p></div>
+          <button id="generateDocumentBtn" class="primary-btn" type="button">+ ออกเอกสารใหม่</button>
+        </div>
+        <div id="documentSummary" class="document-summary nkdocs-summary" aria-label="สรุปเอกสาร"></div>
+        <div class="nkdocs-tabs" role="tablist" aria-label="หมวดเอกสาร">
+          <button class="nkdocs-tab is-active" type="button" role="tab" aria-selected="true" data-nkdocs-tab="all">เอกสารทั้งหมด</button>
+          <button class="nkdocs-tab" type="button" role="tab" aria-selected="false" data-nkdocs-tab="action">ต้องดำเนินการ <span id="nkdocsActionCount"></span></button>
+          <button class="nkdocs-tab" type="button" role="tab" aria-selected="false" data-nkdocs-tab="templates">เทมเพลต</button>
+          <button class="nkdocs-tab" type="button" role="tab" aria-selected="false" data-nkdocs-tab="payslips">สลิปเงินเดือน</button>
+        </div>
+        <article class="panel nkdocs-panel" id="nkdocs-panel-all">
+          <div class="nkdocs-controls">
+            <label class="nkdocs-search"><span class="sr-only">ค้นหาเอกสาร</span><input id="nkdocsSearch" type="search" autocomplete="off" placeholder="ค้นหาชื่อพนักงาน ชื่อเอกสาร หรือเลขเอกสาร" /></label>
+            <label><span class="sr-only">สถานะ</span><select id="nkdocsStatus"><option value="all">ทุกสถานะ</option><option value="draft">ฉบับร่าง / รอ HR</option><option value="awaiting">รอพนักงานลงนาม</option><option value="final">เสร็จสมบูรณ์</option></select></label>
+            <label><span class="sr-only">ประเภทเอกสาร</span><select id="nkdocsType"><option value="all">ทุกประเภท</option></select></label>
+            <label><span class="sr-only">เรียงลำดับ</span><select id="nkdocsSort"><option value="new">ใหม่ล่าสุด</option><option value="old">เก่าสุด</option></select></label>
+          </div>
+          <div class="nkdocs-list-head"><strong>ทะเบียนเอกสาร</strong><span id="nkdocsResultCount">กำลังโหลดรายการ…</span></div>
+          <div id="employeeDocumentList" class="nkdocs-table-slot" aria-live="polite"></div>
+        </article>
+        <article class="panel nkdocs-panel" id="nkdocs-panel-action" hidden>
+          <div class="panel-head"><div><p class="kicker">ACTION CENTER</p><h3>ต้องดำเนินการ</h3><p class="panel-subtitle">งานที่ต้องตรวจและลงนาม รวมถึงรายการที่พนักงานยังไม่ได้ลงลายเซ็น</p></div></div>
+          <div id="documentActionList" class="document-list nkdocs-action-list"></div>
+          <div class="nkdocs-secondary-head">รอพนักงานลงนาม</div>
+          <div id="documentAckList" class="document-list nkdocs-action-list"></div>
+        </article>
+        <article class="panel nkdocs-panel" id="nkdocs-panel-templates" hidden>
+          <div class="panel-head"><div><p class="kicker">TEMPLATE LIBRARY</p><h3>เทมเพลตเอกสาร</h3><p class="panel-subtitle">เลือกประเภทเมื่อออกเอกสารใหม่ การคืนค่ามาตรฐานไม่ลบเอกสารที่เคยออกแล้ว</p></div></div>
+          <div id="documentTemplateList" class="document-list nkdocs-template-list"></div>
+        </article>
+        <article class="panel nkdocs-panel" id="nkdocs-panel-payslips" hidden>
+          <div class="panel-head"><div><p class="kicker">MONTHLY PAYSLIPS</p><h3>สลิปเงินเดือน</h3><p class="panel-subtitle">สลิปที่ Publish จาก Payroll จะปรากฏที่นี่</p></div></div>
+          <div id="payslipDocumentList" class="document-list nkdocs-action-list"></div>
+        </article>
+        <div class="nkdocs-footer-tools"><details class="nkdocs-tools"><summary>การตั้งค่าและเครื่องมือเพิ่มเติม</summary><div class="document-system-toolbar">
+          <button id="documentSettingsBtn" class="secondary-btn" type="button">ตั้งค่าเอกสาร / ลายเซ็น</button>
+          <button id="seedDocumentTemplatesBtn" class="secondary-btn" type="button">คืนค่าเทมเพลตมาตรฐาน</button>
+          <button id="openDocumentCaseBtn" class="secondary-btn" type="button">เปิด HR Case</button>
+          <button id="bulkApproveDocumentsBtn" class="secondary-btn" type="button">ลงนามรายการที่รอทั้งหมด</button>
+          <button id="refreshDocumentSystemBtn" class="secondary-btn" type="button">รีเฟรชข้อมูล</button>
+        </div></details></div>
+        <div id="documentCaseList" class="hidden" aria-hidden="true"></div>
       </section>
       <section id="view-benefits" class="view">
         <div class="page-intro"><div><p class="kicker">BENEFITS</p><h1>สวัสดิการพนักงาน</h1><p>รวมประกันสังคม ประกันกลุ่ม ค่ารักษาพยาบาล กองทุน เบี้ยเลี้ยง และสิทธิพิเศษ พร้อมกำหนดรายคน</p></div><button id="addBenefitBtn" class="primary-btn" type="button">+ เพิ่มสวัสดิการ</button></div>
@@ -1317,7 +1355,12 @@
     </form>
   </dialog>
 
-  <dialog id="documentGenerateModal" class="document-generate-dialog"><form method="dialog"><div class="modal-head"><div><p class="kicker">NEW EMPLOYEE DOCUMENT</p><h3>ออกเอกสารให้พนักงาน</h3><p>เลือกประเภทเอกสารก่อน นากนะจะเตรียม Draft จากข้อมูลพนักงานให้ HR ตรวจ</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="modal-fields"><div class="field full"><label>1. ต้องการออกเอกสารอะไร</label><div id="documentTypeCards" class="document-type-cards"></div><select id="documentTemplate" class="hidden"><option value="">เลือกประเภทเอกสาร</option></select></div><div class="field full"><label>2. ออกให้พนักงาน</label><select id="documentEmployee"></select></div><div id="documentDynamicFields" class="full"></div><div id="documentDraftPreview" class="document-draft-preview full"><p class="kicker">DOCUMENT PREVIEW</p><strong>เลือกประเภทเอกสารเพื่อกรอกแบบฟอร์ม</strong><small>ระบบจะสร้าง Preview จากข้อมูลบริษัทและแฟ้มพนักงานก่อนสร้าง Draft</small></div><div class="field full"><small>เอกสารสำคัญจะยังไม่ส่งให้พนักงานจนกว่า HR จะตรวจและอนุมัติ</small></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="documentGenerateSaveBtn" type="button" class="primary-btn">สร้าง Draft เพื่อตรวจสอบ</button></div></form></dialog>
+  <dialog id="nkdocsDetailDialog" class="nkdocs-detail-dialog" aria-labelledby="nkdocsDetailTitle">
+    <div class="nkdocs-detail-head"><div><p class="kicker">DOCUMENT DETAILS</p><h2 id="nkdocsDetailTitle">รายละเอียดเอกสาร</h2><p id="nkdocsDetailSub"></p></div><button type="button" class="nkdocs-icon-close" id="nkdocsDetailClose" aria-label="ปิดรายละเอียด">×</button></div>
+    <div id="nkdocsDetailBody" class="nkdocs-detail-body"></div>
+    <div class="nkdocs-detail-footer" id="nkdocsDetailActions"></div>
+  </dialog>
+  <dialog id="documentGenerateModal" class="document-generate-dialog"><form method="dialog"><div class="modal-head"><div><p class="kicker">NEW EMPLOYEE DOCUMENT</p><h3>ออกเอกสารให้พนักงาน</h3><p>เลือกประเภทเอกสารก่อน นากนะจะเตรียม Draft จากข้อมูลพนักงานให้ HR ตรวจ</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="nkdocs-wizard-progress" role="status" aria-live="polite"><span class="is-active" data-nkdocs-step="1">1 · ประเภท</span><span data-nkdocs-step="2">2 · พนักงาน</span><span data-nkdocs-step="3">3 · รายละเอียด</span><span data-nkdocs-step="4">4 · ตรวจสอบ</span></div><p class="nkdocs-wizard-hint" id="nkdocsWizardHint">เลือกประเภทเอกสารที่ต้องการออก</p><div class="modal-fields"><div class="field full"><label>1. ต้องการออกเอกสารอะไร</label><div id="documentTypeCards" class="document-type-cards"></div><select id="documentTemplate" class="hidden"><option value="">เลือกประเภทเอกสาร</option></select></div><div class="field full"><label>2. ออกให้พนักงาน</label><select id="documentEmployee"></select></div><div id="documentDynamicFields" class="full"></div><div id="documentDraftPreview" class="document-draft-preview full"><p class="kicker">DOCUMENT PREVIEW</p><strong>เลือกประเภทเอกสารเพื่อกรอกแบบฟอร์ม</strong><small>ระบบจะสร้าง Preview จากข้อมูลบริษัทและแฟ้มพนักงานก่อนสร้าง Draft</small></div><div class="field full"><small>เอกสารสำคัญจะยังไม่ส่งให้พนักงานจนกว่า HR จะตรวจและอนุมัติ</small></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="nkdocsWizardBack" type="button" class="secondary-btn hidden">ย้อนกลับ</button><button id="documentGenerateSaveBtn" type="button" class="primary-btn">สร้าง Draft เพื่อตรวจสอบ</button></div></form></dialog>
 
   <dialog id="courseModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">COURSE BUILDER</p><h3>สร้างหลักสูตร Onboarding</h3><p>สร้างคอร์สก่อน แล้วค่อยเพิ่มวิดีโอ เอกสาร เนื้อหา หรือ Quiz</p></div><button type="button" class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>ชื่อหลักสูตร</label><input id="courseTitle" placeholder="เช่น Welcome to DEAL / Product 101" /></div><div class="field full"><label>คำอธิบาย</label><textarea id="courseDescription" rows="3"></textarea></div><div class="field"><label>กลุ่มเริ่มต้น</label><select id="courseAudience"><option value="manual">เลือกทีหลัง</option><option value="all">พนักงานทั้งหมด</option><option value="probation">พนักงานทดลองงาน</option><option value="department">รายแผนก</option></select></div><div class="field"><label>คะแนนผ่าน Quiz</label><input id="coursePassingScore" type="number" min="0" max="100" value="80" /></div><div class="field"><label>เวลาโดยประมาณ</label><div class="input-suffix"><input id="courseEstimatedMinutes" type="number" min="0" value="30" /><span>นาที</span></div></div><label class="toggle-line"><input id="courseRequired" type="checkbox" checked /> บังคับเรียน</label></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="courseSaveBtn" type="button" class="primary-btn">สร้างคอร์ส</button></div></form></dialog>
 
@@ -1506,7 +1549,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=P10.1-attendance" type="module"></script>
+  <script src="/app.js?v=DOCS20261019" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
