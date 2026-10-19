@@ -1,0 +1,4 @@
+public/index.html
+public/app.js
+public/ui/nk-documents-redesign.css
+src/index.js
