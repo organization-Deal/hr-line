@@ -319,9 +319,9 @@ async function loadViewData(name,{force=false}={}){
   if(!force && isViewFresh(name)){ renderViewData(name); return; }
   if(viewLoadInFlight.has(name)) return viewLoadInFlight.get(name);
   const role=String(activeCompanyRole()||'');
-  const isHr=['owner','co_owner','hr_admin','hr'].includes(role);
+  const isHr=['owner','primary_owner','co_owner','hr_admin','hr'].includes(role);
   const canPayroll=isHr||role==='payroll_admin';
-  const canReadBroadcasts=['owner','co_owner','hr_admin','hr','manager'].includes(role);
+  const canReadBroadcasts=['owner','primary_owner','co_owner','hr_admin','hr','manager'].includes(role);
   const canViewPeople=['owner','co_owner','hr_admin','hr','manager','viewer'].includes(role);
   const load=async(path,fallback=null)=>{ try{return await api(path,{timeoutMs:15000});}catch(error){console.warn('[Nakna] view load',name,path,error?.message||error);return fallback;} };
   const run=(async()=>{
@@ -341,7 +341,17 @@ async function loadViewData(name,{force=false}={}){
       }else if(name==='leave'){
         const [leaves,policies,employees,peopleCore]=await Promise.all([load('/api/leaves',{data:state.leaves}),load('/api/leave-policies',{data:state.leavePolicies}),load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore)]); state.leaves=leaves?.data||state.leaves; state.leavePolicies=policies?.data||state.leavePolicies; state.employees=employees?.data||state.employees; state.peopleCore=mergePeopleCoreFromServer(peopleCore)||state.peopleCore;
       }else if(name==='requests'){
-        const [requests,service]=await Promise.all([load('/api/requests',{data:state.requests}),load('/api/employee-service',state.employeeService)]); state.requests=requests?.data||state.requests; state.employeeService=service||state.employeeService;
+        // Consolidated Employee Service: private HR cases are only fetched for HR roles.
+        const [requests,service,cases,broadcasts]=await Promise.all([
+          load('/api/requests',{data:state.requests}),
+          load('/api/employee-service',state.employeeService),
+          isHr?load('/api/hr-cases',{data:state.hrCases}):Promise.resolve({data:[]}),
+          canReadBroadcasts?load('/api/broadcasts',{data:state.broadcasts}):Promise.resolve({data:[]})
+        ]);
+        state.requests=requests?.data||state.requests;
+        state.employeeService=service||state.employeeService;
+        state.hrCases=isHr?(cases?.data||state.hrCases):[];
+        state.broadcasts=canReadBroadcasts?(broadcasts?.data||state.broadcasts):[];
       }else if(name==='hr-inbox'){
         if(isHr){ const cases=await load('/api/hr-cases',{data:state.hrCases}); state.hrCases=cases?.data||state.hrCases; }
       }else if(name==='broadcast'){
@@ -667,7 +677,7 @@ const viewMeta = {
   benefits: ['สวัสดิการ', 'BENEFITS'],
   attendance: ['เวลาเข้างาน', 'ATTENDANCE CENTER'],
   leave: ['การลา', 'LEAVE'],
-  requests: ['Employee Service', 'EMPLOYEE SERVICE'],
+  requests: ['บริการพนักงาน', 'EMPLOYEE SERVICE'],
   broadcast: ['ประกาศ', 'BROADCAST'],
   payroll: ['Payroll', 'PAYROLL'],
   documents: ['เอกสาร', 'DOCUMENTS'],
@@ -1263,6 +1273,11 @@ function bindEvents() {
   $('#approverAccessSaveBtn').onclick = saveApproverAccess;
   $('#approverRolePreset').onchange = applyApproverRolePreset;
   $('#refreshBtn').onclick = () => loadViewData(state.currentView || 'dashboard',{force:true});
+  document.querySelectorAll('#view-requests [data-nk-service-tab]').forEach(button=>button.addEventListener('click',()=>window.nkServiceSelectTab(button.dataset.nkServiceTab)));
+  $('#nkServiceCaseSearch')?.addEventListener('input',renderEmployeeService);
+  $('#nkServiceCaseStatus')?.addEventListener('change',renderEmployeeService);
+  $('#nkServiceBroadcastSearch')?.addEventListener('input',renderEmployeeService);
+  $('#nkServiceBroadcastStatus')?.addEventListener('change',renderEmployeeService);
   $('#createBroadcastBtn').onclick = openBroadcastModal;
   $('#broadcastAudience').onchange = renderBroadcastAudienceFields;
   $('#broadcastRequiresAck').onchange = renderBroadcastAckFields;
@@ -3449,18 +3464,43 @@ function renderRequests() {
     : emptyState('HR Inbox โล่งแล้ว', 'ตอนนี้ไม่มีคำขอจากพนักงานที่กำลังรอดำเนินการ');
 }
 
+let nkServiceActiveTab='cases';
+window.nkServiceSelectTab=function(name){
+  const role=String(activeCompanyRole()||'');
+  const isHr=['owner','primary_owner','co_owner','hr_admin','hr'].includes(role);
+  if(!isHr && name==='cases') name='broadcast';
+  if(!['cases','broadcast','line'].includes(name))name=isHr?'cases':'broadcast';
+  nkServiceActiveTab=name;
+  document.querySelectorAll('#view-requests [data-nk-service-tab]').forEach(button=>{
+    const selected=button.dataset.nkServiceTab===name;
+    button.classList.toggle('is-active',selected);
+    button.setAttribute('aria-selected',String(selected));
+    button.tabIndex=selected?0:-1;
+  });
+  const sections={cases:'nkServicePanelCases',broadcast:'nkServicePanelBroadcast',line:'nkServicePanelLine'};
+  Object.entries(sections).forEach(([key,id])=>{const el=document.getElementById(id);if(el)el.hidden=key!==name;});
+};
+
 function renderEmployeeService(){
   const service=state.employeeService||{};
   const cases=state.hrCases||[];
   const broadcasts=state.broadcasts||[];
   const role=String(activeCompanyRole()||'');
-  const isHr=['owner','co_owner','hr_admin','hr'].includes(role);
+  const isHr=['owner','primary_owner','co_owner','hr_admin','hr'].includes(role);
   const openCases=cases.filter(c=>!['resolved','closed'].includes(c.status)).length;
   $('#createBroadcastBtn').classList.toggle('hidden',!isHr);
   const totalInbox=openCases+Number(state.requests?.length||0);
   $('#requestCountBadge').textContent=`${totalInbox} รายการ`;
   $('#hrCaseOpenCount').textContent=String(openCases);
   $('#broadcastTotalCount').textContent=String(broadcasts.length);
+  const urgent=cases.filter(c=>!['resolved','closed'].includes(String(c.status))&&['urgent','high'].includes(String(c.priority))).length;
+  if($('#nkServiceUrgentCount'))$('#nkServiceUrgentCount').textContent=String(isHr?urgent:0);
+  if($('#nkServiceOpenPill'))$('#nkServiceOpenPill').textContent=String(isHr?openCases:0);
+  const caseTab=$('#nkServiceTabCases');if(caseTab)caseTab.hidden=!isHr;
+  document.querySelectorAll('#view-requests [data-nk-private-metric]').forEach(el=>el.hidden=!isHr);
+  $('.nk-service-metrics')?.classList.toggle('only-public',!isHr);
+  $('#nkServiceCreateBroadcast')?.classList.toggle('hidden',!isHr);
+  window.nkServiceSelectTab(nkServiceActiveTab);
   const rich=service.rich_menu||{};
   $('#richMenuStatusText').textContent=rich.configured?'พร้อมใช้':'ยังไม่ตั้ง';
   $('#setupRichMenuBtn').textContent=rich.configured?'อัปเดต Rich Menu':'ตั้ง Rich Menu ให้ LINE บริษัท';
@@ -3471,15 +3511,33 @@ function renderEmployeeService(){
   if(root){
     if(!isHr){
       root.innerHTML=emptyState('ข้อมูลส่วนนี้จำกัดเฉพาะ HR','Manager จะไม่เห็นเรื่องส่วนตัวที่พนักงานแจ้ง HR');
-    }else root.innerHTML=cases.length?cases.map(c=>{
+    }else {
+      const query=String($('#nkServiceCaseSearch')?.value||'').trim().toLowerCase();
+      const filter=String($('#nkServiceCaseStatus')?.value||'open');
+      const filtered=cases.filter(c=>{
+        const closed=['resolved','closed'].includes(String(c.status));
+        if(filter==='open'&&closed)return false;
+        if(filter==='resolved'&&!closed)return false;
+        if(filter==='urgent'&&(closed||!['urgent','high'].includes(String(c.priority))))return false;
+        if(!query)return true;
+        return [c.id&&('HR-'+String(c.id).padStart(4,'0')),c.subject,c.detail,c.category,c.nickname,c.first_name,c.last_name,c.department_name].some(v=>String(v||'').toLowerCase().includes(query));
+      });
+      root.innerHTML=filtered.length?filtered.map(c=>{
       const priorityClass=c.priority==='urgent'?'badge-danger':c.priority==='high'?'badge-warning':'badge-neutral';
       const statusLabel=({open:'รับเรื่องแล้ว',in_progress:'กำลังดำเนินการ',waiting_employee:'รอพนักงาน',resolved:'แก้ไขแล้ว',closed:'ปิดเรื่อง'})[c.status]||c.status;
       return `<button class="hr-case-row" type="button" onclick="window.openHrCase(${Number(c.id)})"><div class="hr-case-id"><span class="badge ${priorityClass}">${escapeHtml(c.priority==='urgent'?'ด่วน':c.priority==='high'?'สูง':'ส่วนตัว')}</span><strong>#HR-${String(c.id).padStart(4,'0')}</strong></div><div class="hr-case-copy"><strong>${escapeHtml(c.subject)}</strong><p>${escapeHtml(c.detail)}</p><small>${escapeHtml(c.nickname||c.first_name)}${c.department_name?` · ${escapeHtml(c.department_name)}`:''} · ${formatDateTime(c.created_at)}</small></div><span class="badge ${['resolved','closed'].includes(c.status)?'badge-success':'badge-soft'}">${escapeHtml(statusLabel)}</span></button>`;
-    }).join(''):emptyState('ยังไม่มีเรื่องส่วนตัวถึง HR','เมื่อพนักงานกด “แจ้ง HR” ใน LINE เรื่องจะเข้ามาที่นี่โดยตรง');
+    }).join(''):emptyState(query||filter!=='all'?'ไม่พบเรื่องตามตัวกรอง':'ยังไม่มีเรื่องส่วนตัวถึง HR','เมื่อพนักงานแจ้ง HR ผ่าน LINE เรื่องจะเข้ามาที่นี่โดยตรง');
+    }
   }
 
   const broadcastRoot=$('#broadcastList');
-  if(broadcastRoot) broadcastRoot.innerHTML=broadcasts.length?broadcasts.slice(0,8).map(b=>`<article class="broadcast-row"><div><strong>${escapeHtml(b.title)}</strong><p>${escapeHtml(b.message)}</p><small>${formatDateTime(b.created_at)} · ${escapeHtml(b.audience_type==='all'?'ทุกคน':b.audience_type==='department'?'เฉพาะแผนก':'เลือกพนักงาน')}</small></div><div class="broadcast-stats"><span class="badge ${b.status==='sent'?'badge-success':b.status==='partial'?'badge-warning':'badge-neutral'}">${escapeHtml(b.status)}</span><small>${Number(b.delivered_count||0)}/${Number(b.total_recipients||0)} ส่งสำเร็จ</small>${broadcastAckStatHtml(b)}${b.status==='draft'?`<button class="text-btn" onclick="window.sendBroadcastById(${Number(b.id)})">ส่งตอนนี้</button>`:''}</div></article>`).join(''):emptyState('ยังไม่มีประกาศ','ส่งประกาศจาก HR เข้า LINE ของพนักงานได้จากปุ่มด้านบน');
+  if(broadcastRoot){
+    const query=String($('#nkServiceBroadcastSearch')?.value||'').trim().toLowerCase();
+    const filter=String($('#nkServiceBroadcastStatus')?.value||'all');
+    const filtered=broadcasts.filter(b=>(filter==='all'||String(b.status)===filter)&&(!query||[b.title,b.message].some(v=>String(v||'').toLowerCase().includes(query))));
+    const labels={draft:'ฉบับร่าง',sending:'กำลังส่ง',sent:'ส่งแล้ว',partial:'ส่งบางส่วน',failed:'ส่งไม่สำเร็จ'};
+    broadcastRoot.innerHTML=filtered.length?filtered.map(b=>`<article class="broadcast-row"><div><strong>${escapeHtml(b.title)}</strong><p>${escapeHtml(b.message)}</p><small>${formatDateTime(b.created_at)} · ${escapeHtml(b.audience_type==='all'?'ทั้งบริษัท':b.audience_type==='department'?'เฉพาะแผนก':'เลือกพนักงาน')}</small></div><div class="broadcast-stats"><span class="badge ${b.status==='sent'?'badge-success':b.status==='partial'?'badge-warning':'badge-neutral'}">${escapeHtml(labels[b.status]||b.status)}</span><small>${Number(b.delivered_count||0)}/${Number(b.total_recipients||0)} ส่งสำเร็จ</small>${broadcastAckStatHtml(b)}${b.status==='draft'&&isHr?`<button class="text-btn" onclick="window.sendBroadcastById(${Number(b.id)})">ส่งตอนนี้</button>`:''}</div></article>`).join(''):emptyState(query||filter!=='all'?'ไม่พบประกาศตามตัวกรอง':'ยังไม่มีประกาศ','กด “สร้างประกาศ” เพื่อส่งข้อมูลถึงพนักงานผ่าน LINE');
+  }
   renderBroadcastPage();
   renderHrInbox();
 }
@@ -3628,6 +3686,8 @@ function toggleSettingsNav() {
 }
 
 function showView(name) {
+  if(name==='hr-inbox'){nkServiceActiveTab='cases';name='requests';}
+  else if(name==='broadcast'){nkServiceActiveTab='broadcast';name='requests';}
   if (name === 'wellness') name = 'dashboard'; // Nakna Move retired
   const target = $(`#view-${name}`);
   if (!target) return;
