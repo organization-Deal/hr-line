@@ -67,3 +67,21 @@
 .nk-screening-row:focus-within{outline:2px solid rgba(4,135,138,.2);outline-offset:1px;}
 @media (max-width:780px){.nk-screening-bulk{display:grid;grid-template-columns:1fr 1fr;gap:8px}.nk-screening-bulk .nk-screening-select-all{grid-column:1/-1}.nk-screening-bulk strong{grid-column:1/-1}.nk-screening-bulk button{width:100%;}.nk-screening-row .nk-screening-select-box{align-self:flex-start;}}
 @media (max-width:430px){.nk-screening-row{position:relative;padding-left:43px}.nk-screening-row .nk-screening-select-box{position:absolute;left:10px;top:13px;}}
+/* Selective Gmail import: safe, understandable per-account settings */
+#modalFields [hidden],#view-recruitment [hidden]{display:none!important;}
+#modalFields .nk-mgmail-safe-box{background:#f0faf8;border:1px solid #d1ece7;border-radius:12px;padding:12px 14px;color:#1c5557;font-size:13px;line-height:1.55;}
+#modalFields .nk-mgmail-safe-box small{color:#5c7477;display:block;margin-top:5px;}
+#modalFields .nk-mgmail-preview{background:#f6f9f9;border:1px solid #d9e6e7;border-radius:12px;padding:12px;display:grid;gap:7px;}
+#modalFields .nk-mgmail-preview b{font-size:12px;color:#265558;}
+#modalFields .nk-mgmail-preview code{font-size:11px;color:#204951;white-space:pre-wrap;overflow-wrap:anywhere;}
+#modalFields .nk-mgmail-caution{color:#a25229;display:block;margin-top:5px;line-height:1.6;}
+#modalFields #mgmailScopeValue{width:100%;min-height:66px;resize:vertical;}
+#view-recruitment .nk-mgmail-info>small{display:block;overflow-wrap:anywhere;line-height:1.6;}
+#view-recruitment .nk-mgmail-muted{color:#a26d25!important;}
+@media(max-width:650px){#modalFields .nk-mgmail-safe-box,#modalFields .nk-mgmail-preview{padding:10px;}#view-recruitment .nk-mgmail-info>small{max-width:100%;}}
+
+#view-recruitment .nk-mgmail-guide{margin:8px 0 12px;padding:10px 12px;border:1px solid #d6e8e6;background:#f2faf9;color:#2d585c;font-size:12px;line-height:1.6;border-radius:10px;}
+#view-recruitment .nk-screening-tools{grid-template-columns:minmax(0,1fr) minmax(160px,210px) minmax(160px,210px);}
+#view-recruitment #nkScreeningSourceFilter{max-width:100%;}
+@media(max-width:880px){#view-recruitment .nk-screening-tools{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}#view-recruitment .nk-screening-tools>input{grid-column:1/-1;}}
+@media(max-width:520px){#view-recruitment .nk-screening-tools{grid-template-columns:minmax(0,1fr);}#view-recruitment .nk-screening-tools>input{grid-column:auto;}}

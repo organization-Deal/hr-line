@@ -1,0 +1,18 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+for(const f of ['src/index.js','public/app.js'])execFileSync(process.execPath,['--check',f],{stdio:'inherit'});
+const src=fs.readFileSync('src/index.js','utf8');
+const app=fs.readFileSync('public/app.js','utf8');
+const html=fs.readFileSync('public/index.html','utf8');
+const css=fs.readFileSync('public/ui/nk-recruitment-screening.css','utf8');
+const migration=fs.readFileSync('migrations/0041_recruitment_inbox_scopes.sql','utf8');
+for(const key of ['ensureRecruitmentInboxScopesReady','recruitmentAccountSearchQuery','recruitmentSourceAcceptsMessage','normalizeRecruitmentSourceScope','needs_configuration','filtered_out'])assert.ok(src.includes(key),`Missing backend ${key}`);
+for(const key of ['mgmailScopeMode','mgmailScopeValue','mgmailScopeDays','mgmailConfirmAll','mgmailPreview','nkScreeningSourceFilter'])assert.ok(app.includes(key),`Missing UI ${key}`);
+assert.ok(html.includes('id="nkScreeningSourceFilter"'),'Missing screening inbox filter');
+assert.ok(html.includes('nk-recruitment-screening.css?v=20261020-scope1'),'Stylesheet cache-bust missing');
+assert.ok(html.includes('app.js?v=NAKNA_SCOPE20261020V1'),'JS cache-bust missing');
+assert.ok(css.includes('.nk-mgmail-safe-box'),'Source UI style missing');
+assert.ok(migration.includes('CREATE TABLE IF NOT EXISTS recruitment_inbox_scopes'),'Migration missing');
+execFileSync(process.execPath,['scripts/test-gmail-source-scopes.mjs'],{stdio:'inherit'});
+console.log('✅ Nakna Recruitment Source Scope: release checks passed');

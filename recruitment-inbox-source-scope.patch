@@ -1,0 +1,375 @@
+--- a/src/index.js
++++ b/src/index.js
+@@ -1869,10 +1869,15 @@
+     }
+     if (method==='PATCH' && !recruitmentAccountRoute[2]) {
+       const body=await safeJson(request);
++      let scope;
++      try{scope=normalizeRecruitmentSourceScope({mode:body.scope_mode||'query',value:body.scope_value||'',days:body.scope_days||30,confirm_all:body.confirm_all});}
++      catch(error){return json({error:String(error.message||error)},400);}
+       const query=String(body.query||RECRUITMENT_MULTI_DEFAULT_QUERY).trim().slice(0,500)||RECRUITMENT_MULTI_DEFAULT_QUERY;
+       const enabled=body.enabled===false?0:1,autoSync=body.auto_sync===false?0:1;
++      await ensureRecruitmentInboxScopesReady(env.DB);
+       await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET query=?1,enabled=?2,auto_sync=?3,updated_at=CURRENT_TIMESTAMP WHERE id=?4 AND client_id=?5`).bind(query,enabled,autoSync,id,clientId).run();
+-      return json({ok:true});
++      await env.DB.prepare(`INSERT INTO recruitment_inbox_scopes(account_id,mode,value,days) VALUES(?1,?2,?3,?4) ON CONFLICT(account_id) DO UPDATE SET mode=excluded.mode,value=excluded.value,days=excluded.days,updated_at=CURRENT_TIMESTAMP`).bind(id,scope.mode,scope.value,scope.days).run();
++      return json({ok:true,effective_query:recruitmentAccountSearchQuery({query,...{scope_mode:scope.mode,scope_value:scope.value,scope_days:scope.days}})});
+     }
+     if (method==='DELETE' && !recruitmentAccountRoute[2]) {
+       // Disconnect, preserve provenance rows but securely remove stored OAuth credentials.
+@@ -12120,12 +12125,81 @@
+   for(const sql of statements)await db.prepare(sql).run();
+   SCHEMA_READY.add('recruitment_multi_gmail');
+ }
++// NAKNA_RECRUITMENT_SOURCE_SCOPE_V1 — server-side Gmail source controls.
++// Strictly one Gmail identity (OAuth account) plus optional per-Inbox source restrictions.
++const RECRUITMENT_SCOPE_MODES=new Set(['query','recipient','sender','label','all']);
++const RECRUITMENT_SCOPE_DAYS=new Set([7,30,90,365]);
++async function ensureRecruitmentInboxScopesReady(db){
++  await ensureRecruitmentMultiGmailReady(db);
++  if(SCHEMA_READY.has('recruitment_inbox_scopes_v1')) return;
++  await db.prepare(`CREATE TABLE IF NOT EXISTS recruitment_inbox_scopes (
++    account_id INTEGER PRIMARY KEY REFERENCES recruitment_gmail_accounts(id) ON DELETE CASCADE,
++    mode TEXT NOT NULL DEFAULT 'query' CHECK(mode IN ('query','recipient','sender','label','all')),
++    value TEXT NOT NULL DEFAULT '',
++    days INTEGER NOT NULL DEFAULT 30,
++    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
++  )`).run();
++  SCHEMA_READY.add('recruitment_inbox_scopes_v1');
++}
++function recruitmentScopeTerms(raw){
++  return [...new Set(String(raw||'').split(/[\n,;]+/).map(x=>x.trim().toLowerCase()).filter(Boolean))];
++}
++function normalizeRecruitmentSourceScope(payload){
++  const mode=String(payload?.mode||'query');
++  const days=Number(payload?.days||30);
++  const value=String(payload?.value||'').trim();
++  if(!RECRUITMENT_SCOPE_MODES.has(mode))throw new Error('ประเภทการคัดกรองไม่ถูกต้อง');
++  if(!RECRUITMENT_SCOPE_DAYS.has(days))throw new Error('ช่วงวันที่ไม่ถูกต้อง');
++  if(value.length>500)throw new Error('รายการอีเมล/Label ยาวเกินไป');
++  if(mode==='recipient'||mode==='sender'){
++    const terms=recruitmentScopeTerms(value);
++    if(!terms.length||terms.length>12)throw new Error('ระบุอีเมลหรือโดเมนไม่เกิน 12 รายการ คั่นด้วยจุลภาค');
++    const email=/^[a-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}$/i;
++    const domain=/^@?[a-z0-9.-]+\.[a-z]{2,}$/i;
++    if(terms.some(x=>mode==='recipient'?!email.test(x):!(email.test(x)||domain.test(x))))throw new Error('รูปแบบอีเมล/โดเมนไม่ถูกต้อง');
++    return {mode,value:terms.join(','),days};
++  }
++  if(mode==='label'){
++    if(!value||value.length>80||/[\r\n"\\]/.test(value))throw new Error('ระบุชื่อ Gmail Label ที่ถูกต้อง');
++    return {mode,value,days};
++  }
++  if(mode==='all'&&payload.confirm_all!==true)throw new Error('ต้องยืนยันก่อนอ่านทั้ง Inbox');
++  return {mode,value:'',days};
++}
++function recruitmentAccountSearchQuery(account){
++  const mode=String(account.scope_mode||'unconfigured'),value=String(account.scope_value||'');
++  const days=RECRUITMENT_SCOPE_DAYS.has(Number(account.scope_days))?Number(account.scope_days):30;
++  if(mode==='unconfigured')return ''; // fail closed: do not search until HR selects a source
++  if(mode==='query')return String(account.query||RECRUITMENT_MULTI_DEFAULT_QUERY).trim();
++  const base=`newer_than:${days}d -category:promotions -category:social`;
++  if(mode==='all')return base;
++  if(mode==='label')return `${base} label:"${value}"`;
++  const tokens=recruitmentScopeTerms(value);
++  if(!tokens.length)return `${base} -in:anywhere`;
++  const clauses=tokens.map(x=>(mode==='recipient'?'to:':'from:')+x);
++  return `${base} ${clauses.length===1?clauses[0]:`{${clauses.join(' ')}}`}`;
++}
++function recruitmentSourceAcceptsMessage(account,message){
++  const mode=String(account.scope_mode||'query');
++  if(mode!=='sender'&&mode!=='recipient')return true; // label scope verified by Gmail search itself.
++  const accepted=recruitmentScopeTerms(account.scope_value);
++  if(!accepted.length)return false;
++  if(mode==='sender'){
++    const sender=String(parseEmailIdentity(gmailHeader(message,'From')).email||'').toLowerCase();
++    return accepted.some(x=>x.includes('@')&&!x.startsWith('@')?sender===x:
++      (sender.split('@')[1]===x.replace(/^@/,'')||sender.split('@')[1]?.endsWith('.'+x.replace(/^@/,''))));
++  }
++  const dest=['To','Cc','Delivered-To','X-Original-To','Envelope-To'].map(k=>gmailHeader(message,k)).join(',').toLowerCase();
++  // Exact recipient comparison prevents a broad Gmail search from importing unrelated mail.
++  const addresses=(dest.match(/[a-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/gi)||[]).map(x=>x.toLowerCase());
++  return accepted.some(x=>addresses.includes(x));
++}
+ function publicRecruitmentInboxAccount(row){
+-  return {id:Number(row.id),email:row.email,status:row.status,enabled:Boolean(Number(row.enabled)),auto_sync:Boolean(Number(row.auto_sync)),query:row.query||RECRUITMENT_MULTI_DEFAULT_QUERY,last_sync_at:row.last_sync_at||null,last_error:row.last_error||null,imported_messages:Number(row.imported_messages||0),connected_at:row.created_at};
++  return {id:Number(row.id),email:row.email,status:row.status,enabled:Boolean(Number(row.enabled)),auto_sync:Boolean(Number(row.auto_sync)),query:row.query||RECRUITMENT_MULTI_DEFAULT_QUERY,scope_mode:row.scope_mode||'unconfigured',source_configured:Boolean(row.scope_mode),scope_value:row.scope_value||'',scope_days:Number(row.scope_days||30),effective_query:recruitmentAccountSearchQuery(row),last_sync_at:row.last_sync_at||null,last_error:row.last_error||null,imported_messages:Number(row.imported_messages||0),connected_at:row.created_at};
+ }
+ async function getRecruitmentInboxAccounts(env,clientId){
+-  await ensureRecruitmentMultiGmailReady(env.DB);
+-  const rows=await env.DB.prepare(`SELECT a.id,a.email,a.status,a.enabled,a.auto_sync,a.query,a.last_sync_at,a.last_error,a.created_at,COUNT(m.id) AS imported_messages FROM recruitment_gmail_accounts a LEFT JOIN recruitment_inbox_messages m ON m.account_id=a.id WHERE a.client_id=?1 GROUP BY a.id ORDER BY CASE WHEN a.status='connected' THEN 0 ELSE 1 END,a.id`).bind(Number(clientId)).all();
++  await ensureRecruitmentInboxScopesReady(env.DB);
++  const rows=await env.DB.prepare(`SELECT a.id,a.email,a.status,a.enabled,a.auto_sync,a.query,a.last_sync_at,a.last_error,a.created_at,s.mode AS scope_mode,s.value AS scope_value,s.days AS scope_days,COUNT(m.id) AS imported_messages FROM recruitment_gmail_accounts a LEFT JOIN recruitment_inbox_scopes s ON s.account_id=a.id LEFT JOIN recruitment_inbox_messages m ON m.account_id=a.id WHERE a.client_id=?1 GROUP BY a.id ORDER BY CASE WHEN a.status='connected' THEN 0 ELSE 1 END,a.id`).bind(Number(clientId)).all();
+   return (rows.results||[]).map(publicRecruitmentInboxAccount);
+ }
+ function recruitmentInboxErrorRedirect(request,env,code){
+@@ -12171,7 +12245,7 @@
+     const payload={access_token:tokens.access_token,refresh_token:tokens.refresh_token||previous?.refresh_token||null,expires_at:new Date(Date.now()+Number(tokens.expires_in||3600)*1000).toISOString(),token_type:'Bearer'};
+     if(!payload.refresh_token)throw new Error('REFRESH_TOKEN_REQUIRED');
+     const encrypted=await encryptJson(payload,key);
+-    await env.DB.prepare(`INSERT INTO recruitment_gmail_accounts (client_id,google_sub,email,encrypted_tokens,scopes,token_expires_at,status,enabled,auto_sync,connected_by_user_id,last_error) VALUES (?1,?2,?3,?4,?5,?6,'connected',1,1,?7,NULL) ON CONFLICT(client_id,google_sub) DO UPDATE SET email=excluded.email,encrypted_tokens=excluded.encrypted_tokens,scopes=excluded.scopes,token_expires_at=excluded.token_expires_at,status='connected',enabled=1,auto_sync=1,last_error=NULL,connected_by_user_id=excluded.connected_by_user_id,updated_at=CURRENT_TIMESTAMP`).bind(Number(auth.clientId),String(profile.sub),email,encrypted,tokens.scope||'',payload.expires_at,Number(auth.user.id)).run();
++    await env.DB.prepare(`INSERT INTO recruitment_gmail_accounts (client_id,google_sub,email,encrypted_tokens,scopes,token_expires_at,status,enabled,auto_sync,connected_by_user_id,last_error) VALUES (?1,?2,?3,?4,?5,?6,'connected',0,0,?7,NULL) ON CONFLICT(client_id,google_sub) DO UPDATE SET email=excluded.email,encrypted_tokens=excluded.encrypted_tokens,scopes=excluded.scopes,token_expires_at=excluded.token_expires_at,status='connected',enabled=1,last_error=NULL,connected_by_user_id=excluded.connected_by_user_id,updated_at=CURRENT_TIMESTAMP`).bind(Number(auth.clientId),String(profile.sub),email,encrypted,tokens.scope||'',payload.expires_at,Number(auth.user.id)).run();
+     // Explicitly opt out of reading recruitment mail from the main Drive/Sheets/Payroll account.
+     // Do not unlink that Google Workspace account or alter its Drive / Sheets / Payroll credentials.
+     const hasPreviousAccounts=await env.DB.prepare(`SELECT COUNT(*) AS n FROM recruitment_gmail_accounts WHERE client_id=?1 AND status='connected'`).bind(Number(auth.clientId)).first();
+@@ -12205,17 +12279,18 @@
+   return payload.access_token;
+ }
+ async function syncDedicatedRecruitmentInbox(env,accountId,clientId,{limit=25}={}){
+-  await ensureRecruitmentMultiGmailReady(env.DB);
+-  const row=await env.DB.prepare(`SELECT * FROM recruitment_gmail_accounts WHERE id=?1 AND client_id=?2`).bind(Number(accountId),Number(clientId)).first();
++  await ensureRecruitmentInboxScopesReady(env.DB);
++  const row=await env.DB.prepare(`SELECT a.*,s.mode AS scope_mode,s.value AS scope_value,s.days AS scope_days FROM recruitment_gmail_accounts a LEFT JOIN recruitment_inbox_scopes s ON s.account_id=a.id WHERE a.id=?1 AND a.client_id=?2`).bind(Number(accountId),Number(clientId)).first();
+   if(!row)return {skipped:true,reason:'missing'};
+   if(row.status!=='connected'||!Number(row.enabled))return {skipped:true,reason:'disabled'};
++  if(!row.scope_mode)return {skipped:true,reason:'needs_configuration'}; // existing Gmail account must be explicitly scoped first
+   // An atomic lease prevents overlapping Cron/manual sync of the same Inbox.
+   const lock=await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET sync_lock_until=datetime('now','+3 minutes') WHERE id=?1 AND client_id=?2 AND status='connected' AND (sync_lock_until IS NULL OR sync_lock_until<=CURRENT_TIMESTAMP)`).bind(Number(row.id),Number(clientId)).run();
+   if(!Number(lock?.meta?.changes||0))return {skipped:true,reason:'already_syncing'};
+-  let imported=0,linked=0,skipped=0,scanned=0;
++  let imported=0,linked=0,skipped=0,scanned=0,filtered_out=0;
+   try{
+     const access=await getRecruitmentInboxAccessToken(env,row);
+-    const query=String(row.query||RECRUITMENT_MULTI_DEFAULT_QUERY).trim();
++    const query=recruitmentAccountSearchQuery(row);
+     const listUrl=new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
+     listUrl.searchParams.set('maxResults',String(Math.max(1,Math.min(50,Number(limit)||25))));
+     if(query)listUrl.searchParams.set('q',query);
+@@ -12226,6 +12301,7 @@
+       const seen=await env.DB.prepare(`SELECT id FROM recruitment_inbox_messages WHERE account_id=?1 AND gmail_message_id=?2`).bind(Number(row.id),gmailId).first();
+       if(seen){skipped++;continue;}
+       const msg=await googleApiJson(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(gmailId)}?format=full`,access);
++      if(!recruitmentSourceAcceptsMessage(row,msg)){filtered_out++;continue;}
+       const identity=parseEmailIdentity(gmailHeader(msg,'From'));
+       const subject=gmailHeader(msg,'Subject');
+       const dateHeader=gmailHeader(msg,'Date');
+@@ -12233,10 +12309,11 @@
+       const attachments=gmailAttachmentNames(msg.payload,[]);
+       // Keep raw emails in the Screening Queue. HR acceptance is required before Candidate creation.
+       const candidateId=null,importStatus='pending_review';
+-      await env.DB.prepare(`INSERT OR IGNORE INTO recruitment_inbox_messages (client_id,account_id,gmail_message_id,gmail_thread_id,sender_name,sender_email,subject,received_at,snippet,attachment_names,candidate_id,import_status) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`).bind(Number(clientId),Number(row.id),gmailId,msg.threadId||null,identity.name||null,identity.email||null,subject||null,receivedAt,String(msg.snippet||'').slice(0,500),attachments.length?JSON.stringify(attachments):null,candidateId,importStatus).run();
++      const result=await env.DB.prepare(`INSERT OR IGNORE INTO recruitment_inbox_messages (client_id,account_id,gmail_message_id,gmail_thread_id,sender_name,sender_email,subject,received_at,snippet,attachment_names,candidate_id,import_status) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`).bind(Number(clientId),Number(row.id),gmailId,msg.threadId||null,identity.name||null,identity.email||null,subject||null,receivedAt,String(msg.snippet||'').slice(0,500),attachments.length?JSON.stringify(attachments):null,candidateId,importStatus).run();
++      if(Number(result?.meta?.changes||0)>0)imported++;
+     }
+     await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(row.id)).run();
+-    return {scanned,imported,linked,skipped,source_email:row.email};
++    return {scanned,imported,linked,skipped,filtered_out,source_email:row.email,scope_mode:row.scope_mode||'query'};
+   }catch(error){
+     const message=String(error?.message||error).slice(0,300);
+     await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET last_error=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2`).bind(message,Number(row.id)).run().catch(()=>{});
+--- a/public/app.js
++++ b/public/app.js
+@@ -1,5 +1,5 @@
+ /* NAKNA_BOOT_RECOVERY_20261019; combines retired Stretch + retired company OA without dangling boot handlers. */
+-const NAKNA_FRONTEND_BUILD='P10.1-SCREENING-V1'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
++const NAKNA_FRONTEND_BUILD='P10.1-RECRUITMENT-SOURCE-SCOPE-V1'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
+ // P9.15.3 — Face settings render lifecycle + deployment visibility fix.
+ // If a Face link is accidentally served by index.html, recover before booting the HR login page.
+ try {
+@@ -1423,6 +1423,7 @@
+   $('#nkScreeningReload')?.addEventListener('click',()=>reloadRecruitmentScreening());
+   $('#nkScreeningSearch')?.addEventListener('input',()=>{nkScreeningSelected.clear();renderRecruitmentScreening();});
+   $('#nkScreeningFilter')?.addEventListener('change',()=>{nkScreeningSelected.clear();renderRecruitmentScreening();});
++  $('#nkScreeningSourceFilter')?.addEventListener('change',()=>{nkScreeningSelected.clear();renderRecruitmentScreening();});
+   $('#nkScreeningList')?.addEventListener('click',handleRecruitmentScreeningAction);
+   $('#nkScreeningList')?.addEventListener('change',event=>{
+     const checkbox=event.target.closest('[data-screening-select]');if(!checkbox)return;
+@@ -3029,8 +3030,9 @@
+ // Bulk selection is scoped to this page; never selects or deletes Gmail messages.
+ const nkScreeningSelected=new Set();
+ let nkScreeningBulkBusy=false;
+-function nkScreeningRowsVisible(data,filter,query){
++function nkScreeningRowsVisible(data,filter,query,sourceEmail=''){
+   return data.filter(x=>{
++    if(sourceEmail && String(x.source_email||'')!==sourceEmail)return false;
+     if(filter==='archived')return Boolean(x.archived_at);
+     if(x.archived_at)return false;
+     if(filter==='all')return true;
+@@ -3062,8 +3064,19 @@
+   const counts={all:data.length,pending:0,likely:0,review:0,noise:0,accepted:0,rejected:0,archived:0};
+   data.forEach(x=>{if(x.archived_at){counts.archived++;return;}if(x.decision==='accepted'||x.decision==='rejected')counts[x.decision]++;else{counts.pending++;counts[x.kind]++;}});
+   metrics.innerHTML=[['pending','ยังไม่ตัดสินใจ'],['likely','น่าจะสมัคร'],['review','รอตรวจ'],['noise','ไม่เกี่ยวข้อง'],['accepted','รับแล้ว'],['rejected','คัดออก'],['archived','ลบจากคิว']].map(([k,label])=>`<div class="nk-screening-stat"><small>${label}</small><strong>${counts[k]||0}</strong></div>`).join('');
++  const sourceFilter=$('#nkScreeningSourceFilter');
++  const sourceValue=sourceFilter?.value||'';
++  if(sourceFilter){
++    const emails=[...new Set(data.map(x=>String(x.source_email||'')).filter(Boolean))].sort();
++    const signature=emails.join('|');
++    if(sourceFilter.dataset.sources!==signature){
++      sourceFilter.innerHTML='<option value="">ทุกบัญชี Gmail</option>'+emails.map(email=>`<option value="${escapeHtml(email)}">${escapeHtml(email)}</option>`).join('');
++      sourceFilter.dataset.sources=signature;
++      sourceFilter.value=emails.includes(sourceValue)?sourceValue:'';
++    }
++  }
+   const filter=$('#nkScreeningFilter')?.value||'pending',query=($('#nkScreeningSearch')?.value||'').toLowerCase().trim();
+-  const allShown=nkScreeningRowsVisible(data,filter,query);
++  const allShown=nkScreeningRowsVisible(data,filter,query,sourceFilter?.value||'');
+   const shown=allShown.slice(0,150);
+   const allowedKeys=new Set(shown.filter(x=>x.decision!=='accepted').map(x=>x.source_kind+':'+x.id));
+   for(const key of [...nkScreeningSelected])if(!allowedKeys.has(key))nkScreeningSelected.delete(key);
+@@ -3217,13 +3230,13 @@
+   list.innerHTML = accounts.length ? accounts.map(a => {
+     const live = a.status === 'connected';
+     const hasError=Boolean(a.last_error);
+-    const statusText=a.status==='reconnect_required'?'ต้องเชื่อมใหม่':!live?'ยกเลิกเชื่อมต่อ':a.enabled?'เปิดใช้งาน':'หยุดชั่วคราว';
+-    const statusClass=live&&a.enabled?'good':hasError?'bad':'muted';
++    const statusText=a.status==='reconnect_required'?'ต้องเชื่อมใหม่':!live?'ยกเลิกเชื่อมต่อ':!a.source_configured?'ตั้งแหล่งเมลก่อน':a.enabled?'เปิดใช้งาน':'หยุดชั่วคราว';
++    const statusClass=live&&a.source_configured&&a.enabled?'good':hasError?'bad':'muted';
+     const disabled=!canManageGoogleWorkspace();
+     return `<div class="nk-mgmail-account" data-inbox="${a.id}">
+       <div class="nk-mgmail-avatar">G</div>
+-      <div class="nk-mgmail-info"><strong>${escapeHtml(a.email)}</strong><div class="nk-mgmail-meta"><span class="nk-mgmail-status ${statusClass}">${escapeHtml(statusText)}</span><span>นำเข้า ${Number(a.imported_messages||0).toLocaleString('th-TH')} อีเมล</span><span>${a.last_sync_at?'Sync '+escapeHtml(formatDateTime(a.last_sync_at)):'ยังไม่เคย Sync'}</span></div><small>ค้นหา: ${escapeHtml(a.query||'—')}</small>${hasError?`<p class="nk-mgmail-error">${escapeHtml(a.last_error)}</p>`:''}</div>
+-      <div class="nk-mgmail-actions">${live?`<button type="button" data-action="sync" data-id="${a.id}" ${disabled?'disabled':''}>Sync</button><button type="button" data-action="settings" data-id="${a.id}" ${disabled?'disabled':''}>ตั้งค่า</button>`:`<button type="button" data-action="reconnect" data-id="${a.id}" ${disabled?'disabled':''}>เชื่อมใหม่</button>`}<button type="button" data-action="disconnect" data-id="${a.id}" ${disabled?'disabled':''} ${!live?'hidden':''}>ยกเลิก</button></div>
++      <div class="nk-mgmail-info"><strong>${escapeHtml(a.email)}</strong><div class="nk-mgmail-meta"><span class="nk-mgmail-status ${statusClass}">${escapeHtml(statusText)}</span><span>นำเข้า ${Number(a.imported_messages||0).toLocaleString('th-TH')} อีเมล</span><span>${a.last_sync_at?'Sync '+escapeHtml(formatDateTime(a.last_sync_at)):'ยังไม่เคย Sync'}</span></div><small>รับเมลจาก: ${escapeHtml(!a.source_configured?'ยังไม่ได้เลือก — ต้องตั้งค่าก่อน Sync':a.scope_mode==='recipient'?'เฉพาะส่งถึง '+(a.scope_value||''):a.scope_mode==='sender'?'เฉพาะผู้ส่ง '+(a.scope_value||''):a.scope_mode==='label'?'Gmail Label '+(a.scope_value||''):a.scope_mode==='all'?'ทั้ง Inbox':a.query||'Query เดิม')}</small>${a.auto_sync?'':'<small class="nk-mgmail-muted">Sync อัตโนมัติปิดอยู่</small>'}${hasError?`<p class="nk-mgmail-error">${escapeHtml(a.last_error)}</p>`:''}</div>
++      <div class="nk-mgmail-actions">${live?`<button type="button" data-action="sync" data-id="${a.id}" ${disabled||!a.source_configured||!a.enabled?'disabled title="ตั้งแหล่งเมลและเปิดใช้งานก่อน"':''}>Sync</button><button type="button" data-action="settings" data-id="${a.id}" ${disabled?'disabled':''}>${a.source_configured?'ตั้งค่า':'เลือกแหล่งเมล'}</button>`:`<button type="button" data-action="reconnect" data-id="${a.id}" ${disabled?'disabled':''}>เชื่อมใหม่</button>`}<button type="button" data-action="disconnect" data-id="${a.id}" ${disabled?'disabled':''} ${!live?'hidden':''}>ยกเลิก</button></div>
+     </div>`;
+   }).join('') : `<div class="nk-mgmail-empty">ยังไม่เชื่อม Gmail รับสมัครงานแยก · กด <b>+ เชื่อม Gmail รับสมัครงาน</b> เพื่อเพิ่ม Inbox ใหม่ โดยไม่ต้องเปลี่ยนบัญชี Google หลัก</div>`;
+ }
+@@ -3237,9 +3250,66 @@
+   if(!account) return;
+   if(action==='reconnect') { window.location.assign('/integrations/recruitment-gmail/start'); return; }
+   if(action==='settings') {
+-    openPhase5Form({eyebrow:'RECRUITMENT INBOX',title:`ตั้งค่า ${account.email}`,subtitle:'Query และการ Sync ของบัญชีนี้ ไม่กระทบ Gmail บัญชีอื่น',
+-      html:`<div class="field full"><label class="toggle-line"><input id="mgmailEnabled" type="checkbox" ${account.enabled?'checked':''}/> เปิดใช้งาน Inbox นี้</label></div><div class="field full"><label class="toggle-line"><input id="mgmailAuto" type="checkbox" ${account.auto_sync?'checked':''}/> Sync อัตโนมัติทุกวัน</label></div><div class="field full"><label>Gmail Search Query</label><input id="mgmailQuery" maxlength="500" value="${escapeHtml(account.query||'newer_than:30d {สมัคร resume CV &quot;job application&quot;}')}"/><small>ตัวอย่าง: newer_than:30d {สมัครงาน resume CV}</small></div>`,
+-      onSave:async()=>{await api(`/api/recruitment/gmail/accounts/${id}`,{method:'PATCH',body:JSON.stringify({query:$('#mgmailQuery').value.trim(),enabled:$('#mgmailEnabled').checked,auto_sync:$('#mgmailAuto').checked})});await refreshRecruitmentGmail();toast('บันทึกการตั้งค่า Inbox แล้ว');}});
++    const mode=String(account.scope_mode==='unconfigured'?'recipient':(account.scope_mode||'recipient'));
++    const modes=[
++      ['recipient','เฉพาะอีเมลที่ส่งถึงที่อยู่ที่ระบุ'],
++      ['sender','เฉพาะผู้ส่ง/โดเมนที่ระบุ'],
++      ['label','เฉพาะ Gmail Label ที่เลือก'],
++      ['query','Gmail Query แบบกำหนดเอง'],
++      ['all','อีเมลทุกประเภทใน Inbox (ไม่แนะนำ)']
++    ];
++    const options=modes.map(([v,label])=>`<option value="${v}" ${mode===v?'selected':''}>${label}</option>`).join('');
++    openPhase5Form({eyebrow:'RECRUITMENT INBOX',title:`เลือกอีเมลที่ Nakna อ่านจาก ${account.email}`,
++      subtitle:'ไม่ต้องดึงเมลส่วนตัวทั้งหมด · ตั้งค่าบัญชีนี้ได้อิสระจาก Gmail อื่นและ Google หลัก',
++      html:`<div class="field full"><div class="nk-mgmail-safe-box">📬 <b>บัญชีที่เชื่อม:</b> ${escapeHtml(account.email)}<br><small>เลือกเฉพาะอีเมลที่ใช้รับสมัครงานได้ ก่อน Sync ครั้งถัดไป อีเมลที่เคยดึงไว้จะยังอยู่ในคิวจนกว่าจะคัดออกเอง</small></div></div>
++        <div class="field full"><label>อ่านอีเมลจากส่วนไหนของบัญชีนี้</label><select id="mgmailScopeMode">${options}</select></div>
++        <div class="field full" id="mgmailScopeValueWrap"><label id="mgmailScopeValueLabel">อีเมล / Label</label><textarea id="mgmailScopeValue" rows="2" maxlength="500" placeholder="jobs@company.com">${escapeHtml(account.scope_value||'')}</textarea><small id="mgmailScopeHint">คั่นหลายรายการด้วยเครื่องหมาย , เช่น jobs@company.com, hr@company.com</small></div>
++        <div class="field full" id="mgmailQueryWrap"><label>Gmail Query ขั้นสูง</label><input id="mgmailQuery" maxlength="500" value="${escapeHtml(account.query||'newer_than:30d {สมัครงาน resume CV &quot;job application&quot;}')}"/><small>ใช้ไวยากรณ์ Gmail Search เช่น to:jobs@company.com newer_than:30d</small></div>
++        <div class="field"><label>ย้อนหลังเท่าไหร่</label><select id="mgmailScopeDays">${[7,30,90,365].map(n=>`<option value="${n}" ${Number(account.scope_days||30)===n?'selected':''}>${n} วัน</option>`).join('')}</select></div>
++        <div class="field full"><label class="toggle-line"><input id="mgmailEnabled" type="checkbox" ${account.enabled||!account.source_configured?'checked':''}/> เปิดให้อ่าน Inbox นี้</label></div>
++        <div class="field full"><label class="toggle-line"><input id="mgmailAuto" type="checkbox" ${account.auto_sync?'checked':''}/> Sync อัตโนมัติ (เฉพาะขอบเขตที่เลือก)</label></div>
++        <div class="field full" id="mgmailAllWarning"><label class="toggle-line"><input id="mgmailConfirmAll" type="checkbox"/> ยืนยันว่าอนุญาตให้ตรวจอีเมลทั้ง Inbox รวมถึงอีเมลที่ไม่ใช่สมัครงาน</label><small class="nk-mgmail-caution">ไม่แนะนำสำหรับ Gmail ส่วนตัว เพราะอาจนำอีเมลที่ไม่เกี่ยวข้องเข้าสู่คิวคัดกรอง</small></div>
++        <div class="field full"><div class="nk-mgmail-preview"><b>ขอบเขตการ Sync</b><code id="mgmailPreview">กำลังคำนวณ…</code></div><small>คิวคัดกรองยังต้องให้ HR กดรับก่อนเป็น Candidate · ไม่มีการลบเมลใน Gmail</small></div>`,
++      onSave:async()=>{
++        const selected=$('#mgmailScopeMode').value;
++        const value=$('#mgmailScopeValue').value.trim();
++        if(['recipient','sender','label'].includes(selected)&&!value)throw new Error('กรุณาระบุอีเมล/โดเมน/Label');
++        if(selected==='all'&&!$('#mgmailConfirmAll').checked)throw new Error('ต้องยืนยันการอ่านทั้ง Inbox ก่อน');
++        await api(`/api/recruitment/gmail/accounts/${id}`,{method:'PATCH',body:JSON.stringify({
++          scope_mode:selected,scope_value:value,scope_days:Number($('#mgmailScopeDays').value),
++          confirm_all:$('#mgmailConfirmAll').checked,
++          query:$('#mgmailQuery').value.trim(),enabled:$('#mgmailEnabled').checked,auto_sync:$('#mgmailAuto').checked
++        })});
++        await refreshRecruitmentGmail();toast('บันทึกขอบเขตอีเมลแล้ว · ใช้เมื่อ Sync รอบถัดไป');
++      }});
++    const controls=['mgmailScopeMode','mgmailScopeValue','mgmailScopeDays','mgmailQuery'];
++    const updateScopePreview=()=>{
++      const selected=$('#mgmailScopeMode').value;
++      const value=$('#mgmailScopeValue').value.trim();
++      const days=Number($('#mgmailScopeDays').value)||30;
++      const scoped=['recipient','sender','label'].includes(selected);
++      $('#mgmailScopeValueWrap').hidden=!scoped;
++      $('#mgmailQueryWrap').hidden=selected!=='query';
++      $('#mgmailAllWarning').hidden=selected!=='all';
++      $('#mgmailScopeDays').closest('.field').hidden=selected==='query';
++      const t=$('#mgmailScopeValueLabel'),h=$('#mgmailScopeHint'),v=$('#mgmailScopeValue');
++      if(selected==='recipient'){t.textContent='ส่งถึงอีเมลเหล่านี้ (To)';h.textContent='เช่น jobs@company.com, careers@company.com · ต้องเป็นอีเมลที่รับใน Gmail นี้';v.placeholder='jobs@company.com, careers@company.com';}
++      if(selected==='sender'){t.textContent='รับเฉพาะจากผู้ส่ง/โดเมนเหล่านี้';h.textContent='เช่น jobthai.com, jobs@jobboard.com, @linkedin.com';v.placeholder='jobs@jobboard.com, jobthai.com';}
++      if(selected==='label'){t.textContent='ชื่อ Gmail Label';h.textContent='เช่น Recruitment หรือ สมัครงาน · ต้องสร้าง Label ใน Gmail ก่อน';v.placeholder='Recruitment';}
++      let preview='';
++      if(selected==='query')preview=$('#mgmailQuery').value.trim()||'(ยังไม่ได้ใส่ Query)';
++      else {
++        preview=`newer_than:${days}d -category:promotions -category:social`;
++        const entries=value.split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);
++        if(selected==='label')preview+=` label:"${value}"`;
++        else if(selected==='recipient'||selected==='sender')preview+=' '+(entries.length===1?(selected==='recipient'?'to:':'from:')+entries[0]:`{${entries.map(x=>(selected==='recipient'?'to:':'from:')+x).join(' ')}}`);
++        else preview+=' (ทั้ง Inbox)';
++      }
++      $('#mgmailPreview').textContent=preview;
++    };
++    controls.forEach(x=>$('#'+x)?.addEventListener(x==='mgmailScopeMode'?'change':'input',updateScopePreview));
++    $('#mgmailScopeDays')?.addEventListener('change',updateScopePreview);
++    updateScopePreview();
+     return;
+   }
+   if(action==='disconnect' && !confirm(`ยกเลิกการเชื่อมต่อ ${account.email}? ระบบจะลบ Token แต่เก็บประวัติผู้สมัครไว้`)) return;
+@@ -3247,8 +3317,8 @@
+   try {
+     if(action==='sync') {
+       const result=await api(`/api/recruitment/gmail/accounts/${id}/sync`,{method:'POST',body:'{}',timeoutMs:45000});
+-      if(result.skipped)toast(result.reason==='already_syncing'?'บัญชีนี้กำลัง Sync อยู่':'บัญชีนี้ปิดใช้งานอยู่');
+-      else toast(`Sync ${account.email} แล้ว · ตรวจเมล ${result.scanned||0} ฉบับ เปิดคิวคัดกรองเพื่อยืนยันผู้สมัคร`);
++      if(result.skipped)toast(result.reason==='already_syncing'?'บัญชีนี้กำลัง Sync อยู่':result.reason==='needs_configuration'?'ต้องเลือกแหล่งอีเมลก่อน Sync':'บัญชีนี้ปิดใช้งานอยู่');
++      else toast(`Sync ${account.email} แล้ว · รับเข้า ${result.imported||0} ฉบับ · ข้ามนอกขอบเขต ${result.filtered_out||0} · ตรวจคิวเพื่อยืนยัน`);
+       await refreshRecruitmentGmail({reloadCandidates:true});
+       await reloadRecruitmentScreening();
+     } else if(action==='disconnect') {
+--- a/public/index.html
++++ b/public/index.html
+@@ -16,7 +16,7 @@
+   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
+   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
+-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCREENING20261020V1" />
++  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1" />
+   <style>
+     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
+     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
+@@ -44,7 +44,7 @@
+   <link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A" />
+   <link rel="stylesheet" href="/ui/nk-multi-gmail.css?v=MGMAIL20261020A" />
+   <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A" />
+-  <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-bulk1">
++  <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1">
+ </head>
+ <body>
+   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
+@@ -436,13 +436,14 @@
+           <div id="recruitmentGmailError" class="integration-error hidden"></div>
+           <div class="gmail-sync-actions"><button id="recruitmentGmailAddAccount" class="primary-btn" type="button">+ เชื่อม Gmail รับสมัครงาน</button><button id="recruitmentGmailConnectBtn" class="secondary-btn" type="button">เชื่อม Google หลัก</button><button id="recruitmentGmailSyncBtn" class="secondary-btn hidden" type="button">Sync Google หลัก</button><button id="recruitmentGmailSettingsBtn" class="secondary-btn hidden" type="button">ตั้งค่า Google หลัก</button></div>
+           <div class="nk-mgmail-heading"><h4>บัญชีรับสมัครงานที่เชื่อม</h4><small>แต่ละบัญชี Sync แยกกัน · ใบสมัครทั้งหมดเข้ารวมใน Pipeline ด้านล่าง</small></div>
++          <p class="nk-mgmail-guide">เลือกบัญชีและตั้งค่าปุ่ม <b>ตั้งค่า</b> → เลือกว่า Nakna จะอ่านเฉพาะเมลส่งถึงไหน, ผู้ส่งรายใด หรือ Label อะไร · เมลนอกเงื่อนไขจะไม่ถูกนำเข้าคิวรอบใหม่</p>
+           <div id="recruitmentGmailAccountList" class="nk-mgmail-list" aria-live="polite"></div>
+           <p class="nk-mgmail-help">บัญชี Google หลักใช้สำหรับ Drive / Sheets / Payroll เหมือนเดิม · เชื่อมบัญชีรับสมัครงานบัญชีแรกแล้วระบบจะหยุดอ่านใบสมัครจาก Google หลักอัตโนมัติ · การเข้าถึง Gmail ต้องผ่านการยินยอมของเจ้าของบัญชี</p>
+         </article>
+         <section class="panel nk-screening" id="nkScreeningPanel" aria-label="คิวคัดกรองอีเมลรับสมัครงาน">
+           <div class="nk-screening-top"><div><p class="kicker">APPLICATION SCREENING</p><h3>คิวคัดกรองอีเมล</h3><p>เมลที่ Sync เข้ามายังไม่ใช่ผู้สมัคร HR ตรวจแล้วกดรับจึงเข้าสู่ Pipeline</p></div><button class="secondary-btn" id="nkScreeningReload" type="button">↻ โหลดคิวใหม่</button></div>
+           <div class="nk-screening-metrics" id="nkScreeningMetrics"></div>
+-          <div class="nk-screening-tools"><input type="search" id="nkScreeningSearch" placeholder="ค้นหาผู้ส่ง / หัวข้อ / อีเมล" aria-label="ค้นหาคิวคัดกรอง"/><select id="nkScreeningFilter" aria-label="กรองผลคัดกรอง"><option value="pending">ยังไม่ตัดสินใจ</option><option value="all">ทั้งหมด</option><option value="likely">น่าจะสมัครจริง</option><option value="review">รอตรวจ</option><option value="noise">ไม่เกี่ยวข้อง</option><option value="accepted">รับเป็นผู้สมัครแล้ว</option><option value="rejected">คัดออกแล้ว</option><option value="archived">ลบจากคิว (กู้คืนได้)</option></select></div>
++          <div class="nk-screening-tools"><input type="search" id="nkScreeningSearch" placeholder="ค้นหาผู้ส่ง / หัวข้อ / อีเมล" aria-label="ค้นหาคิวคัดกรอง"/><select id="nkScreeningFilter" aria-label="กรองผลคัดกรอง"><option value="pending">ยังไม่ตัดสินใจ</option><option value="all">ทั้งหมด</option><option value="likely">น่าจะสมัครจริง</option><option value="review">รอตรวจ</option><option value="noise">ไม่เกี่ยวข้อง</option><option value="accepted">รับเป็นผู้สมัครแล้ว</option><option value="rejected">คัดออกแล้ว</option><option value="archived">ลบจากคิว (กู้คืนได้)</option></select><select id="nkScreeningSourceFilter" aria-label="กรองตามบัญชี Gmail ที่นำเข้า"><option value="">ทุกบัญชี Gmail</option></select></div>
+           <div class="nk-screening-bulk" id="nkScreeningBulk" aria-label="เลือกอีเมลหลายรายการ">
+             <label class="nk-screening-select-all"><input type="checkbox" id="nkScreeningSelectAll"/> เลือกทั้งหมดที่แสดง (สูงสุด 50)</label>
+             <strong id="nkScreeningSelectedCount" aria-live="polite">เลือก 0 รายการ</strong>
+@@ -1563,7 +1564,7 @@
+   </div>
+ 
+   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
+-  <script src="/app.js?v=NAKNA_SCREENING20261020V1" type="module"></script>
++  <script src="/app.js?v=NAKNA_SCOPE20261020V1" type="module"></script>
+ 
+   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
+     <div class="modal-head">
+--- a/public/ui/nk-recruitment-screening.css
++++ b/public/ui/nk-recruitment-screening.css
+@@ -67,3 +67,21 @@
+ .nk-screening-row:focus-within{outline:2px solid rgba(4,135,138,.2);outline-offset:1px;}
+ @media (max-width:780px){.nk-screening-bulk{display:grid;grid-template-columns:1fr 1fr;gap:8px}.nk-screening-bulk .nk-screening-select-all{grid-column:1/-1}.nk-screening-bulk strong{grid-column:1/-1}.nk-screening-bulk button{width:100%;}.nk-screening-row .nk-screening-select-box{align-self:flex-start;}}
+ @media (max-width:430px){.nk-screening-row{position:relative;padding-left:43px}.nk-screening-row .nk-screening-select-box{position:absolute;left:10px;top:13px;}}
++/* Selective Gmail import: safe, understandable per-account settings */
++#modalFields [hidden],#view-recruitment [hidden]{display:none!important;}
++#modalFields .nk-mgmail-safe-box{background:#f0faf8;border:1px solid #d1ece7;border-radius:12px;padding:12px 14px;color:#1c5557;font-size:13px;line-height:1.55;}
++#modalFields .nk-mgmail-safe-box small{color:#5c7477;display:block;margin-top:5px;}
++#modalFields .nk-mgmail-preview{background:#f6f9f9;border:1px solid #d9e6e7;border-radius:12px;padding:12px;display:grid;gap:7px;}
++#modalFields .nk-mgmail-preview b{font-size:12px;color:#265558;}
++#modalFields .nk-mgmail-preview code{font-size:11px;color:#204951;white-space:pre-wrap;overflow-wrap:anywhere;}
++#modalFields .nk-mgmail-caution{color:#a25229;display:block;margin-top:5px;line-height:1.6;}
++#modalFields #mgmailScopeValue{width:100%;min-height:66px;resize:vertical;}
++#view-recruitment .nk-mgmail-info>small{display:block;overflow-wrap:anywhere;line-height:1.6;}
++#view-recruitment .nk-mgmail-muted{color:#a26d25!important;}
++@media(max-width:650px){#modalFields .nk-mgmail-safe-box,#modalFields .nk-mgmail-preview{padding:10px;}#view-recruitment .nk-mgmail-info>small{max-width:100%;}}
++
++#view-recruitment .nk-mgmail-guide{margin:8px 0 12px;padding:10px 12px;border:1px solid #d6e8e6;background:#f2faf9;color:#2d585c;font-size:12px;line-height:1.6;border-radius:10px;}
++#view-recruitment .nk-screening-tools{grid-template-columns:minmax(0,1fr) minmax(160px,210px) minmax(160px,210px);}
++#view-recruitment #nkScreeningSourceFilter{max-width:100%;}
++@media(max-width:880px){#view-recruitment .nk-screening-tools{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}#view-recruitment .nk-screening-tools>input{grid-column:1/-1;}}
++@media(max-width:520px){#view-recruitment .nk-screening-tools{grid-template-columns:minmax(0,1fr);}#view-recruitment .nk-screening-tools>input{grid-column:auto;}}

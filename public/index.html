@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCREENING20261020V1" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -44,7 +44,7 @@
   <link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A" />
   <link rel="stylesheet" href="/ui/nk-multi-gmail.css?v=MGMAIL20261020A" />
   <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A" />
-  <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-bulk1">
+  <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1">
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -436,13 +436,14 @@
           <div id="recruitmentGmailError" class="integration-error hidden"></div>
           <div class="gmail-sync-actions"><button id="recruitmentGmailAddAccount" class="primary-btn" type="button">+ เชื่อม Gmail รับสมัครงาน</button><button id="recruitmentGmailConnectBtn" class="secondary-btn" type="button">เชื่อม Google หลัก</button><button id="recruitmentGmailSyncBtn" class="secondary-btn hidden" type="button">Sync Google หลัก</button><button id="recruitmentGmailSettingsBtn" class="secondary-btn hidden" type="button">ตั้งค่า Google หลัก</button></div>
           <div class="nk-mgmail-heading"><h4>บัญชีรับสมัครงานที่เชื่อม</h4><small>แต่ละบัญชี Sync แยกกัน · ใบสมัครทั้งหมดเข้ารวมใน Pipeline ด้านล่าง</small></div>
+          <p class="nk-mgmail-guide">เลือกบัญชีและตั้งค่าปุ่ม <b>ตั้งค่า</b> → เลือกว่า Nakna จะอ่านเฉพาะเมลส่งถึงไหน, ผู้ส่งรายใด หรือ Label อะไร · เมลนอกเงื่อนไขจะไม่ถูกนำเข้าคิวรอบใหม่</p>
           <div id="recruitmentGmailAccountList" class="nk-mgmail-list" aria-live="polite"></div>
           <p class="nk-mgmail-help">บัญชี Google หลักใช้สำหรับ Drive / Sheets / Payroll เหมือนเดิม · เชื่อมบัญชีรับสมัครงานบัญชีแรกแล้วระบบจะหยุดอ่านใบสมัครจาก Google หลักอัตโนมัติ · การเข้าถึง Gmail ต้องผ่านการยินยอมของเจ้าของบัญชี</p>
         </article>
         <section class="panel nk-screening" id="nkScreeningPanel" aria-label="คิวคัดกรองอีเมลรับสมัครงาน">
           <div class="nk-screening-top"><div><p class="kicker">APPLICATION SCREENING</p><h3>คิวคัดกรองอีเมล</h3><p>เมลที่ Sync เข้ามายังไม่ใช่ผู้สมัคร HR ตรวจแล้วกดรับจึงเข้าสู่ Pipeline</p></div><button class="secondary-btn" id="nkScreeningReload" type="button">↻ โหลดคิวใหม่</button></div>
           <div class="nk-screening-metrics" id="nkScreeningMetrics"></div>
-          <div class="nk-screening-tools"><input type="search" id="nkScreeningSearch" placeholder="ค้นหาผู้ส่ง / หัวข้อ / อีเมล" aria-label="ค้นหาคิวคัดกรอง"/><select id="nkScreeningFilter" aria-label="กรองผลคัดกรอง"><option value="pending">ยังไม่ตัดสินใจ</option><option value="all">ทั้งหมด</option><option value="likely">น่าจะสมัครจริง</option><option value="review">รอตรวจ</option><option value="noise">ไม่เกี่ยวข้อง</option><option value="accepted">รับเป็นผู้สมัครแล้ว</option><option value="rejected">คัดออกแล้ว</option><option value="archived">ลบจากคิว (กู้คืนได้)</option></select></div>
+          <div class="nk-screening-tools"><input type="search" id="nkScreeningSearch" placeholder="ค้นหาผู้ส่ง / หัวข้อ / อีเมล" aria-label="ค้นหาคิวคัดกรอง"/><select id="nkScreeningFilter" aria-label="กรองผลคัดกรอง"><option value="pending">ยังไม่ตัดสินใจ</option><option value="all">ทั้งหมด</option><option value="likely">น่าจะสมัครจริง</option><option value="review">รอตรวจ</option><option value="noise">ไม่เกี่ยวข้อง</option><option value="accepted">รับเป็นผู้สมัครแล้ว</option><option value="rejected">คัดออกแล้ว</option><option value="archived">ลบจากคิว (กู้คืนได้)</option></select><select id="nkScreeningSourceFilter" aria-label="กรองตามบัญชี Gmail ที่นำเข้า"><option value="">ทุกบัญชี Gmail</option></select></div>
           <div class="nk-screening-bulk" id="nkScreeningBulk" aria-label="เลือกอีเมลหลายรายการ">
             <label class="nk-screening-select-all"><input type="checkbox" id="nkScreeningSelectAll"/> เลือกทั้งหมดที่แสดง (สูงสุด 50)</label>
             <strong id="nkScreeningSelectedCount" aria-live="polite">เลือก 0 รายการ</strong>
@@ -1563,7 +1564,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SCREENING20261020V1" type="module"></script>
+  <script src="/app.js?v=NAKNA_SCOPE20261020V1" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
