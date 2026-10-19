@@ -1413,6 +1413,12 @@ function bindEvents() {
   $('#recruitmentGmailConnectBtn').onclick = connectGoogleWorkspace;
   $('#recruitmentGmailSyncBtn').onclick = syncRecruitmentGmailNow;
   $('#recruitmentGmailSettingsBtn').onclick = openRecruitmentGmailSettings;
+  $('#recruitmentGmailAddAccount')?.addEventListener('click', () => {
+    if(!canManageGoogleWorkspace())return toast('เฉพาะ Owner หรือ HR Admin ที่เชื่อม Gmail ได้',true);
+    if(isLineInAppBrowser())return toast('กรุณาเปิดใน Chrome หรือ Safari เพื่อเชื่อมบัญชี Gmail เพิ่ม',true);
+    window.location.assign('/integrations/recruitment-gmail/start');
+  });
+  $('#recruitmentGmailAccountList')?.addEventListener('click', handleRecruitmentGmailAccountAction);
   $('#addBenefitBtn').onclick = openBenefitCreate;
   $('#employeeSearch').addEventListener('input', event => renderEmployees(event.target.value));
 
@@ -3012,7 +3018,7 @@ function renderCandidates() {
           <article class="candidate-card">
             <strong>${escapeHtml(candidate.nickname || candidate.first_name)} ${escapeHtml(candidate.last_name)}</strong>
             <small>${escapeHtml(candidate.position_name)}</small>
-            <div class="candidate-meta"><span>${escapeHtml(candidate.source || 'Direct')}</span><span>${candidate.expected_salary ? money(candidate.expected_salary) : 'ไม่ระบุเงินเดือน'}</span></div>
+            <div class="candidate-meta"><span title="อีเมลรับสมัครงานที่พบผู้สมัคร">${escapeHtml(candidate.recruitment_inboxes ? `Gmail: ${candidate.recruitment_inboxes}` : (candidate.source || 'Direct'))}</span><span>${candidate.expected_salary ? money(candidate.expected_salary) : 'ไม่ระบุเงินเดือน'}</span></div>
             <select aria-label="เปลี่ยนสถานะผู้สมัคร" onchange="window.moveCandidate(${candidate.id},this.value)">
               ${activeStages.concat(['hired', 'rejected']).map(option => `<option value="${option}" ${option === candidate.stage ? 'selected' : ''}>${stageLabels[option]}</option>`).join('')}
             </select>
@@ -3044,22 +3050,74 @@ window.hireCandidate = id => {
 };
 
 
+// RECRUITMENT_MULTI_GMAIL_20261020
 function renderRecruitmentGmail() {
   const root = $('#recruitmentGmailCard');
   if (!root) return;
   const d = state.recruitmentGmail || {};
   const connected = Boolean(d.connected);
-  $('#recruitmentGmailBadge').className = `badge ${connected && d.enabled !== false ? 'badge-success' : connected ? 'badge-neutral' : 'badge-warning'}`;
-  $('#recruitmentGmailBadge').textContent = !connected ? 'ยังไม่เชื่อม Google' : d.enabled === false ? 'ปิด Auto Sync' : 'Auto Sync';
-  $('#recruitmentGmailEmail').textContent = connected ? (d.email || 'Google connected') : 'เชื่อม Google เพื่ออ่านอีเมลสมัครงาน';
-  $('#recruitmentGmailQueryText').textContent = d.query || 'ยังไม่ได้ตั้ง Query';
-  $('#recruitmentGmailLastSync').textContent = d.last_sync_at ? `Sync ล่าสุด ${formatDateTime(d.last_sync_at)}` : 'ยังไม่เคย Sync';
+  const accounts = Array.isArray(d.accounts) ? d.accounts : [];
+  const active = accounts.filter(a => a.status === 'connected' && a.enabled).length;
+  const badge = $('#recruitmentGmailBadge');
+  badge.className = `badge ${active || (d.primary_connected && d.enabled) ? 'badge-success' : 'badge-neutral'}`;
+  badge.textContent = active ? `${active} Gmail ที่เปิดใช้` : (d.primary_connected && d.enabled ? 'Google หลัก' : 'ยังไม่มี Inbox ที่เปิดใช้');
+  $('#recruitmentGmailEmail').textContent = active ? `${active} บัญชีแยก` : (d.primary_email || 'ยังไม่มีบัญชีรับสมัครงาน');
+  $('#recruitmentGmailQueryText').textContent = active ? 'ตั้ง Query แยกตามแต่ละบัญชีด้านล่าง' : (d.primary_connected && d.enabled ? d.query || '-' : '—');
+  const syncTimes = accounts.map(a=>a.last_sync_at).filter(Boolean).concat(d.last_sync_at ? [d.last_sync_at] : []);
+  $('#recruitmentGmailLastSync').textContent = syncTimes.length ? `ล่าสุด ${formatDateTime(syncTimes.sort().at(-1))}` : 'ยังไม่เคย Sync';
   $('#recruitmentGmailImported').textContent = `${Number(d.imported_messages || 0).toLocaleString('th-TH')} อีเมล`;
-  $('#recruitmentGmailError').textContent = d.last_error || '';
-  $('#recruitmentGmailError').classList.toggle('hidden', !d.last_error);
-  $('#recruitmentGmailConnectBtn').classList.toggle('hidden', connected);
-  $('#recruitmentGmailSyncBtn').classList.toggle('hidden', !connected || d.enabled === false);
-  $('#recruitmentGmailSettingsBtn').classList.toggle('hidden', !connected);
+  const queryError = new URLSearchParams(location.search).get('recruitment_gmail_error');
+  const errors = {state:'ไม่สามารถยืนยันการเชื่อมต่อได้ กรุณาลองใหม่',expired:'ลิงก์ Google หมดอายุ กรุณาเชื่อมอีกครั้ง',permission:'บัญชีนี้ไม่มีสิทธิ์เชื่อม Gmail',access_denied:'ยังไม่ได้อนุญาตให้ Nakna อ่าน Gmail',refresh_token:'Google ไม่ส่งสิทธิ์ระยะยาว กรุณาลองเชื่อมใหม่',email_already_connected:'Gmail นี้ถูกเชื่อมอยู่แล้ว',connect_failed:'เชื่อม Gmail ไม่สำเร็จ ตรวจสิทธิ์ OAuth และลองใหม่',encryption_not_configured:'ระบบยังไม่พร้อมเข้ารหัสบัญชี กรุณาติดต่อผู้ดูแล'};
+  const shownError = (queryError && errors[queryError]) || d.last_error || '';
+  $('#recruitmentGmailError').textContent = shownError;
+  $('#recruitmentGmailError').classList.toggle('hidden', !shownError);
+  $('#recruitmentGmailConnectBtn').classList.toggle('hidden', Boolean(d.primary_connected));
+  $('#recruitmentGmailSyncBtn').classList.toggle('hidden', !d.primary_connected || d.enabled === false);
+  $('#recruitmentGmailSettingsBtn').classList.toggle('hidden', !d.primary_connected);
+  if($('#recruitmentGmailAddAccount')) $('#recruitmentGmailAddAccount').disabled = !canManageGoogleWorkspace();
+  const list = $('#recruitmentGmailAccountList');
+  if (!list) return;
+  list.innerHTML = accounts.length ? accounts.map(a => {
+    const live = a.status === 'connected';
+    const hasError=Boolean(a.last_error);
+    const statusText=a.status==='reconnect_required'?'ต้องเชื่อมใหม่':!live?'ยกเลิกเชื่อมต่อ':a.enabled?'เปิดใช้งาน':'หยุดชั่วคราว';
+    const statusClass=live&&a.enabled?'good':hasError?'bad':'muted';
+    const disabled=!canManageGoogleWorkspace();
+    return `<div class="nk-mgmail-account" data-inbox="${a.id}">
+      <div class="nk-mgmail-avatar">G</div>
+      <div class="nk-mgmail-info"><strong>${escapeHtml(a.email)}</strong><div class="nk-mgmail-meta"><span class="nk-mgmail-status ${statusClass}">${escapeHtml(statusText)}</span><span>นำเข้า ${Number(a.imported_messages||0).toLocaleString('th-TH')} อีเมล</span><span>${a.last_sync_at?'Sync '+escapeHtml(formatDateTime(a.last_sync_at)):'ยังไม่เคย Sync'}</span></div><small>ค้นหา: ${escapeHtml(a.query||'—')}</small>${hasError?`<p class="nk-mgmail-error">${escapeHtml(a.last_error)}</p>`:''}</div>
+      <div class="nk-mgmail-actions">${live?`<button type="button" data-action="sync" data-id="${a.id}" ${disabled?'disabled':''}>Sync</button><button type="button" data-action="settings" data-id="${a.id}" ${disabled?'disabled':''}>ตั้งค่า</button>`:`<button type="button" data-action="reconnect" data-id="${a.id}" ${disabled?'disabled':''}>เชื่อมใหม่</button>`}<button type="button" data-action="disconnect" data-id="${a.id}" ${disabled?'disabled':''} ${!live?'hidden':''}>ยกเลิก</button></div>
+    </div>`;
+  }).join('') : `<div class="nk-mgmail-empty">ยังไม่เชื่อม Gmail รับสมัครงานแยก · กด <b>+ เชื่อม Gmail รับสมัครงาน</b> เพื่อเพิ่ม Inbox ใหม่ โดยไม่ต้องเปลี่ยนบัญชี Google หลัก</div>`;
+}
+
+async function handleRecruitmentGmailAccountAction(event){
+  const btn=event.target.closest('[data-action][data-id]');
+  if(!btn || btn.disabled) return;
+  if(!canManageGoogleWorkspace()) return toast('ไม่มีสิทธิ์จัดการ Gmail',true);
+  const id=Number(btn.dataset.id),action=btn.dataset.action;
+  const account=(state.recruitmentGmail?.accounts||[]).find(a=>Number(a.id)===id);
+  if(!account) return;
+  if(action==='reconnect') { window.location.assign('/integrations/recruitment-gmail/start'); return; }
+  if(action==='settings') {
+    openPhase5Form({eyebrow:'RECRUITMENT INBOX',title:`ตั้งค่า ${account.email}`,subtitle:'Query และการ Sync ของบัญชีนี้ ไม่กระทบ Gmail บัญชีอื่น',
+      html:`<div class="field full"><label class="toggle-line"><input id="mgmailEnabled" type="checkbox" ${account.enabled?'checked':''}/> เปิดใช้งาน Inbox นี้</label></div><div class="field full"><label class="toggle-line"><input id="mgmailAuto" type="checkbox" ${account.auto_sync?'checked':''}/> Sync อัตโนมัติทุกวัน</label></div><div class="field full"><label>Gmail Search Query</label><input id="mgmailQuery" maxlength="500" value="${escapeHtml(account.query||'newer_than:30d {สมัคร resume CV &quot;job application&quot;}')}"/><small>ตัวอย่าง: newer_than:30d {สมัครงาน resume CV}</small></div>`,
+      onSave:async()=>{await api(`/api/recruitment/gmail/accounts/${id}`,{method:'PATCH',body:JSON.stringify({query:$('#mgmailQuery').value.trim(),enabled:$('#mgmailEnabled').checked,auto_sync:$('#mgmailAuto').checked})});await refreshRecruitmentGmail();toast('บันทึกการตั้งค่า Inbox แล้ว');}});
+    return;
+  }
+  if(action==='disconnect' && !confirm(`ยกเลิกการเชื่อมต่อ ${account.email}? ระบบจะลบ Token แต่เก็บประวัติผู้สมัครไว้`)) return;
+  btn.disabled=true;
+  try {
+    if(action==='sync') {
+      const result=await api(`/api/recruitment/gmail/accounts/${id}/sync`,{method:'POST',body:'{}',timeoutMs:45000});
+      if(result.skipped)toast(result.reason==='already_syncing'?'บัญชีนี้กำลัง Sync อยู่':'บัญชีนี้ปิดใช้งานอยู่');
+      else toast(`Sync ${account.email} แล้ว · ผู้สมัครใหม่ ${result.imported||0} · เชื่อมคนเดิม ${result.linked||0}`);
+      await refreshRecruitmentGmail({reloadCandidates:true});
+    } else if(action==='disconnect') {
+      await api(`/api/recruitment/gmail/accounts/${id}`,{method:'DELETE'});
+      await refreshRecruitmentGmail();toast('ยกเลิกการเชื่อมต่อแล้ว');
+    }
+  }catch(error){toast(error.message||'ทำรายการไม่สำเร็จ',true);await refreshRecruitmentGmail().catch(()=>{});}finally{btn.disabled=false;}
 }
 
 async function refreshRecruitmentGmail({ reloadCandidates = false } = {}) {
@@ -3095,8 +3153,8 @@ function openRecruitmentGmailSettings() {
   openPhase5Form({
     eyebrow:'RECRUITMENT GMAIL',
     title:'ตั้งค่า Gmail ผู้สมัคร',
-    subtitle:'ใช้ Gmail Search Query เพื่อดึงเฉพาะเมลที่เป็นผู้สมัคร ลดการอ่านเมลอื่นที่ไม่เกี่ยวข้อง',
-    html:`<div class="field full"><label class="toggle-line"><input id="p7RecruitEnabled" type="checkbox" ${d.enabled !== false ? 'checked' : ''}/> เปิด Auto Sync ผู้สมัครจาก Gmail</label></div>
+    subtitle:'ตั้งค่าการอ่านใบสมัครจากบัญชี Google หลักเท่านั้น หากเชื่อม Gmail แยกแล้วไม่จำเป็นต้องเปิดส่วนนี้',
+    html:`<div class="field full"><label class="toggle-line"><input id="p7RecruitEnabled" type="checkbox" ${d.enabled !== false ? 'checked' : ''}/> อ่านผู้สมัครจาก Google หลัก (ทางเลือก)</label></div>
       <div class="field full"><label>Gmail Search Query</label><input id="p7RecruitQuery" value="${escapeHtml(d.query || 'newer_than:30d {สมัคร resume CV &quot;job application&quot;}')}"/><small>ตัวอย่าง: <code>to:jobs@company.com newer_than:30d</code></small></div>`,
     onSave:async()=>{
       await api('/api/onboarding/recruitment-gmail',{method:'POST',body:JSON.stringify({enabled:$('#p7RecruitEnabled').checked,auto_sync:$('#p7RecruitEnabled').checked,query:$('#p7RecruitQuery').value.trim()})});

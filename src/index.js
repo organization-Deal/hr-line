@@ -1493,6 +1493,13 @@ export default {
       if (url.pathname === '/integrations/google-workspace/callback' && request.method === 'GET') {
         return await finishGoogleWorkspaceConnection(request, env, ctx);
       }
+      // Recruitment Gmail OAuth does not touch the company's Drive/Sheets/Payroll account.
+      if (url.pathname === '/integrations/recruitment-gmail/start' && request.method === 'GET') {
+        return await startRecruitmentInboxOAuth(request, env);
+      }
+      if (url.pathname === '/integrations/recruitment-gmail/callback' && request.method === 'GET') {
+        return await finishRecruitmentInboxOAuth(request, env);
+      }
       // Legacy personal Gmail flow is kept for existing test users.
       if (url.pathname === '/integrations/gmail/start' && request.method === 'GET') {
         return await startGmailConnection(request, env);
@@ -1727,6 +1734,7 @@ export default {
         sendDailyHrBrief(env),
         runPhase5DailyAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'phase5_daily_failed',message:String(error?.message||error)}))),
         syncAllRecruitmentGmail(env).catch(error=>console.error(JSON.stringify({level:'error',event:'recruitment_gmail_daily_failed',message:String(error?.message||error)}))),
+        syncAllDedicatedRecruitmentInboxes(env).catch(error=>console.error(JSON.stringify({level:'error',event:'recruitment_multi_gmail_daily_failed',message:String(error?.message||error)}))),
         runDocumentEvidenceAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'document_evidence_daily_failed',message:String(error?.message||error)})))
       );
     }
@@ -1822,8 +1830,41 @@ async function handleApi(request, env, url, auth, ctx) {
     return json({ok:true,onboarding:status});
   }
 
+  // Per-Inbox operations: never mutate Google Workspace credentials.
+  if (path === '/api/recruitment/gmail/accounts' && method === 'GET') {
+    if (!clientId) return json({error:'COMPANY_REQUIRED'},409);
+    if (!canManagePeopleAdmin(auth.role)) return json({error:'ไม่มีสิทธิ์ดูบัญชีรับสมัครงาน'},403);
+    return json({accounts:await getRecruitmentInboxAccounts(env,clientId)});
+  }
+  const recruitmentAccountRoute = path.match(/^\/api\/recruitment\/gmail\/accounts\/(\d+)(?:\/(sync))?$/);
+  if (recruitmentAccountRoute) {
+    if (!clientId) return json({error:'COMPANY_REQUIRED'},409);
+    if (!canManageIntegrations(auth.role)) return json({error:'เฉพาะ Owner หรือ HR Admin ที่จัดการ Gmail ได้'},403);
+    await ensureRecruitmentMultiGmailReady(env.DB);
+    const id=Number(recruitmentAccountRoute[1]);
+    const current=await env.DB.prepare(`SELECT id,status FROM recruitment_gmail_accounts WHERE id=?1 AND client_id=?2`).bind(id,clientId).first();
+    if (!current) return json({error:'ไม่พบบัญชี Gmail ของบริษัทนี้'},404);
+    if (method==='POST' && recruitmentAccountRoute[2]==='sync') {
+      try{return json({ok:true,...await syncDedicatedRecruitmentInbox(env,id,clientId,{limit:30})});}
+      catch(error){return json({error:safeRecruitmentGmailError(error)},400);}
+    }
+    if (method==='PATCH' && !recruitmentAccountRoute[2]) {
+      const body=await safeJson(request);
+      const query=String(body.query||RECRUITMENT_MULTI_DEFAULT_QUERY).trim().slice(0,500)||RECRUITMENT_MULTI_DEFAULT_QUERY;
+      const enabled=body.enabled===false?0:1,autoSync=body.auto_sync===false?0:1;
+      await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET query=?1,enabled=?2,auto_sync=?3,updated_at=CURRENT_TIMESTAMP WHERE id=?4 AND client_id=?5`).bind(query,enabled,autoSync,id,clientId).run();
+      return json({ok:true});
+    }
+    if (method==='DELETE' && !recruitmentAccountRoute[2]) {
+      // Disconnect, preserve provenance rows but securely remove stored OAuth credentials.
+      await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET encrypted_tokens=NULL,status='disconnected',enabled=0,auto_sync=0,sync_lock_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
+      return json({ok:true});
+    }
+  }
+
   if (path === '/api/recruitment/gmail/status' && method === 'GET') {
     if (!clientId) return json({error:'COMPANY_REQUIRED'},409);
+    if (!canManagePeopleAdmin(auth.role)) return json({error:'ไม่มีสิทธิ์ดู Recruitment Gmail'},403);
     await ensureV100P7Ready(env.DB);
     return json(await getRecruitmentGmailStatus(env,clientId));
   }
@@ -3274,8 +3315,14 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/candidates' && method === 'GET') {
+    await ensureRecruitmentMultiGmailReady(env.DB);
     const result = await env.DB.prepare(`
-      SELECT * FROM candidates WHERE client_id = ?1
+      SELECT c.*,
+        (SELECT group_concat(DISTINCT a.email)
+         FROM recruitment_inbox_messages rim
+         JOIN recruitment_gmail_accounts a ON a.id=rim.account_id
+         WHERE rim.client_id=c.client_id AND rim.candidate_id=c.id) AS recruitment_inboxes
+      FROM candidates c WHERE c.client_id = ?1
       ORDER BY CASE stage
         WHEN 'new' THEN 1 WHEN 'screening' THEN 2 WHEN 'hr_interview' THEN 3
         WHEN 'manager_interview' THEN 4 WHEN 'assignment' THEN 5 WHEN 'offer' THEN 6
@@ -11891,15 +11938,175 @@ async function getWebOnboardingStatus(env,auth){
   };
 }
 
+// RECRUITMENT_MULTI_GMAIL_20261020: Independent read-only Gmail accounts for Recruitment.
+const RECRUITMENT_MULTI_DEFAULT_QUERY = 'newer_than:30d {สมัคร resume CV "job application"}';
+async function ensureRecruitmentMultiGmailReady(db){
+  if(SCHEMA_READY.has('recruitment_multi_gmail'))return;
+  await ensureV100P7Ready(db);
+  const statements=[
+    `CREATE TABLE IF NOT EXISTS recruitment_gmail_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,google_sub TEXT NOT NULL,email TEXT NOT NULL,encrypted_tokens TEXT,scopes TEXT,token_expires_at TEXT,status TEXT NOT NULL DEFAULT 'connected' CHECK(status IN ('connected','reconnect_required','disconnected')),enabled INTEGER NOT NULL DEFAULT 1,auto_sync INTEGER NOT NULL DEFAULT 1,query TEXT NOT NULL DEFAULT 'newer_than:30d {สมัคร resume CV "job application"}',last_sync_at TEXT,last_error TEXT,sync_lock_until TEXT,connected_by_user_id INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(client_id,google_sub),UNIQUE(client_id,email))`,
+    `CREATE INDEX IF NOT EXISTS idx_rga_sync ON recruitment_gmail_accounts(status,enabled,auto_sync,last_sync_at)`,
+    `CREATE TABLE IF NOT EXISTS recruitment_inbox_messages (id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,account_id INTEGER NOT NULL REFERENCES recruitment_gmail_accounts(id) ON DELETE RESTRICT,gmail_message_id TEXT NOT NULL,gmail_thread_id TEXT,sender_name TEXT,sender_email TEXT,subject TEXT,received_at TEXT,snippet TEXT,attachment_names TEXT,candidate_id INTEGER REFERENCES candidates(id) ON DELETE SET NULL,import_status TEXT NOT NULL DEFAULT 'seen',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(account_id,gmail_message_id))`,
+    `CREATE INDEX IF NOT EXISTS idx_rim_client_date ON recruitment_inbox_messages(client_id,received_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_rim_candidate ON recruitment_inbox_messages(client_id,candidate_id)`
+  ];
+  for(const sql of statements)await db.prepare(sql).run();
+  SCHEMA_READY.add('recruitment_multi_gmail');
+}
+function publicRecruitmentInboxAccount(row){
+  return {id:Number(row.id),email:row.email,status:row.status,enabled:Boolean(Number(row.enabled)),auto_sync:Boolean(Number(row.auto_sync)),query:row.query||RECRUITMENT_MULTI_DEFAULT_QUERY,last_sync_at:row.last_sync_at||null,last_error:row.last_error||null,imported_messages:Number(row.imported_messages||0),connected_at:row.created_at};
+}
+async function getRecruitmentInboxAccounts(env,clientId){
+  await ensureRecruitmentMultiGmailReady(env.DB);
+  const rows=await env.DB.prepare(`SELECT a.id,a.email,a.status,a.enabled,a.auto_sync,a.query,a.last_sync_at,a.last_error,a.created_at,COUNT(m.id) AS imported_messages FROM recruitment_gmail_accounts a LEFT JOIN recruitment_inbox_messages m ON m.account_id=a.id WHERE a.client_id=?1 GROUP BY a.id ORDER BY CASE WHEN a.status='connected' THEN 0 ELSE 1 END,a.id`).bind(Number(clientId)).all();
+  return (rows.results||[]).map(publicRecruitmentInboxAccount);
+}
+function recruitmentInboxErrorRedirect(request,env,code){
+  return redirectResponse(`${appOrigin(request,env)}/?recruitment_gmail_error=${encodeURIComponent(code)}`,[clearCookie('nakna_recruitment_gmail_state')]);
+}
+async function startRecruitmentInboxOAuth(request,env){
+  assertGoogleConfig(env);
+  const auth=await authorizeUser(request,env,{requireCompany:true});
+  if(!auth.ok)return redirectResponse(`${appOrigin(request,env)}/?auth=required`);
+  if(!canManageIntegrations(auth.role))return recruitmentInboxErrorRedirect(request,env,'permission');
+  if(!integrationEncryptionKey(env))return recruitmentInboxErrorRedirect(request,env,'encryption_not_configured');
+  await ensureRecruitmentMultiGmailReady(env.DB);
+  const state=randomToken(32),stateHash=await sha256Hex(state);
+  const purpose=`recruitment_gmail:${Number(auth.clientId)}`;
+  await env.DB.prepare(`INSERT INTO oauth_states (state_hash,purpose,user_id,expires_at) VALUES (?1,?2,?3,?4)`).bind(stateHash,purpose,Number(auth.user.id),new Date(Date.now()+600000).toISOString()).run();
+  const params=new URLSearchParams({client_id:env.GOOGLE_CLIENT_ID,redirect_uri:oauthRedirectUri(request,env,'/integrations/recruitment-gmail/callback'),response_type:'code',scope:'openid email profile https://www.googleapis.com/auth/gmail.readonly',state,access_type:'offline',prompt:'select_account consent',include_granted_scopes:'false'});
+  return redirectResponse(`https://accounts.google.com/o/oauth2/v2/auth?${params}`,[oauthStateCookie('nakna_recruitment_gmail_state',state,600)]);
+}
+async function finishRecruitmentInboxOAuth(request,env){
+  const auth=await authorizeUser(request,env,{requireCompany:true});
+  if(!auth.ok)return redirectResponse(`${appOrigin(request,env)}/?auth=required`);
+  if(!canManageIntegrations(auth.role))return recruitmentInboxErrorRedirect(request,env,'permission');
+  const u=new URL(request.url),code=u.searchParams.get('code'),state=u.searchParams.get('state');
+  const cookieState=getCookie(request,'nakna_recruitment_gmail_state');
+  if(u.searchParams.has('error'))return recruitmentInboxErrorRedirect(request,env,'access_denied');
+  if(!code||!state||!cookieState||!constantTimeEqual(state,cookieState))return recruitmentInboxErrorRedirect(request,env,'state');
+  await ensureRecruitmentMultiGmailReady(env.DB);
+  const stateHash=await sha256Hex(state);
+  const purpose=`recruitment_gmail:${Number(auth.clientId)}`;
+  const saved=await env.DB.prepare('SELECT * FROM oauth_states WHERE state_hash=?1 AND purpose=?2 AND user_id=?3').bind(stateHash,purpose,Number(auth.user.id)).first();
+  if(!saved||Date.parse(saved.expires_at)<=Date.now())return recruitmentInboxErrorRedirect(request,env,'expired');
+  await env.DB.prepare('DELETE FROM oauth_states WHERE state_hash=?1').bind(stateHash).run();
+  try{
+    const key=integrationEncryptionKey(env);
+    if(!key)throw new Error('ENCRYPTION_NOT_CONFIGURED');
+    const tokens=await exchangeGoogleCode(code,oauthRedirectUri(request,env,'/integrations/recruitment-gmail/callback'),env);
+    const profile=await fetchGoogleProfile(tokens.access_token);
+    if(!profile?.sub||!profile?.email||profile.email_verified===false)throw new Error('INVALID_GOOGLE_PROFILE');
+    const email=String(profile.email).trim().toLowerCase();
+    const existing=await env.DB.prepare(`SELECT * FROM recruitment_gmail_accounts WHERE client_id=?1 AND google_sub=?2`).bind(Number(auth.clientId),String(profile.sub)).first();
+    let previous=null;
+    if(existing?.encrypted_tokens){try{previous=await decryptJson(existing.encrypted_tokens,key);}catch{}}
+    const payload={access_token:tokens.access_token,refresh_token:tokens.refresh_token||previous?.refresh_token||null,expires_at:new Date(Date.now()+Number(tokens.expires_in||3600)*1000).toISOString(),token_type:'Bearer'};
+    if(!payload.refresh_token)throw new Error('REFRESH_TOKEN_REQUIRED');
+    const encrypted=await encryptJson(payload,key);
+    await env.DB.prepare(`INSERT INTO recruitment_gmail_accounts (client_id,google_sub,email,encrypted_tokens,scopes,token_expires_at,status,enabled,auto_sync,connected_by_user_id,last_error) VALUES (?1,?2,?3,?4,?5,?6,'connected',1,1,?7,NULL) ON CONFLICT(client_id,google_sub) DO UPDATE SET email=excluded.email,encrypted_tokens=excluded.encrypted_tokens,scopes=excluded.scopes,token_expires_at=excluded.token_expires_at,status='connected',enabled=1,auto_sync=1,last_error=NULL,connected_by_user_id=excluded.connected_by_user_id,updated_at=CURRENT_TIMESTAMP`).bind(Number(auth.clientId),String(profile.sub),email,encrypted,tokens.scope||'',payload.expires_at,Number(auth.user.id)).run();
+    // Explicitly opt out of reading recruitment mail from the main Drive/Sheets/Payroll account.
+    // Do not unlink that Google Workspace account or alter its Drive / Sheets / Payroll credentials.
+    const hasPreviousAccounts=await env.DB.prepare(`SELECT COUNT(*) AS n FROM recruitment_gmail_accounts WHERE client_id=?1 AND status='connected'`).bind(Number(auth.clientId)).first();
+    if(Number(hasPreviousAccounts?.n||0)===1){
+      await env.DB.prepare(`INSERT INTO recruitment_email_settings (client_id,enabled,auto_sync,query) VALUES (?1,0,0,?2) ON CONFLICT(client_id) DO UPDATE SET enabled=0,auto_sync=0,updated_at=CURRENT_TIMESTAMP`).bind(Number(auth.clientId),RECRUITMENT_MULTI_DEFAULT_QUERY).run();
+    }
+    return redirectResponse(`${appOrigin(request,env)}/?recruitment_gmail=connected`,[clearCookie('nakna_recruitment_gmail_state')]);
+  }catch(error){
+    const msg=String(error?.message||error);
+    console.error(JSON.stringify({level:'error',event:'recruitment_inbox_oauth_failed',message:msg.slice(0,170)}));
+    return recruitmentInboxErrorRedirect(request,env,/REFRESH_TOKEN_REQUIRED/.test(msg)?'refresh_token':/UNIQUE constraint/.test(msg)?'email_already_connected':'connect_failed');
+  }
+}
+async function getRecruitmentInboxAccessToken(env,row){
+  const key=integrationEncryptionKey(env);
+  if(!key||!row.encrypted_tokens)throw new Error('RECONNECT_REQUIRED');
+  const current=await decryptJson(row.encrypted_tokens,key);
+  if(current.access_token&&Date.parse(current.expires_at)>Date.now()+60000)return current.access_token;
+  if(!current.refresh_token)throw new Error('RECONNECT_REQUIRED');
+  let next;
+  try{next=await refreshGoogleAccessToken(current.refresh_token,env);}
+  catch(error){
+    if(/invalid_grant|REAUTH_REQUIRED/i.test(String(error?.message||error))){
+      await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET status='reconnect_required',last_error='สิทธิ์ Gmail หมดอายุ กรุณาเชื่อมบัญชีใหม่',updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(row.id)).run();
+    }
+    throw error;
+  }
+  const payload={...current,access_token:next.access_token,expires_at:new Date(Date.now()+Number(next.expires_in||3600)*1000).toISOString()};
+  const encrypted=await encryptJson(payload,key);
+  await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET encrypted_tokens=?1,token_expires_at=?2,updated_at=CURRENT_TIMESTAMP WHERE id=?3`).bind(encrypted,payload.expires_at,Number(row.id)).run();
+  return payload.access_token;
+}
+async function syncDedicatedRecruitmentInbox(env,accountId,clientId,{limit=25}={}){
+  await ensureRecruitmentMultiGmailReady(env.DB);
+  const row=await env.DB.prepare(`SELECT * FROM recruitment_gmail_accounts WHERE id=?1 AND client_id=?2`).bind(Number(accountId),Number(clientId)).first();
+  if(!row)return {skipped:true,reason:'missing'};
+  if(row.status!=='connected'||!Number(row.enabled))return {skipped:true,reason:'disabled'};
+  // An atomic lease prevents overlapping Cron/manual sync of the same Inbox.
+  const lock=await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET sync_lock_until=datetime('now','+3 minutes') WHERE id=?1 AND client_id=?2 AND status='connected' AND (sync_lock_until IS NULL OR sync_lock_until<=CURRENT_TIMESTAMP)`).bind(Number(row.id),Number(clientId)).run();
+  if(!Number(lock?.meta?.changes||0))return {skipped:true,reason:'already_syncing'};
+  let imported=0,linked=0,skipped=0,scanned=0;
+  try{
+    const access=await getRecruitmentInboxAccessToken(env,row);
+    const query=String(row.query||RECRUITMENT_MULTI_DEFAULT_QUERY).trim();
+    const listUrl=new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
+    listUrl.searchParams.set('maxResults',String(Math.max(1,Math.min(50,Number(limit)||25))));
+    if(query)listUrl.searchParams.set('q',query);
+    const listing=await googleApiJson(listUrl.toString(),access);
+    for(const ref of listing.messages||[]){
+      const gmailId=String(ref.id||''); if(!gmailId)continue;
+      scanned++;
+      const seen=await env.DB.prepare(`SELECT id FROM recruitment_inbox_messages WHERE account_id=?1 AND gmail_message_id=?2`).bind(Number(row.id),gmailId).first();
+      if(seen){skipped++;continue;}
+      const msg=await googleApiJson(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(gmailId)}?format=full`,access);
+      const identity=parseEmailIdentity(gmailHeader(msg,'From'));
+      const subject=gmailHeader(msg,'Subject');
+      const dateHeader=gmailHeader(msg,'Date');
+      const receivedAt=dateHeader&&!Number.isNaN(Date.parse(dateHeader))?new Date(dateHeader).toISOString():new Date(Number(msg.internalDate||Date.now())).toISOString();
+      const attachments=gmailAttachmentNames(msg.payload,[]);
+      let candidateId=null,importStatus='seen';
+      if(identity.email){
+        const existing=await env.DB.prepare(`SELECT id FROM candidates WHERE client_id=?1 AND lower(email)=lower(?2) ORDER BY id DESC LIMIT 1`).bind(Number(clientId),identity.email).first();
+        if(existing){candidateId=Number(existing.id);linked++;importStatus='linked_existing';await env.DB.prepare(`UPDATE candidates SET last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(candidateId,Number(clientId)).run();}
+        else{
+          const name=candidateNameParts(identity.name,identity.email);
+          const notes=[`นำเข้าจาก ${row.email}: ${subject||'(ไม่มีหัวข้อ)'}`];
+          if(attachments.length)notes.push(`ไฟล์แนบ: ${attachments.join(', ')}`);
+          // Conditional insert prevents the same applicant being created twice by concurrent Inbox syncs.
+          const created=await env.DB.prepare(`INSERT INTO candidates (client_id,first_name,last_name,email,position_name,source,stage,notes,last_activity_at) SELECT ?1,?2,?3,?4,?5,'Gmail','new',?6,CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM candidates WHERE client_id=?1 AND lower(email)=lower(?4))`).bind(Number(clientId),name.first_name,name.last_name,identity.email,inferCandidatePosition(subject),notes.join('\n').slice(0,1500)).run();
+          if(Number(created.meta.changes||0)>0){candidateId=Number(created.meta.last_row_id);imported++;importStatus='candidate_created';}
+          else { const recheck=await env.DB.prepare(`SELECT id FROM candidates WHERE client_id=?1 AND lower(email)=lower(?2) ORDER BY id DESC LIMIT 1`).bind(Number(clientId),identity.email).first();candidateId=Number(recheck?.id||0)||null;linked++;importStatus='linked_existing'; }
+        }
+      }
+      await env.DB.prepare(`INSERT OR IGNORE INTO recruitment_inbox_messages (client_id,account_id,gmail_message_id,gmail_thread_id,sender_name,sender_email,subject,received_at,snippet,attachment_names,candidate_id,import_status) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`).bind(Number(clientId),Number(row.id),gmailId,msg.threadId||null,identity.name||null,identity.email||null,subject||null,receivedAt,String(msg.snippet||'').slice(0,500),attachments.length?JSON.stringify(attachments):null,candidateId,importStatus).run();
+    }
+    await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(row.id)).run();
+    return {scanned,imported,linked,skipped,source_email:row.email};
+  }catch(error){
+    const message=String(error?.message||error).slice(0,300);
+    await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET last_error=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2`).bind(message,Number(row.id)).run().catch(()=>{});
+    throw error;
+  }finally{
+    await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET sync_lock_until=NULL WHERE id=?1`).bind(Number(row.id)).run().catch(()=>{});
+  }
+}
+async function syncAllDedicatedRecruitmentInboxes(env){
+  await ensureRecruitmentMultiGmailReady(env.DB);
+  const accounts=await env.DB.prepare(`SELECT id,client_id FROM recruitment_gmail_accounts WHERE status='connected' AND enabled=1 AND auto_sync=1 ORDER BY COALESCE(last_sync_at,'2000-01-01') ASC LIMIT 20`).all();
+  for(const row of accounts.results||[]){try{await syncDedicatedRecruitmentInbox(env,row.id,row.client_id,{limit:20});}catch(error){console.error(JSON.stringify({level:'error',event:'recruitment_inbox_sync_failed',account_id:row.id,message:String(error?.message||error).slice(0,160)}));}}
+}
+
 async function getRecruitmentGmailStatus(env,clientId){
-  await ensureV100P7Ready(env.DB);
-  const [settings,workspace,count]=await Promise.all([
+  await ensureRecruitmentMultiGmailReady(env.DB);
+  const [settings,workspace,count,accounts]=await Promise.all([
     env.DB.prepare(`SELECT * FROM recruitment_email_settings WHERE client_id=?1`).bind(Number(clientId)).first(),
     env.DB.prepare(`SELECT email,status,scopes FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM recruitment_email_messages WHERE client_id=?1`).bind(Number(clientId)).first(),
+    getRecruitmentInboxAccounts(env,clientId),
   ]);
-  return {connected:Boolean(workspace),email:workspace?.email||null,enabled:settings?Boolean(Number(settings.enabled)):true,auto_sync:settings?Boolean(Number(settings.auto_sync)):true,query:settings?.query||'newer_than:30d {สมัคร resume CV "job application"}',last_sync_at:settings?.last_sync_at||null,last_error:settings?.last_error||null,imported_messages:Number(count?.n||0)};
+  return {connected:Boolean(workspace)||accounts.some(a=>a.status==='connected'),email:workspace?.email||accounts[0]?.email||null,primary_connected:Boolean(workspace),primary_email:workspace?.email||null,enabled:settings?Boolean(Number(settings.enabled)):true,auto_sync:settings?Boolean(Number(settings.auto_sync)):true,query:settings?.query||RECRUITMENT_MULTI_DEFAULT_QUERY,last_sync_at:settings?.last_sync_at||null,last_error:settings?.last_error||null,imported_messages:Number(count?.n||0)+accounts.reduce((n,a)=>n+a.imported_messages,0),accounts};
 }
+
 
 function gmailHeader(message,name){
   const headers=message?.payload?.headers||[];

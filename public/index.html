@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_LEAVE20261020A" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_MULTIGMAIL20261020A" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -42,6 +42,7 @@
 <script defer src="/ui/p10-5.js?v=P10.5-ux1"></script>
   <link rel="stylesheet" href="/ui/nk-rewards-workspace.css?v=20261019-r1"/>
   <link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A" />
+  <link rel="stylesheet" href="/ui/nk-multi-gmail.css?v=MGMAIL20261020A" />
   <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A" />
 </head>
 <body>
@@ -422,7 +423,7 @@
         </div>
         <article id="recruitmentGmailCard" class="panel recruitment-gmail-card">
           <div class="panel-head">
-            <div><p class="kicker">GMAIL INBOX</p><h3>ผู้สมัครจาก Gmail</h3><p class="panel-subtitle">ใช้ Google ของบริษัทอ่านเฉพาะเมลตาม Search Query แล้วสร้าง Candidate อัตโนมัติ พร้อมกันเมลซ้ำด้วย Gmail Message ID</p></div>
+            <div><p class="kicker">GMAIL INBOX</p><h3>ผู้สมัครจาก Gmail</h3><p class="panel-subtitle">เชื่อม Gmail รับสมัครงานหลายบัญชีได้ โดยไม่กระทบ Drive, Sheets หรือ Payroll ของบริษัท</p></div>
             <span id="recruitmentGmailBadge" class="badge badge-warning">กำลังตรวจสอบ</span>
           </div>
           <div class="gmail-sync-grid">
@@ -432,7 +433,10 @@
             <div><span>IMPORTED MAIL</span><strong id="recruitmentGmailImported">0 อีเมล</strong></div>
           </div>
           <div id="recruitmentGmailError" class="integration-error hidden"></div>
-          <div class="gmail-sync-actions"><button id="recruitmentGmailConnectBtn" class="primary-btn" type="button">เชื่อม Google</button><button id="recruitmentGmailSyncBtn" class="primary-btn hidden" type="button">Sync Gmail ตอนนี้</button><button id="recruitmentGmailSettingsBtn" class="secondary-btn hidden" type="button">ตั้งค่า Query</button></div>
+          <div class="gmail-sync-actions"><button id="recruitmentGmailAddAccount" class="primary-btn" type="button">+ เชื่อม Gmail รับสมัครงาน</button><button id="recruitmentGmailConnectBtn" class="secondary-btn" type="button">เชื่อม Google หลัก</button><button id="recruitmentGmailSyncBtn" class="secondary-btn hidden" type="button">Sync Google หลัก</button><button id="recruitmentGmailSettingsBtn" class="secondary-btn hidden" type="button">ตั้งค่า Google หลัก</button></div>
+          <div class="nk-mgmail-heading"><h4>บัญชีรับสมัครงานที่เชื่อม</h4><small>แต่ละบัญชี Sync แยกกัน · ใบสมัครทั้งหมดเข้ารวมใน Pipeline ด้านล่าง</small></div>
+          <div id="recruitmentGmailAccountList" class="nk-mgmail-list" aria-live="polite"></div>
+          <p class="nk-mgmail-help">บัญชี Google หลักใช้สำหรับ Drive / Sheets / Payroll เหมือนเดิม · เชื่อมบัญชีรับสมัครงานบัญชีแรกแล้วระบบจะหยุดอ่านใบสมัครจาก Google หลักอัตโนมัติ · การเข้าถึง Gmail ต้องผ่านการยินยอมของเจ้าของบัญชี</p>
         </article>
         <div class="ats-summary"><span><strong id="candidateTotal">0</strong> ผู้สมัครทั้งหมด</span><span><strong id="candidateInterview">0</strong> รอสัมภาษณ์</span><span><strong id="candidateOffer">0</strong> อยู่ขั้น Offer</span></div>
         <div id="kanban" class="kanban"></div>
@@ -1541,7 +1545,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_LEAVE20261020A" type="module"></script>
+  <script src="/app.js?v=NAKNA_MULTIGMAIL20261020A" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
