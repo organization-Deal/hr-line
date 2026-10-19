@@ -1,3 +1,4 @@
+/* NAKNA_OA_SETTINGS_REMOVED_20261019: UI-only retirement; keep existing integrations and LINE delivery intact. */
 const NAKNA_FRONTEND_BUILD='P10.1-ATTENDANCE-UX'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
 // P9.15.3 — Face settings render lifecycle + deployment visibility fix.
 // If a Face link is accidentally served by index.html, recover before booting the HR login page.
@@ -48,6 +49,7 @@ const state = {
   learning: { courses: [], assignments: [], summary: {} },
   performance: { cycles: [], goals: [], one_on_ones: [], probation_reviews: [], probation_due: [], summary: {} },
   engagement: { rules: [], rewards: [], redemptions: [], leaderboard: [], recent_transactions: [], summary: {} },
+  wellness: { settings: {}, summary: {}, today_sessions: [], routine: [] },
   analytics: { summary: {}, headcount_trend: [], departments: [], recruitment: {}, moments: [] },
   subscription: null,
   saasAdmin: null,
@@ -304,6 +306,7 @@ function renderViewData(name){
     if(name==='documents'){ renderDocuments(); return; }
     if(name==='performance'){ renderGrowth(); return; }
     if(name==='engagement'){ renderEngagement(); return; }
+    if(name==='wellness'){ renderWellness(); return; }
     if(name==='analytics'){ renderAnalytics(); return; }
     if(name==='saas-admin'){ renderSaasAdmin(); return; }
     if(name==='settings'){ renderSettings(); renderSettingsSidebar(); renderWorkLocations(); renderLeavePolicies(); renderAttendanceSettingsControls({fetchFace:true}); return; }
@@ -353,6 +356,8 @@ async function loadViewData(name,{force=false}={}){
         if(canReadBroadcasts){ const [learning,performance]=await Promise.all([load('/api/learning/overview',state.learning),load('/api/performance/overview',state.performance)]); state.learning=learning||state.learning; state.performance=performance||state.performance; }
       }else if(name==='engagement'){
         if(canViewPeople){ state.engagement=await load('/api/engagement/overview',state.engagement)||state.engagement; }
+      }else if(name==='wellness'){
+        if(canViewPeople){ state.wellness=await load('/api/wellness/overview',state.wellness)||state.wellness; }
       }else if(name==='analytics'){
         if(canViewPeople){ state.analytics=await load('/api/analytics/overview',state.analytics)||state.analytics; }
       }else if(name==='saas-admin'){
@@ -660,6 +665,7 @@ const viewMeta = {
   documents: ['เอกสาร', 'DOCUMENTS'],
   performance: ['Learning & KPI', 'GROWTH OS'],
   engagement: ['แต้ม & ของรางวัล', 'ENGAGEMENT'],
+  wellness: ['พักยืดกับนากนะ', 'NAKNA MOVE'],
   analytics: ['People Analytics', 'PEOPLE INTELLIGENCE'],
   'saas-admin': ['Nakna Admin', 'SAAS CONTROL'],
   settings: ['ตั้งค่า', 'SYSTEM'],
@@ -671,7 +677,7 @@ const settingsCategoryMeta = {
   attendance: { title: 'ตั้งค่าการเช็กอิน', kicker: 'ATTENDANCE', description: 'กำหนดสถานที่ พิกัด รัศมี และกติกาเช็กเอาต์นอกพื้นที่' },
   leave: { title: 'การลา & วันหยุด', kicker: 'LEAVE & HOLIDAY', description: 'ตั้งประเภทลา สิทธิ์ช่วงทดลองงาน และปฏิทินวันหยุดบริษัท' },
   approvals: { title: 'สิทธิ์ & การอนุมัติ', kicker: 'APPROVAL FLOW', description: 'กำหนดหัวหน้า ผู้อนุมัติ และสิทธิ์ที่ใช้ในแต่ละ Workflow' },
-  integrations: { title: 'การเชื่อมต่อ', kicker: 'INTEGRATIONS', description: 'เชื่อม LINE, Gmail, Google Drive และ Google Sheets' },
+  integrations: { title: 'การเชื่อมต่อ', kicker: 'INTEGRATIONS', description: 'ตรวจสอบ LINE นากนะ และจัดการ Gmail, Google Drive และ Google Sheets' },
   payroll: { title: 'ตั้งค่า Payroll', kicker: 'PAYROLL', description: 'กำหนดวันจ่าย ภาษี ประกันสังคม และกติกาการหัก' },
   billing: { title: 'แพ็กเกจ & Billing', kicker: 'SUBSCRIPTION', description: 'ดู Free Trial, Active Seats, แพ็กเกจ และ Invoice' },
 };
@@ -1233,12 +1239,6 @@ function bindEvents() {
   $('#googleWorkspaceSyncBtn').onclick = syncGoogleWorkspace;
   $('#googleWorkspaceDisconnectBtn').onclick = disconnectGoogleWorkspace;
   $('#statusGoogleAction').onclick = connectGoogleWorkspace;
-  $('#lineIntegrationShortcut').onclick = openLineIntegrationModal;
-  $('#statusLineAction').onclick = openLineIntegrationModal;
-  $('#lineConfigureBtn').onclick = openLineIntegrationModal;
-  $('#lineTestBtn').onclick = testLineIntegration;
-  $('#lineDisconnectBtn').onclick = disconnectLineIntegration;
-  $('#lineIntegrationSaveBtn').onclick = saveLineIntegration;
   $('#approverAccessShortcut').onclick = () => document.querySelector('#approverAccessSection')?.scrollIntoView({behavior:'smooth',block:'start'});
   $('#addCompanyAccessBtn').onclick = openCompanyAccessModal;
   $('#companyAccessSaveBtn').onclick = saveCompanyAccess;
@@ -1246,7 +1246,6 @@ function bindEvents() {
   $('#addApproverAccessBtn').onclick = () => openApproverAccessModal();
   $('#approverAccessSaveBtn').onclick = saveApproverAccess;
   $('#approverRolePreset').onchange = applyApproverRolePreset;
-  $('#copyLineWebhookModalBtn').onclick = copyLineWebhookFromModal;
   $('#refreshBtn').onclick = () => loadViewData(state.currentView || 'dashboard',{force:true});
   $('#createBroadcastBtn').onclick = openBroadcastModal;
   $('#broadcastAudience').onchange = renderBroadcastAudienceFields;
@@ -1290,6 +1289,12 @@ function bindEvents() {
   $('#documentGenerateSaveBtn').onclick = nkdocsHandleWizardNext;
   $('#runPointRulesBtn').onclick = runPointRules;
   $('#manualAwardBtn').onclick = openManualAward;
+  if($('#wellnessSaveBtn')) $('#wellnessSaveBtn').onclick = saveWellnessSettings;
+  if($('#wellnessRemindNowBtn')) $('#wellnessRemindNowBtn').onclick = sendWellnessReminderNow;
+  if($('#wellnessPreviewBtn')) $('#wellnessPreviewBtn').onclick = openWellnessPreview;
+  if($('#wellnessTestTiming')) $('#wellnessTestTiming').onchange = syncWellnessTestTimingUi;
+  if($('#wellnessTestSendBtn')) $('#wellnessTestSendBtn').onclick = sendWellnessTestReminder;
+  if($('#wellnessTestScheduleStatus')) $('#wellnessTestScheduleStatus').onclick = event => { const btn=event.target.closest('[data-cancel-wellness-test]'); if(btn) cancelWellnessTestSchedule(Number(btn.dataset.cancelWellnessTest)); };
   $('#createPointRuleBtn').onclick = openPointRule;
   $('#createRewardBtn').onclick = openReward;
   $('#subscriptionPlanBtn').onclick = openSubscriptionPlan;
@@ -3613,7 +3618,6 @@ function toggleSettingsNav() {
 }
 
 function showView(name) {
-  if (name === 'wellness') name = 'dashboard'; // Nakna Move retired
   const target = $(`#view-${name}`);
   if (!target) return;
 
@@ -5069,10 +5073,10 @@ function renderGoogleWorkspace() {
 
 function renderSetupOverview(){
   const profile=state.companyProfile||state.dashboard?.client||activeCompany()||{};const line=state.lineIntegration||{};const google=state.googleWorkspace||{};
-  const companyReady=companyProfileCompleted(profile);const lineReady=Boolean(line.mode==='dedicated'&&line.connected);const googleReady=Boolean(google.connected&&google.integration?.drive_folder_id&&google.integration?.spreadsheet_id);
+  const companyReady=companyProfileCompleted(profile);const lineReady=Boolean((line.mode==='dedicated'&&line.connected)||line.default_available);const googleReady=Boolean(google.connected&&google.integration?.drive_folder_id&&google.integration?.spreadsheet_id);
   const ready=[companyReady,lineReady,googleReady].filter(Boolean).length;$('#setupOverviewBadge').textContent=`${ready}/3 พร้อมใช้งาน`;$('#setupOverviewBadge').className=`badge ${ready===3?'badge-success':ready?'badge-soft':'badge-neutral'}`;$('#setupProgressBar').style.width=`${ready/3*100}%`;
   $('#statusCompanyBadge').className=`badge ${companyReady?'badge-success':'badge-warning'}`;$('#statusCompanyBadge').textContent=companyReady?'พร้อมใช้งาน':'ควรตรวจ';$('#statusCompanyText').textContent=companyReady?`${profile.name} · ${profile.work_start}–${profile.work_end} · ${profile.timezone}`:'ใส่ชื่อบริษัท เวลาเข้างาน และเวลาสิ้นสุดงานให้ครบ';
-  const dedicated=line.mode==='dedicated'&&line.connected;$('#statusLineBadge').className=`badge ${dedicated?'badge-success':line.default_available?'badge-soft':'badge-warning'}`;$('#statusLineBadge').textContent=dedicated?'เชื่อมธุรกิจแล้ว':line.default_available?'ใช้นากนะกลาง':'ยังไม่เชื่อม';$('#statusLineText').textContent=dedicated?`${line.integration?.bot_display_name||'LINE OA บริษัท'} เชื่อมกับ Workspace แล้ว`:line.default_available?'ตอนนี้ใช้ LINE “นากนะ” กลางอยู่ เชื่อม OA บริษัทได้เมื่อพร้อม':'ยังไม่มี LINE สำหรับ Workspace นี้';$('#statusLineAction').disabled=!canManageGoogleWorkspace();$('#statusLineAction').textContent=dedicated?'แก้การเชื่อมต่อ':'ตั้งค่า LINE OA';
+  const dedicated=line.mode==='dedicated'&&line.connected;$('#statusLineBadge').className=`badge ${lineReady?'badge-success':'badge-warning'}`;$('#statusLineBadge').textContent=lineReady?'พร้อมใช้งาน':'ต้องตรวจสอบ';$('#statusLineText').textContent=dedicated?`${line.integration?.bot_display_name||'ช่องทาง LINE เดิม'} · ${line.integration?.webhook_active?'พร้อมใช้งาน':'รอตรวจ Webhook'}`:line.default_available?'LINE นากนะกลางพร้อมใช้งานกับพนักงาน ไม่ต้องเชื่อม OA ของบริษัท':'LINE กลางยังไม่พร้อม กรุณาติดต่อผู้ดูแลระบบ';
   $('#statusGoogleBadge').className=`badge ${googleReady?'badge-success':'badge-neutral'}`;$('#statusGoogleBadge').textContent=googleReady?'เชื่อมแล้ว':'ยังไม่เชื่อม';$('#statusGoogleText').textContent=googleReady?`${google.integration?.email||'Google'} · Gmail ✓ Drive ✓ Sheets ✓`:'เชื่อมครั้งเดียวเพื่อเปิด Gmail, Drive และ HR Database Sheet';$('#statusGoogleAction').disabled=!canManageGoogleWorkspace();$('#statusGoogleAction').textContent=googleReady?'ดู Google':'เชื่อม Google';
   $('#statusGoogleAction').onclick=googleReady?()=>document.querySelector('#googleWorkspaceSection')?.scrollIntoView({behavior:'smooth'}):connectGoogleWorkspace;
 }
@@ -5256,131 +5260,21 @@ async function saveApproverAccess(){
   }catch(error){toast(error.message,true);}finally{button.disabled=false;}
 }
 
+// Company-owned LINE OA setup retired from regular Nakna Settings.
+// Existing integrations remain intact in storage and messaging paths;
+// the sidebar only reports the actually active LINE channel.
 function renderLineIntegration() {
-  const data = state.lineIntegration || { mode: 'nakna_default', connected: false };
-  const dedicated = data.mode === 'dedicated' && data.connected;
-  const info = data.integration || {};
-  const title = $('#lineCompanyTitle');
-  const text = $('#lineCompanyText');
-  const badge = $('#lineCompanyBadge');
-  const logo = $('#lineCompanyLogo');
-  const meta = $('#lineIntegrationMeta');
-
-  const canManage = ['owner','co_owner','hr_admin'].includes(String(activeCompanyRole() || ''));
-  if (dedicated) {
-    $('#sidebarLineTitle').textContent = info.bot_display_name || 'LINE OA บริษัท';
-    $('#sidebarLineText').textContent = info.webhook_active ? 'เชื่อมกับ Workspace แล้ว' : 'รอเปิด Use webhook';
-    title.textContent = info.bot_display_name || 'LINE OA ของบริษัท';
-    text.textContent = info.webhook_active
-      ? 'เชื่อมกับ Workspace นี้แล้ว และ LINE เปิดใช้งาน Webhook อยู่'
-      : 'เชื่อม OA แล้ว แต่ LINE ยังไม่ได้เปิด Use webhook';
-    badge.className = `badge ${info.webhook_active ? 'badge-success' : 'badge-warning'}`;
-    badge.textContent = info.webhook_active ? 'พร้อมใช้งาน' : 'รอเปิด Webhook';
-    logo.textContent = 'LINE';
-    meta.classList.remove('hidden');
-    meta.innerHTML = `
-      <span><b>Basic ID</b> ${escapeHtml(info.bot_basic_id || '—')}</span>
-      <span><b>Webhook</b> <button type="button" class="inline-copy-btn" onclick="window.copyWorkspaceWebhook()">คัดลอก URL</button></span>
-      ${info.last_test_at ? `<span><b>ทดสอบล่าสุด</b> ${escapeHtml(formatDateTime(info.last_test_at))}</span>` : ''}`;
-    $('#lineConfigureBtn').textContent = 'แก้การเชื่อมต่อ';
-    $('#lineTestBtn').classList.remove('hidden');
-    $('#lineDisconnectBtn').classList.remove('hidden');
-  } else {
-    $('#sidebarLineTitle').textContent = data.default_available ? 'LINE นากนะ' : 'ยังไม่เชื่อม LINE';
-    $('#sidebarLineText').textContent = data.default_available ? 'Nakna Default' : 'ตั้งค่าที่เมนูระบบ';
-    title.textContent = data.bot?.display_name ? `ใช้ ${data.bot.display_name}` : 'LINE นากนะ';
-    text.textContent = data.default_available
-      ? 'ตอนนี้ Workspace ใช้ LINE “นากนะ” กลาง พนักงานใช้งานได้ทันที'
-      : 'ยังไม่มี LINE OA สำหรับ Workspace นี้';
-    badge.className = `badge ${data.default_available ? 'badge-soft' : 'badge-neutral'}`;
-    badge.textContent = data.default_available ? 'Nakna Default' : 'ยังไม่เชื่อม';
-    meta.classList.add('hidden');
-    meta.innerHTML = '';
-    $('#lineConfigureBtn').textContent = 'เชื่อม LINE OA บริษัท';
-    $('#lineTestBtn').classList.add('hidden');
-    $('#lineDisconnectBtn').classList.add('hidden');
-  }
-  $('#lineConfigureBtn').classList.toggle('hidden', !canManage);
-  if (!canManage) { $('#lineTestBtn').classList.add('hidden'); $('#lineDisconnectBtn').classList.add('hidden'); }
+  const line = state.lineIntegration || {};
+  const dedicated = line.mode === 'dedicated' && line.connected;
+  const title = $('#sidebarLineTitle');
+  const sub = $('#sidebarLineText');
+  if (title) title.textContent = dedicated
+    ? (line.integration?.bot_display_name || 'LINE สำหรับพนักงาน')
+    : (line.default_available ? 'LINE นากนะ พร้อมใช้งาน' : 'LINE ยังไม่พร้อม');
+  if (sub) sub.textContent = dedicated
+    ? (line.integration?.webhook_active ? 'ช่องทาง LINE เดิมของบริษัท' : 'กรุณาติดต่อผู้ดูแลระบบ')
+    : (line.default_available ? 'ช่องทางกลางของนากนะ' : 'กรุณาติดต่อผู้ดูแลระบบ');
 }
-
-function openLineIntegrationModal() {
-  const data = state.lineIntegration || {};
-  const info = data.integration || {};
-  $('#lineIntegrationForm').reset();
-  $('#lineChannelId').value = info.channel_id || '';
-  $('#lineChannelSecret').value = '';
-  $('#lineAccessToken').value = '';
-  $('#lineWebhookPreview').value = info.webhook_url || 'ระบบจะสร้างหลังเชื่อม';
-  $('#lineIntegrationSaveBtn').textContent = data.mode === 'dedicated' ? 'อัปเดตการเชื่อมต่อ' : 'เชื่อมและตั้ง Webhook';
-  $('#lineIntegrationModal').showModal();
-}
-
-async function saveLineIntegration() {
-  const channel_secret = $('#lineChannelSecret').value.trim();
-  const access_token = $('#lineAccessToken').value.trim();
-  const channel_id = $('#lineChannelId').value.trim();
-  if (channel_secret.length < 16 || access_token.length < 20) return toast('กรุณาใส่ Channel Secret และ Channel Access Token ให้ครบ', true);
-  const button = $('#lineIntegrationSaveBtn');
-  button.disabled = true;
-  button.textContent = 'กำลังเชื่อม LINE…';
-  try {
-    const result = await api('/api/integrations/line', { method: 'PUT', body: JSON.stringify({ channel_id, channel_secret, access_token }) });
-    state.lineIntegration = { mode: 'dedicated', connected: true, integration: result.integration };
-    $('#lineWebhookPreview').value = result.integration?.webhook_url || '';
-    $('#lineIntegrationModal').close();
-    renderLineIntegration();
-    toast('เชื่อม LINE Official Account เรียบร้อยแล้ว');
-  } catch (error) {
-    toast(error.message, true);
-  } finally {
-    button.disabled = false;
-    button.textContent = 'เชื่อมและตั้ง Webhook';
-  }
-}
-
-async function testLineIntegration() {
-  const button = $('#lineTestBtn');
-  button.disabled = true;
-  button.textContent = 'กำลังทดสอบ…';
-  try {
-    const result = await api('/api/integrations/line/test', { method: 'POST', body: '{}' });
-    if (result.ok) toast('Webhook ของ LINE รับข้อมูลจากนากนะได้แล้ว');
-    else toast(`Webhook ยังไม่พร้อม: ${result.webhook?.test?.reason || 'กรุณาตรวจ Use webhook'}`, true);
-    state.lineIntegration = await api('/api/integrations/line');
-    renderLineIntegration();
-  } catch (error) {
-    toast(error.message, true);
-  } finally {
-    button.disabled = false;
-    button.textContent = 'ทดสอบ';
-  }
-}
-
-async function disconnectLineIntegration() {
-  if (!confirm('ยกเลิก LINE OA ของบริษัทนี้? หลังยกเลิก Invite ใหม่จะกลับไปใช้ LINE นากนะกลาง')) return;
-  const button = $('#lineDisconnectBtn');
-  button.disabled = true;
-  try {
-    await api('/api/integrations/line', { method: 'DELETE' });
-    state.lineIntegration = await api('/api/integrations/line');
-    renderLineIntegration();
-    toast('ยกเลิก LINE OA ของบริษัทแล้ว');
-  } catch (error) {
-    toast(error.message, true);
-  } finally { button.disabled = false; }
-}
-
-function copyLineWebhookFromModal() {
-  const value = $('#lineWebhookPreview').value;
-  if (!value || value.startsWith('ระบบจะ')) return toast('เชื่อม LINE OA ก่อน ระบบจึงจะสร้าง Webhook URL', true);
-  copyText(value);
-}
-
-window.copyWorkspaceWebhook = () => {
-  const value = state.lineIntegration?.integration?.webhook_url;
-  if (value) copyText(value);
-};
 
 function copyText(value) {
   navigator.clipboard?.writeText(value).then(() => toast('คัดลอกแล้ว')).catch(() => {
@@ -6202,6 +6096,35 @@ function renderEngagement(){
   const rewards=d.rewards||[];$('#rewardCatalogList').innerHTML=rewards.length?rewards.map(r=>`<article class="reward-card ${r.status!=='active'?'inactive':''}"><div class="reward-emoji">${rewardEmoji(r.reward_type)}</div><div><strong>${escapeHtml(r.title)}</strong><p>${escapeHtml(r.description||'')}</p><small>${Number(r.points_cost||0).toLocaleString('th-TH')} แต้ม${Number(r.cash_value||0)>0?` · มูลค่า ${money(r.cash_value)}`:''}${r.stock_qty!=null?` · เหลือ ${r.stock_qty}`:' · ไม่จำกัดจำนวน'}</small></div><span class="badge ${r.status==='active'?'badge-success':'badge-neutral'}">${r.status==='active'?'พร้อมแลก':'ปิด'}</span></article>`).join(''):emptyState('ยังไม่มีของรางวัล','เพิ่มของขวัญ เงินรางวัล หรือสิทธิพิเศษให้ทีม');
   const reds=d.redemptions||[],pending=reds.filter(x=>x.status==='pending').length;$('#redemptionQueueBadge').textContent=`${pending} รอจัดการ`;$('#redemptionList').innerHTML=reds.length?reds.slice(0,30).map(r=>`<div class="phase5-row"><div class="reward-emoji small">${rewardEmoji(r.reward_type)}</div><div class="phase5-copy"><strong>${escapeHtml(r.nickname||r.first_name)} · ${escapeHtml(r.reward_title)}</strong><p>${Number(r.points_cost||0).toLocaleString('th-TH')} แต้ม · ${formatDateTime(r.requested_at)}</p></div><span class="badge ${r.status==='pending'?'badge-warning':r.status==='approved'?'badge-success':r.status==='delivered'?'badge-soft':'badge-neutral'}">${redemptionLabel(r.status)}</span>${canManage?redemptionActions(r):''}</div>`).join(''):emptyState('ยังไม่มีคำขอแลก','คำขอจาก Employee Portal จะมาอยู่ตรงนี้');
 }
+function wellnessStatusLabel(status){return ({completed:'ทำแล้ว',started:'กำลังทำ',reminded:'รอทำ',skipped:'ข้ามวันนี้'})[status]||'ยังไม่ได้เริ่ม';}
+function renderWellness(){
+  const d=state.wellness||{},settings=d.settings||{},summary=d.summary||{}; if(!$('#wellnessSummary'))return; const canManage=canManageEngagementUi();
+  $('#wellnessSaveBtn')?.classList.toggle('hidden',!canManage); $('#wellnessRemindNowBtn')?.classList.toggle('hidden',!canManage); $('#wellnessPreviewBtn')?.classList.toggle('hidden',!canManage); $$('#view-wellness input,#view-wellness select').forEach(el=>el.disabled=!canManage);
+  $('#wellnessSummary').innerHTML=[['พนักงานที่เชื่อม LINE',summary.line_connected||0,'LINE'],['ทำแล้ววันนี้',summary.completed||0,'DONE'],['กำลังทำ',summary.started||0,'ACTIVE'],['ข้ามวันนี้',summary.skipped||0,'SKIP'],['ยังรอ',summary.pending||0,'PENDING']].map(([label,value,key])=>`<article><span>${key}</span><strong>${Number(value||0)}</strong><p>${label}</p></article>`).join('');
+  $('#wellnessEnabled').checked=Boolean(settings.enabled); $('#wellnessReminderTime').value=settings.reminder_time||'15:00'; $('#wellnessDuration').value=String(settings.duration_minutes||3); $('#wellnessSnooze').value=String(settings.snooze_minutes||30); $('#wellnessPoints').value=String(Number(settings.points_reward||0)); $('#wellnessCamera').checked=settings.camera_enabled!==false; if($('#wellnessPoseTracking')) $('#wellnessPoseTracking').checked=settings.pose_tracking_enabled!==false; $('#wellnessWorkdayOnly').checked=settings.workday_only!==false;
+  const test=d.test_mode||{},tester=test.employee||null,testRoot=$('#wellnessTestRecipient');
+  if(testRoot){if(tester){testRoot.classList.remove('unavailable');testRoot.innerHTML=`<span class="wellness-test-avatar">${escapeHtml(String(tester.nickname||tester.first_name||'T').slice(0,1).toUpperCase())}</span><div><strong>${escapeHtml(tester.nickname||tester.first_name)} · ส่งเฉพาะ LINE ของคุณ</strong><small>${escapeHtml(tester.employee_code||'')} · ${tester.line_connected?'LINE เชื่อมแล้ว':'ยังไม่ได้เชื่อม LINE'}</small></div>`;}else{testRoot.classList.add('unavailable');testRoot.innerHTML=`<span class="wellness-test-avatar">!</span><div><strong>ยังหาพนักงานที่ตรงกับบัญชีนี้ไม่เจอ</strong><small>ตั้ง Email ใน Employee Profile ให้ตรงกับบัญชีที่ล็อกอิน และเชื่อม LINE ก่อนทดสอบ</small></div>`;}}
+  const testBtn=$('#wellnessTestSendBtn');if(testBtn)testBtn.disabled=!tester?.line_connected;
+  const scheduled=test.scheduled||null,status=$('#wellnessTestScheduleStatus');if(status){status.classList.toggle('hidden',!scheduled);status.innerHTML=scheduled?`<span>🧪 ทดสอบถัดไป: <strong>${formatDateTime(scheduled.scheduled_for)}</strong> · ${escapeHtml(tester?.nickname||tester?.first_name||'ฉัน')}</span><button type="button" data-cancel-wellness-test="${Number(scheduled.id)}">ยกเลิก</button>`:'';}
+  syncWellnessTestTimingUi();
+  const routine=d.routine||[]; $('#wellnessRoutinePreview').innerHTML=routine.length?routine.map((step,i)=>`<div class="wellness-routine-row"><span>${i+1}</span><div><strong>${escapeHtml(step.title)}</strong><small>${escapeHtml(step.instruction)}${step.cue?` · AI: ${escapeHtml(step.cue)}`:''}</small></div><em>${Number(step.seconds||0)} วิ</em></div>`).join(''):emptyState('กำลังเตรียมท่ายืด','เปิดหน้านี้ใหม่อีกครั้ง');
+  const sessions=d.today_sessions||[]; $('#wellnessTodayBadge').textContent=`${Number(summary.completed||0)}/${Number(summary.line_connected||0)} ทำแล้ว`;
+  $('#wellnessTeamList').innerHTML=sessions.length?sessions.map(row=>`<div class="wellness-team-row"><span class="mini-avatar">${initial(row)}</span><div><strong>${escapeHtml(row.nickname||row.first_name)}</strong><small>${escapeHtml(row.department_name||'ไม่ระบุแผนก')}${row.completed_at?` · ${formatDateTime(row.completed_at)}`:''}${Number(row.ai_tracking_used)?` · AI ${Math.round(Number(row.ai_score||0))}% (${Number(row.ai_passed_steps||0)}/${Number(row.ai_total_steps||0)})`:''}</small></div><span class="badge ${row.status==='completed'?'badge-success':row.status==='skipped'?'badge-neutral':row.status==='started'?'badge-soft':'badge-warning'}">${wellnessStatusLabel(row.status)}</span>${Number(row.points_awarded||0)>0?`<b>+${Number(row.points_awarded||0)} pts</b>`:''}</div>`).join(''):emptyState('ยังไม่มี Activity วันนี้','เมื่อระบบส่งเตือน หรือพนักงานเปิดพักยืด รายชื่อจะมาอยู่ตรงนี้');
+}
+function openWellnessPreview(){
+  const url=`/wellness.html?preview=1&v=${Date.now()}`;
+  const win=window.open(url,'_blank');
+  if(win){try{win.opener=null;}catch{}}else location.href=url;
+}
+async function saveWellnessSettings(){
+  const button=$('#wellnessSaveBtn');button.disabled=true;try{const poseEnabled=$('#wellnessPoseTracking')?.checked!==false;if(poseEnabled&&$('#wellnessCamera'))$('#wellnessCamera').checked=true;const result=await api('/api/wellness/settings',{method:'PATCH',body:JSON.stringify({enabled:$('#wellnessEnabled').checked,reminder_time:$('#wellnessReminderTime').value,duration_minutes:Number($('#wellnessDuration').value||3),snooze_minutes:Number($('#wellnessSnooze').value||30),points_reward:Number($('#wellnessPoints').value||0),camera_enabled:$('#wellnessCamera').checked,pose_tracking_enabled:poseEnabled,workday_only:$('#wellnessWorkdayOnly').checked})});state.wellness.settings=result.settings||state.wellness.settings;markViewLoaded('wellness');renderWellness();toast('บันทึกการตั้งค่า Wellness แล้ว');}catch(e){toast(e.message,true)}finally{button.disabled=false;}}
+async function sendWellnessReminderNow(){
+  if(!confirm('ส่ง Wellness Reminder ให้ทีมงานที่เข้าเงื่อนไขตอนนี้ใช่ไหม?\n\nถ้าต้องการตรวจสอบ Flow ก่อน ให้ใช้ “พรีวิวสำหรับ HR” แทน'))return;
+  const button=$('#wellnessRemindNowBtn');button.disabled=true;button.textContent='กำลังส่งทั้งทีม…';try{const r=await api('/api/wellness/remind-now',{method:'POST',body:'{}'});toast(`ส่งเตือนแล้ว ${Number(r.sent||0)} คน${Number(r.failed||0)?` · ไม่สำเร็จ ${r.failed}`:''}`);queueBackgroundRefresh('wellness:remind',async()=>{state.wellness=await api('/api/wellness/overview',{silentStatus:true});markViewLoaded('wellness');renderWellness();});}catch(e){toast(e.message,true)}finally{button.disabled=false;button.textContent='ส่งเตือนทั้งทีมตอนนี้';}}
+function syncWellnessTestTimingUi(){const timing=$('#wellnessTestTiming')?.value||'now';$('#wellnessTestTimeField')?.classList.toggle('hidden',timing!=='custom');const btn=$('#wellnessTestSendBtn');if(btn)btn.textContent=timing==='now'?'ส่งให้ฉันตอนนี้':timing==='1'?'ส่งให้ฉันอีก 1 นาที':timing==='5'?'ส่งให้ฉันอีก 5 นาที':'ตั้งเวลาส่งให้ฉัน';}
+async function sendWellnessTestReminder(){const btn=$('#wellnessTestSendBtn'),timing=$('#wellnessTestTiming')?.value||'now';const body=timing==='now'?{mode:'now'}:timing==='custom'?{mode:'time',scheduled_time:$('#wellnessTestTime')?.value||''}:{mode:'delay',delay_minutes:Number(timing)};if(timing==='custom'&&!body.scheduled_time)return toast('กรุณาเลือกเวลาส่ง',true);btn.disabled=true;try{const r=await api('/api/wellness/test-reminder',{method:'POST',body:JSON.stringify(body)});toast(r.sent?'ส่งข้อความตรวจสอบให้คุณแล้ว':'ตั้งเวลาส่งแล้ว · ส่งเฉพาะคุณ');queueBackgroundRefresh('wellness:test',async()=>{state.wellness=await api('/api/wellness/overview',{silentStatus:true});markViewLoaded('wellness');renderWellness();});}catch(e){toast(e.message,true)}finally{btn.disabled=false;syncWellnessTestTimingUi();}}
+async function cancelWellnessTestSchedule(id){if(!id)return;try{await api(`/api/wellness/test-schedules/${id}`,{method:'DELETE'});toast('ยกเลิกเวลาส่งตรวจสอบแล้ว');queueBackgroundRefresh('wellness:cancel-test',async()=>{state.wellness=await api('/api/wellness/overview',{silentStatus:true});renderWellness();});}catch(e){toast(e.message,true)}}
+
 function eventRuleLabel(v){return ({attendance_streak:'มาตรงเวลาเป็นชุด' ,learning_complete:'เรียนจบหลักสูตร',kpi_complete:'KPI สำเร็จ',birthday:'วันเกิด',work_anniversary:'ครบรอบงาน',manual:'HR ให้เอง',custom:'กำหนดเอง'})[v]||v;}
 function rewardEmoji(v){return ({gift:'🎁',cash:'💸',leave:'🌴',perk:'✨',custom:'⭐'})[v]||'🎁';}
 function redemptionLabel(v){return ({pending:'รออนุมัติ',approved:'อนุมัติแล้ว',rejected:'ปฏิเสธ',delivered:'ส่งมอบแล้ว',cancelled:'ยกเลิก'})[v]||v;}

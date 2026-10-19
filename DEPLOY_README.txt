@@ -1,28 +1,26 @@
-Nakna HR — Remove Nakna Move / Stretch feature
-Source base: hr-line-main (2).zip + latest available Nakna Documents Redesign patch.
+NAKNA HR — REMOVE COMPANY LINE OA SETTINGS (UI ONLY)
+===============================================
+ชุดนี้ต่อจาก Nakna-HR-REMOVE-STRETCH-CHANGED-ONLY.zip รอบก่อน
+ไฟล์ที่แก้: public/index.html, public/app.js
+ไฟล์ตรวจ: scripts/verify-line-oa-settings-retired.mjs
 
-Changed files:
-  public/index.html       Remove sidebar entry and full HR dashboard view.
-  public/app.js           Remove view handler, API polling, click handlers and UI renderer.
-  public/wellness.html    Retire old links without starting camera or awarding points.
-  src/index.js            Remove backend functionality, LINE menu and automated reminders;
-                          existing old LINE actions respond with 'feature retired'.
-  scripts/verify-move-retired.mjs   Pre-deploy verification script.
+แก้แล้ว:
+- เอาหัวข้อ LINE Official Account ของบริษัทและช่องเชื่อม OA ออกทั้งหมด
+- เอา shortcut / ปุ่มเชื่อม / modal ใส่ Token และ Webhook ของ OA บริษัทออก
+- สถานะ LINE นากนะกลางยังมองเห็นได้ (ไม่มีปุ่มตั้งค่าเพิ่มเติม)
+- 2/3 readiness จะนับ LINE กลางที่พร้อมใช้งานเป็นพร้อม โดยไม่บังคับ OA ของบริษัท
+- หน้า Google ยังอยู่และใช้งานเหมือนเดิม
+- API, database, LINE messaging และ OA ที่เคยเชื่อมไว้ ไม่ถูกลบหรือยกเลิกโดยอัตโนมัติ
 
-HOW TO DEPLOY
-1. Extract the ZIP at the root of the hr-line repository (replace changed files).
-2. Check: npm run check
-3. Check: node scripts/verify-move-retired.mjs
-4. For Cloudflare Builds use Deploy command:
-   node scripts/verify-move-retired.mjs && npx wrangler deploy
-5. Commit and push the changed files to the branch wired to Cloudflare.
-6. Refresh the page (Ctrl+Shift+R) and refresh the LINE employee menu by sending 'เมนู'.
+วิธี Deploy:
+1. อัปไฟล์จาก ZIP ลง Root ของ Repo hr-line โดยให้ public/index.html และ public/app.js ทับที่เดิม
+2. Commit/Push ไป Branch ที่ Cloudflare ใช้จริง
+3. Cloudflare Deploy command (แนะนำ):
+   node scripts/verify-line-oa-settings-retired.mjs && npx wrangler deploy
+4. หลัง Deploy กด Ctrl+Shift+R เพื่อโหลดไฟล์ใหม่ แล้วไป ตั้งค่า > การเชื่อมต่อ
+5. ควรเหลือเพียงสถานะ LINE สำหรับพนักงาน (ดูอย่างเดียว) และ Google พร้อมการเชื่อมต่อ
 
-NOTE
-- No D1 schema changes or destructive deletes; historical wellness/points remain stored.
-- Cloudflare cron stays in place for daily HR briefs, attendance reminders and other HR tasks.
-- Previously delivered LINE stretch cards can't be recalled, but their buttons no longer
-  initiate any activity and they cannot grant new points.
-- public/wellness.js and public/wellness.css are inert legacy assets. They are not linked
-  from the retired route. They may be deleted in source control separately.
-- This package has not been deployed to production. Test with a company account after deploy.
+ข้อจำกัด:
+- ไม่ได้ยกเลิก/ลบการเชื่อม OA บริษัทที่เคยมีอยู่ และไม่ได้ปิด backend endpoints
+- หากต้องการถอดระบบ OA บริษัทถาวร ต้องสำรวจผลกระทบกับลูกค้าที่ยังเชื่อมอยู่ก่อน
+- ไม่ต้องทำ Migration และไม่ต้องแก้ Secrets
