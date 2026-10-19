@@ -307,7 +307,7 @@ function renderViewData(name){
     if(name==='engagement'){ renderEngagement(); return; }
     if(name==='analytics'){ renderAnalytics(); return; }
     if(name==='saas-admin'){ renderSaasAdmin(); return; }
-    if(name==='settings'){ renderSettings(); renderSettingsSidebar(); renderWorkLocations(); renderLeavePolicies(); renderAttendanceSettingsControls({fetchFace:true}); return; }
+    if(name==='settings'){ renderSettings(); renderSettingsSidebar(); renderCompanyHolidays(); renderWorkLocations(); renderLeavePolicies(); renderAttendanceSettingsControls({fetchFace:true}); return; }
   }catch(error){ console.warn('[Nakna] render view failed', name, error); }
 }
 async function loadViewData(name,{force=false}={}){
@@ -3743,6 +3743,7 @@ function openSettingsCategory(category, { scroll = true } = {}) {
   if ($('#settingsDetailKicker')) $('#settingsDetailKicker').textContent = meta.kicker;
   if ($('#settingsDetailDescription')) $('#settingsDetailDescription').textContent = meta.description;
   syncSettingsSidebar();
+  if (category === 'leave') { setLeaveSettingsTab(nkLeaveActiveTab); renderCompanyHolidays(); if(!holidayUi.loading && Date.now()-holidayUi.loadedAt>15000) refreshCompanyHolidays(); }
   if (category === 'company') fillCompanyProfileForm();
   if (category === 'attendance') renderAttendanceSettingsControls({fetchFace:true});
   if (category === 'approvals' && ['owner','co_owner'].includes(String(activeCompanyRole()||''))) loadCompanyAccess();
@@ -4086,6 +4087,109 @@ window.quickSetEmployeeDepartment = async (employeeId,departmentId) => {
   }catch(e){patchEmployeeLocal(employeeId,{department_id:previous});renderPeopleFast();toast(e.message,true);}finally{if(select)select.disabled=false;}
 };
 
+// Company holidays have their own read-only endpoint. Do not mistake a failed
+// people-core request for "zero holidays", and never mutate holiday data on view.
+const holidayUi={records:null,year:null,yearTouched:false,loading:false,error:'',loadedAt:0,pending:null};
+let nkLeaveActiveTab='holidays';
+window.setLeaveSettingsTab=function(tab){
+  if(!['holidays','policies','probation'].includes(tab))return;
+  nkLeaveActiveTab=tab;
+  document.querySelectorAll('[data-nk-leave-panel]').forEach(el=>el.classList.toggle('is-active',el.dataset.nkLeavePanel===tab));
+  document.querySelectorAll('[data-nk-leave-tab]').forEach(el=>{
+    const active=el.dataset.nkLeaveTab===tab;
+    el.classList.toggle('is-active',active);
+    el.setAttribute('aria-pressed',String(active));
+  });
+  if(tab==='holidays')renderCompanyHolidays();
+  if(tab==='policies')renderLeavePolicies();
+};
+window.setHolidayYear=function(year){
+  const n=Number(year);
+  if(!Number.isInteger(n)||n<2000||n>2100)return;
+  holidayUi.year=n;
+  holidayUi.yearTouched=true;
+  renderCompanyHolidays();
+};
+window.reloadCompanyHolidays=()=>refreshCompanyHolidays();
+async function refreshCompanyHolidays(){
+  if(holidayUi.pending)return holidayUi.pending;
+  holidayUi.loading=true;holidayUi.error='';renderCompanyHolidays();
+  holidayUi.pending=(async()=>{
+    try{
+      const response=await api('/api/company-holidays',{timeoutMs:15000,silentStatus:true});
+      if(!Array.isArray(response?.data))throw new Error('ข้อมูลวันหยุดที่ได้รับไม่ถูกต้อง');
+      holidayUi.records=response.data;
+      if(!holidayUi.yearTouched){
+        const currentYear=new Date().getFullYear();
+        const allYears=[...new Set(response.data.map(h=>Number(String(h.holiday_date||'').slice(0,4))).filter(y=>y>=2000&&y<=2100))].sort((a,b)=>b-a);
+        holidayUi.year=allYears.includes(currentYear)?currentYear:(allYears[0]||currentYear);
+      }
+      holidayUi.loadedAt=Date.now();
+      state.peopleCore={...(state.peopleCore||{}),holidays:response.data};
+      holidayUi.error='';
+      renderSettingsSidebar();
+    }catch(error){
+      holidayUi.error=String(error?.message||'ดึงข้อมูลวันหยุดไม่สำเร็จ');
+      console.warn('[Nakna] company holidays refresh failed',error);
+    }finally{holidayUi.loading=false;holidayUi.pending=null;renderCompanyHolidays();}
+  })();
+  return holidayUi.pending;
+}
+function renderCompanyHolidays(){
+  const root=$('#holidayList'),badge=$('#holidayCountBadge'),summary=$('#holidayCompliance');
+  if(!root||!badge||!summary)return;
+  const records=Array.isArray(holidayUi.records)?holidayUi.records:Array.isArray(state.peopleCore?.holidays)?state.peopleCore.holidays:[];
+  const currentYear=new Date().getFullYear();
+  const years=[...new Set(records.map(h=>Number(String(h.holiday_date||'').slice(0,4))).filter(n=>n>=2000&&n<=2100))].sort((a,b)=>b-a);
+  if(holidayUi.year===null){holidayUi.year=years.includes(currentYear)?currentYear:(years.length?years[0]:currentYear);}
+  const selected=holidayUi.year;
+  const yearSelect=$('#holidayYearSelect');
+  if(yearSelect){
+    const possible=[...new Set([...years,currentYear-1,currentYear,currentYear+1,selected])].sort((a,b)=>b-a);
+    const options=possible.map(y=>`<option value="${y}" ${y===selected?'selected':''}>พ.ศ. ${y+543}${years.includes(y)?' • มีข้อมูล':''}</option>`).join('');
+    if(yearSelect.innerHTML!==options)yearSelect.innerHTML=options;
+    yearSelect.value=String(selected);
+  }
+  const list=records.filter(h=>String(h.holiday_date||'').startsWith(String(selected))).sort((a,b)=>String(a.holiday_date||'').localeCompare(String(b.holiday_date||'')));
+  const paid=list.filter(h=>Number(h.is_paid)===1).length;
+  badge.textContent=holidayUi.loading&&!holidayUi.loadedAt?'กำลังโหลด…':`${list.length} วัน · พ.ศ. ${selected+543}`;
+  const status=$('#holidayDataStatus');
+  if(status){
+    if(holidayUi.loading)status.textContent='กำลังดึงข้อมูลจากบริษัท…';
+    else if(holidayUi.error)status.textContent='โหลดไม่สำเร็จ · กด “โหลดใหม่” เพื่อลองอีกครั้ง';
+    else if(holidayUi.loadedAt)status.textContent='ข้อมูลล่าสุดจาก Workspace';
+    else status.textContent='รอโหลดข้อมูลวันหยุด';
+  }
+  if(holidayUi.error){
+    summary.className='holiday-compliance nk-holiday-summary warn';
+    summary.innerHTML=`<strong>โหลดวันหยุดไม่สำเร็จ</strong><span>${escapeHtml(holidayUi.error)} · ข้อมูลเดิมที่แสดงอาจไม่ใช่ข้อมูลล่าสุด</span>`;
+  }else{
+    summary.className='holiday-compliance nk-holiday-summary';
+    const otherYears=years.filter(y=>y!==selected);
+    const hint=!list.length&&otherYears.length?`พบวันหยุดในปี ${otherYears.map(y=>y+543).join(', ')} — เปลี่ยนปีเพื่อดูรายการเดิม`:!list.length?'ยังไม่มีวันหยุดในปีที่เลือก':'ข้อมูลใช้ประกอบปฏิทิน HR และ Payroll ควรตรวจทานกับประกาศบริษัท';
+    summary.innerHTML=`<div class="nk-holiday-metrics"><span><strong>${list.length}</strong> วันหยุดในปี</span><span><strong>${paid}</strong> วันมีค่าจ้าง</span><span><strong>${list.length-paid}</strong> วันไม่มีค่าจ้าง</span></div><span>${hint}</span>`;
+  }
+  if(holidayUi.loading&&!holidayUi.loadedAt){root.innerHTML='<div class="nk-holiday-empty">กำลังโหลดวันหยุดของบริษัท…</div>';return;}
+  if(!list.length){
+    const extra=years.length?`<small>มีข้อมูลวันหยุดในปี ${years.map(y=>y+543).join(', ')} — เลือกปีด้านบนเพื่อเปิดดู</small>`:'';
+    root.innerHTML=`<div class="nk-holiday-empty"><strong>ไม่มีรายการวันหยุดในปี ${selected+543}</strong>${extra}<span>กด “+ เพิ่มวันหยุด” หรือเปลี่ยนปีเพื่อค้นหารายการเดิม</span></div>`;
+    return;
+  }
+  const typeName=t=>({traditional:'ตามประเพณี',company:'บริษัท',special:'พิเศษ'})[t]||t||'ไม่ระบุ';
+  let lastMonth='';
+  root.innerHTML=list.map(h=>{
+    const date=String(h.holiday_date||'');
+    const valid=/^\d{4}-\d{2}-\d{2}$/.test(date);
+    const parsed=valid?new Date(`${date}T12:00:00`):null;
+    const month=parsed&&!isNaN(parsed.valueOf())?parsed.toLocaleDateString('th-TH',{month:'long',year:'numeric'}):'ไม่ระบุเดือน';
+    const header=month!==lastMonth?`<div class="nk-holiday-month">${escapeHtml(month)}</div>`:'';
+    lastMonth=month;
+    const day=parsed&&!isNaN(parsed.valueOf())?parsed.getDate():'—';
+    const shortMonth=parsed&&!isNaN(parsed.valueOf())?parsed.toLocaleDateString('th-TH',{month:'short'}):'';
+    return `${header}<div class="holiday-row nk-holiday-row"><div class="holiday-date"><strong>${day}</strong><span>${escapeHtml(shortMonth)}</span></div><div class="nk-holiday-row-copy"><strong>${escapeHtml(h.name||'ไม่ระบุชื่อ')}</strong><small>${escapeHtml(typeName(h.holiday_type))} · ${Number(h.is_paid)===1?'ได้รับค่าจ้าง':'ไม่ได้รับค่าจ้าง'}</small></div><button class="text-btn danger-text" type="button" onclick="window.deleteHoliday(${Number(h.id)})">ลบ</button></div>`;
+  }).join('');
+}
+
 function renderPeopleCore(){
   const core=state.peopleCore||{}; const departments=core.departments||[]; const schedules=core.schedules||[]; const holidays=core.holidays||[];
   const org=$('#organizationChart');
@@ -4121,11 +4225,7 @@ function renderPeopleCore(){
     const cards=[...groups.entries()].map(([key,rules])=>{const [type,id]=key.split(':');const byDay=new Map(rules.map(r=>[Number(r.weekday),r]));return `<article class="schedule-card"><div class="schedule-head"><div><span class="scope-chip">${type==='company'?'บริษัท':type==='department'?'แผนก':'รายคน'}</span><strong>${escapeHtml(scopeName(type,Number(id)))}</strong></div><div class="schedule-actions"><button class="text-btn" onclick="window.openScheduleFor('${type}',${Number(id)})">ตั้งเวลาเพิ่ม</button><button class="text-btn danger-text" onclick="window.resetSchedule('${type}',${Number(id)})">ล้าง Override</button></div></div><div class="week-strip">${order.map((label,i)=>{const r=byDay.get(i+1);return `<div class="day-cell ${r&&Number(r.is_workday)?'work':'off'}"><b>${label}</b><span>${r?(Number(r.is_workday)?escapeHtml(r.start_time||'—'):'หยุด'):'ตามค่าเริ่มต้น'}</span></div>`}).join('')}</div></article>`}).join('');
     scheduleRoot.innerHTML=cards||`<article class="schedule-card default"><div class="schedule-head"><div><span class="scope-chip">ค่าเริ่มต้น</span><strong>ทั้งบริษัท</strong><small>${escapeHtml(state.companyProfile?.work_start||'09:00')}–${escapeHtml(state.companyProfile?.work_end||'18:00')} · จันทร์–ศุกร์</small></div><button class="text-btn" onclick="window.openScheduleFor('company',0)">กำหนดตาราง</button></div></article>`;
   }
-  const holidayRoot=$('#holidayList'); if(holidayRoot){
-    const currentYear=new Date().getFullYear(); const yearItems=holidays.filter(h=>String(h.holiday_date||'').startsWith(String(currentYear)));
-    $('#holidayCountBadge').textContent=`${yearItems.length} วันใน ${currentYear+543}`; $('#holidayCompliance').className=`holiday-compliance ${yearItems.length>=13?'ok':'warn'}`; $('#holidayCompliance').innerHTML=yearItems.length>=13?`<strong>✓ จำนวนวันหยุดปีนี้ ${yearItems.length} วัน</strong><span>ตรวจสอบชื่อวันหยุดและวันแรงงานให้ตรงนโยบายบริษัทอีกครั้ง</span>`:`<strong>ควรตรวจวันหยุดประจำปี</strong><span>ตอนนี้มี ${yearItems.length} วัน · ระบบแนะนำให้ HR ตรวจ requirement วันหยุดตามประเพณีก่อนประกาศใช้</span>`;
-    holidayRoot.innerHTML=holidays.length?holidays.slice(0,30).map(h=>`<div class="holiday-row"><div class="holiday-date"><strong>${new Date(`${h.holiday_date}T12:00:00`).getDate()}</strong><span>${new Date(`${h.holiday_date}T12:00:00`).toLocaleDateString('th-TH',{month:'short'})}</span></div><div><strong>${escapeHtml(h.name)}</strong><small>${h.holiday_type==='traditional'?'วันหยุดตามประเพณี':escapeHtml(h.holiday_type)}${Number(h.is_paid)?' · จ่ายค่าจ้าง':' · ไม่จ่ายค่าจ้าง'}</small></div><button class="text-btn danger-text" onclick="window.deleteHoliday(${Number(h.id)})">ลบ</button></div>`).join(''):emptyState('ยังไม่ได้ตั้งวันหยุดบริษัท','เพิ่มวันหยุดประจำปีให้พนักงานตรวจสอบได้จากระบบ');
-  }
+  renderCompanyHolidays();
   renderAttendanceSettingsControls();
 }
 
@@ -4185,8 +4285,8 @@ function openScheduleModal(type='company',id=0){$('#scheduleScopeType').value=ty
 function refreshScheduleTarget(){const type=$('#scheduleScopeType').value;const target=$('#scheduleScopeId');if(type==='company'){target.innerHTML='<option value="0">ทั้งบริษัท</option>';target.disabled=true;}else if(type==='department'){target.disabled=false;target.innerHTML=(state.peopleCore.departments||[]).map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');}else{target.disabled=false;target.innerHTML=state.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}">${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</option>`).join('');}}
 async function saveSchedule(){const weekdays=$$('#scheduleWeekdays input:checked').map(i=>Number(i.value));if(!weekdays.length)return toast('เลือกวันที่ต้องการตั้งเวลาอย่างน้อย 1 วัน',true);const body={scope_type:$('#scheduleScopeType').value,scope_id:Number($('#scheduleScopeId').value||0),rules:weekdays.map(weekday=>({weekday,is_workday:$('#scheduleIsWorkday').checked,start_time:$('#scheduleStart').value,end_time:$('#scheduleEnd').value,late_grace_minutes:Number($('#scheduleGrace').value||0)}))};const b=$('#scheduleSaveBtn');b.disabled=true;try{await api('/api/work-schedules',{method:'PUT',body:JSON.stringify(body)});$('#scheduleModal').close();await refreshPeopleCoreOnly();toast('บันทึกเวลาทำงานแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
 function openHolidayModal(){ $('#holidayDate').value='';$('#holidayName').value='';$('#holidayType').value='traditional';$('#holidayPaid').checked=true;$('#holidayNotes').value='';$('#holidayModal').showModal(); }
-async function saveHoliday(){const body={holiday_date:$('#holidayDate').value,name:$('#holidayName').value.trim(),holiday_type:$('#holidayType').value,is_paid:$('#holidayPaid').checked,notes:$('#holidayNotes').value.trim()};const b=$('#holidaySaveBtn');b.disabled=true;try{await api('/api/company-holidays',{method:'POST',body:JSON.stringify(body)});$('#holidayModal').close();await refreshPeopleCoreOnly();toast('เพิ่มวันหยุดบริษัทแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
-window.deleteHoliday=async id=>{if(!confirm('ลบวันหยุดนี้ใช่ไหม?'))return;try{await api(`/api/company-holidays/${id}`,{method:'DELETE'});await refreshPeopleCoreOnly();toast('ลบวันหยุดแล้ว');}catch(e){toast(e.message,true);}};
+async function saveHoliday(){const body={holiday_date:$('#holidayDate').value,name:$('#holidayName').value.trim(),holiday_type:$('#holidayType').value,is_paid:$('#holidayPaid').checked,notes:$('#holidayNotes').value.trim()};const b=$('#holidaySaveBtn');b.disabled=true;try{await api('/api/company-holidays',{method:'POST',body:JSON.stringify(body)});$('#holidayModal').close();holidayUi.year=Number(String(body.holiday_date).slice(0,4))||holidayUi.year;holidayUi.yearTouched=true;await refreshCompanyHolidays();toast('เพิ่มวันหยุดบริษัทแล้ว');}catch(e){toast(e.message,true);}finally{b.disabled=false;}}
+window.deleteHoliday=async id=>{if(!confirm('ลบวันหยุดนี้ใช่ไหม?'))return;try{await api(`/api/company-holidays/${id}`,{method:'DELETE'});await refreshCompanyHolidays();toast('ลบวันหยุดแล้ว');}catch(e){toast(e.message,true);}};
 function renderAttendanceReminderSettings(){
   const card=$('#attendanceReminderCard'),toggle=$('#attendanceReminderToggle'),message=$('#attendanceReminderMessage');
   if(!card||!toggle||!message)return;

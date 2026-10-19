@@ -1,0 +1,55 @@
+/* Nakna Leave Settings v20261020A – scoped to Settings only.
+   Keep existing forms, IDs and save/delete handlers intact. */
+.nk-leave-settings { --nk-teal: #04878a; --nk-border: #dce8e7; max-width: 100%; }
+.nk-leave-settings .nk-leave-settings-intro { padding: 3px 0 18px; }
+.nk-leave-settings .nk-leave-settings-intro h2 { font-size:clamp(20px,2.2vw,26px);letter-spacing:-.025em;margin:3px 0 6px;color:#10353c; }
+.nk-leave-settings .nk-leave-settings-intro p:last-child { font-size:13px;line-height:1.55;color:#62787c;margin:0; }
+.nk-leave-settings .nk-leave-tabs { display:flex;gap:8px;padding:5px;background:#eff4f4;border:1px solid #e1e9e8;border-radius:14px;margin:0 0 20px;max-width:540px; }
+.nk-leave-settings .nk-leave-tab { appearance:none;background:transparent;border:0;flex:1;min-width:0;min-height:42px;border-radius:10px;padding:9px 10px;color:#576a70;font:600 13px/1.3 'IBM Plex Sans Thai','IBM Plex Sans',sans-serif;cursor:pointer;transition:background .16s ease,color .16s ease;white-space:nowrap; }
+.nk-leave-settings .nk-leave-tab:hover { background:#e4efee;color:#0d676c; }
+.nk-leave-settings .nk-leave-tab.is-active { background:#fff;color:#056f72;box-shadow:0 1px 4px rgba(15,45,48,.09); }
+.nk-leave-settings .nk-leave-tab:focus-visible {outline:2px solid var(--nk-teal);outline-offset:2px;}
+.nk-leave-settings .nk-leave-panel:not(.is-active) { display:none !important; }
+.nk-leave-settings .nk-leave-panel.is-active {display:block !important; margin:0;padding:0;border:0;}
+.nk-leave-settings .page-intro.compact { padding:0 0 14px;margin:0;gap:15px; }
+.nk-leave-settings .page-intro.compact h2 { font-size:clamp(18px,2vw,23px); }
+.nk-leave-settings .page-intro.compact p:not(.kicker) { font-size:12px;line-height:1.6; }
+.nk-leave-settings .nk-holiday-actions { display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
+.nk-leave-settings .nk-holiday-toolbar {display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:13px 15px;background:#fff;border:1px solid var(--nk-border);border-radius:14px;margin-bottom:12px;}
+.nk-leave-settings .nk-holiday-toolbar label {font-size:12px;font-weight:700;color:#48646a;}
+.nk-leave-settings .nk-holiday-toolbar select {min-width:150px;min-height:39px;border:1px solid #d9e5e3;background:#fff;color:#18373d;border-radius:9px;padding:6px 11px;font-size:13px;}
+.nk-leave-settings .nk-holiday-toolbar .secondary-btn {min-height:39px;font-size:12px;}
+.nk-leave-settings .nk-holiday-data-status { margin-left:auto;color:#6b7f83;font-size:11px;line-height:1.5;}
+.nk-leave-settings .holiday-compliance.nk-holiday-summary {display:flex;flex-direction:column;align-items:stretch;gap:9px;background:#f3faf8;border:1px solid #cbe5e1;padding:13px 15px;border-radius:13px;margin-bottom:10px;}
+.nk-leave-settings .holiday-compliance.nk-holiday-summary.warn {background:#fffaf0;border-color:#f2dca7;}
+.nk-leave-settings .nk-holiday-metrics {display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;}
+.nk-leave-settings .nk-holiday-metrics span {display:flex;gap:5px;align-items:baseline;font-size:12px;color:#48666b;}
+.nk-leave-settings .nk-holiday-metrics strong {font-size:19px;line-height:1;font-weight:700;color:#075d63;}
+.nk-leave-settings .nk-holiday-summary>span {font-size:12px;color:#61777b;line-height:1.6;}
+.nk-leave-settings .nk-holiday-summary.warn>strong {font-size:13px;color:#95650a;}
+.nk-leave-settings .holiday-list {background:#fff;border:1px solid var(--nk-border);border-radius:15px;overflow:hidden;padding:4px 15px 10px;}
+.nk-leave-settings .nk-holiday-month {padding:16px 3px 8px;font-size:12px;font-weight:700;color:#067b80;letter-spacing:.01em;}
+.nk-leave-settings .holiday-row.nk-holiday-row {grid-template-columns:46px minmax(0,1fr) auto;gap:12px;padding:10px 3px;min-height:68px;}
+.nk-leave-settings .holiday-row .holiday-date {width:46px;height:46px;}
+.nk-leave-settings .holiday-row .holiday-date strong {font-size:16px;}
+.nk-leave-settings .holiday-row .holiday-date span {font-size:10px;}
+.nk-leave-settings .nk-holiday-row-copy strong {font-size:13px;color:#13353a;}
+.nk-leave-settings .nk-holiday-row-copy small {font-size:11px;line-height:1.6;color:#61767b;}
+.nk-leave-settings .nk-holiday-empty {min-height:156px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:7px;padding:28px 16px;color:#647980;font-size:12px;line-height:1.5;}
+.nk-leave-settings .nk-holiday-empty strong {color:#24484e;font-size:15px;}
+.nk-leave-settings .nk-holiday-empty small {font-size:12px;color:#667f81;}
+.nk-leave-settings .policy-toggle-card,.nk-leave-settings .leave-policy-card {border-radius:13px;}
+.nk-leave-settings .leave-policy-list {grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+.nk-leave-settings .leave-policy-card {min-width:0;padding:14px;}
+.nk-leave-settings .leave-policy-copy strong {font-size:13px;}
+.nk-leave-settings .leave-policy-copy p {font-size:11px;line-height:1.6;}
+@media (max-width: 700px){
+  .nk-leave-settings .nk-leave-settings-intro {padding-bottom:14px;}
+  .nk-leave-settings .nk-leave-tabs {max-width:100%;gap:3px;padding:4px;}
+  .nk-leave-settings .nk-leave-tab {padding:8px 4px;font-size:12px;}
+  .nk-leave-settings .nk-holiday-toolbar {padding:11px;}
+  .nk-leave-settings .nk-holiday-data-status {margin-left:0;flex-basis:100%;}
+  .nk-leave-settings .holiday-list {padding:0 10px 7px;}
+  .nk-leave-settings .leave-policy-list {grid-template-columns:1fr;}
+  .nk-leave-settings .nk-holiday-row-copy strong {font-size:12px;}
+}

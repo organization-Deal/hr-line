@@ -2354,6 +2354,14 @@ async function handleApi(request, env, url, auth, ctx) {
     return json({ok:true});
   }
 
+  // Dedicated read-only route for holiday settings. No position cleanup or
+  // other unrelated writes during a holiday read. Same authenticated tenant.
+  if(path==='/api/company-holidays' && method==='GET'){
+    await ensureV100P1Ready(env.DB);
+    const result=await env.DB.prepare(`SELECT id,holiday_date,name,holiday_type,is_paid,notes FROM company_holidays WHERE client_id=?1 ORDER BY holiday_date,id`).bind(clientId).all();
+    return json({ok:true,data:result.results||[]});
+  }
+
   if(path==='/api/company-holidays' && method==='POST'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดการวันหยุด'},403);
     await ensureV100P1Ready(env.DB); const body=await safeJson(request); const date=String(body.holiday_date||'').trim(); const name=String(body.name||'').trim(); if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||name.length<2)return json({error:'กรุณาใส่วันที่และชื่อวันหยุด'},400);

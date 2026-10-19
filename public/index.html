@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SERVICE20261020A" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_LEAVE20261020A" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -42,6 +42,7 @@
 <script defer src="/ui/p10-5.js?v=P10.5-ux1"></script>
   <link rel="stylesheet" href="/ui/nk-rewards-workspace.css?v=20261019-r1"/>
   <link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A" />
+  <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A" />
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -941,20 +942,32 @@
           </div>
             </div>
 
-            <div class="settings-category-panel hidden" data-settings-category="leave">
-              <div id="holidaySection" class="people-core-section">
+            <div class="settings-category-panel hidden nk-leave-settings" data-settings-category="leave">
+              <div class="nk-leave-settings-intro"><div><p class="kicker">LEAVE SETTINGS</p><h2>จัดการสิทธิ์ลาและวันหยุด</h2><p>ตั้งค่าวันหยุด ประเภทลา และเงื่อนไขการทดลองงานในพื้นที่เดียว</p></div></div>
+              <nav class="nk-leave-tabs" aria-label="หมวดตั้งค่าการลา">
+                <button class="nk-leave-tab is-active" data-nk-leave-tab="holidays" type="button" aria-pressed="true" onclick="window.setLeaveSettingsTab('holidays')">วันหยุดบริษัท</button>
+                <button class="nk-leave-tab" data-nk-leave-tab="policies" type="button" aria-pressed="false" onclick="window.setLeaveSettingsTab('policies')">ประเภทลา</button>
+                <button class="nk-leave-tab" data-nk-leave-tab="probation" type="button" aria-pressed="false" onclick="window.setLeaveSettingsTab('probation')">ทดลองงาน</button>
+              </nav>
+              <div id="holidaySection" class="people-core-section nk-leave-panel is-active" data-nk-leave-panel="holidays">
             <div class="page-intro compact">
               <div><p class="kicker">COMPANY HOLIDAYS</p><h2>วันหยุดบริษัท</h2><p>HR กำหนดปฏิทินวันหยุดประจำปีไว้ให้พนักงานใช้เป็นข้อมูลกลางเดียวกัน</p></div>
-              <div class="section-action-group"><span id="holidayCountBadge" class="badge badge-soft">0 วัน</span><button id="addHolidayBtn" class="primary-btn" type="button">+ วันหยุด</button></div>
+              <div class="section-action-group nk-holiday-actions"><span id="holidayCountBadge" class="badge badge-soft">กำลังตรวจข้อมูล</span><button id="addHolidayBtn" class="primary-btn" type="button">+ เพิ่มวันหยุด</button></div>
             </div>
-            <div id="holidayCompliance" class="holiday-compliance warn"></div>
+            <div class="nk-holiday-toolbar">
+              <label for="holidayYearSelect">ปีที่แสดง</label>
+              <select id="holidayYearSelect" aria-label="เลือกปีวันหยุด" onchange="window.setHolidayYear(this.value)"></select>
+              <button class="secondary-btn" type="button" onclick="window.reloadCompanyHolidays()">↻ โหลดใหม่</button>
+              <span id="holidayDataStatus" class="nk-holiday-data-status" aria-live="polite">กำลังตรวจสอบข้อมูลวันหยุด…</span>
+            </div>
+            <div id="holidayCompliance" class="holiday-compliance nk-holiday-summary" role="status" aria-live="polite"></div>
             <div id="holidayList" class="holiday-list"></div>
           </div>
-              <div class="leave-access-section">
+              <div class="leave-access-section nk-leave-panel" data-nk-leave-panel="probation">
             <div class="page-intro compact"><div><p class="kicker">LEAVE ACCESS</p><h2>สิทธิ์ลาระหว่างทดลองงาน</h2><p>ตั้งค่าเริ่มต้นของบริษัท แล้ว HR สามารถ Override รายคนจากหน้า Employee Leave Profile ได้</p></div></div>
             <article class="policy-toggle-card"><div><strong>ล็อกสิทธิ์ลาก่อนผ่านทดลองงาน</strong><p>ประเภทลาที่เปิด “ใช้ได้ระหว่างทดลองงาน” จะยังขอได้ตามปกติ</p></div><label class="switch"><input id="probationLeaveLockToggle" type="checkbox" checked><span></span></label></article>
           </div>
-              <div class="leave-policy-section">
+              <div class="leave-policy-section nk-leave-panel" data-nk-leave-panel="policies">
             <div class="page-intro compact">
               <div><p class="kicker">LEAVE POLICY</p><h2>นโยบายและสิทธิ์การลา</h2><p>กำหนดประเภทลา สิทธิ์เริ่มต้น เหตุผล หลักฐาน และเงื่อนไขล่วงหน้าของบริษัท</p></div>
               <button id="addLeavePolicyBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มประเภทลา</button>
@@ -1528,7 +1541,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SERVICE20261020A" type="module"></script>
+  <script src="/app.js?v=NAKNA_LEAVE20261020A" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
