@@ -1,0 +1,53 @@
+/* Nakna Recruitment Screening V1 - production-style scoped UI */
+#view-recruitment .nk-screening { margin:18px 0 20px; padding:22px; border:1px solid #dde9eb; border-radius:18px; background:#fff; box-shadow:0 4px 18px rgba(12,54,59,.025); }
+.nk-screening * { box-sizing:border-box; }
+.nk-screening-top { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.nk-screening-top h3 {margin:4px 0 5px;font-size:20px;line-height:1.3;color:#173d44;}
+.nk-screening-top p:not(.kicker){margin:0;color:#6e858c;font-size:13px;line-height:1.6;}
+.nk-screening-top button {white-space:nowrap;flex-shrink:0;}
+.nk-screening-metrics {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:19px;}
+.nk-screening-stat {background:#f6faf9;border:1px solid #ebf0f1;padding:11px 12px;border-radius:12px;min-width:0;}
+.nk-screening-stat small{display:block;color:#72878a;font-size:11px;line-height:1.4;}
+.nk-screening-stat strong {display:block;margin-top:3px;font-size:22px;line-height:1.25;color:#173d44;font-variant-numeric:tabular-nums;}
+.nk-screening-tools{display:grid;grid-template-columns:minmax(0,1fr) 210px;gap:9px;margin:14px 0 8px;}
+.nk-screening-tools input,.nk-screening-tools select{min-width:0;width:100%;height:42px;border:1px solid #cfdfe2;border-radius:10px;padding:0 13px;background:#fff;font:inherit;font-size:13px;color:#14393e;}
+.nk-screening-result{margin:10px 0 12px;color:#6a8387;font-size:12px;}
+.nk-screening-list{display:grid;gap:9px;}
+.nk-screening-row{display:flex;justify-content:space-between;align-items:center;gap:16px;border:1px solid #e0e9eb;border-radius:14px;padding:14px 15px;background:#fff;}
+.nk-screening-content{flex:1;min-width:0;}
+.nk-screening-line{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:5px;}
+.nk-screening-status{font-size:11px;font-weight:700;padding:4px 8px;border-radius:100px;background:#eff2f3;color:#52626a;white-space:nowrap;}
+.nk-screening-likely,.nk-screening-accepted {color:#12654f;background:#e8f7ef;}
+.nk-screening-review{color:#8b6816;background:#fff5de;}
+.nk-screening-noise,.nk-screening-rejected{color:#924c37;background:#fcf0ea;}
+.nk-screening-score {font-size:11px;color:#7a8d92;}
+.nk-screening-subject {display:block;font-size:14px;color:#102f37;overflow-wrap:anywhere;line-height:1.4;}
+.nk-screening-sender{color:#536d74;font-size:12px;line-height:1.5;margin:4px 0;overflow-wrap:anywhere;}
+.nk-screening-sender span{color:#829499;}
+.nk-screening-snippet{margin:5px 0;color:#6b7c82;font-size:12px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.nk-screening-reasons{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;}
+.nk-screening-reason{padding:3px 7px;background:#f2f5f5;border-radius:6px;font-size:10px;color:#5e7277;}
+.nk-screening-prior{color:#935724;background:#fff0df;}
+.nk-screening-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;max-width:300px;}
+.nk-screening-actions button{min-height:34px;padding:7px 10px;font-size:12px;white-space:nowrap;}
+.nk-screening-done{font-size:12px;color:#12654f;}
+.nk-screening-row details{font-size:11px;color:#566e76;margin-top:7px;}
+.nk-screening-row summary{cursor:pointer;width:max-content;max-width:100%;}
+.nk-screening-row details p{max-width:100%;overflow-wrap:anywhere;}
+.nk-screening-empty{padding:24px;text-align:center;color:#637a80;background:#f7faf9;border:1px dashed #cfdee0;border-radius:12px;}
+.nk-screening-empty strong{display:block;font-size:14px;color:#23454a;margin-bottom:5px;}
+.nk-screening-empty p{font-size:12px;margin:0;}
+.nk-screening-note{font-size:11px;color:#809093;margin:12px 0 0;line-height:1.6;}
+.nk-pipeline-header{display:flex;align-items:center;justify-content:space-between;margin:20px 0 9px;}
+.nk-pipeline-header h3{font-size:17px;color:#163e44;margin:0;}
+.nk-pipeline-header p{color:#69848a;font-size:12px;margin:4px 0 0;}
+@media(max-width:1090px){.nk-screening-metrics{grid-template-columns:repeat(3,minmax(0,1fr));}.nk-screening-row{flex-direction:column;align-items:stretch;}.nk-screening-actions{max-width:none;justify-content:flex-start;}}
+@media(max-width:640px){#view-recruitment .nk-screening{padding:14px;margin-top:12px;border-radius:13px;}.nk-screening-top{align-items:stretch;flex-direction:column;}.nk-screening-top button{align-self:flex-start;}.nk-screening-metrics{grid-template-columns:repeat(3,minmax(0,1fr));}.nk-screening-stat{padding:8px;}.nk-screening-stat strong{font-size:18px;}.nk-screening-stat small{font-size:10px;}.nk-screening-tools{grid-template-columns:minmax(0,1fr);}.nk-screening-row{padding:12px;gap:12px;}.nk-screening-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;}.nk-screening-actions button{white-space:normal;font-size:11px;min-width:0;}}
+/* Keep Gmail connection secondary to the actual HR screening task. */
+#view-recruitment .recruitment-gmail-card { padding:17px 19px; }
+#view-recruitment .recruitment-gmail-card .gmail-sync-grid { margin-block:12px; }
+#view-recruitment .nk-mgmail-list { max-height:220px; overflow:auto; }
+#view-recruitment .kanban { align-items:start; }
+#view-recruitment .kanban .kanban-col { min-height:0 !important; height:auto !important; }
+#view-recruitment .kanban .empty-state { min-height:0 !important; padding:18px 8px !important; }
+@media(max-width:720px){#view-recruitment .recruitment-gmail-card {padding:13px;}}

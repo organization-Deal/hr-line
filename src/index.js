@@ -1830,6 +1830,19 @@ async function handleApi(request, env, url, auth, ctx) {
     return json({ok:true,onboarding:status});
   }
 
+  // Separate Gmail ingestion from HR-approved candidate creation.
+  if(path==='/api/recruitment/screening' && method==='GET'){
+    if(!clientId)return json({error:'COMPANY_REQUIRED'},409);
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์ดูอีเมลคัดกรอง'},403);
+    return json({data:await getRecruitmentScreeningRows(env,clientId)});
+  }
+  if(path==='/api/recruitment/screening/decision' && method==='POST'){
+    if(!clientId)return json({error:'COMPANY_REQUIRED'},409);
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์คัดกรองผู้สมัคร'},403);
+    const result=await decideRecruitmentScreening(env,clientId,Number(auth.user.id),await safeJson(request));
+    return json(result,result.error?400:200);
+  }
+
   // Per-Inbox operations: never mutate Google Workspace credentials.
   if (path === '/api/recruitment/gmail/accounts' && method === 'GET') {
     if (!clientId) return json({error:'COMPANY_REQUIRED'},409);
@@ -3315,7 +3328,8 @@ async function handleApi(request, env, url, auth, ctx) {
   }
 
   if (path === '/api/candidates' && method === 'GET') {
-    await ensureRecruitmentMultiGmailReady(env.DB);
+    await ensureRecruitmentScreeningReady(env.DB);
+    await ensureV100P7Ready(env.DB);
     const result = await env.DB.prepare(`
       SELECT c.*,
         (SELECT group_concat(DISTINCT a.email)
@@ -3323,6 +3337,10 @@ async function handleApi(request, env, url, auth, ctx) {
          JOIN recruitment_gmail_accounts a ON a.id=rim.account_id
          WHERE rim.client_id=c.client_id AND rim.candidate_id=c.id) AS recruitment_inboxes
       FROM candidates c WHERE c.client_id = ?1
+        AND NOT (lower(COALESCE(c.source,''))='gmail' AND c.stage='new'
+          AND (EXISTS(SELECT 1 FROM recruitment_email_messages r WHERE r.client_id=c.client_id AND r.candidate_id=c.id)
+            OR EXISTS(SELECT 1 FROM recruitment_inbox_messages r WHERE r.client_id=c.client_id AND r.candidate_id=c.id))
+          AND NOT EXISTS(SELECT 1 FROM recruitment_screening_decisions d WHERE d.client_id=c.client_id AND d.candidate_id=c.id AND d.decision='accepted'))
       ORDER BY CASE stage
         WHEN 'new' THEN 1 WHEN 'screening' THEN 2 WHEN 'hr_interview' THEN 3
         WHEN 'manager_interview' THEN 4 WHEN 'assignment' THEN 5 WHEN 'offer' THEN 6
@@ -11939,7 +11957,103 @@ async function getWebOnboardingStatus(env,auth){
 }
 
 // RECRUITMENT_MULTI_GMAIL_20261020: Independent read-only Gmail accounts for Recruitment.
-const RECRUITMENT_MULTI_DEFAULT_QUERY = 'newer_than:30d {สมัคร resume CV "job application"}';
+
+// NAKNA_RECRUITMENT_SCREENING_V1 — retain inbox evidence; candidates are created only after HR acceptance.
+async function ensureRecruitmentScreeningReady(db){
+  await ensureRecruitmentMultiGmailReady(db);
+  await db.prepare(`CREATE TABLE IF NOT EXISTS recruitment_screening_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    source_kind TEXT NOT NULL CHECK(source_kind IN ('dedicated','legacy')),
+    message_id INTEGER NOT NULL,
+    decision TEXT NOT NULL CHECK(decision IN ('accepted','rejected','review')),
+    candidate_id INTEGER,
+    decided_by_user_id INTEGER,
+    decided_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(client_id,source_kind,message_id)
+  )`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_screening_client_decision ON recruitment_screening_decisions(client_id,decision)`).run();
+}
+function classifyRecruitmentEmail(message){
+  const subject=String(message.subject||'');
+  const snippet=String(message.snippet||'');
+  const filenames=Array.isArray(message.attachments)?message.attachments:[];
+  const subj=subject.toLowerCase(),body=snippet.toLowerCase();
+  const sender=String(message.sender_email||'').toLowerCase();
+  const domain=sender.split('@')[1]||'';
+  const reasons=[];let score=0;let strong=false;
+  const add=(n,label)=>{score+=n;reasons.push(label)};
+  if(/สมัครงาน|สมัครตำแหน่ง|application for|applying for|job application|apply for|สมัครเข้าทำงาน/i.test(subject)) {add(6,'หัวข้อระบุการสมัครงาน');strong=true;}
+  else if(/(?:^|[\s:,_-])(?:cv|resume)(?:$|[\s:,_-])|เรซูเม่|ประวัติส่วนตัว/i.test(subject)) {add(5,'หัวข้อกล่าวถึง CV/Resume');strong=true;}
+  if(/สมัครงาน|สมัครตำแหน่ง|apply for|job application|i am applying|ขอสมัคร/i.test(snippet)) {add(3,'เนื้อหามีเจตนาสมัครงาน');strong=true;}
+  const cvFiles=filenames.filter(x=>/\.(pdf|docx?|rtf)$/i.test(String(x)) && /(cv|resume|portfolio|สมัครงาน|ประวัติ|application)/i.test(String(x)));
+  if(cvFiles.length) {add(4,'มีไฟล์ CV/Resume');strong=true;}
+  else if(filenames.some(x=>/\.(pdf|docx?)$/i.test(String(x)))) add(1,'มีเอกสารแนบ');
+  if(/portfolio|linkedin\.com\/in\/|behance\.net/i.test(snippet))add(2,'มี Portfolio/โปรไฟล์');
+  if(/\b(08|09|06)\d[ -]?\d{3}[ -]?\d{4}\b/.test(snippet))add(1,'มีเบอร์ติดต่อ');
+  if(/\b(job alert|job digest|newsletter|promotion|invoice|receipt|billing|payment|booking|reservation|verify|security alert|password reset|reminder|digest|weekly update|update function|airbnb|alibaba|peakup)\b|ใบแจ้งหนี้|ใบเสร็จ|ชำระเงิน|รหัสยืนยัน|ข่าวสารประจำสัปดาห์/i.test(subject+' '+snippet))add(-8,'ลักษณะเมลทั่วไป/การตลาด');
+  if(/(^|[.-])(no-?reply|notifications?|mailer|automated)([.@-]|$)/i.test(sender)) add(-6,'ผู้ส่งอัตโนมัติ');
+  if(/(?:^|\.)(google\.com|airbnb\.com|alibaba\.com|businessinsider\.com|peakaccount\.com|linkedin\.com)$/i.test(domain) && !strong)add(-6,'ผู้ส่งไม่ใช่ใบสมัครโดยตรง');
+  // Job boards can forward valid applications: never auto-reject solely from sender/domain.
+  const kind=score>=6&&strong?'likely':score<=-3?'noise':'review';
+  return {score,kind,reasons:reasons.slice(0,6),strong};
+}
+function recruitmentAttachmentList(value){
+  if(!value)return [];
+  try { const arr=JSON.parse(value);return Array.isArray(arr)?arr.map(x=>String(x).slice(0,160)).slice(0,12):[]; }catch{return [];}
+}
+async function getRecruitmentScreeningRows(env,clientId){
+  await ensureRecruitmentScreeningReady(env.DB);
+  await ensureV100P7Ready(env.DB);
+  const [dedicated,legacy]=await Promise.all([
+    env.DB.prepare(`SELECT m.*,a.email AS inbox_email,c.stage AS candidate_stage,(SELECT cc.id FROM candidates cc WHERE cc.client_id=m.client_id AND lower(cc.email)=lower(m.sender_email) ORDER BY cc.id LIMIT 1) AS matching_candidate_id,d.decision,d.decided_at,d.decided_by_user_id,d.candidate_id AS approved_candidate_id FROM recruitment_inbox_messages m JOIN recruitment_gmail_accounts a ON a.id=m.account_id LEFT JOIN candidates c ON c.id=m.candidate_id AND c.client_id=m.client_id LEFT JOIN recruitment_screening_decisions d ON d.client_id=m.client_id AND d.source_kind='dedicated' AND d.message_id=m.id WHERE m.client_id=?1 ORDER BY m.id DESC LIMIT 250`).bind(clientId).all(),
+    env.DB.prepare(`SELECT m.*,g.email AS inbox_email,c.stage AS candidate_stage,(SELECT cc.id FROM candidates cc WHERE cc.client_id=m.client_id AND lower(cc.email)=lower(m.sender_email) ORDER BY cc.id LIMIT 1) AS matching_candidate_id,d.decision,d.decided_at,d.decided_by_user_id,d.candidate_id AS approved_candidate_id FROM recruitment_email_messages m LEFT JOIN google_workspace_integrations g ON g.client_id=m.client_id LEFT JOIN candidates c ON c.id=m.candidate_id AND c.client_id=m.client_id LEFT JOIN recruitment_screening_decisions d ON d.client_id=m.client_id AND d.source_kind='legacy' AND d.message_id=m.id WHERE m.client_id=?1 ORDER BY m.id DESC LIMIT 250`).bind(clientId).all()
+  ]);
+  const pack=(row,source_kind)=>{
+    const attachments=recruitmentAttachmentList(row.attachment_names);
+    const classification=classifyRecruitmentEmail({...row,attachments});
+    return {id:Number(row.id),source_kind,source_email:row.inbox_email||null,
+      sender_name:row.sender_name||'',sender_email:row.sender_email||'',subject:row.subject||'',snippet:row.snippet||'',
+      received_at:row.received_at||row.created_at,attachments,candidate_id:row.approved_candidate_id||row.candidate_id||null,
+      candidate_stage:row.candidate_stage||null,decision:row.decision||null,decided_at:row.decided_at||null,
+      imported_as_candidate:Boolean(row.candidate_id),possible_duplicate_id:row.matching_candidate_id||null,...classification};
+  };
+  return [...(dedicated.results||[]).map(r=>pack(r,'dedicated')),...(legacy.results||[]).map(r=>pack(r,'legacy'))]
+    .sort((a,b)=>String(b.received_at||'').localeCompare(String(a.received_at||''))||b.id-a.id).slice(0,300);
+}
+async function decideRecruitmentScreening(env,clientId,userId,input){
+  const source=String(input.source_kind||'');const msgId=Number(input.id);
+  const decision=String(input.decision||'');
+  if(!['dedicated','legacy'].includes(source)||!Number.isInteger(msgId)||msgId<1||!['accepted','review','rejected'].includes(decision))return {error:'INVALID_SCREENING_DECISION'};
+  await ensureRecruitmentScreeningReady(env.DB);
+  const table=source==='dedicated'?'recruitment_inbox_messages':'recruitment_email_messages';
+  const row=await env.DB.prepare(`SELECT id,client_id,sender_name,sender_email,subject,attachment_names,candidate_id FROM ${table} WHERE id=?1 AND client_id=?2`).bind(msgId,clientId).first();
+  if(!row)return {error:'MESSAGE_NOT_FOUND'};
+  const previous=await env.DB.prepare(`SELECT decision,candidate_id FROM recruitment_screening_decisions WHERE client_id=?1 AND source_kind=?2 AND message_id=?3`).bind(clientId,source,msgId).first();
+  if(previous?.decision==='accepted'&&decision!=='accepted')return {error:'ALREADY_ACCEPTED'};
+  let candidateId=Number(previous?.candidate_id||0)||null;
+  if(decision==='accepted'){
+    const email=String(row.sender_email||'').trim().toLowerCase();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return {error:'SENDER_EMAIL_REQUIRED'};
+    const existing=await env.DB.prepare(`SELECT id FROM candidates WHERE client_id=?1 AND lower(email)=?2 ORDER BY id LIMIT 1`).bind(clientId,email).first();
+    if(existing)candidateId=Number(existing.id);
+    else{
+      const names=candidateNameParts(row.sender_name,email);
+      const subject=String(row.subject||'').trim();
+      const notes=[`HR ยืนยันใบสมัครจาก ${source==='dedicated'?'Recruitment Inbox':'Gmail หลัก'}: ${subject}`].join('\n');
+      const created=await env.DB.prepare(`INSERT INTO candidates(client_id,first_name,last_name,email,position_name,source,stage,notes,last_activity_at) SELECT ?1,?2,?3,?4,?5,'Gmail','new',?6,CURRENT_TIMESTAMP WHERE NOT EXISTS(SELECT 1 FROM candidates WHERE client_id=?1 AND lower(email)=?4)`).bind(clientId,names.first_name,names.last_name,email,inferCandidatePosition(subject),notes.slice(0,1200)).run();
+      candidateId=Number(created?.meta?.last_row_id||0)||null;
+      if(!candidateId){const again=await env.DB.prepare(`SELECT id FROM candidates WHERE client_id=?1 AND lower(email)=?2 ORDER BY id LIMIT 1`).bind(clientId,email).first();candidateId=Number(again?.id)||null;}
+    }
+    if(!candidateId)return {error:'CANDIDATE_CREATE_FAILED'};
+  }
+  await env.DB.prepare(`INSERT INTO recruitment_screening_decisions(client_id,source_kind,message_id,decision,candidate_id,decided_by_user_id) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(client_id,source_kind,message_id) DO UPDATE SET decision=excluded.decision,candidate_id=excluded.candidate_id,decided_by_user_id=excluded.decided_by_user_id,decided_at=CURRENT_TIMESTAMP`).bind(clientId,source,msgId,decision,candidateId,userId).run();
+  if(decision==='accepted'&&candidateId){await env.DB.prepare(`UPDATE ${table} SET candidate_id=?1,import_status='hr_accepted' WHERE id=?2 AND client_id=?3`).bind(candidateId,msgId,clientId).run();}
+  await safeAudit(env.DB,clientId,'user',String(userId),'recruitment.screening.'+decision,'recruitment_email',source+':'+msgId,{candidate_id:candidateId});
+  return {ok:true,decision,candidate_id:candidateId};
+}
+
+const RECRUITMENT_MULTI_DEFAULT_QUERY = 'newer_than:30d {\"สมัครงาน\" \"สมัครตำแหน่ง\" \"job application\" \"apply for\"} -category:promotions';
 async function ensureRecruitmentMultiGmailReady(db){
   if(SCHEMA_READY.has('recruitment_multi_gmail'))return;
   await ensureV100P7Ready(db);
@@ -12064,20 +12178,8 @@ async function syncDedicatedRecruitmentInbox(env,accountId,clientId,{limit=25}={
       const dateHeader=gmailHeader(msg,'Date');
       const receivedAt=dateHeader&&!Number.isNaN(Date.parse(dateHeader))?new Date(dateHeader).toISOString():new Date(Number(msg.internalDate||Date.now())).toISOString();
       const attachments=gmailAttachmentNames(msg.payload,[]);
-      let candidateId=null,importStatus='seen';
-      if(identity.email){
-        const existing=await env.DB.prepare(`SELECT id FROM candidates WHERE client_id=?1 AND lower(email)=lower(?2) ORDER BY id DESC LIMIT 1`).bind(Number(clientId),identity.email).first();
-        if(existing){candidateId=Number(existing.id);linked++;importStatus='linked_existing';await env.DB.prepare(`UPDATE candidates SET last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(candidateId,Number(clientId)).run();}
-        else{
-          const name=candidateNameParts(identity.name,identity.email);
-          const notes=[`นำเข้าจาก ${row.email}: ${subject||'(ไม่มีหัวข้อ)'}`];
-          if(attachments.length)notes.push(`ไฟล์แนบ: ${attachments.join(', ')}`);
-          // Conditional insert prevents the same applicant being created twice by concurrent Inbox syncs.
-          const created=await env.DB.prepare(`INSERT INTO candidates (client_id,first_name,last_name,email,position_name,source,stage,notes,last_activity_at) SELECT ?1,?2,?3,?4,?5,'Gmail','new',?6,CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM candidates WHERE client_id=?1 AND lower(email)=lower(?4))`).bind(Number(clientId),name.first_name,name.last_name,identity.email,inferCandidatePosition(subject),notes.join('\n').slice(0,1500)).run();
-          if(Number(created.meta.changes||0)>0){candidateId=Number(created.meta.last_row_id);imported++;importStatus='candidate_created';}
-          else { const recheck=await env.DB.prepare(`SELECT id FROM candidates WHERE client_id=?1 AND lower(email)=lower(?2) ORDER BY id DESC LIMIT 1`).bind(Number(clientId),identity.email).first();candidateId=Number(recheck?.id||0)||null;linked++;importStatus='linked_existing'; }
-        }
-      }
+      // Keep raw emails in the Screening Queue. HR acceptance is required before Candidate creation.
+      const candidateId=null,importStatus='pending_review';
       await env.DB.prepare(`INSERT OR IGNORE INTO recruitment_inbox_messages (client_id,account_id,gmail_message_id,gmail_thread_id,sender_name,sender_email,subject,received_at,snippet,attachment_names,candidate_id,import_status) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`).bind(Number(clientId),Number(row.id),gmailId,msg.threadId||null,identity.name||null,identity.email||null,subject||null,receivedAt,String(msg.snippet||'').slice(0,500),attachments.length?JSON.stringify(attachments):null,candidateId,importStatus).run();
     }
     await env.DB.prepare(`UPDATE recruitment_gmail_accounts SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(Number(row.id)).run();
@@ -12171,17 +12273,8 @@ async function syncRecruitmentGmailForClient(env,clientId,{limit=25}={}){
     const from=gmailHeader(msg,'From'); const subject=gmailHeader(msg,'Subject'); const dateHeader=gmailHeader(msg,'Date');
     const identity=parseEmailIdentity(from); const receivedAt=dateHeader&&!Number.isNaN(new Date(dateHeader).getTime())?new Date(dateHeader).toISOString():new Date(Number(msg.internalDate||Date.now())).toISOString();
     const attachments=gmailAttachmentNames(msg.payload,[]);
-    let candidateId=null,importStatus='seen';
-    if(identity.email){
-      const existing=await env.DB.prepare(`SELECT id FROM candidates WHERE client_id=?1 AND lower(email)=lower(?2) ORDER BY id DESC LIMIT 1`).bind(cid,identity.email).first();
-      if(existing){candidateId=Number(existing.id);linked++;importStatus='linked_existing';await env.DB.prepare(`UPDATE candidates SET last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1`).bind(candidateId).run();}
-      else{
-        const names=candidateNameParts(identity.name,identity.email); const position=inferCandidatePosition(subject);
-        const noteParts=[`นำเข้าจาก Gmail: ${subject||'(ไม่มีหัวข้อ)'}`]; if(attachments.length)noteParts.push(`ไฟล์แนบ: ${attachments.join(', ')}`);
-        const created=await env.DB.prepare(`INSERT INTO candidates (client_id,first_name,last_name,email,position_name,source,stage,notes,last_activity_at) VALUES (?1,?2,?3,?4,?5,'Gmail','new',?6,CURRENT_TIMESTAMP)`).bind(cid,names.first_name,names.last_name,identity.email,position,noteParts.join('\n').slice(0,1500)).run();
-        candidateId=Number(created.meta.last_row_id); imported++; importStatus='candidate_created';
-      }
-    }
+    // Legacy Google Workspace Inbox follows the same HR-first screening workflow.
+    const candidateId=null,importStatus='pending_review';
     await env.DB.prepare(`INSERT INTO recruitment_email_messages (client_id,gmail_message_id,gmail_thread_id,sender_name,sender_email,subject,received_at,snippet,attachment_names,candidate_id,import_status) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`).bind(cid,gmailId,msg.threadId||null,identity.name||null,identity.email||null,subject||null,receivedAt,String(msg.snippet||'').slice(0,500),attachments.length?JSON.stringify(attachments):null,candidateId,importStatus).run();
   }
   await env.DB.prepare(`INSERT INTO recruitment_email_settings (client_id,enabled,query,auto_sync,last_sync_at,last_error,updated_at) VALUES (?1,1,?2,1,CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP) ON CONFLICT(client_id) DO UPDATE SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP`).bind(cid,query).run();

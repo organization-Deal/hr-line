@@ -1,5 +1,5 @@
 /* NAKNA_BOOT_RECOVERY_20261019; combines retired Stretch + retired company OA without dangling boot handlers. */
-const NAKNA_FRONTEND_BUILD='P10.1-ATTENDANCE-UX'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
+const NAKNA_FRONTEND_BUILD='P10.1-SCREENING-V1'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
 // P9.15.3 — Face settings render lifecycle + deployment visibility fix.
 // If a Face link is accidentally served by index.html, recover before booting the HR login page.
 try {
@@ -22,6 +22,7 @@ const state = {
   onboardingConfig: null,
   onboardingStatus: null,
   recruitmentGmail: null,
+  recruitmentScreening: {data:[],loading:false,error:''},
   benefits: { data: [], enrollments: [] },
   loadErrors: [],
   companyProfile: null,
@@ -294,7 +295,7 @@ function renderViewData(name){
     if(name==='dashboard'){ renderDashboard(); return; }
     if(name==='employees'){ renderEmployees($('#employeeSearch')?.value || ''); renderInviteCenter(); return; }
     if(name==='organization'){ renderPeopleCore(); return; }
-    if(name==='recruitment'){ renderCandidates(); renderRecruitmentGmail(); return; }
+    if(name==='recruitment'){ renderCandidates(); renderRecruitmentGmail(); renderRecruitmentScreening(); return; }
     if(name==='benefits'){ renderBenefits(); return; }
     if(name==='attendance'){ renderTeamWorkLog(); return; }
     if(name==='leave'){ renderLeaves(); renderLeavePolicies(); return; }
@@ -333,7 +334,7 @@ async function loadViewData(name,{force=false}={}){
       }else if(name==='organization'){
         const [employees,peopleCore]=await Promise.all([load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore)]); state.employees=employees?.data||state.employees; state.peopleCore=mergePeopleCoreFromServer(peopleCore)||state.peopleCore;
       }else if(name==='recruitment'){
-        const [candidates,gmail]=await Promise.all([load('/api/candidates',{data:state.candidates}),isHr?load('/api/recruitment/gmail/status',state.recruitmentGmail):Promise.resolve(state.recruitmentGmail)]); state.candidates=candidates?.data||state.candidates; state.recruitmentGmail=gmail||state.recruitmentGmail;
+        const [candidates,gmail,screening]=await Promise.all([load('/api/candidates',{data:state.candidates}),isHr?load('/api/recruitment/gmail/status',state.recruitmentGmail):Promise.resolve(state.recruitmentGmail),isHr?load('/api/recruitment/screening',null):Promise.resolve(null)]); state.candidates=candidates?.data||state.candidates; state.recruitmentGmail=gmail||state.recruitmentGmail; if(screening?.data)state.recruitmentScreening={data:screening.data,loading:false,error:''}; else if(isHr)state.recruitmentScreening={...state.recruitmentScreening,error:'โหลดคิวไม่สำเร็จ กรุณาลองใหม่'};
       }else if(name==='benefits'){
         const [benefits,employees]=await Promise.all([isHr?load('/api/benefits',state.benefits):Promise.resolve(state.benefits),load('/api/employees',{data:state.employees})]); state.benefits=benefits||state.benefits; state.employees=employees?.data||state.employees;
       }else if(name==='attendance'){
@@ -1419,6 +1420,10 @@ function bindEvents() {
     window.location.assign('/integrations/recruitment-gmail/start');
   });
   $('#recruitmentGmailAccountList')?.addEventListener('click', handleRecruitmentGmailAccountAction);
+  $('#nkScreeningReload')?.addEventListener('click',()=>reloadRecruitmentScreening());
+  $('#nkScreeningSearch')?.addEventListener('input',renderRecruitmentScreening);
+  $('#nkScreeningFilter')?.addEventListener('change',renderRecruitmentScreening);
+  $('#nkScreeningList')?.addEventListener('click',handleRecruitmentScreeningAction);
   $('#addBenefitBtn').onclick = openBenefitCreate;
   $('#employeeSearch').addEventListener('input', event => renderEmployees(event.target.value));
 
@@ -2179,6 +2184,7 @@ function renderAll() {
   renderEmployees($('#employeeSearch')?.value || '');
   renderCandidates();
   renderRecruitmentGmail();
+  renderRecruitmentScreening();
   renderBenefits();
   renderAttendance();
   renderLeaves();
@@ -2999,6 +3005,56 @@ function showInviteCreated(url, expiresAt, maxUses) {
   toast('สร้างและคัดลอกลิงก์เชิญแล้ว');
 }
 
+// NAKNA_RECRUITMENT_SCREENING_V1 — controlled list; no global DOM MutationObserver.
+function renderRecruitmentScreening(){
+  const root=$('#nkScreeningList'),metrics=$('#nkScreeningMetrics'),result=$('#nkScreeningResult');
+  if(!root||!metrics||!result)return;
+  if(!['owner','primary_owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''))){$('#nkScreeningPanel')?.classList.add('hidden');return;}
+  $('#nkScreeningPanel')?.classList.remove('hidden');
+  const data=state.recruitmentScreening?.data||[];
+  const counts={all:data.length,pending:0,likely:0,review:0,noise:0,accepted:0,rejected:0};
+  data.forEach(x=>{if(x.decision==='accepted'||x.decision==='rejected')counts[x.decision]++;else{counts.pending++;counts[x.kind]++;}});
+  metrics.innerHTML=[['pending','ยังไม่ตัดสินใจ'],['likely','น่าจะสมัคร'],['review','รอตรวจ'],['noise','ไม่เกี่ยวข้อง'],['accepted','รับแล้ว'],['rejected','คัดออก']].map(([k,label])=>`<div class="nk-screening-stat"><small>${label}</small><strong>${counts[k]||0}</strong></div>`).join('');
+  const filter=$('#nkScreeningFilter')?.value||'pending',query=($('#nkScreeningSearch')?.value||'').toLowerCase().trim();
+  let shown=data.filter(x=>(filter==='all'||(filter==='pending'?!['accepted','rejected'].includes(x.decision):filter==='accepted'||filter==='rejected'?x.decision===filter:!['accepted','rejected'].includes(x.decision)&&x.kind===filter)) && (!query||[x.sender_name,x.sender_email,x.subject,x.snippet,x.source_email].some(v=>String(v||'').toLowerCase().includes(query))));
+  shown=shown.slice(0,150);
+  result.textContent=state.recruitmentScreening?.error||`แสดง ${shown.length} จาก ${data.length} อีเมลล่าสุด • คัดกรองด้วย HR ก่อนเข้าระบบผู้สมัคร`;
+  root.innerHTML=shown.length?shown.map(x=>{
+    const kindLabel={likely:'น่าจะสมัครจริง',review:'รอตรวจ',noise:'ไม่น่าใช่ใบสมัคร'}[x.kind]||'รอตรวจ';
+    const stateLabel=x.decision==='accepted'?'รับเป็นผู้สมัครแล้ว':x.decision==='rejected'?'คัดออกแล้ว':x.decision==='review'?'HR รอตรวจ':kindLabel;
+    const badges=(x.reasons||[]).map(t=>`<span class="nk-screening-reason">${escapeHtml(t)}</span>`).join('');
+    const date=x.received_at?formatDateTime(x.received_at):'ไม่ทราบเวลา';
+    const key=escapeHtml(x.source_kind+':'+x.id);
+    return `<article class="nk-screening-row"><div class="nk-screening-content"><div class="nk-screening-line"><span class="nk-screening-status nk-screening-${x.decision||x.kind}">${stateLabel}</span><span class="nk-screening-score">คะแนน ${Number(x.score)||0} · ${date}</span></div>
+      <strong class="nk-screening-subject">${escapeHtml(x.subject||'(ไม่มีหัวข้อ)')}</strong>
+      <div class="nk-screening-sender">${escapeHtml(x.sender_name||'ไม่ทราบผู้ส่ง')} · ${escapeHtml(x.sender_email||'ไม่มีอีเมล')} <span>· ${escapeHtml(x.source_email||'Gmail หลัก')}</span></div>
+      <p class="nk-screening-snippet">${escapeHtml(x.snippet||'ไม่มีตัวอย่างเนื้อหา')}</p>
+      <div class="nk-screening-reasons">${badges}${x.imported_as_candidate&&!x.decision?'<span class="nk-screening-reason nk-screening-prior">เคยนำเข้าระบบเก่า · รอยืนยัน</span>':''}${x.possible_duplicate_id?`<span class="nk-screening-reason nk-screening-prior">พบ Candidate เดิม #${Number(x.possible_duplicate_id)}</span>`:''}${x.candidate_id&&!x.possible_duplicate_id?`<span class="nk-screening-reason">Candidate #${Number(x.candidate_id)}</span>`:''}</div>
+      ${x.attachments?.length?`<details><summary>ไฟล์แนบ ${x.attachments.length} รายการ</summary><p>${x.attachments.map(a=>escapeHtml(a)).join(' · ')}</p></details>`:''}
+      </div><div class="nk-screening-actions">${x.decision==='accepted'?'<span class="nk-screening-done">ยืนยันแล้ว</span>':`<button class="primary-btn" data-screening="accepted" data-key="${key}" type="button">รับเป็นผู้สมัคร</button><button class="secondary-btn" data-screening="review" data-key="${key}" type="button">รอตรวจ</button><button class="secondary-btn" data-screening="rejected" data-key="${key}" type="button">คัดออก</button>`}</div></article>`;
+  }).join(''):`<div class="nk-screening-empty"><strong>ไม่มีอีเมลในกลุ่มนี้</strong><p>ลองเปลี่ยนตัวกรองหรือกด Sync ที่บัญชี Gmail ด้านบน</p></div>`;
+}
+async function reloadRecruitmentScreening(){
+  const btn=$('#nkScreeningReload');if(btn)btn.disabled=true;
+  try{const response=await api('/api/recruitment/screening',{timeoutMs:20000});state.recruitmentScreening={data:response?.data||[],loading:false,error:''};}
+  catch(error){state.recruitmentScreening={...state.recruitmentScreening,error:error.message||'โหลดคิวไม่ได้'};}
+  finally{if(btn)btn.disabled=false;renderRecruitmentScreening();}
+}
+async function handleRecruitmentScreeningAction(event){
+  const btn=event.target.closest('[data-screening][data-key]');if(!btn)return;
+  const [source_kind,id]=String(btn.dataset.key||'').split(':');const decision=btn.dataset.screening;
+  const current=(state.recruitmentScreening?.data||[]).find(x=>x.source_kind===source_kind&&Number(x.id)===Number(id));
+  if(decision==='accepted'&&current?.kind==='noise'&&!confirm('ระบบประเมินว่าเมลนี้ไม่เกี่ยวกับการสมัครงาน ยืนยันให้เป็นผู้สมัครจริงหรือไม่?'))return;
+  if(decision==='rejected'&&!confirm('คัดอีเมลนี้ออกจากคิวรับสมัคร? ข้อมูลอีเมลยังอยู่ตรวจย้อนหลังได้'))return;
+  btn.disabled=true;
+  try{
+    const response=await api('/api/recruitment/screening/decision',{method:'POST',body:JSON.stringify({source_kind,id:Number(id),decision})});
+    if(!response?.ok)throw new Error(response?.error||'ไม่สามารถบันทึกผล');
+    toast(decision==='accepted'?'ยืนยันผู้สมัครเข้าระบบแล้ว':decision==='rejected'?'คัดออกแล้ว':'ตั้งเป็นรอตรวจแล้ว');
+    await Promise.all([reloadRecruitmentScreening(),refreshRecruitmentOnly({render:true})]);
+  }catch(error){toast(error.message||'บันทึกการคัดกรองไม่สำเร็จ',true);btn.disabled=false;}
+}
+
 function renderCandidates() {
   const activeStages = ['new', 'screening', 'hr_interview', 'manager_interview', 'assignment', 'offer'];
   const total = state.candidates.length;
@@ -3111,8 +3167,9 @@ async function handleRecruitmentGmailAccountAction(event){
     if(action==='sync') {
       const result=await api(`/api/recruitment/gmail/accounts/${id}/sync`,{method:'POST',body:'{}',timeoutMs:45000});
       if(result.skipped)toast(result.reason==='already_syncing'?'บัญชีนี้กำลัง Sync อยู่':'บัญชีนี้ปิดใช้งานอยู่');
-      else toast(`Sync ${account.email} แล้ว · ผู้สมัครใหม่ ${result.imported||0} · เชื่อมคนเดิม ${result.linked||0}`);
+      else toast(`Sync ${account.email} แล้ว · ตรวจเมล ${result.scanned||0} ฉบับ เปิดคิวคัดกรองเพื่อยืนยันผู้สมัคร`);
       await refreshRecruitmentGmail({reloadCandidates:true});
+      await reloadRecruitmentScreening();
     } else if(action==='disconnect') {
       await api(`/api/recruitment/gmail/accounts/${id}`,{method:'DELETE'});
       await refreshRecruitmentGmail();toast('ยกเลิกการเชื่อมต่อแล้ว');
@@ -3137,8 +3194,8 @@ async function syncRecruitmentGmailNow() {
   button.textContent = 'กำลัง Sync…';
   try {
     const result = await api('/api/recruitment/gmail/sync', { method:'POST', body:'{}', timeoutMs:45000 });
-    toast(`Gmail Sync สำเร็จ · เพิ่ม ${result.imported || 0} ผู้สมัคร · เชื่อมของเดิม ${result.linked || 0}`);
-    queueBackgroundRefresh('recruitment:gmail-sync',()=>refreshRecruitmentGmail({ reloadCandidates: true }));
+    toast(`Gmail Sync สำเร็จ · ตรวจเมล ${result.scanned || 0} ฉบับ กรุณาคัดกรองก่อนเข้าระบบ`);
+    queueBackgroundRefresh('recruitment:gmail-sync',async()=>{await refreshRecruitmentGmail({ reloadCandidates: true });await reloadRecruitmentScreening();});
   } catch (error) {
     toast(error.message, true);
     queueBackgroundRefresh('recruitment:gmail-error-status',()=>refreshRecruitmentGmail());
