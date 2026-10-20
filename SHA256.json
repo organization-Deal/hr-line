@@ -1,0 +1,13 @@
+{
+  "README_P10.9.1.md": "6192a1a57a2cbf4d1d65cc03b5ab21ad8256e6d786be36b1e82bb7bd5b000ca2",
+  "public/index.html": "e03dab7856b43c3d3d22ce02a65c14a72c87a665b3e13aead23701fb9935849d",
+  "public/ui/p10-5.css": "227e636e87542f1c10e9daac93ffa55908a57bf383817b9cb027f746713561d1",
+  "public/ui/p10-5.js": "0bbfccd01455a373c368c170622a11a1c7d4e52302453e3676c318f0ae6f169b",
+  "public/ui/p10-7-recruitment-gmail.css": "dad411eac1529adbf408a236bad07ac2faa6a87de64539045e91d10aa23adbad",
+  "public/ui/p10-7-recruitment-gmail.js": "b4ce133fc6f80cb818258969e84b37a8e56f2a905bc7f1de548d075920fe28ae",
+  "public/ui/p10-8-recruitment-simple.css": "b940383b99861bea45b69bd425ab956421ef631980f6f6a84b14b2177aad4559",
+  "public/ui/p10-8-recruitment-simple.js": "2f07f1af2a9a33265ec868207c93e20573593147ec9151f09f760ed58b997ab3",
+  "public/ui/p10-9-recruitment-quickstart.css": "e95e25d2dce8a8a09dad3ddc219ddffb062208c052f72c89644ad4b1ff4b06c3",
+  "public/ui/p10-9-recruitment-quickstart.js": "f2903e4c04bec2d49a524978538765e916c7e0b47e36dc8ae7c310a105e0f426",
+  "tools/apply-p10.9.1-safe.mjs": "cd35dbb3f7a39062b96a9bc7703fe7affbf11a822f22837560adcf510f1ba855"
+}

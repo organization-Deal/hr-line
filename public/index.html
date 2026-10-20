@@ -1,4 +1,3 @@
-<!-- NAKNA_BOOT_RECOVERY_20261019 -->
 <!doctype html>
 <html lang="th">
 <head>
@@ -16,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1" />
+  <link rel="modulepreload" href="/app.js?v=P10.1-a1&ed=P10.4" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -32,19 +31,18 @@
     #leaveUnifiedPanel .leave-unified-empty{color:#80918f;padding:14px 0}
     @media(max-width:650px){#leaveUnifiedPanel .leave-unified-filters{grid-template-columns:repeat(2,minmax(0,1fr))}#leaveUnifiedPanel .panel-head{flex-wrap:wrap}}
   </style>
-<link rel="stylesheet" href="/ui/p10.css?v=P10.0-ui1" />
-<script defer src="/ui/p10.js?v=P10.1-attendance"></script>
-<link rel="stylesheet" href="/ui/p10-attendance.css?v=P10.1-attendance" />
-
-<link rel="stylesheet" href="/ui/p10-5.css?v=P10.5-ux1" />
-<link rel="stylesheet" href="/ui/nk-documents-redesign.css?v=DOCS20261019" />
-<link rel="stylesheet" href="/ui/nk-growth-workspace.css?v=GROWTH20261019A" />
-<script defer src="/ui/p10-5.js?v=P10.5-ux1"></script>
-  <link rel="stylesheet" href="/ui/nk-rewards-workspace.css?v=20261019-r1"/>
-  <link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A" />
-  <link rel="stylesheet" href="/ui/nk-multi-gmail.css?v=MGMAIL20261020A" />
-  <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A" />
-  <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1">
+  <link rel="stylesheet" href="/ui/p10.css?v=P10.0-ui1" />
+  <script defer src="/ui/p10.js?v=P10.0-ui1"></script>
+  <link rel="stylesheet" href="/ui/attendance-p10.css?v=P10.1-a1" />
+  <script defer src="/ui/attendance-p10.js?v=P10.1-a1"></script>
+  <link rel="stylesheet" href="/ui/p10-5.css?v=P10.5-ux1" />
+  <script defer src="/ui/p10-5.js?v=P10.5-ux1"></script>
+  <link rel="stylesheet" href="/ui/p10-7-recruitment-gmail.css?v=P10.7-1" />
+  <script defer src="/ui/p10-7-recruitment-gmail.js?v=P10.7-1"></script>
+  <link rel="stylesheet" href="/ui/p10-8-recruitment-simple.css?v=P10.8-1" />
+  <script defer src="/ui/p10-8-recruitment-simple.js?v=P10.8-1"></script>
+  <link rel="stylesheet" href="/ui/p10-9-recruitment-quickstart.css?v=P10.9-1" />
+  <script defer src="/ui/p10-9-recruitment-quickstart.js?v=P10.9-1"></script>
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -248,7 +246,7 @@
         <button class="nav-item" data-view="benefits"><svg viewBox="0 0 24 24"><path d="M12 21s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 11c0 5.65-7 10-7 10Z"/><path d="M9 13h6M12 10v6"/></svg><span>สวัสดิการ</span></button>
         <button class="nav-item" data-view="performance"><svg viewBox="0 0 24 24"><path d="m4 18 5-5 4 3 7-9"/><path d="M15 7h5v5"/></svg><span>Learning & KPI</span></button>
         <button class="nav-item" data-view="engagement"><svg viewBox="0 0 24 24"><path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 3Z"/></svg><span>แต้ม & ของรางวัล</span></button>
-
+        <button class="nav-item" data-view="wellness"><svg viewBox="0 0 24 24"><path d="M12 20v-8M12 12c-4.8 0-7-2.8-7-7 4.8 0 7 2.6 7 7ZM12 14c4.8 0 7-2.4 7-6.5-4.4 0-6.8 2.3-7 6.5Z"/><path d="M8 20h8"/></svg><span>พักยืดกับนากนะ</span></button>
         <button class="nav-item" data-view="analytics"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>People Analytics</span></button>
 
         <p class="nav-label">บริหารจัดการ</p>
@@ -424,7 +422,7 @@
         </div>
         <article id="recruitmentGmailCard" class="panel recruitment-gmail-card">
           <div class="panel-head">
-            <div><p class="kicker">GMAIL INBOX</p><h3>ผู้สมัครจาก Gmail</h3><p class="panel-subtitle">เชื่อม Gmail รับสมัครงานหลายบัญชีได้ โดยไม่กระทบ Drive, Sheets หรือ Payroll ของบริษัท</p></div>
+            <div><p class="kicker">GMAIL INBOX</p><h3>ผู้สมัครจาก Gmail</h3><p class="panel-subtitle">ใช้ Google ของบริษัทอ่านเฉพาะเมลตาม Search Query แล้วสร้าง Candidate อัตโนมัติ พร้อมกันเมลซ้ำด้วย Gmail Message ID</p></div>
             <span id="recruitmentGmailBadge" class="badge badge-warning">กำลังตรวจสอบ</span>
           </div>
           <div class="gmail-sync-grid">
@@ -434,125 +432,113 @@
             <div><span>IMPORTED MAIL</span><strong id="recruitmentGmailImported">0 อีเมล</strong></div>
           </div>
           <div id="recruitmentGmailError" class="integration-error hidden"></div>
-          <div class="gmail-sync-actions"><button id="recruitmentGmailAddAccount" class="primary-btn" type="button">+ เชื่อม Gmail รับสมัครงาน</button><button id="recruitmentGmailConnectBtn" class="secondary-btn" type="button">เชื่อม Google หลัก</button><button id="recruitmentGmailSyncBtn" class="secondary-btn hidden" type="button">Sync Google หลัก</button><button id="recruitmentGmailSettingsBtn" class="secondary-btn hidden" type="button">ตั้งค่า Google หลัก</button></div>
-          <div class="nk-mgmail-heading"><h4>บัญชีรับสมัครงานที่เชื่อม</h4><small>แต่ละบัญชี Sync แยกกัน · ใบสมัครทั้งหมดเข้ารวมใน Pipeline ด้านล่าง</small></div>
-          <p class="nk-mgmail-guide">เลือกบัญชีและตั้งค่าปุ่ม <b>ตั้งค่า</b> → เลือกว่า Nakna จะอ่านเฉพาะเมลส่งถึงไหน, ผู้ส่งรายใด หรือ Label อะไร · เมลนอกเงื่อนไขจะไม่ถูกนำเข้าคิวรอบใหม่</p>
-          <div id="recruitmentGmailAccountList" class="nk-mgmail-list" aria-live="polite"></div>
-          <p class="nk-mgmail-help">บัญชี Google หลักใช้สำหรับ Drive / Sheets / Payroll เหมือนเดิม · เชื่อมบัญชีรับสมัครงานบัญชีแรกแล้วระบบจะหยุดอ่านใบสมัครจาก Google หลักอัตโนมัติ · การเข้าถึง Gmail ต้องผ่านการยินยอมของเจ้าของบัญชี</p>
+          <div class="gmail-sync-actions"><button id="recruitmentGmailConnectBtn" class="primary-btn" type="button">เชื่อม Google</button><button id="recruitmentGmailSyncBtn" class="primary-btn hidden" type="button">Sync Gmail ตอนนี้</button><button id="recruitmentGmailSettingsBtn" class="secondary-btn hidden" type="button">ตั้งค่า Query</button></div>
         </article>
-        <section class="panel nk-screening" id="nkScreeningPanel" aria-label="คิวคัดกรองอีเมลรับสมัครงาน">
-          <div class="nk-screening-top"><div><p class="kicker">APPLICATION SCREENING</p><h3>คิวคัดกรองอีเมล</h3><p>เมลที่ Sync เข้ามายังไม่ใช่ผู้สมัคร HR ตรวจแล้วกดรับจึงเข้าสู่ Pipeline</p></div><button class="secondary-btn" id="nkScreeningReload" type="button">↻ โหลดคิวใหม่</button></div>
-          <div class="nk-screening-metrics" id="nkScreeningMetrics"></div>
-          <div class="nk-screening-tools"><input type="search" id="nkScreeningSearch" placeholder="ค้นหาผู้ส่ง / หัวข้อ / อีเมล" aria-label="ค้นหาคิวคัดกรอง"/><select id="nkScreeningFilter" aria-label="กรองผลคัดกรอง"><option value="pending">ยังไม่ตัดสินใจ</option><option value="all">ทั้งหมด</option><option value="likely">น่าจะสมัครจริง</option><option value="review">รอตรวจ</option><option value="noise">ไม่เกี่ยวข้อง</option><option value="accepted">รับเป็นผู้สมัครแล้ว</option><option value="rejected">คัดออกแล้ว</option><option value="archived">ลบจากคิว (กู้คืนได้)</option></select><select id="nkScreeningSourceFilter" aria-label="กรองตามบัญชี Gmail ที่นำเข้า"><option value="">ทุกบัญชี Gmail</option></select></div>
-          <div class="nk-screening-bulk" id="nkScreeningBulk" aria-label="เลือกอีเมลหลายรายการ">
-            <label class="nk-screening-select-all"><input type="checkbox" id="nkScreeningSelectAll"/> เลือกทั้งหมดที่แสดง (สูงสุด 50)</label>
-            <strong id="nkScreeningSelectedCount" aria-live="polite">เลือก 0 รายการ</strong>
-            <button type="button" class="secondary-btn" id="nkScreeningBulkReject" disabled>คัดออกที่เลือก</button>
-            <button type="button" class="secondary-btn nk-screening-delete" id="nkScreeningBulkArchive" disabled>ลบออกจากคิว</button>
-            <button type="button" class="secondary-btn" id="nkScreeningBulkRestore" hidden disabled>กู้คืนที่เลือก</button>
-            <button type="button" class="nk-screening-clear" id="nkScreeningClearSelection" disabled>ยกเลิกเลือก</button>
-          </div>
-          <div class="nk-screening-result" id="nkScreeningResult" role="status" aria-live="polite">กำลังโหลดคิวอีเมล…</div>
-          <div class="nk-screening-list" id="nkScreeningList"></div>
-          <p class="nk-screening-note">การจัดประเภทเป็นเพียงคำแนะนำจากกติกา ไม่ได้ตัดสินผู้สมัครโดยอัตโนมัติ • เมลที่คัดออกยังตรวจย้อนหลังได้</p>
-        </section>
-        <div class="nk-pipeline-header"><div><h3>Recruitment Pipeline</h3><p>เฉพาะผู้สมัครที่ HR ยืนยันแล้วหรือเพิ่มเอง</p></div></div>
         <div class="ats-summary"><span><strong id="candidateTotal">0</strong> ผู้สมัครทั้งหมด</span><span><strong id="candidateInterview">0</strong> รอสัมภาษณ์</span><span><strong id="candidateOffer">0</strong> อยู่ขั้น Offer</span></div>
         <div id="kanban" class="kanban"></div>
       </section>
 
-      <section id="view-attendance" class="view attendance-center-view">
-        <div class="page-intro attendance-center-intro">
-          <div><p class="kicker">ATTENDANCE CENTER</p><h1>เวลาเข้างาน & ลงเวลา</h1><p>ดูเวลาเข้า–ออก การลา สถานที่จริง สถานะใน/นอกพื้นที่ และย้อนหลังของพนักงานจากหน้าจอเดียว</p></div>
-          <div class="attendance-center-actions"><span class="badge badge-success"><span class="status-dot"></span> LINE + GPS พร้อมใช้งาน</span><button class="secondary-btn" type="button" data-settings-sidebar-open="attendance">ตั้งค่า Work Location</button></div>
-        </div>
+ <section class="view attendance-center-view nd-workspace" data-nk-no-enhance="" id="view-attendance">
+<header class="nd-intro">
+<div class="nd-intro-copy"><p class="nd-eyebrow">TEAM ATTENDANCE</p><h1>บันทึกเวลาของทีม</h1><p>ดูสถานะก่อน เปิดรายละเอียดเมื่อจำเป็น</p></div>
 
-        <article class="panel team-worklog-panel attendance-worklog-panel">
-          <div class="panel-head team-worklog-head attendance-worklog-head">
-            <div>
-              <p class="kicker">TEAM ATTENDANCE</p>
-              <h3>บันทึกเวลาของพนักงาน</h3>
-              <p class="panel-subtitle">เลือกดูวันนี้ รายวัน รายสัปดาห์ รายเดือน หรือช่วงวันที่ แล้วกด “ดูรายละเอียด” เพื่อดูพิกัดจริง Work Location ระยะห่าง และ GPS</p>
-            </div>
-            <div class="team-worklog-controls">
-              <div class="segmented-control" id="teamWorkLogMode" role="group" aria-label="ช่วงเวลา">
-                <button type="button" data-worklog-mode="today" class="active">วันนี้</button>
-                <button type="button" data-worklog-mode="day">รายวัน</button>
-                <button type="button" data-worklog-mode="week">รายสัปดาห์</button>
-                <button type="button" data-worklog-mode="month">รายเดือน</button>
-                <button type="button" data-worklog-mode="range">กำหนดช่วง</button>
-              </div>
-              <div id="teamWorkLogSingleDateControls" class="team-worklog-date-controls">
-                <button id="teamWorkLogPrevBtn" class="icon-btn" type="button" aria-label="ช่วงก่อนหน้า">‹</button>
-                <input id="teamWorkLogDate" type="date" />
-                <button id="teamWorkLogNextBtn" class="icon-btn" type="button" aria-label="ช่วงถัดไป">›</button>
-              </div>
-              <input id="teamWorkLogMonth" class="team-worklog-month" type="month" hidden />
-              <div id="teamWorkLogRangeControls" class="team-worklog-custom-range" hidden>
-                <label><span>จาก</span><input id="teamWorkLogStartDate" type="date" /></label>
-                <span class="range-separator">–</span>
-                <label><span>ถึง</span><input id="teamWorkLogEndDate" type="date" /></label>
-                <button id="teamWorkLogApplyRangeBtn" class="primary-btn compact-btn" type="button">ดูข้อมูล</button>
-              </div>
-            </div>
-          </div>
+<section aria-label="เลือกช่วงเวลาของรายงาน" class="nd-period-bar">
+<label class="nd-period-select">ช่วงเวลา<select id="ndPeriodSelect"><option value="today">วันนี้</option><option value="day">รายวัน</option><option value="week">รายสัปดาห์</option><option value="month">รายเดือน</option><option value="range">กำหนดช่วง</option></select></label>
+<div class="team-worklog-controls">
+<div aria-label="ช่วงเวลา" class="segmented-control" id="teamWorkLogMode" role="group">
+<button class="active" data-worklog-mode="today" type="button">วันนี้</button>
+<button data-worklog-mode="day" type="button">รายวัน</button>
+<button data-worklog-mode="week" type="button">รายสัปดาห์</button>
+<button data-worklog-mode="month" type="button">รายเดือน</button>
+<button data-worklog-mode="range" type="button">กำหนดช่วง</button>
+</div>
+<div class="team-worklog-date-controls" id="teamWorkLogSingleDateControls">
+<button aria-label="ช่วงก่อนหน้า" class="icon-btn" id="teamWorkLogPrevBtn" type="button">‹</button>
+<input id="teamWorkLogDate" type="date"/>
+<button aria-label="ช่วงถัดไป" class="icon-btn" id="teamWorkLogNextBtn" type="button">›</button>
+</div>
+<input class="team-worklog-month" hidden="" id="teamWorkLogMonth" type="month"/>
+<div class="team-worklog-custom-range" hidden="" id="teamWorkLogRangeControls">
+<label><span>จาก</span><input id="teamWorkLogStartDate" type="date"/></label>
+<span class="range-separator">–</span>
+<label><span>ถึง</span><input id="teamWorkLogEndDate" type="date"/></label>
+<button class="primary-btn compact-btn" id="teamWorkLogApplyRangeBtn" type="button">ดูข้อมูล</button>
+</div>
+</div>
+</section></header>
 
-          <div id="nkAttendanceDayNote" class="nk-attendance-day-note" hidden></div>
-          <div id="teamWorkLogSummary" class="team-worklog-summary attendance-summary-expanded">
-            <div><span>เช็กอินแล้ว</span><strong>0</strong><small>ครั้ง</small></div>
-            <div><span>ตรงเวลา</span><strong>0</strong><small>ครั้ง</small></div>
-            <div><span>มาสาย</span><strong>0</strong><small>ครั้ง</small></div>
-            <div><span>ลา</span><strong>0</strong><small>วัน</small></div>
-            <div><span>นอกพื้นที่</span><strong>0</strong><small>ครั้ง</small></div>
-            <div><span>ขาด / ไม่ลงเวลา</span><strong>0</strong><small>วัน</small></div>
-          </div>
+<div aria-live="polite" class="nd-load-state" hidden="" id="ndLoadState" role="status"></div>
+<div id="ndDataArea">
+<section aria-label="ภาพรวมเวลาเข้างาน" class="nd-overview">
+<div class="nd-overview-title"><div><span class="nd-context" id="ndContextTag">ตามช่วงที่เลือก</span><strong id="teamWorkLogRangeLabel">กำลังโหลดข้อมูล…</strong></div><span class="nd-asof" id="ndAsOf"></span></div>
+<div class="nd-metrics" id="ndMetricStrip"></div>
+<p class="nd-day-note" hidden="" id="ndDayNote"></p>
+<details class="nd-metric-details"><summary>ดูตัวเลขทั้งหมด <span>ตรงเวลา · นอกพื้นที่ · ขาด / ไม่ลงเวลา</span></summary><div class="team-worklog-summary attendance-summary-expanded" id="teamWorkLogSummary">
+<div><span>เช็กอินแล้ว</span><strong>0</strong><small>ครั้ง</small></div>
+<div><span>ตรงเวลา</span><strong>0</strong><small>ครั้ง</small></div>
+<div><span>มาสาย</span><strong>0</strong><small>ครั้ง</small></div>
+<div><span>ลา</span><strong>0</strong><small>วัน</small></div>
+<div><span>นอกพื้นที่</span><strong>0</strong><small>ครั้ง</small></div>
+<div><span>ขาด / ไม่ลงเวลา</span><strong>0</strong><small>วัน</small></div>
+</div></details>
+</section>
+<section class="nd-register">
+<div class="nd-register-heading"><h2>รายการของทีม</h2><span id="teamWorkLogRowCount"></span></div>
+<nav aria-label="มุมมองเวลาเข้างาน" class="nd-tabs" id="ndTabs" role="tablist">
+<button aria-controls="ndPane-list" aria-selected="true" data-nd-tab="list" id="ndTab-list" role="tab" type="button">รายชื่อ</button>
+<button aria-controls="ndPane-summary" aria-selected="false" data-nd-tab="summary" id="ndTab-summary" role="tab" tabindex="-1" type="button">สรุปรายคน</button>
+<button aria-controls="ndPane-matrix" aria-selected="false" data-nd-tab="matrix" id="ndTab-matrix" role="tab" tabindex="-1" type="button">ตารางเวลา</button>
+<button aria-controls="ndPane-queue" aria-selected="false" data-nd-tab="queue" hidden="" id="ndTab-queue" role="tab" tabindex="-1" type="button">รออนุมัติ <span id="ndPendingCount">0</span></button>
+</nav>
+<div class="nd-filters" id="ndSharedFilters"><label class="search-box attendance-search"><svg viewbox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input id="teamWorkLogSearch" placeholder="ค้นหาชื่อ / รหัสพนักงาน" type="search"/></label><button aria-controls="ndFilterOptions" aria-expanded="false" class="secondary-btn" id="ndFilterToggle" type="button">ตัวกรอง</button><div class="nd-filter-options" hidden="" id="ndFilterOptions"><div class="attendance-filterbar">
 
-          <section class="attendance-person-summary-panel" aria-labelledby="attendancePersonSummaryTitle">
-            <div class="attendance-person-summary-head">
-              <div><p class="kicker">HR PERIOD SUMMARY</p><h3 id="attendancePersonSummaryTitle">สรุปเวลารายบุคคล</h3><p>สรุปจำนวนวันทำงาน มาทำงาน สาย ขาด ลา และลงเวลานอกพื้นที่ตามช่วงที่เลือก ใช้ปิดสรุปรายสัปดาห์หรือรายเดือนได้ทันที</p></div>
-              <div class="nk-attendance-report-actions"><button id="nkAttendanceReportToggle" class="secondary-btn compact-btn" type="button" aria-expanded="false" aria-controls="nkAttendanceReportContent">ดูสรุปรายคน <span aria-hidden="true">⌄</span></button><button id="attendanceSummaryExportBtn" class="secondary-btn compact-btn" type="button">ดาวน์โหลด CSV</button></div>
-            </div>
-            <div id="nkAttendanceReportContent" class="nk-attendance-report-content">
-              <div id="nkAttendanceMobileSummary" class="nk-attendance-mobile-summary" aria-label="รายการสรุปเวลารายพนักงาน"></div>
-            <div class="attendance-person-summary-wrap">
-              <table class="attendance-person-summary-table" data-nk-no-enhance="1">
-                <thead><tr><th>พนักงาน</th><th>วันทำงาน</th><th>มาทำงาน</th><th>ตรงเวลา</th><th>สาย</th><th>ขาด</th><th>ลา</th><th>ประเภทการลา</th><th>นอกพื้นที่</th><th>ยังไม่เช็กเอาต์</th></tr></thead>
-                <tbody id="attendancePersonSummaryBody"><tr><td colspan="10">กำลังโหลดข้อมูล…</td></tr></tbody>
-              </table>
-            </div>
-            <div id="attendanceSummaryAsOf" class="attendance-summary-asof"></div>
-            </div>
-          </section>
+<select aria-label="กรองตามแผนก" id="teamWorkLogDepartmentFilter"><option value="">ทุกแผนก</option></select>
+<select aria-label="กรองตามสถานะ" id="teamWorkLogStatusFilter">
+<option value="all">ทุกสถานะ</option>
+<option value="checked_in">เช็กอินแล้ว</option>
+<option value="late">มาสาย</option>
+<option value="leave">ลา</option>
+<option value="outside">ลงเวลานอกพื้นที่</option>
+<option value="missing">ยังไม่เช็กอิน</option>
+</select>
+<button class="secondary-btn compact-btn" id="teamWorkLogClearFilterBtn" type="button">ล้างตัวกรอง</button>
+</div><label class="nd-sort-label">เรียงลำดับ<select id="ndSort"><option value="attention">เรื่องที่ควรตรวจสอบก่อน</option><option value="name">ชื่อพนักงาน</option></select></label><button aria-label="ตั้งค่าเวลางานและ Work Location" class="secondary-btn nd-settings" data-settings-sidebar-open="attendance" type="button">ตั้งค่าเวลางาน</button></div><p class="nd-filter-description" id="ndFilterDescription">ทุกแผนก · ทุกสถานะ · เรื่องที่ควรตรวจสอบก่อน</p></div>
+<div aria-labelledby="ndTab-list" class="nd-pane" id="ndPane-list" role="tabpanel">
+<p class="nd-list-tip">แตะชื่อเพื่อดูเวลาเข้า–ออก เหตุผล และสถานที่ที่บันทึกไว้</p>
+<div class="nd-list" id="ndPeopleList"></div><div class="nd-pager" id="ndListPager"></div>
+</div>
+<div aria-labelledby="ndTab-summary" class="nd-pane" hidden="" id="ndPane-summary" role="tabpanel">
+<div class="nd-subhead"><div><h3 id="attendancePersonSummaryTitle">สรุปเวลารายบุคคล</h3><p>จำนวนวันตามข้อมูลสรุปจากระบบ</p></div><button class="secondary-btn compact-btn" id="attendanceSummaryExportBtn" type="button">ดาวน์โหลด CSV</button></div>
+<div class="attendance-summary-asof" id="attendanceSummaryAsOf"></div>
+<div class="nd-list" id="ndSummaryList"></div><div class="nd-pager" id="ndSummaryPager"></div>
+<details class="nd-full-summary" id="ndFullSummary"><summary>เปิดตารางสรุปทุกคอลัมน์</summary><p>เลื่อนแนวนอนเฉพาะตารางเพื่อดูข้อมูลครบทุกช่อง</p><div class="attendance-person-summary-wrap">
+<table class="attendance-person-summary-table">
+<thead><tr><th>พนักงาน</th><th>วันทำงาน</th><th>มาทำงาน</th><th>ตรงเวลา</th><th>สาย</th><th>ขาด</th><th>ลา</th><th>ประเภทการลา</th><th>นอกพื้นที่</th><th>ยังไม่เช็กเอาต์</th></tr></thead>
+<tbody id="attendancePersonSummaryBody"><tr><td colspan="10">กำลังโหลดข้อมูล…</td></tr></tbody>
+</table>
+</div></details>
+</div>
+<div aria-labelledby="ndTab-matrix" class="nd-pane" hidden="" id="ndPane-matrix" role="tabpanel">
+<div class="nd-subhead"><div><h3>ตารางเวลาเข้า–ออก</h3><p>ข้อมูลครบทุกวัน · เลื่อนแนวนอนเฉพาะตาราง</p></div></div>
+<div class="team-worklog-help">กดดูรายละเอียดเพื่อดู GPS, Work Location และพิกัดจริง</div>
+<div class="team-worklog-matrix-wrap attendance-matrix-wrap">
+<table class="team-worklog-matrix">
+<thead id="teamWorkLogHead"><tr><th class="worklog-person-col">พนักงาน</th></tr></thead>
+<tbody id="teamWorkLogBody"></tbody>
+</table>
+</div>
+</div>
+<div aria-labelledby="ndTab-queue" class="nd-pane" hidden="" id="ndPane-queue" role="tabpanel">
+<section class="nd-retro-panel" id="attendanceRetroApprovalPanel">
+<div class="nd-subhead"><div><h3>คำขอเช็กอินย้อนหลัง</h3><p>คิวคำขอรออนุมัติทั้งหมด ไม่ผูกกับช่วงวันที่รายงาน</p></div><span class="badge" id="attendanceRetroApprovalCount">—</span></div>
+<div hidden="" id="ndRetroLoadError" role="status"></div>
+<div id="attendanceRetroApprovalList"></div>
+</section>
+</div>
+</section>
+</div>
+</section>
 
-          <div class="attendance-filterbar">
-            <label class="search-box attendance-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="teamWorkLogSearch" type="search" placeholder="ค้นหาชื่อ รหัสพนักงาน แผนก หรือตำแหน่ง" /></label>
-            <select id="teamWorkLogDepartmentFilter" aria-label="กรองตามแผนก"><option value="">ทุกแผนก</option></select>
-            <select id="teamWorkLogStatusFilter" aria-label="กรองตามสถานะ">
-              <option value="all">ทุกสถานะ</option>
-              <option value="checked_in">เช็กอินแล้ว</option>
-              <option value="late">มาสาย</option>
-              <option value="leave">ลา</option>
-              <option value="outside">ลงเวลานอกพื้นที่</option>
-              <option value="missing">ยังไม่เช็กอิน</option>
-            </select>
-            <button id="teamWorkLogClearFilterBtn" class="secondary-btn compact-btn" type="button">ล้างตัวกรอง</button>
-          </div>
-
-          <div class="team-worklog-range"><strong id="teamWorkLogRangeLabel">วันนี้</strong><span id="teamWorkLogRowCount">0 คน</span></div>
-          <div class="team-worklog-help">ในแต่ละช่องจะแสดง <strong>เข้า / ออก · สาย / ตรงเวลา · ใน/นอกพื้นที่ · จุดที่ลงเวลา</strong> และกดดูรายละเอียดเพื่อเปิดแผนที่ได้</div>
-          <div class="attendance-legend" aria-label="คำอธิบายสถานะ"><span class="legend-chip ok">ในพื้นที่ / ตรงเวลา</span><span class="legend-chip warn">สาย / นอกพื้นที่</span><span class="legend-chip leave">ลา</span><span class="legend-chip danger">ยังไม่เช็กอิน</span></div>
-          <div id="nkTeamWorkLogMobile" class="nk-attendance-mobile-entries" aria-label="รายการเวลาเข้างานรายพนักงาน"></div>
-          <button id="nkAttendanceMatrixToggle" class="nk-attendance-matrix-toggle" type="button" aria-controls="nkAttendanceMatrixContainer" aria-expanded="false">ดูตารางแบบละเอียดทุกวัน <span aria-hidden="true">↔</span></button>
-          <div id="nkAttendanceMatrixContainer" class="nk-attendance-matrix-container">
-          <div class="team-worklog-matrix-wrap attendance-matrix-wrap">
-            <table class="team-worklog-matrix" data-nk-no-enhance="1">
-              <thead id="teamWorkLogHead"><tr><th class="worklog-person-col">พนักงาน</th></tr></thead>
-              <tbody id="teamWorkLogBody"></tbody>
-            </table>
-          </div>
-          </div>
-        </article>
-      </section>
 
 <section class="view" id="view-leave"><div class="page-intro">
 <div><p class="kicker">LEAVE CONTROL</p><h1>การลา</h1><p>สิทธิ์ลา ผู้อนุมัติ เหตุผล หลักฐาน และสถานะของทุกคำขออยู่ในที่เดียว</p></div>
@@ -640,46 +626,30 @@
         </article>
       </section>
 
-      <section id="view-requests" class="view nk-service-view">
-        <div class="page-intro nk-service-intro">
-          <div><p class="kicker">EMPLOYEE SERVICE</p><h1>บริการพนักงาน</h1><p>รับเรื่องจากพนักงานและสื่อสารกับทีม ผ่าน LINE นากนะในพื้นที่เดียว</p></div>
-          <div class="page-actions nk-service-head-actions"><span id="requestCountBadge" class="badge badge-soft" aria-live="polite">0 เรื่อง</span><button id="createBroadcastBtn" class="primary-btn" type="button">+ สร้างประกาศ</button></div>
+      <section id="view-requests" class="view">
+        <div class="page-intro">
+          <div><p class="kicker">EMPLOYEE SERVICE</p><h1>Employee Service</h1><p>เรื่องส่วนตัวถึง HR, ประกาศบริษัท และประสบการณ์พนักงานบน LINE อยู่ที่เดียว</p></div>
+          <div class="page-actions"><span class="badge badge-warning" id="requestCountBadge">0 เรื่องเปิด</span><button id="createBroadcastBtn" class="primary-btn" type="button">+ ส่งประกาศ</button></div>
         </div>
-        <div class="nk-service-metrics" aria-label="ภาพรวมงานบริการพนักงาน">
-          <article class="nk-service-metric" data-nk-private-metric="1"><div><span>เรื่องที่รอดำเนินการ</span><strong id="hrCaseOpenCount">0</strong><small>เฉพาะเรื่องที่ HR มีสิทธิ์ดู</small></div><span class="nk-service-metric-icon" aria-hidden="true">▤</span></article>
-          <article class="nk-service-metric" data-nk-private-metric="1"><div><span>เรื่องเร่งด่วน</span><strong id="nkServiceUrgentCount">0</strong><small>ยังไม่ได้ปิดเคส</small></div><span class="nk-service-metric-icon" aria-hidden="true">!</span></article>
-          <article class="nk-service-metric"><div><span>ประกาศในระบบ</span><strong id="broadcastTotalCount">0</strong><small>ดูประวัติและการรับทราบ</small></div><span class="nk-service-metric-icon" aria-hidden="true">↗</span></article>
+        <div class="service-summary-grid">
+          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="3"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10"/></svg></span><div><small>เรื่องส่วนตัวถึง HR</small><strong id="hrCaseOpenCount">0</strong><p>เห็นเฉพาะ Owner / HR Admin / HR</p></div></article>
+          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><path d="M4 13.5h3l8 4V6.5l-8 4H4z"/><path d="M7 13.5 8.5 19h3"/></svg></span><div><small>ประกาศที่ส่งแล้ว</small><strong id="broadcastTotalCount">0</strong><p>Broadcast เข้า LINE พนักงาน</p></div></article>
+          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M12 5v14M4 12h16"/></svg></span><div><small>LINE Rich Menu</small><strong id="richMenuStatusText">ยังไม่ตั้ง</strong><p>6 เมนูหลักสำหรับพนักงาน</p></div></article>
         </div>
-        <div class="nk-service-workspace panel">
-          <div class="nk-service-tabbar" role="tablist" aria-label="เลือกพื้นที่บริการพนักงาน">
-            <button id="nkServiceTabCases" type="button" class="nk-service-tab is-active" role="tab" aria-selected="true" aria-controls="nkServicePanelCases" data-nk-service-tab="cases">เรื่องถึง HR <span id="nkServiceOpenPill" class="nk-service-tab-count">0</span></button>
-            <button id="nkServiceTabBroadcast" type="button" class="nk-service-tab" role="tab" aria-selected="false" aria-controls="nkServicePanelBroadcast" data-nk-service-tab="broadcast">ประกาศ</button>
-            <button id="nkServiceTabLine" type="button" class="nk-service-tab" role="tab" aria-selected="false" aria-controls="nkServicePanelLine" data-nk-service-tab="line">LINE พนักงาน</button>
-          </div>
-          <div id="nkServicePanelCases" class="nk-service-panel" role="tabpanel" aria-labelledby="nkServiceTabCases">
-            <div class="nk-service-panel-head"><div><h2>เรื่องที่พนักงานแจ้งถึง HR</h2><p>ข้อมูลส่วนตัวเข้าถึงได้เฉพาะผู้มีสิทธิ์ของบริษัท ไม่เปิดให้ Manager ทั่วไป</p></div><span class="nk-service-confidential">ส่วนตัว</span></div>
-            <div class="nk-service-filters">
-              <label class="nk-service-search"><span class="sr-only">ค้นหาเรื่องถึง HR</span><input id="nkServiceCaseSearch" type="search" placeholder="ค้นหาหัวข้อ ชื่อพนักงาน หรือเลขเรื่อง" autocomplete="off" /></label>
-              <label><span class="sr-only">กรองสถานะเรื่องถึง HR</span><select id="nkServiceCaseStatus"><option value="open">ยังไม่ปิดเรื่อง</option><option value="all">ทุกสถานะ</option><option value="urgent">เร่งด่วน</option><option value="resolved">ปิดแล้ว</option></select></label>
-            </div>
-            <div id="hrCasesList" class="hr-case-list nk-service-case-list" aria-live="polite"></div>
-            <details class="nk-service-legacy-requests"><summary>คำขอ HR จากระบบเดิม</summary><div id="requestsList" class="request-grid"></div></details>
-          </div>
-          <div id="nkServicePanelBroadcast" class="nk-service-panel" role="tabpanel" aria-labelledby="nkServiceTabBroadcast" hidden>
-            <div class="nk-service-panel-head"><div><h2>ประกาศถึงพนักงาน</h2><p>ดูประวัติการส่ง ตรวจคนรับทราบ และติดตามการแจ้ง LINE</p></div></div>
-            <div class="nk-service-filters">
-              <label class="nk-service-search"><span class="sr-only">ค้นหาประกาศ</span><input id="nkServiceBroadcastSearch" type="search" placeholder="ค้นหาชื่อประกาศหรือข้อความ" autocomplete="off" /></label>
-              <label><span class="sr-only">สถานะประกาศ</span><select id="nkServiceBroadcastStatus"><option value="all">ทุกสถานะ</option><option value="sent">ส่งแล้ว</option><option value="draft">ฉบับร่าง</option><option value="partial">ส่งบางส่วน</option></select></label>
-            </div>
-            <div id="broadcastList" class="broadcast-list nk-service-broadcast-list" aria-live="polite"></div>
-          </div>
-          <div id="nkServicePanelLine" class="nk-service-panel" role="tabpanel" aria-labelledby="nkServiceTabLine" hidden>
-            <div class="nk-service-panel-head"><div><h2>LINE สำหรับพนักงาน</h2><p>พนักงานใช้ LINE นากนะกลาง ไม่ต้องเชื่อม LINE OA ของบริษัทเพิ่มเติม</p></div></div>
-            <div class="nk-service-line-card"><div class="nk-service-line-mark">LINE</div><div><strong>ใช้งานผ่าน LINE นากนะ</strong><p>พนักงานเพิ่มเพื่อน LINE นากนะ และเชื่อมกับบริษัทเพื่อใช้เมนูเช็กอิน ขอลา และแจ้ง HR</p><span>การรับส่งข้อความจริงขึ้นกับสถานะการเชื่อม LINE ของพนักงานแต่ละคน</span></div></div>
-            <div class="nk-service-line-steps"><div><strong>1</strong><span>พนักงานเพิ่มเพื่อนนากนะ</span></div><div><strong>2</strong><span>ยืนยันและเชื่อมบริษัท</span></div><div><strong>3</strong><span>เลือกบริการที่ต้องการผ่าน LINE</span></div></div>
-          </div>
+        <div class="service-grid">
+          <article class="panel service-cases-panel">
+            <div class="panel-head"><div><p class="kicker">PRIVATE HR INBOX</p><h3>เรื่องส่วนตัวถึง HR</h3><p class="panel-subtitle">พนักงานแจ้งจาก LINE และข้อมูลส่วนนี้ไม่แสดงให้ Manager</p></div><span class="badge badge-coral">Confidential</span></div>
+            <div id="hrCasesList" class="hr-case-list"></div>
+          </article>
+          <article class="panel service-tools-panel">
+            <div class="panel-head"><div><p class="kicker">LINE EXPERIENCE</p><h3>เครื่องมือพนักงาน</h3></div></div>
+            <div class="rich-menu-preview"><img src="/richmenu-nakna.png" alt="Nakna LINE Rich Menu preview" /><div><strong>Rich Menu พนักงาน</strong><p>เช็กอิน · เช็กเอาต์ · ขอลา · สิทธิ์ลา · วันหยุด · แจ้ง HR</p></div></div>
+            <div class="service-tool-actions"><button id="setupRichMenuBtn" class="primary-btn" type="button">ตั้ง Rich Menu ให้ LINE บริษัท</button><button id="removeRichMenuBtn" class="text-btn danger-text hidden" type="button">ลบ Rich Menu</button></div>
+            <div class="panel-head service-broadcast-head"><div><p class="kicker">BROADCAST HISTORY</p><h3>ประกาศล่าสุด</h3></div></div>
+            <div id="broadcastList" class="broadcast-list"></div>
+          </article>
         </div>
-        <div class="nk-service-obsolete-bindings" hidden aria-hidden="true"><span id="richMenuStatusText"></span><button id="setupRichMenuBtn" type="button"></button><button id="removeRichMenuBtn" class="hidden" type="button"></button></div>
+        <article class="panel legacy-request-panel"><div class="panel-head"><div><p class="kicker">OTHER REQUESTS</p><h3>คำขอ HR เดิม</h3></div></div><div id="requestsList" class="request-grid"></div></article>
       </section>
 
       <section id="view-payroll" class="view">
@@ -690,50 +660,13 @@
           <article class="panel payroll-detail-panel"><div id="payrollDetail" class="payroll-detail-empty"><div class="module-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M16 15h2"/></svg></div><h3>เลือกรอบเงินเดือน</h3><p>เลือกเดือนด้านซ้ายเพื่อดูตารางปิดเงินเดือนแบบเต็ม และปรับเงินเพิ่ม/หัก/ภาษีรายคนได้</p></div></article>
         </div>
       </section>
-      <section id="view-documents" class="view nkdocs-workspace">
-        <div class="page-intro nkdocs-intro">
-          <div><p class="kicker">DOCUMENT WORKSPACE</p><h1>เอกสาร HR</h1><p>ออกเอกสาร · ติดตามการลงนาม · ตรวจสอบหลักฐานย้อนหลังจากที่เดียว</p></div>
-          <button id="generateDocumentBtn" class="primary-btn" type="button">+ ออกเอกสารใหม่</button>
-        </div>
-        <div id="documentSummary" class="document-summary nkdocs-summary" aria-label="สรุปเอกสาร"></div>
-        <div class="nkdocs-tabs" role="tablist" aria-label="หมวดเอกสาร">
-          <button class="nkdocs-tab is-active" type="button" role="tab" aria-selected="true" data-nkdocs-tab="all">เอกสารทั้งหมด</button>
-          <button class="nkdocs-tab" type="button" role="tab" aria-selected="false" data-nkdocs-tab="action">ต้องดำเนินการ <span id="nkdocsActionCount"></span></button>
-          <button class="nkdocs-tab" type="button" role="tab" aria-selected="false" data-nkdocs-tab="templates">เทมเพลต</button>
-          <button class="nkdocs-tab" type="button" role="tab" aria-selected="false" data-nkdocs-tab="payslips">สลิปเงินเดือน</button>
-        </div>
-        <article class="panel nkdocs-panel" id="nkdocs-panel-all">
-          <div class="nkdocs-controls">
-            <label class="nkdocs-search"><span class="sr-only">ค้นหาเอกสาร</span><input id="nkdocsSearch" type="search" autocomplete="off" placeholder="ค้นหาชื่อพนักงาน ชื่อเอกสาร หรือเลขเอกสาร" /></label>
-            <label><span class="sr-only">สถานะ</span><select id="nkdocsStatus"><option value="all">ทุกสถานะ</option><option value="draft">ฉบับร่าง / รอ HR</option><option value="awaiting">รอพนักงานลงนาม</option><option value="final">เสร็จสมบูรณ์</option></select></label>
-            <label><span class="sr-only">ประเภทเอกสาร</span><select id="nkdocsType"><option value="all">ทุกประเภท</option></select></label>
-            <label><span class="sr-only">เรียงลำดับ</span><select id="nkdocsSort"><option value="new">ใหม่ล่าสุด</option><option value="old">เก่าสุด</option></select></label>
-          </div>
-          <div class="nkdocs-list-head"><strong>ทะเบียนเอกสาร</strong><span id="nkdocsResultCount">กำลังโหลดรายการ…</span></div>
-          <div id="employeeDocumentList" class="nkdocs-table-slot" aria-live="polite"></div>
-        </article>
-        <article class="panel nkdocs-panel" id="nkdocs-panel-action" hidden>
-          <div class="panel-head"><div><p class="kicker">ACTION CENTER</p><h3>ต้องดำเนินการ</h3><p class="panel-subtitle">งานที่ต้องตรวจและลงนาม รวมถึงรายการที่พนักงานยังไม่ได้ลงลายเซ็น</p></div></div>
-          <div id="documentActionList" class="document-list nkdocs-action-list"></div>
-          <div class="nkdocs-secondary-head">รอพนักงานลงนาม</div>
-          <div id="documentAckList" class="document-list nkdocs-action-list"></div>
-        </article>
-        <article class="panel nkdocs-panel" id="nkdocs-panel-templates" hidden>
-          <div class="panel-head"><div><p class="kicker">TEMPLATE LIBRARY</p><h3>เทมเพลตเอกสาร</h3><p class="panel-subtitle">เลือกประเภทเมื่อออกเอกสารใหม่ การคืนค่ามาตรฐานไม่ลบเอกสารที่เคยออกแล้ว</p></div></div>
-          <div id="documentTemplateList" class="document-list nkdocs-template-list"></div>
-        </article>
-        <article class="panel nkdocs-panel" id="nkdocs-panel-payslips" hidden>
-          <div class="panel-head"><div><p class="kicker">MONTHLY PAYSLIPS</p><h3>สลิปเงินเดือน</h3><p class="panel-subtitle">สลิปที่ Publish จาก Payroll จะปรากฏที่นี่</p></div></div>
-          <div id="payslipDocumentList" class="document-list nkdocs-action-list"></div>
-        </article>
-        <div class="nkdocs-footer-tools"><details class="nkdocs-tools"><summary>การตั้งค่าและเครื่องมือเพิ่มเติม</summary><div class="document-system-toolbar">
-          <button id="documentSettingsBtn" class="secondary-btn" type="button">ตั้งค่าเอกสาร / ลายเซ็น</button>
-          <button id="seedDocumentTemplatesBtn" class="secondary-btn" type="button">คืนค่าเทมเพลตมาตรฐาน</button>
-          <button id="openDocumentCaseBtn" class="secondary-btn" type="button">เปิด HR Case</button>
-          <button id="bulkApproveDocumentsBtn" class="secondary-btn" type="button">ลงนามรายการที่รอทั้งหมด</button>
-          <button id="refreshDocumentSystemBtn" class="secondary-btn" type="button">รีเฟรชข้อมูล</button>
-        </div></details></div>
-        <div id="documentCaseList" class="hidden" aria-hidden="true"></div>
+      <section id="view-documents" class="view">
+        <div class="page-intro"><div><p class="kicker">EMPLOYEE DOCUMENTS</p><h1>เอกสาร HR</h1><p>แฟ้มเอกสารพนักงานแบบตรวจสอบย้อนหลังได้ · Version · สิทธิ์การมองเห็น · ประวัติหลักฐาน และ Payslip</p></div><button id="generateDocumentBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>ออกเอกสาร</button></div>
+        <div id="documentSummary" class="document-summary"></div>
+        <div class="document-system-toolbar"><button id="documentSettingsBtn" class="secondary-btn" type="button">ตั้งค่าเอกสาร & ลายเซ็น</button><button id="seedDocumentTemplatesBtn" class="secondary-btn" type="button">คืนค่า Template มาตรฐาน</button><button id="openDocumentCaseBtn" class="secondary-btn" type="button">+ เปิด HR Case</button><button id="bulkApproveDocumentsBtn" class="secondary-btn" type="button">ลงนามที่รอทั้งหมด</button><button id="refreshDocumentSystemBtn" class="secondary-btn" type="button">รีเฟรช</button></div>
+        <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">ACTION CENTER</p><h3>งานที่ต้องดำเนินการ</h3></div></div><div id="documentActionList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">TEMPLATES</p><h3>Template เอกสาร</h3></div></div><div id="documentTemplateList" class="document-list"></div></article></div>
+        <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">MONTHLY PAYSLIPS</p><h3>สลิปเงินเดือน</h3></div></div><div id="payslipDocumentList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">HR DOCUMENTS</p><h3>เอกสารพนักงาน</h3></div></div><div id="employeeDocumentList" class="document-list"></div></article></div>
+        <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">EVIDENCE</p><h3>รอพนักงานรับทราบ</h3></div></div><div id="documentAckList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">HR CASES</p><h3>Case ที่กำลังดำเนินการ</h3></div></div><div id="documentCaseList" class="document-list"></div></article></div>
       </section>
       <section id="view-benefits" class="view">
         <div class="page-intro"><div><p class="kicker">BENEFITS</p><h1>สวัสดิการพนักงาน</h1><p>รวมประกันสังคม ประกันกลุ่ม ค่ารักษาพยาบาล กองทุน เบี้ยเลี้ยง และสิทธิพิเศษ พร้อมกำหนดรายคน</p></div><button id="addBenefitBtn" class="primary-btn" type="button">+ เพิ่มสวัสดิการ</button></div>
@@ -744,68 +677,69 @@
         </div>
       </section>
 
-      <section id="view-performance" class="view nk-growth-view">
-        <div class="page-intro nk-growth-head">
-          <div><p class="kicker">PEOPLE DEVELOPMENT</p><h1>Learning & Performance</h1><p>ติดตามการเรียนรู้ เป้าหมาย และการพัฒนาทีม จากข้อมูลที่มีอยู่จริง</p></div>
-          <div class="page-actions nk-growth-actions">
-            <button id="createCourseBtn" class="primary-btn" type="button">+ สร้างหลักสูตร</button>
-            <button id="createKpiBtn" class="secondary-btn" type="button">+ ตั้ง KPI</button>
-            <button id="createOneOnOneBtn" class="secondary-btn" type="button">+ นัด 1:1</button>
-            <button id="createProbationReviewBtn" class="secondary-btn" type="button">+ ประเมินทดลองงาน</button>
-          </div>
-        </div>
-        <div id="performanceSummary" class="performance-summary nk-growth-summary" aria-live="polite"></div>
-        <div class="nk-growth-toolbar">
-          <div class="nk-growth-tabs" role="tablist" aria-label="หมวดหมู่ Learning และ Performance">
-            <button type="button" id="growth-tab-overview" data-growth-tab="overview" role="tab" aria-selected="true" onclick="window.nkGrowthSelectTab('overview')">ภาพรวมงาน</button>
-            <button type="button" id="growth-tab-kpi" data-growth-tab="kpi" role="tab" aria-selected="false" onclick="window.nkGrowthSelectTab('kpi')">KPI / Goals</button>
-            <button type="button" id="growth-tab-learning" data-growth-tab="learning" role="tab" aria-selected="false" onclick="window.nkGrowthSelectTab('learning')">หลักสูตร</button>
-            <button type="button" id="growth-tab-one" data-growth-tab="one" role="tab" aria-selected="false" onclick="window.nkGrowthSelectTab('one')">1:1</button>
-            <button type="button" id="growth-tab-probation" data-growth-tab="probation" role="tab" aria-selected="false" onclick="window.nkGrowthSelectTab('probation')">ทดลองงาน</button>
-          </div>
-          <label class="nk-growth-employee-filter"><span>พนักงาน</span><select id="growthEmployeeSelect" aria-label="เลือกพนักงานเพื่อดูผลงานรายคน" onchange="window.nkGrowthSelectEmployee(this.value)"><option value="all">ทุกคนในสิทธิ์ของฉัน</option></select></label>
-        </div>
-        <div data-growth-panel="overview" id="growth-overview-panel" role="tabpanel" aria-labelledby="growth-tab-overview">
-          <div class="nk-growth-overview-grid">
-            <article class="panel nk-growth-task-panel">
-              <div class="panel-head"><div><p class="kicker">WORK QUEUE</p><h3>งานที่ควรติดตาม</h3><p class="panel-subtitle">เรียงจากรายการที่มีวันครบกำหนด หรือรอการอัปเดต</p></div><span id="growthActionBadge" class="badge badge-soft">0 รายการ</span></div>
-              <div id="growthActionList" class="nk-growth-task-list" aria-live="polite"></div>
-            </article>
-            <article class="panel nk-growth-profile-panel">
-              <div class="panel-head"><div><p class="kicker">EMPLOYEE PROFILE</p><h3>ภาพรวมรายพนักงาน</h3><p class="panel-subtitle">KPI, หลักสูตร, 1:1 และทดลองงาน เชื่อมตามพนักงานคนเดียวกัน</p></div></div>
-              <div id="growthProfile" aria-live="polite"></div>
-            </article>
-          </div>
-        </div>
-        <div class="nk-growth-content-panels">
-          <article class="panel growth-kpi-panel" data-growth-panel="kpi" id="growth-kpi-panel" role="tabpanel" aria-labelledby="growth-tab-kpi" hidden><div class="panel-head"><div><p class="kicker">KPI / GOALS</p><h3>เป้าหมายและการอัปเดต</h3><p class="panel-subtitle">ความคืบหน้าเป็นรายเป้าหมาย ไม่ใช่คะแนนตัดสินพนักงานอัตโนมัติ</p></div><button id="createPerformanceCycleBtn" class="text-btn" type="button">+ รอบประเมิน</button></div><div id="kpiGoalList" class="kpi-goal-list"></div></article>
-          <article class="panel growth-learning-panel" data-growth-panel="learning" id="growth-learning-panel" role="tabpanel" aria-labelledby="growth-tab-learning" hidden><div class="panel-head"><div><p class="kicker">ONBOARDING / LEARNING</p><h3>หลักสูตรและการมอบหมาย</h3></div><span id="learningProgressBadge" class="badge badge-soft">0 คอร์ส</span></div><div id="learningCourseList" class="learning-course-list"></div></article>
-          <article class="panel growth-one-panel" data-growth-panel="one" id="growth-one-panel" role="tabpanel" aria-labelledby="growth-tab-one" hidden><div class="panel-head"><div><p class="kicker">1:1 / FOLLOW-UP</p><h3>นัดคุยกับทีม</h3><p class="panel-subtitle">กำหนดนัด ประเด็นที่ตกลง และวันติดตาม</p></div></div><div id="oneOnOneList" class="one-on-one-list"></div></article>
-          <article class="panel growth-probation-panel" data-growth-panel="probation" id="growth-probation-panel" role="tabpanel" aria-labelledby="growth-tab-probation" hidden><div class="panel-head"><div><p class="kicker">PROBATION</p><h3>การทดลองงาน</h3><p class="panel-subtitle">วันครบกำหนดและผลประเมินล่าสุด</p></div><span id="probationDueBadge" class="badge badge-warning">0 คน</span></div><div id="probationReviewList" class="probation-review-list"></div></article>
+      <section id="view-performance" class="view">
+        <div class="page-intro"><div><p class="kicker">GROWTH OS</p><h1>Learning & Performance</h1><p>Onboarding วิดีโอจาก Google Drive · Quiz · KPI · 1:1 · Probation Review ใน Timeline เดียว</p></div><div class="page-actions"><button id="createCourseBtn" class="primary-btn" type="button">+ สร้างคอร์ส</button><button id="createKpiBtn" class="secondary-btn" type="button">+ KPI</button><button id="createOneOnOneBtn" class="secondary-btn" type="button">+ 1:1</button><button id="createProbationReviewBtn" class="secondary-btn" type="button">ประเมิน Probation</button></div></div>
+        <div id="performanceSummary" class="performance-summary"></div>
+        <div class="growth-grid">
+          <article class="panel growth-learning-panel"><div class="panel-head"><div><p class="kicker">ONBOARDING / LEARNING</p><h3>หลักสูตรของบริษัท</h3></div><span id="learningProgressBadge" class="badge badge-soft">0 คอร์ส</span></div><div id="learningCourseList" class="learning-course-list"></div></article>
+          <article class="panel growth-kpi-panel"><div class="panel-head"><div><p class="kicker">KPI / GOALS</p><h3>เป้าหมายและการอัปเดต</h3></div><button id="createPerformanceCycleBtn" class="text-btn" type="button">+ รอบประเมิน</button></div><div id="kpiGoalList" class="kpi-goal-list"></div></article>
+          <article class="panel growth-one-panel"><div class="panel-head"><div><p class="kicker">1:1</p><h3>คุยกับทีม</h3></div></div><div id="oneOnOneList" class="one-on-one-list"></div></article>
+          <article class="panel growth-probation-panel"><div class="panel-head"><div><p class="kicker">PROBATION</p><h3>การทดลองงาน</h3></div><span id="probationDueBadge" class="badge badge-warning">0 คน</span></div><div id="probationReviewList" class="probation-review-list"></div></article>
         </div>
       </section>
       <section id="view-engagement" class="view">
-        <div class="page-intro"><div><p class="kicker">ENGAGEMENT</p><h1>แต้ม & ของรางวัล</h1><p>กำหนดกติกาที่เป็นธรรม ติดตามแต้ม และจัดการของรางวัลจากที่เดียว</p></div><div class="page-actions"><button id="manualAwardBtn" class="primary-btn" type="button">+ ให้แต้ม</button></div></div>
-        <div id="engagementError" class="nk-reward-alert hidden" role="alert"><span id="engagementErrorMessage">เชื่อมต่อข้อมูลแต้มไม่สำเร็จ</span><button id="engagementRetryBtn" type="button" class="secondary-btn">ลองโหลดอีกครั้ง</button></div>
-        <div id="engagementSummary" class="engagement-summary nk-reward-summary"></div>
-        <div id="engagementSetupGuide" class="nk-reward-setup hidden"></div>
-        <div class="nk-reward-tabs" id="engagementTabs" role="tablist" aria-label="จัดการแต้มและของรางวัล">
-          <button class="active" type="button" data-reward-tab="queue" role="tab" aria-selected="true">งานที่ต้องทำ <span id="nkRewardsQueueCount">0</span></button>
-          <button type="button" data-reward-tab="catalog" role="tab" aria-selected="false">ของรางวัล</button>
-          <button type="button" data-reward-tab="rules" role="tab" aria-selected="false">กติกาแต้ม</button>
-          <button type="button" data-reward-tab="history" role="tab" aria-selected="false">ประวัติแต้ม</button>
-          <button type="button" data-reward-tab="ranking" role="tab" aria-selected="false">อันดับ (เลือกเปิดได้)</button>
-        </div>
-        <div class="nk-reward-workspace">
-          <section class="panel nk-reward-pane active" data-reward-pane="queue"><div class="panel-head"><div><p class="kicker">TO DO</p><h3>คำขอแลกรางวัลที่ต้องจัดการ</h3><p class="panel-subtitle">ตรวจสิทธิ์และแต้มก่อนอนุมัติ · หลังอนุมัติให้ยืนยันการส่งมอบ</p></div><span id="redemptionQueueBadge" class="badge badge-warning">0 รออนุมัติ</span></div><div id="redemptionList" class="phase5-list"></div></section>
-          <section class="panel nk-reward-pane" data-reward-pane="catalog"><div class="panel-head"><div><p class="kicker">REWARD CATALOG</p><h3>ของรางวัล</h3><p class="panel-subtitle">รายการที่พนักงานจะเห็นและขอแลกผ่าน LINE</p></div><button id="createRewardBtn" class="text-btn" type="button">+ ของรางวัล</button></div><div id="rewardCatalogList" class="reward-catalog-list"></div></section>
-          <section class="panel nk-reward-pane" data-reward-pane="rules"><div class="panel-head"><div><p class="kicker">POINT RULES</p><h3>กติกาการได้แต้ม</h3><p class="panel-subtitle">ทุกกติกาปิดไว้ก่อน จนกว่า HR จะเปิดใช้งาน</p></div><button id="createPointRuleBtn" class="text-btn" type="button">+ กติกา</button></div><div class="nk-rule-toolbar"><button id="runPointRulesBtn" class="secondary-btn" type="button">ประมวลผลกติกาตอนนี้</button><small>เฉพาะ HR ที่ได้รับสิทธิ์ · ระบบป้องกันการให้แต้มซ้ำตามเงื่อนไขเดิม</small></div><div id="pointRulesList" class="phase5-list"></div></section>
-          <section class="panel nk-reward-pane" data-reward-pane="history"><div class="panel-head"><div><p class="kicker">POINT HISTORY</p><h3>ประวัติการให้และใช้แต้ม</h3><p class="panel-subtitle">ข้อมูลบันทึกจริง พร้อมพนักงาน เหตุผล และเวลา</p></div></div><div id="engagementHistoryList" class="nk-reward-history"></div></section>
-          <section class="panel nk-reward-pane" data-reward-pane="ranking"><div class="panel-head"><div><p class="kicker">OPTIONAL</p><h3>อันดับแต้มของทีม</h3><p class="panel-subtitle">แสดงอันดับเฉพาะเมื่อบริษัทเปิดใช้ เหมาะสำหรับองค์กรที่สมัครใจแข่งขัน</p></div><label id="engagementLeaderboardToggleWrap" class="nk-leader-toggle"><input type="checkbox" id="engagementLeaderboardToggle"/> เปิดการแสดงอันดับ</label></div><div id="leaderboardList" class="leaderboard-list"></div></section>
+        <div class="page-intro"><div><p class="kicker">ENGAGEMENT</p><h1>แต้ม & ของรางวัล</h1><p>เปลี่ยนพฤติกรรมที่บริษัทอยากเห็นให้เป็นแต้ม รางวัล และ Incentive ที่ต่อเข้า Payroll ได้</p></div><div class="page-actions"><button id="runPointRulesBtn" class="secondary-btn" type="button">รันกติกาตอนนี้</button><button id="manualAwardBtn" class="primary-btn" type="button">+ ให้แต้ม</button></div></div>
+        <div id="engagementSummary" class="engagement-summary"></div>
+        <div class="engagement-grid">
+          <article class="panel"><div class="panel-head"><div><p class="kicker">POINT RULES</p><h3>กติกาการได้แต้ม</h3><p class="panel-subtitle">ปิดไว้เป็นค่าเริ่มต้น HR เลือกเปิดเฉพาะกติกาที่บริษัทต้องการ</p></div><button id="createPointRuleBtn" class="text-btn" type="button">+ กติกา</button></div><div id="pointRulesList" class="phase5-list"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="kicker">LEADERBOARD</p><h3>คนที่มีแต้มสูงสุด</h3></div><span class="badge badge-soft">Live</span></div><div id="leaderboardList" class="leaderboard-list"></div></article>
+          <article class="panel engagement-reward-panel"><div class="panel-head"><div><p class="kicker">REWARD CATALOG</p><h3>ของรางวัล</h3></div><button id="createRewardBtn" class="text-btn" type="button">+ ของรางวัล</button></div><div id="rewardCatalogList" class="reward-catalog-list"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="kicker">REDEMPTION QUEUE</p><h3>คำขอแลกรางวัล</h3></div><span id="redemptionQueueBadge" class="badge badge-warning">0 รอจัดการ</span></div><div id="redemptionList" class="phase5-list"></div></article>
         </div>
       </section>
 
+      <section id="view-wellness" class="view">
+        <div class="page-intro"><div><p class="kicker">NAKNA MOVE</p><h1>พักยืดกับนากนะ</h1><p>ชวนพนักงานลุกขยับวันละครั้งผ่าน LINE · AI Pose Tracking ตรวจท่าและนับรอบบนเครื่อง ไม่อัปโหลดวิดีโอ</p></div><div class="page-actions"><button id="wellnessSaveBtn" class="primary-btn" type="button">บันทึกการตั้งค่า</button></div></div>
+        <div id="wellnessSummary" class="wellness-summary"></div>
+        <div class="wellness-grid">
+          <article class="panel wellness-settings-card">
+            <div class="panel-head"><div><p class="kicker">DAILY WELLNESS</p><h3>การแจ้งเตือนจริง</h3><p class="panel-subtitle">เปิดเมื่อพร้อมใช้งานจริงเท่านั้น · ระบบจะส่งให้พนักงานที่เข้าเงื่อนไข</p></div><label class="switch"><input id="wellnessEnabled" type="checkbox"><span></span></label></div>
+            <div class="wellness-live-warning"><strong>การแจ้งเตือนทีมงาน</strong><span>ถ้าสวิตช์ด้านบนปิดอยู่ ระบบจะไม่ส่งแจ้งเตือนจริงตามเวลา แต่โหมดพรีวิวสำหรับ HR ด้านล่างยังเปิดดูได้</span></div>
+            <div class="wellness-setting-grid">
+              <label><span>เวลาเตือนจริง</span><input id="wellnessReminderTime" type="time" step="900" value="15:00"><small>เลือกได้ทุก 15 นาที</small></label>
+              <label><span>ระยะเวลา</span><select id="wellnessDuration"><option value="3">3 นาที</option><option value="5">5 นาที</option></select><small>6 ท่ายืดมาตรฐาน</small></label>
+              <label><span>เตือนอีกครั้ง</span><select id="wellnessSnooze"><option value="15">15 นาที</option><option value="30">30 นาที</option><option value="45">45 นาที</option><option value="60">60 นาที</option></select><small>เมื่อพนักงานกดไว้ทีหลัง</small></label>
+              <label><span>แต้มเมื่อทำครบ</span><input id="wellnessPoints" type="number" min="0" step="1" value="0"><small>0 = ไม่ให้แต้ม</small></label>
+            </div>
+            <div class="wellness-toggle-list">
+              <label class="toggle-line"><input id="wellnessCamera" type="checkbox" checked><span><strong>ใช้กล้องในกิจกรรม</strong><small>เปิดกล้องหน้าให้พนักงานเห็นตัวเอง ภาพไม่ถูกอัปโหลดหรือบันทึก</small></span></label>
+              <label class="toggle-line"><input id="wellnessPoseTracking" type="checkbox" checked><span><strong>AI Pose Tracking · แนะนำ</strong><small>ตรวจจุดข้อต่อบนเครื่อง บอกท่า นับรอบ/เวลาค้าง และให้ผ่านเมื่อทำครบ</small></span></label>
+              <label class="toggle-line"><input id="wellnessWorkdayOnly" type="checkbox" checked><span><strong>เตือนเฉพาะวันทำงาน</strong><small>ข้ามวันหยุดบริษัทและพนักงานที่ลา</small></span></label>
+            </div>
+            <div class="wellness-live-actions"><button id="wellnessRemindNowBtn" class="secondary-btn danger-outline" type="button">ส่งเตือนทั้งทีมตอนนี้</button><small>ใช้เฉพาะตอนพร้อมเปิดจริง ระบบจะถามยืนยันอีกครั้งก่อนส่ง</small></div>
+          </article>
 
+          <article class="panel wellness-test-card">
+            <div class="panel-head"><div><p class="kicker">HR PREVIEW</p><h3>พรีวิวสำหรับ HR</h3><p class="panel-subtitle">เปิดดูหน้า Stretch ได้ทันทีโดยไม่ส่งหาใคร หรือส่งตรวจสอบเฉพาะ LINE ของคุณก่อนเปิดใช้จริง</p></div><span class="badge badge-soft">ไม่ส่งทีมงาน</span></div>
+            <div class="wellness-preview-launch">
+              <div><strong>เปิดพรีวิวบนเว็บ</strong><small>ไม่ส่ง LINE · ไม่ต้องผูก Employee Profile · ไม่บันทึก Activity · ไม่ให้แต้ม</small></div>
+              <button id="wellnessPreviewBtn" class="secondary-btn" type="button">เปิดหน้าพรีวิว</button>
+            </div>
+            <div class="wellness-test-divider"><span>หรือส่งตรวจสอบผ่าน LINE ของฉัน</span></div>
+            <div id="wellnessTestRecipient" class="wellness-test-recipient"><span class="wellness-test-avatar">H</span><div><strong>กำลังตรวจบัญชี HR…</strong><small>ต้องมี Employee Profile ที่ใช้อีเมลเดียวกับบัญชีนี้ และเชื่อม LINE แล้ว</small></div></div>
+            <div class="wellness-test-controls">
+              <label><span>เวลาส่งตรวจสอบ</span><select id="wellnessTestTiming"><option value="now">ส่งตอนนี้</option><option value="1">อีก 1 นาที</option><option value="5">อีก 5 นาที</option><option value="custom">กำหนดเวลา</option></select></label>
+              <label id="wellnessTestTimeField" class="hidden"><span>เวลา (ประเทศไทย)</span><input id="wellnessTestTime" type="time" step="60"></label>
+              <button id="wellnessTestSendBtn" class="primary-btn" type="button">ส่งให้ฉันตอนนี้</button>
+            </div>
+            <div id="wellnessTestScheduleStatus" class="wellness-test-status hidden"></div>
+            <div class="wellness-test-note"><b>ข้อความตรวจสอบจะส่งเฉพาะบัญชีของคุณ</b><span>ทำ Routine ได้เหมือนของจริง แต่ไม่เปลี่ยนสถานะ “ทำแล้ววันนี้” และไม่กระทบแต้มของพนักงาน</span></div>
+          </article>
+
+          <article class="panel wellness-routine-card"><div class="panel-head"><div><p class="kicker">3-MIN ROUTINE</p><h3>ท่าที่พนักงานจะเห็น</h3><p class="panel-subtitle">6 ท่าที่ AI ตรวจได้ · คอ บ่า ไหล่ แขน ลำตัว และการยืดตัว</p></div><span class="badge badge-soft">ไม่ใช่การรักษา</span></div><div id="wellnessRoutinePreview" class="wellness-routine-preview"></div></article>
+          <article class="panel wellness-team-card"><div class="panel-head"><div><p class="kicker">TODAY</p><h3>สถานะวันนี้</h3><p class="panel-subtitle">ดูว่าใครทำแล้ว ใครข้าม และใครยังไม่ได้เริ่ม · พรีวิว/การตรวจสอบของ HR จะไม่ถูกนับตรงนี้</p></div><span id="wellnessTodayBadge" class="badge badge-soft">วันนี้</span></div><div id="wellnessTeamList" class="wellness-team-list"></div></article>
+        </div>
+      </section>
 
       <section id="view-analytics" class="view">
         <div class="page-intro"><div><p class="kicker">PEOPLE INTELLIGENCE</p><h1>People Analytics</h1><p>เห็นสุขภาพทีมในภาพเดียว ทั้ง Headcount, Turnover, การมาสาย, การลา, Recruitment และช่วงเวลาสำคัญของคน</p></div><span id="analyticsUpdatedBadge" class="badge badge-soft">ข้อมูลล่าสุด</span></div>
@@ -965,32 +899,20 @@
           </div>
             </div>
 
-            <div class="settings-category-panel hidden nk-leave-settings" data-settings-category="leave">
-              <div class="nk-leave-settings-intro"><div><p class="kicker">LEAVE SETTINGS</p><h2>จัดการสิทธิ์ลาและวันหยุด</h2><p>ตั้งค่าวันหยุด ประเภทลา และเงื่อนไขการทดลองงานในพื้นที่เดียว</p></div></div>
-              <nav class="nk-leave-tabs" aria-label="หมวดตั้งค่าการลา">
-                <button class="nk-leave-tab is-active" data-nk-leave-tab="holidays" type="button" aria-pressed="true" onclick="window.setLeaveSettingsTab('holidays')">วันหยุดบริษัท</button>
-                <button class="nk-leave-tab" data-nk-leave-tab="policies" type="button" aria-pressed="false" onclick="window.setLeaveSettingsTab('policies')">ประเภทลา</button>
-                <button class="nk-leave-tab" data-nk-leave-tab="probation" type="button" aria-pressed="false" onclick="window.setLeaveSettingsTab('probation')">ทดลองงาน</button>
-              </nav>
-              <div id="holidaySection" class="people-core-section nk-leave-panel is-active" data-nk-leave-panel="holidays">
+            <div class="settings-category-panel hidden" data-settings-category="leave">
+              <div id="holidaySection" class="people-core-section">
             <div class="page-intro compact">
               <div><p class="kicker">COMPANY HOLIDAYS</p><h2>วันหยุดบริษัท</h2><p>HR กำหนดปฏิทินวันหยุดประจำปีไว้ให้พนักงานใช้เป็นข้อมูลกลางเดียวกัน</p></div>
-              <div class="section-action-group nk-holiday-actions"><span id="holidayCountBadge" class="badge badge-soft">กำลังตรวจข้อมูล</span><button id="addHolidayBtn" class="primary-btn" type="button">+ เพิ่มวันหยุด</button></div>
+              <div class="section-action-group"><span id="holidayCountBadge" class="badge badge-soft">0 วัน</span><button id="addHolidayBtn" class="primary-btn" type="button">+ วันหยุด</button></div>
             </div>
-            <div class="nk-holiday-toolbar">
-              <label for="holidayYearSelect">ปีที่แสดง</label>
-              <select id="holidayYearSelect" aria-label="เลือกปีวันหยุด" onchange="window.setHolidayYear(this.value)"></select>
-              <button class="secondary-btn" type="button" onclick="window.reloadCompanyHolidays()">↻ โหลดใหม่</button>
-              <span id="holidayDataStatus" class="nk-holiday-data-status" aria-live="polite">กำลังตรวจสอบข้อมูลวันหยุด…</span>
-            </div>
-            <div id="holidayCompliance" class="holiday-compliance nk-holiday-summary" role="status" aria-live="polite"></div>
+            <div id="holidayCompliance" class="holiday-compliance warn"></div>
             <div id="holidayList" class="holiday-list"></div>
           </div>
-              <div class="leave-access-section nk-leave-panel" data-nk-leave-panel="probation">
+              <div class="leave-access-section">
             <div class="page-intro compact"><div><p class="kicker">LEAVE ACCESS</p><h2>สิทธิ์ลาระหว่างทดลองงาน</h2><p>ตั้งค่าเริ่มต้นของบริษัท แล้ว HR สามารถ Override รายคนจากหน้า Employee Leave Profile ได้</p></div></div>
             <article class="policy-toggle-card"><div><strong>ล็อกสิทธิ์ลาก่อนผ่านทดลองงาน</strong><p>ประเภทลาที่เปิด “ใช้ได้ระหว่างทดลองงาน” จะยังขอได้ตามปกติ</p></div><label class="switch"><input id="probationLeaveLockToggle" type="checkbox" checked><span></span></label></article>
           </div>
-              <div class="leave-policy-section nk-leave-panel" data-nk-leave-panel="policies">
+              <div class="leave-policy-section">
             <div class="page-intro compact">
               <div><p class="kicker">LEAVE POLICY</p><h2>นโยบายและสิทธิ์การลา</h2><p>กำหนดประเภทลา สิทธิ์เริ่มต้น เหตุผล หลักฐาน และเงื่อนไขล่วงหน้าของบริษัท</p></div>
               <button id="addLeavePolicyBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มประเภทลา</button>
@@ -1034,11 +956,32 @@
             <div class="setup-progress"><div id="setupProgressBar" class="setup-progress-bar"></div></div>
             <div class="setup-status-grid">
               <article class="status-card"><div class="status-card-head"><div class="status-icon">🏢</div><span id="statusCompanyBadge" class="badge badge-neutral">รอตั้งค่า</span></div><strong>รายละเอียดบริษัท</strong><p id="statusCompanyText">กำลังโหลดข้อมูลบริษัท…</p><button id="statusCompanyAction" class="secondary-btn" type="button">แก้ข้อมูลบริษัท</button></article>
-              <article class="status-card"><div class="status-card-head"><div class="status-icon line-status-icon">LINE</div><span id="statusLineBadge" class="badge badge-neutral">กำลังตรวจสอบ</span></div><strong>LINE สำหรับพนักงาน</strong><p id="statusLineText">กำลังตรวจสอบบริการ LINE…</p><small class="settings-hint">นากนะจัดการ LINE ให้โดยอัตโนมัติ ไม่ต้องตั้งค่า OA เพิ่ม</small></article>
+              <article class="status-card"><div class="status-card-head"><div class="status-icon line-status-icon">LINE</div><span id="statusLineBadge" class="badge badge-neutral">รอตั้งค่า</span></div><strong>เชื่อมธุรกิจใน LINE</strong><p id="statusLineText">กำลังตรวจสอบ LINE Official Account…</p><button id="statusLineAction" class="secondary-btn" type="button">ตั้งค่า LINE OA</button></article>
               <article class="status-card"><div class="status-card-head"><div class="status-icon google-status-icon">G</div><span id="statusGoogleBadge" class="badge badge-neutral">รอตั้งค่า</span></div><strong>Google</strong><p id="statusGoogleText">กำลังตรวจสอบ Gmail, Drive และ Sheets…</p><button id="statusGoogleAction" class="secondary-btn" type="button">เชื่อม Google</button></article>
             </div>
           </div>
-              <!-- NAKNA_BOOT_RECOVERY_20261019: company OA setup retired -->
+              <div class="settings-integration-shortcuts">
+                <article id="lineIntegrationShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H8l-3 3V5Z"/></svg></div><div><strong>LINE Official Account</strong><p>เชื่อม OA บริษัท หรือใช้นากนะกลาง</p></div><span>→</span></article>
+                <article id="googleWorkspaceShortcut" class="setting-card setting-card-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6M8 18v2M16 18v2"/></svg></div><div><strong>Google</strong><p>Gmail + Drive + Google Sheets</p></div><span>→</span></article>
+              </div>
+              <div class="company-line-section">
+            <div class="page-intro compact">
+              <div><p class="kicker">COMPANY INTEGRATION</p><h2>LINE Official Account</h2><p>บริษัทเลือกใช้ LINE “นากนะ” กลางได้ หรือเชื่อม OA ของบริษัทเองเพื่อให้พนักงานคุยกับแบรนด์ของบริษัทโดยตรง</p></div>
+            </div>
+            <article id="lineCompanyCard" class="integration-card company-line-card">
+              <div id="lineCompanyLogo" class="integration-logo line-business-logo">LINE</div>
+              <div class="integration-copy">
+                <strong id="lineCompanyTitle">LINE นากนะ</strong>
+                <p id="lineCompanyText">กำลังตรวจสอบสถานะการเชื่อมต่อ…</p>
+                <div id="lineIntegrationMeta" class="integration-meta hidden"></div>
+              </div>
+              <span id="lineCompanyBadge" class="badge badge-neutral">กำลังโหลด</span>
+              <button id="lineConfigureBtn" class="secondary-btn" type="button">เชื่อม LINE OA</button>
+              <button id="lineTestBtn" class="secondary-btn hidden" type="button">ทดสอบ</button>
+              <button id="lineDisconnectBtn" class="text-btn danger-text hidden" type="button">ยกเลิก</button>
+            </article>
+            <p class="settings-hint">ถ้ายังไม่เชื่อม OA ของบริษัท ระบบจะใช้ LINE “นากนะ” กลางเป็นค่าเริ่มต้น พอเชื่อม OA ของบริษัทแล้ว Invite ใหม่และข้อความ HR จะวิ่งผ่าน OA ของบริษัทนั้นอัตโนมัติ</p>
+          </div>
               <div id="googleWorkspaceSection" class="google-workspace-section">
             <div class="page-intro compact"><div><p class="kicker">COMPANY DATA</p><h2>Google</h2><p>เชื่อมบัญชี Google ของบริษัทครั้งเดียว เพื่อใช้ Gmail, เก็บเอกสารใน Drive และสร้าง HR Database ใน Google Sheets</p></div></div>
             <article class="integration-card workspace-google-card">
@@ -1389,12 +1332,7 @@
     </form>
   </dialog>
 
-  <dialog id="nkdocsDetailDialog" class="nkdocs-detail-dialog" aria-labelledby="nkdocsDetailTitle">
-    <div class="nkdocs-detail-head"><div><p class="kicker">DOCUMENT DETAILS</p><h2 id="nkdocsDetailTitle">รายละเอียดเอกสาร</h2><p id="nkdocsDetailSub"></p></div><button type="button" class="nkdocs-icon-close" id="nkdocsDetailClose" aria-label="ปิดรายละเอียด">×</button></div>
-    <div id="nkdocsDetailBody" class="nkdocs-detail-body"></div>
-    <div class="nkdocs-detail-footer" id="nkdocsDetailActions"></div>
-  </dialog>
-  <dialog id="documentGenerateModal" class="document-generate-dialog"><form method="dialog"><div class="modal-head"><div><p class="kicker">NEW EMPLOYEE DOCUMENT</p><h3>ออกเอกสารให้พนักงาน</h3><p>เลือกประเภทเอกสารก่อน นากนะจะเตรียม Draft จากข้อมูลพนักงานให้ HR ตรวจ</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="nkdocs-wizard-progress" role="status" aria-live="polite"><span class="is-active" data-nkdocs-step="1">1 · ประเภท</span><span data-nkdocs-step="2">2 · พนักงาน</span><span data-nkdocs-step="3">3 · รายละเอียด</span><span data-nkdocs-step="4">4 · ตรวจสอบ</span></div><p class="nkdocs-wizard-hint" id="nkdocsWizardHint">เลือกประเภทเอกสารที่ต้องการออก</p><div class="modal-fields"><div class="field full"><label>1. ต้องการออกเอกสารอะไร</label><div id="documentTypeCards" class="document-type-cards"></div><select id="documentTemplate" class="hidden"><option value="">เลือกประเภทเอกสาร</option></select></div><div class="field full"><label>2. ออกให้พนักงาน</label><select id="documentEmployee"></select></div><div id="documentDynamicFields" class="full"></div><div id="documentDraftPreview" class="document-draft-preview full"><p class="kicker">DOCUMENT PREVIEW</p><strong>เลือกประเภทเอกสารเพื่อกรอกแบบฟอร์ม</strong><small>ระบบจะสร้าง Preview จากข้อมูลบริษัทและแฟ้มพนักงานก่อนสร้าง Draft</small></div><div class="field full"><small>เอกสารสำคัญจะยังไม่ส่งให้พนักงานจนกว่า HR จะตรวจและอนุมัติ</small></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="nkdocsWizardBack" type="button" class="secondary-btn hidden">ย้อนกลับ</button><button id="documentGenerateSaveBtn" type="button" class="primary-btn">สร้าง Draft เพื่อตรวจสอบ</button></div></form></dialog>
+  <dialog id="documentGenerateModal" class="document-generate-dialog"><form method="dialog"><div class="modal-head"><div><p class="kicker">NEW EMPLOYEE DOCUMENT</p><h3>ออกเอกสารให้พนักงาน</h3><p>เลือกประเภทเอกสารก่อน นากนะจะเตรียม Draft จากข้อมูลพนักงานให้ HR ตรวจ</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="modal-fields"><div class="field full"><label>1. ต้องการออกเอกสารอะไร</label><div id="documentTypeCards" class="document-type-cards"></div><select id="documentTemplate" class="hidden"><option value="">เลือกประเภทเอกสาร</option></select></div><div class="field full"><label>2. ออกให้พนักงาน</label><select id="documentEmployee"></select></div><div id="documentDynamicFields" class="full"></div><div id="documentDraftPreview" class="document-draft-preview full"><p class="kicker">DOCUMENT PREVIEW</p><strong>เลือกประเภทเอกสารเพื่อกรอกแบบฟอร์ม</strong><small>ระบบจะสร้าง Preview จากข้อมูลบริษัทและแฟ้มพนักงานก่อนสร้าง Draft</small></div><div class="field full"><small>เอกสารสำคัญจะยังไม่ส่งให้พนักงานจนกว่า HR จะตรวจและอนุมัติ</small></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="documentGenerateSaveBtn" type="button" class="primary-btn">สร้าง Draft เพื่อตรวจสอบ</button></div></form></dialog>
 
   <dialog id="courseModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">COURSE BUILDER</p><h3>สร้างหลักสูตร Onboarding</h3><p>สร้างคอร์สก่อน แล้วค่อยเพิ่มวิดีโอ เอกสาร เนื้อหา หรือ Quiz</p></div><button type="button" class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>ชื่อหลักสูตร</label><input id="courseTitle" placeholder="เช่น Welcome to DEAL / Product 101" /></div><div class="field full"><label>คำอธิบาย</label><textarea id="courseDescription" rows="3"></textarea></div><div class="field"><label>กลุ่มเริ่มต้น</label><select id="courseAudience"><option value="manual">เลือกทีหลัง</option><option value="all">พนักงานทั้งหมด</option><option value="probation">พนักงานทดลองงาน</option><option value="department">รายแผนก</option></select></div><div class="field"><label>คะแนนผ่าน Quiz</label><input id="coursePassingScore" type="number" min="0" max="100" value="80" /></div><div class="field"><label>เวลาโดยประมาณ</label><div class="input-suffix"><input id="courseEstimatedMinutes" type="number" min="0" value="30" /><span>นาที</span></div></div><label class="toggle-line"><input id="courseRequired" type="checkbox" checked /> บังคับเรียน</label></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="courseSaveBtn" type="button" class="primary-btn">สร้างคอร์ส</button></div></form></dialog>
 
@@ -1416,7 +1354,26 @@
 
   <dialog id="probationReviewModal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PROBATION REVIEW</p><h3>ประเมินทดลองงาน</h3><p>ผ่าน / ต่อโปร / ไม่ผ่าน พร้อมบันทึกเหตุผลและจุดพัฒนา</p></div><button type="button" class="close-btn" value="cancel">×</button></div><div class="modal-fields"><div class="field full"><label>พนักงาน</label><select id="reviewEmployee"></select></div><div class="field"><label>วันที่ประเมิน</label><input id="reviewDate" type="date"/></div><div class="field"><label>ผล</label><select id="reviewStatus"><option value="submitted">ส่งประเมิน</option><option value="passed">ผ่านทดลองงาน</option><option value="extended">ต่อทดลองงาน</option><option value="not_passed">ไม่ผ่าน</option></select></div><div class="field"><label>คะแนน</label><input id="reviewScore" type="number" min="0" max="100"/></div><div class="field"><label>ต่อโปรถึง</label><input id="reviewExtensionEnd" type="date"/></div><div class="field full"><label>จุดแข็ง</label><textarea id="reviewStrengths" rows="2"></textarea></div><div class="field full"><label>สิ่งที่ต้องพัฒนา</label><textarea id="reviewImprovements" rows="2"></textarea></div><div class="field full"><label>Manager Comment</label><textarea id="reviewManagerComment" rows="2"></textarea></div><div class="field full"><label>HR Comment</label><textarea id="reviewHrComment" rows="2"></textarea></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="reviewSaveBtn" type="button" class="primary-btn">บันทึกผลประเมิน</button></div></form></dialog>
 
-  <!-- Company LINE OA setup is not available in UI. -->
+  <dialog id="lineIntegrationModal" class="line-integration-modal">
+    <form method="dialog" id="lineIntegrationForm">
+      <div class="modal-head">
+        <div><p class="kicker">LINE OFFICIAL ACCOUNT</p><h3>เชื่อม LINE OA ของบริษัท</h3><p>นากนะจะเก็บ Channel Secret และ Access Token แบบเข้ารหัส และตั้ง Webhook URL ของ Workspace ให้อัตโนมัติ</p></div>
+        <button type="button" class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="line-connect-note">
+        <strong>ก่อนเชื่อม</strong>
+        <span>เปิด Messaging API ใน LINE Official Account แล้วออก Channel Access Token (long-lived) ให้เรียบร้อย</span>
+      </div>
+      <div class="modal-fields">
+        <div class="field full"><label>Channel ID <small>ไม่บังคับ</small></label><input id="lineChannelId" inputmode="numeric" placeholder="เช่น 201xxxxxxxxx" autocomplete="off" /></div>
+        <div class="field full"><label>Channel Secret <em>*</em></label><input id="lineChannelSecret" type="password" placeholder="ความลับแชนแนลจาก Basic settings" autocomplete="new-password" /></div>
+        <div class="field full"><label>Channel Access Token <em>*</em></label><textarea id="lineAccessToken" rows="4" placeholder="Channel access token (long-lived)" autocomplete="off"></textarea></div>
+        <div class="field full"><label>Webhook ของ Workspace</label><div class="copy-field"><input id="lineWebhookPreview" readonly value="ระบบจะสร้างหลังเชื่อม" /><button id="copyLineWebhookModalBtn" type="button" class="secondary-btn">คัดลอก</button></div><small>หลังเชื่อมแล้ว ให้เปิด “Use webhook” ใน LINE Developers ถ้ายังปิดอยู่</small></div>
+      </div>
+      <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="lineIntegrationSaveBtn" class="primary-btn">เชื่อมและตั้ง Webhook</button></div>
+    </form>
+  </dialog>
+
   <dialog id="companyAccessModal">
     <form method="dialog">
       <div class="modal-head">
@@ -1564,7 +1521,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SCOPE20261020V1" type="module"></script>
+  <script src="/app.js?v=P10.1-a1&ed=P10.4" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
