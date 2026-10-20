@@ -1,0 +1,12 @@
+/* Nakna P10.9: small, account-scoped quick-start controls. */
+button.p109-original-hidden { display:none !important; }
+.p109-actions {display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0;max-width:100%;}
+.p109-start,.p109-advanced {appearance:none;border-radius:10px;min-height:40px;padding:8px 13px;font:inherit;cursor:pointer;font-size:13px;font-weight:650;line-height:1.2;}
+.p109-start {background:#04878a;border:1px solid #04878a;color:#fff;}
+.p109-start:hover {background:#036a6d;}
+.p109-start:disabled {opacity:.55;cursor:wait;}
+.p109-advanced {background:#fff;border:1px solid #d0e0df;color:#36545b;}
+.p109-start:focus-visible,.p109-advanced:focus-visible {outline:3px solid #a9dad4;outline-offset:2px;}
+.p109-note {flex-basis:100%;font-size:11px;line-height:1.5;color:#6c8285;margin:0;overflow-wrap:anywhere;}
+.p109-note[data-error="1"]{color:#aa3434;}
+@media(max-width:550px){.p109-actions{width:100%;}.p109-start{flex:1;min-width:0;}.p109-advanced{flex:0 0 auto;}}
