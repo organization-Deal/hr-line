@@ -1,0 +1,51 @@
+/* P10.7: small, accessible helper below the original recruitment queue filters. */
+.nakna-gmail-account-help {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 6px;
+  background: #f3faf8;
+  border: 1px solid #d7e9e5;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 8px 0 14px;
+  color: #23464b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.nakna-gmail-account-help__text {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.nakna-gmail-account-help__button {
+  cursor: pointer;
+  appearance: none;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 36px;
+  max-width: 100%;
+  padding: 7px 12px;
+  border: 1px solid #9dcfca;
+  border-radius: 9px;
+  background: #fff;
+  color: #04797b;
+  font: inherit;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.nakna-gmail-account-help__button:hover { background: #ecf8f5; }
+.nakna-gmail-account-help__button:focus-visible { outline: 2px solid #04878a; outline-offset: 2px; }
+.nakna-gmail-account-help__button[hidden] { display: none !important; }
+.nakna-gmail-account-help__detail {
+  flex-basis: 100%;
+  color: #667d80;
+  font-size: 11px;
+}
+@media (max-width: 600px) {
+  .nakna-gmail-account-help { align-items: stretch; }
+  .nakna-gmail-account-help__text { flex-basis: 100%; }
+  .nakna-gmail-account-help__button { width: 100%; min-height: 44px; }
+}
