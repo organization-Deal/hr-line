@@ -1,0 +1,8 @@
+/* Emphasize the leave work queue without changing tab behavior or request counts. */
+#view-leave #nkLeaveTabs #nkLeaveTab-queue{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:44px;padding:10px 18px;border:1px solid #e9be68!important;border-radius:10px;background:#fff3d5!important;color:#805014!important;font-size:14px!important;font-weight:700!important;line-height:1.4;box-shadow:0 2px 5px #966b1410}
+#view-leave #nkLeaveTabs #nkLeaveTab-queue:hover{background:#ffebbc!important;border-color:#c99232!important}
+#view-leave #nkLeaveTabs #nkLeaveTab-queue[aria-selected="true"]{background:#8a5718!important;color:#fff!important;border-color:#8a5718!important;box-shadow:inset 0 -3px 0 #56350e,0 2px 5px #966b141a}
+#view-leave #nkLeaveTabs #nkLeavePendingCount{display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:26px;min-height:26px;box-sizing:border-box;padding:3px 8px;border-radius:999px;background:#8a5718!important;color:#fff!important;font-size:13px!important;font-weight:700!important;line-height:1.2;font-variant-numeric:tabular-nums}
+#view-leave #nkLeaveTabs #nkLeaveTab-queue[aria-selected="true"] #nkLeavePendingCount{background:#fff!important;color:#71410c!important}
+#view-leave #nkLeaveTabs #nkLeaveTab-queue:focus-visible{outline:3px solid #a76b1c!important;outline-offset:3px}
+@media(max-width:600px){#view-leave #nkLeaveTabs #nkLeaveTab-queue{font-size:13px!important;padding:9px 13px;gap:7px}#view-leave #nkLeaveTabs #nkLeavePendingCount{min-width:24px;min-height:24px;font-size:12px!important}}
