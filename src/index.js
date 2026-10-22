@@ -2,8 +2,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.18-NOTIFICATION-CENTER';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.18-NOTIFICATION-CENTER';
+const NAKNA_RUNTIME_RELEASE = 'P10.19-NOTIFICATION-CENTER';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.19-NOTIFICATION-CENTER';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -11531,6 +11531,15 @@ function buildDailyHrStatusFlex(client,dashboard,retroPending=0,{asOf=bangkokClo
   })};
 }
 
+function buildFeatureNotificationFlex(client,title,message,lines,clock){
+  return {type:'flex',altText:`${title} · ${client.name}`.slice(0,200),contents:lineBubble({
+    eyebrow:'NAKNA · HR NOTIFICATION',title,
+    subtitle:`${client.name} · ${formatThaiShortDate(clock.date)}`,
+    body:[lineText(message,'sm',LINE_CI.text),lineInfoCard(lines.map(([label,count])=>lineInfoRow(label,String(count))),'teal'),lineText(`ข้อมูล ณ ${clock.time} น. เวลาไทย · ดึงจากข้อมูลปัจจุบันในระบบ`,'xxs',LINE_CI.muted)],
+    footer:[linePrimaryButton('เปิด HR Dashboard',{type:'postback',label:'เปิด HR Dashboard',data:`action=owner_dashboard&client_id=${Number(client.id)}`})]
+  })};
+}
+
 async function sendDailyHrBrief(env) {
   const clients = await env.DB.prepare('SELECT * FROM clients ORDER BY id').all();
   for (const client of clients.results || []) {
@@ -13535,4 +13544,4 @@ function bangkokClock(date=new Date()){
  return {date:dateKey,time:`${parts.hour}:${parts.minute}`,hour:Number(parts.hour),minute:Number(parts.minute),weekday:weekdayBangkok(dateKey)};
 }
 
-function notificationCenterHelpers(){return {canManagePeopleAdmin,ensureMissingCheckinReminderReady,ensureDailyHrStatusReady,ensureAttendanceRetroReady,getDailyHrLineRecipients,getAccessTokenForProviderScope,resolveEffectiveWorkSchedule,getDashboard,dashboardAttentionTotal,buildDailyHrStatusFlex,safeAudit};}
+function notificationCenterHelpers(){return {canManagePeopleAdmin,ensureMissingCheckinReminderReady,ensureDailyHrStatusReady,ensureAttendanceRetroReady,getDailyHrLineRecipients,getAccessTokenForProviderScope,resolveEffectiveWorkSchedule,getDashboard,dashboardAttentionTotal,buildDailyHrStatusFlex,buildFeatureNotificationFlex,safeAudit};}

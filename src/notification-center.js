@@ -1,12 +1,8 @@
+import {NOTIFICATION_TYPES as NC_TYPES,fieldsForKind,canonicalTemplate,messageDate} from '../public/notification-catalog.js';
+import {notificationFeatureData} from './notification-data.js';
 // Nakna P10.17: tenant-scoped settings, durable outbox and scheduler.
-export const NC_RELEASE='P10.18';
-export const NC_TYPES={
- checkin:{title:'อย่าลืมเช็กอิน',time:'12:30',enabled:true,text:'สวัสดี {ชื่อ} หากเริ่มทำงานแล้ว อย่าลืมเช็กอินวันนี้นะครับ',employee:true,window:60},
- checkout:{title:'อย่าลืมเช็กเอาต์',time:'20:15',enabled:false,text:'สวัสดี {ชื่อ} หากเลิกงานแล้ว อย่าลืมเช็กเอาต์นะครับ',employee:true,window:60},
- hr_summary:{title:'สรุปประจำวัน HR',time:'13:00',enabled:true,text:'สรุปสถานะทีม {บริษัท} ประจำวันที่ {วันที่}',window:300},
- executive_summary:{title:'สรุปผู้บริหาร',time:'20:30',enabled:false,text:'ภาพรวมทีม {บริษัท} ประจำวันที่ {วันที่}',window:180},
- pending_approvals:{title:'งานรออนุมัติ',time:'16:00',enabled:false,text:'มีรายการรอตรวจสอบของ {บริษัท} กรุณาเปิด Dashboard เพื่อดำเนินการ',window:120}
-};
+export const NC_RELEASE='P10.19';
+export { NOTIFICATION_TYPES as NC_TYPES } from '../public/notification-catalog.js';
 export const NC_SCHEMA=[
  `CREATE TABLE IF NOT EXISTS notification_center_settings(client_id INTEGER NOT NULL,kind TEXT NOT NULL,enabled INTEGER NOT NULL,send_time TEXT NOT NULL,weekdays TEXT NOT NULL,message_text TEXT NOT NULL,recipient_keys TEXT NOT NULL DEFAULT 'null',updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(client_id,kind))`,
  `CREATE TABLE IF NOT EXISTS notification_center_outbox(id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,kind TEXT NOT NULL,send_date TEXT NOT NULL,recipient_key TEXT NOT NULL,recipient_label TEXT NOT NULL,provider_scope TEXT NOT NULL,line_user_id TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,retry_key TEXT NOT NULL,payload_json TEXT NOT NULL,lease_token TEXT,lease_until INTEGER NOT NULL DEFAULT 0,next_attempt_at INTEGER NOT NULL DEFAULT 0,http_status INTEGER,error_code TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(client_id,kind,send_date,recipient_key))`,
@@ -29,15 +25,15 @@ export function ncDue(setting,clock){const diff=ncMinutes(clock.time)-ncMinutes(
 export function ncTemplate(text,values){return String(text).replace(/\{([^{}]+)\}/g,(m,key)=>String(values[key]??m));}
 function parse(value,fallback){try{return JSON.parse(value);}catch{return fallback;}}
 export function ncRecipientKey(r){return r.user_id?'u:'+Number(r.user_id):'e:'+Number(r.employee_id||r.id);}
-export function ncAllowedRecipients(kind,rows){return kind==='executive_summary'?rows.filter(r=>['owner','co_owner'].includes(r.role)):rows;}
+export function ncAllowedRecipients(kind,rows){return kind==='executive_summary'?rows.filter(r=>['owner','co_owner'].includes(r.role)):NC_TYPES[kind]?.private?rows.filter(r=>['owner','co_owner','hr_admin','hr'].includes(r.role)):rows;}
 export function ncNormalize(kind,input){
  if(!NC_TYPES[kind])throw new Error('ไม่พบประเภทแจ้งเตือน');
  if(typeof input.enabled!=='boolean')throw new Error('ระบุสถานะเปิดหรือปิด');
  if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(input.send_time||''))throw new Error('เวลาไม่ถูกต้อง');
  if(!Array.isArray(input.weekdays)||!input.weekdays.length||input.weekdays.some(d=>!Number.isInteger(d)||d<1||d>7))throw new Error('เลือกวันอย่างน้อยหนึ่งวัน');
- const text=String(input.message_text||'').trim();if(!text||text.length>300)throw new Error('ข้อความต้องมี 1–300 ตัวอักษร');
- const vars=new Set(['ชื่อ','บริษัท','วันที่','เวลา','name','company','date','time']);
- if([...text.matchAll(/\{([^{}]+)\}/g)].some(m=>!vars.has(m[1])))throw new Error('มีตัวแปรข้อความที่ไม่รองรับ');
+ const text=canonicalTemplate(input.message_text||'').trim();if(!text||text.length>300)throw new Error('ข้อความต้องมี 1–300 ตัวอักษร');
+ const vars=new Set(fieldsForKind(kind).map(f=>f.key));
+ if([...text.matchAll(/\{([^{}]+)\}/g)].some(m=>!vars.has(m[1])))throw new Error('พบข้อมูลอัตโนมัติที่ไม่รองรับ กรุณาลบแล้วเลือกจากปุ่มเพิ่มข้อมูล');
  const recipients=NC_TYPES[kind].employee?null:input.recipient_keys;
  if(recipients!==null&&(!Array.isArray(recipients)||recipients.length>100||recipients.some(k=>!/^([ue]):[1-9]\d*$/.test(k))))throw new Error('ผู้รับไม่ถูกต้อง');
  if(input.enabled&&!NC_TYPES[kind].employee&&Array.isArray(recipients)&&!recipients.length)throw new Error('เลือกผู้รับก่อนเปิดการแจ้งเตือน');
@@ -57,9 +53,9 @@ export async function ncPush(token,to,payload,retryKey,fetcher=fetch){
  return {accepted,retryable:[408,429].includes(res.status)||res.status>=500,status:res.status,error:accepted?null:'LINE_HTTP_'+res.status};
  }catch(e){return {accepted:false,retryable:true,status:0,error:e.name==='AbortError'?'LINE_TIMEOUT':'LINE_NETWORK_ERROR'};}finally{clearTimeout(timer);}
 }
-export function ncMessage(setting,client,recipient,clock,summary=null){
+export function ncMessage(setting,client,recipient,clock,summary=null,extraValues={}){
  const d=NC_TYPES[setting.kind],name=recipient.recipient_name||recipient.nickname||recipient.first_name||'คุณ';
- const vars={'ชื่อ':name,'บริษัท':client.name,'วันที่':clock.date,'เวลา':setting.send_time,name,company:client.name,date:clock.date,time:setting.send_time};
+ const vars={'ชื่อ':name,'บริษัท':client.name,'วันที่':messageDate(clock.date),'เวลา':setting.send_time,name,company:client.name,date:messageDate(clock.date),time:setting.send_time,...extraValues};
  const intro=ncTemplate(setting.message_text,vars);
  const contents=[{type:'text',text:d.title,weight:'bold',size:'lg',color:'#173D43',wrap:true},{type:'text',text:intro,wrap:true,size:'sm',color:'#5F7972',margin:'md'}];
  if(summary){for(const [label,value] of summary)contents.push({type:'box',layout:'horizontal',margin:'md',contents:[{type:'text',text:label,wrap:true,size:'sm',flex:3},{type:'text',text:String(value),align:'end',size:'sm',weight:'bold',flex:1}]});}
@@ -99,7 +95,7 @@ export async function runNotificationCenter(env,controller,h,{now=new Date(),max
    try{
     const setting=await ncSetting(db,client,kind);if(!ncDue(setting,clock))continue;
     const holiday=await db.prepare('SELECT id FROM company_holidays WHERE client_id=?1 AND holiday_date=?2 LIMIT 1').bind(client.id,clock.date).first();
-    if(holiday){await runtime(db,client.id,kind,{date:clock.date,time:clock.time,reason:'COMPANY_HOLIDAY',eligible:0});continue;}
+    if(holiday&&kind!=='birthdays'){await runtime(db,client.id,kind,{date:clock.date,time:clock.time,reason:'COMPANY_HOLIDAY',eligible:0});continue;}
     let eligible=0,sent=0,failed=0,reason=null;
     const d=NC_TYPES[kind];
     if(d.employee){
@@ -120,12 +116,19 @@ export async function runNotificationCenter(env,controller,h,{now=new Date(),max
      eligible=recipients.length;
      if(!eligible)reason='NO_AUTHORIZED_LINE_RECIPIENTS';
      if(eligible){
-      const dashboard=await h.getDashboard(db,client.id,{includeHrCases:false});
-      let privateDashboard;
-      const retro=await db.prepare("SELECT COUNT(*) AS n FROM attendance_retro_requests WHERE client_id=?1 AND status='pending'").bind(client.id).first();
-      const summary=dashboard.summary||{},pending=Number(h.dashboardAttentionTotal(dashboard,'leave_pending')||0)+Number(retro?.n||0)+Number(h.dashboardAttentionTotal(dashboard,'request')||0);
-      const lines=kind==='pending_approvals'?[['ใบลารออนุมัติ',Number(h.dashboardAttentionTotal(dashboard,'leave_pending')||0)],['เช็กอินย้อนหลังรออนุมัติ',Number(retro?.n||0)],['คำขอรอตรวจสอบ',Number(h.dashboardAttentionTotal(dashboard,'request')||0)]]:[['มีตารางวันนี้',Number(summary.scheduled_today||0)],['เช็กอินแล้ว',Number(summary.scheduled_present??summary.present??0)],['มาสาย',Number(summary.late||0)],['ลาวันนี้',Number(summary.leave||0)],['ยังไม่เช็กอิน',Number(summary.missing||0)],['งานรอตรวจสอบ',pending]];
-      if(kind==='pending_approvals'&&!pending)reason='NO_PENDING_TASKS';
+      let dashboard,privateDashboard,retro,lines,values={},pending=0;
+      if(NC_TYPES[kind].feature){
+       const facts=await notificationFeatureData(db,client.id,kind,clock.date);
+       values=facts.values;lines=facts.lines;pending=facts.count;
+      }else{
+       dashboard=await h.getDashboard(db,client.id,{includeHrCases:false});
+       retro=await db.prepare("SELECT COUNT(*) AS n FROM attendance_retro_requests WHERE client_id=?1 AND status='pending'").bind(client.id).first();
+       const summary=dashboard.summary||{};
+       values={'เอกสารรอHRเซ็น':Number(dashboard.documents?.pending_hr_sign||0),'เอกสารรอพนักงานเซ็น':Number(dashboard.documents?.pending_employee_sign||0),'พนักงานทั้งหมด':Number(summary.employees||0),'มีตารางวันนี้':Number(summary.scheduled_today||0),'เช็กอินแล้ว':Number(summary.scheduled_present??summary.present??0),'มาสาย':Number(summary.late||0),'ลาวันนี้':Number(summary.leave||0),'ยังไม่เช็กอิน':Number(summary.missing||0),'ใบลารออนุมัติ':Number(h.dashboardAttentionTotal(dashboard,'leave_pending')||0),'เช็กอินย้อนหลังรออนุมัติ':Number(retro?.n||0),'คำขอรอตรวจสอบ':Number(h.dashboardAttentionTotal(dashboard,'request')||0)};
+       pending=values['ใบลารออนุมัติ']+values['เช็กอินย้อนหลังรออนุมัติ']+values['คำขอรอตรวจสอบ'];
+       lines=kind==='pending_approvals'?[['ใบลารออนุมัติ',values['ใบลารออนุมัติ']],['เช็กอินย้อนหลังรออนุมัติ',values['เช็กอินย้อนหลังรออนุมัติ']],['คำขอรอตรวจสอบ',values['คำขอรอตรวจสอบ']]]:[['มีตารางวันนี้',values['มีตารางวันนี้']],['เช็กอินแล้ว',values['เช็กอินแล้ว']],['มาสาย',values['มาสาย']],['ลาวันนี้',values['ลาวันนี้']],['ยังไม่เช็กอิน',values['ยังไม่เช็กอิน']],['งานรอตรวจสอบ',pending]];
+      }
+      if((kind==='pending_approvals'||NC_TYPES[kind].feature)&&!pending)reason='NO_PENDING_TASKS';
       else for(const recipient of recipients){
        if(attempted>=maxSends){reason='BATCH_CONTINUES_NEXT_TICK';break;}
        if(kind==='hr_summary'&&await db.prepare("SELECT client_id FROM hr_daily_status_deliveries WHERE client_id=?1 AND summary_date=?2 AND status='accepted' AND provider_scope=?3 AND line_user_id=?4 LIMIT 1").bind(client.id,clock.date,recipient.line_provider_scope,recipient.line_user_id).first())continue;
@@ -134,15 +137,18 @@ export async function runNotificationCenter(env,controller,h,{now=new Date(),max
         // Use the established branded card, including its HR queue and both actions.
         const includePrivate=Boolean(recipient.can_private)&&h.canManagePeopleAdmin(recipient.role);
         if(includePrivate&&!privateDashboard)privateDashboard=await h.getDashboard(db,client.id,{includeHrCases:true});
-        const messageText=setting.message_text===NC_TYPES.hr_summary.text?'':ncTemplate(setting.message_text,{'ชื่อ':recipient.recipient_name||'คุณ','บริษัท':client.name,'วันที่':clock.date,'เวลา':setting.send_time,name:recipient.recipient_name||'คุณ',company:client.name,date:clock.date,time:setting.send_time});
+        const messageText=setting.message_text===NC_TYPES.hr_summary.text?'':ncTemplate(setting.message_text,{'ชื่อ':recipient.recipient_name||'คุณ','บริษัท':client.name,'วันที่':messageDate(clock.date),'เวลา':setting.send_time,name:recipient.recipient_name||'คุณ',company:client.name,date:messageDate(clock.date),time:setting.send_time,...values});
         messages=[h.buildDailyHrStatusFlex(client,includePrivate?privateDashboard:dashboard,Number(retro?.n||0),{asOf:clock,sendTime:setting.send_time,includePrivate,messageText})];
-       }else messages=ncMessage(setting,client,recipient,clock,lines);
+       }else if(NC_TYPES[kind].feature){
+        const intro=ncTemplate(setting.message_text,{'ชื่อ':recipient.recipient_name||'คุณ','บริษัท':client.name,'วันที่':messageDate(clock.date),'เวลา':setting.send_time,name:recipient.recipient_name||'คุณ',company:client.name,date:messageDate(clock.date),time:setting.send_time,...values});
+        messages=[h.buildFeatureNotificationFlex(client,setting.title,intro,lines,clock)];
+       }else messages=ncMessage(setting,client,recipient,clock,lines,values);
        const result=await ncDeliver(env,client,kind,ncRecipientKey(recipient),recipient,clock.date,messages,h);if(!result.skipped){attempted++;result.accepted?sent++:failed++;}
       }
      }
     }
     await runtime(db,client.id,kind,{date:clock.date,time:clock.time,eligible,sent_now:sent,failed_now:failed,reason});
-   }catch(e){await runtime(db,client.id,kind,{date:clock.date,time:clock.time,error:String(e.message||'JOB_FAILED').slice(0,180)}).catch(()=>{});console.error(JSON.stringify({event:'notification_center_job_failed',client_id:client.id,kind,error:String(e.message).slice(0,150)}));}
+   }catch(e){await runtime(db,client.id,kind,{date:clock.date,time:clock.time,error:NC_TYPES[kind].feature?'โหลดข้อมูลจากฟีเจอร์ไม่สำเร็จ กรุณาตรวจระบบต้นทาง':String(e.message||'JOB_FAILED').slice(0,180)}).catch(()=>{});console.error(JSON.stringify({event:'notification_center_job_failed',client_id:client.id,kind,error:String(e.message).slice(0,150)}));}
   }
  }
  return {release:NC_RELEASE,date:clock.date,attempted};
@@ -163,7 +169,7 @@ export async function notificationCenterApi(request,env,auth,h){
   const runs=(await db.prepare('SELECT runtime_key,value_json FROM notification_center_runtime WHERE client_id=?1').bind(cid).all()).results||[];
   const logs=(await db.prepare('SELECT id,kind,send_date,recipient_label,status,attempts,http_status,error_code,updated_at FROM notification_center_outbox WHERE client_id=?1 ORDER BY id DESC LIMIT 80').bind(cid).all()).results||[];
   const missing=await db.prepare("SELECT COUNT(*) AS n FROM employees WHERE client_id=?1 AND status='active' AND trim(COALESCE(line_user_id,''))=''").bind(cid).first();
-  return Response.json({ok:true,release:NC_RELEASE,timezone:'Asia/Bangkok',settings,recipients:recipients.map(r=>({key:ncRecipientKey(r),name:r.recipient_name||'ผู้รับ',role:r.role})),heartbeat:parse(heart?.value_json,null),runs:Object.fromEntries(runs.map(r=>[r.runtime_key,parse(r.value_json,{})])),logs,missing_employee_line:Number(missing?.n||0),today:ncClock().date});
+  return Response.json({ok:true,release:NC_RELEASE,timezone:'Asia/Bangkok',company_name:client.name,settings,recipients:recipients.map(r=>({key:ncRecipientKey(r),name:r.recipient_name||'ผู้รับ',role:r.role})),heartbeat:parse(heart?.value_json,null),runs:Object.fromEntries(runs.map(r=>[r.runtime_key,parse(r.value_json,{})])),logs,missing_employee_line:Number(missing?.n||0),today:ncClock().date});
  }
  if(request.method==='PATCH'){
   try{const input=await request.json(),kind=legacy?'checkin':input.kind;

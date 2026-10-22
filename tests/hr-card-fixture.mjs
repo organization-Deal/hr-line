@@ -8,5 +8,6 @@ export function loadHrCardBuilder(){
  const date=source.slice(source.indexOf('function formatThaiShortDate('),source.indexOf('async function replyLineWithLocationQuickReply('));
  const ctx={bangkokClock:ncClock,DAILY_HR_STATUS_TIME:'13:00'};
  vm.createContext(ctx);vm.runInContext(shared+card+date,ctx);
+ ctx.buildDailyHrStatusFlex.feature=ctx.buildFeatureNotificationFlex;
  return ctx.buildDailyHrStatusFlex;
 }
