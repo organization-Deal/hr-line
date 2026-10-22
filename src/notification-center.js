@@ -1,5 +1,5 @@
 // Nakna P10.17: tenant-scoped settings, durable outbox and scheduler.
-export const NC_RELEASE='P10.17';
+export const NC_RELEASE='P10.18';
 export const NC_TYPES={
  checkin:{title:'อย่าลืมเช็กอิน',time:'12:30',enabled:true,text:'สวัสดี {ชื่อ} หากเริ่มทำงานแล้ว อย่าลืมเช็กอินวันนี้นะครับ',employee:true,window:60},
  checkout:{title:'อย่าลืมเช็กเอาต์',time:'20:15',enabled:false,text:'สวัสดี {ชื่อ} หากเลิกงานแล้ว อย่าลืมเช็กเอาต์นะครับ',employee:true,window:60},
@@ -121,6 +121,7 @@ export async function runNotificationCenter(env,controller,h,{now=new Date(),max
      if(!eligible)reason='NO_AUTHORIZED_LINE_RECIPIENTS';
      if(eligible){
       const dashboard=await h.getDashboard(db,client.id,{includeHrCases:false});
+      let privateDashboard;
       const retro=await db.prepare("SELECT COUNT(*) AS n FROM attendance_retro_requests WHERE client_id=?1 AND status='pending'").bind(client.id).first();
       const summary=dashboard.summary||{},pending=Number(h.dashboardAttentionTotal(dashboard,'leave_pending')||0)+Number(retro?.n||0)+Number(h.dashboardAttentionTotal(dashboard,'request')||0);
       const lines=kind==='pending_approvals'?[['ใบลารออนุมัติ',Number(h.dashboardAttentionTotal(dashboard,'leave_pending')||0)],['เช็กอินย้อนหลังรออนุมัติ',Number(retro?.n||0)],['คำขอรอตรวจสอบ',Number(h.dashboardAttentionTotal(dashboard,'request')||0)]]:[['มีตารางวันนี้',Number(summary.scheduled_today||0)],['เช็กอินแล้ว',Number(summary.scheduled_present??summary.present??0)],['มาสาย',Number(summary.late||0)],['ลาวันนี้',Number(summary.leave||0)],['ยังไม่เช็กอิน',Number(summary.missing||0)],['งานรอตรวจสอบ',pending]];
@@ -128,7 +129,15 @@ export async function runNotificationCenter(env,controller,h,{now=new Date(),max
       else for(const recipient of recipients){
        if(attempted>=maxSends){reason='BATCH_CONTINUES_NEXT_TICK';break;}
        if(kind==='hr_summary'&&await db.prepare("SELECT client_id FROM hr_daily_status_deliveries WHERE client_id=?1 AND summary_date=?2 AND status='accepted' AND provider_scope=?3 AND line_user_id=?4 LIMIT 1").bind(client.id,clock.date,recipient.line_provider_scope,recipient.line_user_id).first())continue;
-       const result=await ncDeliver(env,client,kind,ncRecipientKey(recipient),recipient,clock.date,ncMessage(setting,client,recipient,clock,lines),h);if(!result.skipped){attempted++;result.accepted?sent++:failed++;}
+       let messages;
+       if(kind==='hr_summary'){
+        // Use the established branded card, including its HR queue and both actions.
+        const includePrivate=Boolean(recipient.can_private)&&h.canManagePeopleAdmin(recipient.role);
+        if(includePrivate&&!privateDashboard)privateDashboard=await h.getDashboard(db,client.id,{includeHrCases:true});
+        const messageText=setting.message_text===NC_TYPES.hr_summary.text?'':ncTemplate(setting.message_text,{'ชื่อ':recipient.recipient_name||'คุณ','บริษัท':client.name,'วันที่':clock.date,'เวลา':setting.send_time,name:recipient.recipient_name||'คุณ',company:client.name,date:clock.date,time:setting.send_time});
+        messages=[h.buildDailyHrStatusFlex(client,includePrivate?privateDashboard:dashboard,Number(retro?.n||0),{asOf:clock,sendTime:setting.send_time,includePrivate,messageText})];
+       }else messages=ncMessage(setting,client,recipient,clock,lines);
+       const result=await ncDeliver(env,client,kind,ncRecipientKey(recipient),recipient,clock.date,messages,h);if(!result.skipped){attempted++;result.accepted?sent++:failed++;}
       }
      }
     }

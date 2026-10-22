@@ -1,3 +1,4 @@
+import {loadHrCardBuilder} from './hr-card-fixture.mjs';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
@@ -33,8 +34,8 @@ await run('CREATE TABLE attendance_reminder_logs(id INTEGER PRIMARY KEY,client_i
 await run('CREATE TABLE hr_daily_status_deliveries(client_id INTEGER,summary_date TEXT,status TEXT,provider_scope TEXT,line_user_id TEXT)');
 await run('CREATE TABLE attendance_retro_requests(client_id INTEGER,status TEXT)');
 await run("INSERT INTO clients VALUES(1,'A','09:00','18:00',1,NULL),(2,'B','09:00','18:00',0,NULL)");
-const client={id:1,name:'A'},recipient={user_id:1,recipient_name:'HR',line_user_id:'U1',line_provider_scope:'default',role:'hr'};let calls=[];let code=429;
-const h={getAccessTokenForProviderScope:async()=> 'test-token',fetcher:async(url,options)=>{calls.push(options);return new Response('',{status:code});},ensureMissingCheckinReminderReady:async()=>{},ensureDailyHrStatusReady:async()=>{},ensureAttendanceRetroReady:async()=>{},resolveEffectiveWorkSchedule:async()=>({is_workday:true,start_time:'09:00',end_time:'18:00'}),getDailyHrLineRecipients:async(db,cid)=>cid===1?[recipient]:[],getDashboard:async()=>({summary:{scheduled_today:6,scheduled_present:1,missing:4}}),dashboardAttentionTotal:()=>0,canManagePeopleAdmin:role=>role==='hr',safeAudit:async()=>{}};
+const client={id:1,name:'A'},recipient={user_id:1,recipient_name:'HR',line_user_id:'U1',line_provider_scope:'default',role:'hr',can_private:true};let calls=[];let code=429;
+const h={buildDailyHrStatusFlex:loadHrCardBuilder(),getAccessTokenForProviderScope:async()=> 'test-token',fetcher:async(url,options)=>{calls.push(options);return new Response('',{status:code});},ensureMissingCheckinReminderReady:async()=>{},ensureDailyHrStatusReady:async()=>{},ensureAttendanceRetroReady:async()=>{},resolveEffectiveWorkSchedule:async()=>({is_workday:true,start_time:'09:00',end_time:'18:00'}),getDailyHrLineRecipients:async(db,cid)=>cid===1?[recipient]:[],getDashboard:async()=>({today:'2026-10-22',summary:{employees:6,scheduled_today:6,scheduled_present:1,missing:4}}),dashboardAttentionTotal:()=>0,canManagePeopleAdmin:role=>role==='hr',safeAudit:async()=>{}};
 const env={DB:db};const message=[{type:'text',text:'first'}];
 let x=await ncDeliver(env,client,'testcase','u:1',recipient,'2026-10-22',message,h);check(x.status==='retry','429 durable retry');
 x=await ncDeliver(env,client,'testcase','u:1',recipient,'2026-10-22',message,h);check(x.skipped&&calls.length===1,'retry backoff');
@@ -51,13 +52,13 @@ await runNotificationCenter(env,{cron:'* * * * *'},h,{now:new Date('2026-10-22T0
 await runNotificationCenter(env,{},h,{now:new Date('2026-10-22T05:34:00Z')});check(calls.length===before+2,'continue next tick');
 check((await first("SELECT COUNT(*) n FROM notification_center_outbox WHERE kind='checkin' AND status='accepted'")).n===2,'skip checked-in, leave, legacy-sent, unlinked, inactive');
 await runNotificationCenter(env,{},h,{now:new Date('2026-10-22T05:35:00Z')});check(calls.length===before+2,'checkin no duplicates');
-await runNotificationCenter(env,{},h,{now:new Date('2026-10-22T06:03:00Z')});check(calls.length===before+3,'HR missed minute catchup');
+await runNotificationCenter(env,{},h,{now:new Date('2026-10-22T06:03:00Z')});check(calls.length===before+3,'HR missed minute catchup');const hrPayload=JSON.parse(calls.at(-1).body);check(hrPayload.messages[0].contents.header.contents[1].text==='สรุปทีมรอบ 13:00','cron sends original branded HR card');check(hrPayload.messages[0].contents.footer.contents.length===2,'cron retains dashboard and status actions');
 await runNotificationCenter(env,{},h,{now:new Date('2026-10-22T06:04:00Z')});check(calls.length===before+3,'HR dedupe');
 check((await ncSetting(db,{id:2,attendance_reminder_enabled:0},'checkin')).enabled===false,'legacy disabled preserved');
 await run("INSERT INTO company_holidays VALUES(1,1,'2026-10-23')");
 await runNotificationCenter(env,{},h,{now:new Date('2026-10-23T05:33:00Z')});check(calls.length===before+3,'company holiday');
 let response=await notificationCenterApi(new Request('https://test/api/notification-center'),env,{clientId:1,role:'employee',user:{id:1}},h);check(response.status===403,'API role guard');
-response=await notificationCenterApi(new Request('https://test/api/notification-center'),env,{clientId:1,role:'hr',user:{id:1}},h);const body=await response.json();check(body.heartbeat.release==='P10.17','heartbeat exposed');check(!JSON.stringify(body).includes('test-token')&&!JSON.stringify(body).includes('"line_user_id"')&&!JSON.stringify(body).includes('payload_json'),'API excludes tokens, LINE IDs, payload');
+response=await notificationCenterApi(new Request('https://test/api/notification-center'),env,{clientId:1,role:'hr',user:{id:1}},h);const body=await response.json();check(body.heartbeat.release==='P10.18','heartbeat exposed');check(!JSON.stringify(body).includes('test-token')&&!JSON.stringify(body).includes('"line_user_id"')&&!JSON.stringify(body).includes('payload_json'),'API excludes tokens, LINE IDs, payload');
 response=await notificationCenterApi(new Request('https://test/api/notification-center',{method:'PATCH',body:JSON.stringify({...base,kind:'hr_summary',recipient_keys:['u:999']})}),env,{clientId:1,role:'hr',user:{id:1}},h);check(response.status===400,'recipient authorization');
 response=await notificationCenterApi(new Request('https://test/api/notification-center',{method:'PATCH',body:JSON.stringify({...base,send_time:'11:45',message_text:'Hello {ชื่อ}'})}),env,{clientId:1,role:'hr',user:{id:1}},h);check(response.ok,'settings persist');check((await ncSetting(db,client,'checkin')).send_time==='11:45','saved time');
 check((await ncSetting(db,{id:2,attendance_reminder_enabled:0},'checkin')).send_time==='12:30','tenant settings isolated');

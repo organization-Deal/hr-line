@@ -2,8 +2,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.17-NOTIFICATION-CENTER';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.17-NOTIFICATION-CENTER';
+const NAKNA_RUNTIME_RELEASE = 'P10.18-NOTIFICATION-CENTER';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.18-NOTIFICATION-CENTER';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -11461,7 +11461,7 @@ function dashboardAttentionTotal(dashboard,key){
   return Number(row?.total_count??row?.count??0);
 }
 
-function buildDailyHrStatusFlex(client,dashboard,retroPending=0,{asOf=bangkokClock(),manual=false,includePrivate=true}={}){
+function buildDailyHrStatusFlex(client,dashboard,retroPending=0,{asOf=bangkokClock(),manual=false,includePrivate=true,sendTime=DAILY_HR_STATUS_TIME,messageText=''}={}){
   const summary=dashboard?.summary||{};
   const scheduled=Number(summary.scheduled_today||0);
   const checkedIn=Number(summary.scheduled_present??summary.present??0);
@@ -11483,6 +11483,7 @@ function buildDailyHrStatusFlex(client,dashboard,retroPending=0,{asOf=bangkokClo
     : missing>0 ? `ยังขาด ${missing} คน` : (scheduled>0?'ทีมมาครบตามข้อมูล':'ไม่มีตารางวันนี้');
   const statusTone=missing>0?'warning':'success';
   const body=[
+    ...(messageText?[lineText(messageText,'sm',LINE_CI.muted)]:[]),
     lineInfoCard([
       lineInfoRow('พนักงาน Active',`${active} คน`),
       lineInfoRow('มีตารางวันนี้',`${scheduled} คน`),
@@ -11518,10 +11519,10 @@ function buildDailyHrStatusFlex(client,dashboard,retroPending=0,{asOf=bangkokClo
   body.push(lineText(`ข้อมูล ณ ${asOf.time} น. เวลาไทย · ใช้ตารางงาน วันหยุดบริษัท ใบลาที่อนุมัติ และข้อมูลเช็กอินในระบบ`,'xxs',LINE_CI.muted));
   if(manual)body.push(lineText('สรุปตามคำขอ · ไม่ใช่การยืนยันว่ารอบส่งอัตโนมัติทำงานแล้ว','xxs',LINE_CI.muted));
   if(!includePrivate)body.push(lineText('ไม่รวมเรื่องส่วนตัวที่ต้องใช้สิทธิ์ผู้ดูแล HR','xxs',LINE_CI.muted));
-  return {type:'flex',altText:`${manual?'สรุป HR วันนี้':'สรุป HR รอบ 13:00'} · ${client.name}`,contents:lineBubble({
+  return {type:'flex',altText:`${manual?'สรุป HR วันนี้':`สรุป HR รอบ ${sendTime}`} · ${client.name}`,contents:lineBubble({
     eyebrow:'NAKNA · HR DAILY',
-    title:manual?'สรุปทีมวันนี้':'สรุปทีมรอบ 13:00',
-    subtitle:`${client.name} · ${formatThaiShortDate(dashboard.today)}`,
+    title:manual?'สรุปทีมวันนี้':`สรุปทีมรอบ ${sendTime}`,
+    subtitle:`${client.name} · ${formatThaiShortDate(dashboard.today||asOf.date)}`,
     status,statusTone,body,
     footer:[
       linePrimaryButton('เปิด HR Dashboard',{type:'postback',label:'เปิด HR Dashboard',data:`action=owner_dashboard&client_id=${Number(client.id)}`}),
@@ -13534,4 +13535,4 @@ function bangkokClock(date=new Date()){
  return {date:dateKey,time:`${parts.hour}:${parts.minute}`,hour:Number(parts.hour),minute:Number(parts.minute),weekday:weekdayBangkok(dateKey)};
 }
 
-function notificationCenterHelpers(){return {canManagePeopleAdmin,ensureMissingCheckinReminderReady,ensureDailyHrStatusReady,ensureAttendanceRetroReady,getDailyHrLineRecipients,getAccessTokenForProviderScope,resolveEffectiveWorkSchedule,getDashboard,dashboardAttentionTotal,safeAudit};}
+function notificationCenterHelpers(){return {canManagePeopleAdmin,ensureMissingCheckinReminderReady,ensureDailyHrStatusReady,ensureAttendanceRetroReady,getDailyHrLineRecipients,getAccessTokenForProviderScope,resolveEffectiveWorkSchedule,getDashboard,dashboardAttentionTotal,buildDailyHrStatusFlex,safeAudit};}

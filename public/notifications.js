@@ -1,4 +1,4 @@
-// Notification Center P10.17. Refresh only reads; test sends exclusively to the signed-in HR user.
+// Notification Center P10.18. Refresh only reads; test sends exclusively to the signed-in HR user.
 export function createNotificationCenter({api,escapeHtml:e,escapeAttr:a,toast,openForm,companyId,role}){
  let data=null,tenant=0,sequence=0,busy=false,error='';
  const days=['จ.','อ.','พ.','พฤ.','ศ.','ส.','อา.'];
@@ -14,7 +14,7 @@ export function createNotificationCenter({api,escapeHtml:e,escapeAttr:a,toast,op
   const cid=companyId(),ticket=++sequence;error='';if(!allowed()){data=null;render();return;}
   if(tenant!==cid)data=null;render('กำลังโหลดการแจ้งเตือน…');
   try{const result=await api('/api/notification-center',{timeoutMs:20000});if(cid!==companyId()||ticket!==sequence)return;data=result;tenant=cid;}
-  catch(err){if(cid!==companyId()||ticket!==sequence)return;error=(err.message||'โหลดไม่สำเร็จ')+' · หากเพิ่งอัปเดต กรุณา Deploy โค้ด Worker พร้อมหน้าเว็บ P10.17';data=null;}
+  catch(err){if(cid!==companyId()||ticket!==sequence)return;error=(err.message||'โหลดไม่สำเร็จ')+' · หากเพิ่งอัปเดต กรุณา Deploy โค้ด Worker พร้อมหน้าเว็บ P10.18';data=null;}
   render();
  }
  function render(loading=''){
