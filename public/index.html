@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.12" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.13" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -44,6 +44,7 @@
 <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1-P10.12">
 <link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A">
 <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A">
+<link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.13">
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -687,14 +688,12 @@
         <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">MONTHLY PAYSLIPS</p><h3>สลิปเงินเดือน</h3></div></div><div id="payslipDocumentList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">HR DOCUMENTS</p><h3>เอกสารพนักงาน</h3></div></div><div id="employeeDocumentList" class="document-list"></div></article></div>
         <div class="document-layout"><article class="panel"><div class="panel-head"><div><p class="kicker">EVIDENCE</p><h3>รอพนักงานรับทราบ</h3></div></div><div id="documentAckList" class="document-list"></div></article><article class="panel"><div class="panel-head"><div><p class="kicker">HR CASES</p><h3>Case ที่กำลังดำเนินการ</h3></div></div><div id="documentCaseList" class="document-list"></div></article></div>
       </section>
-      <section id="view-benefits" class="view">
-        <div class="page-intro"><div><p class="kicker">BENEFITS</p><h1>สวัสดิการพนักงาน</h1><p>รวมประกันสังคม ประกันกลุ่ม ค่ารักษาพยาบาล กองทุน เบี้ยเลี้ยง และสิทธิพิเศษ พร้อมกำหนดรายคน</p></div><button id="addBenefitBtn" class="primary-btn" type="button">+ เพิ่มสวัสดิการ</button></div>
-        <div id="benefitSummary" class="benefit-summary"></div>
-        <div class="benefit-layout">
-          <article class="panel"><div class="panel-head"><div><p class="kicker">PROGRAMS</p><h3>รายการสวัสดิการ</h3><p class="panel-subtitle">รายการตามกฎหมายและสวัสดิการเพิ่มเติมของบริษัทอยู่ด้วยกัน แต่แยกสถานะชัดเจน</p></div></div><div id="benefitProgramList" class="benefit-program-list"></div></article>
-          <article class="panel"><div class="panel-head"><div><p class="kicker">ENROLLMENTS</p><h3>สิทธิ์รายพนักงาน</h3><p class="panel-subtitle">ใช้สำหรับสิทธิ์ที่ต่างกันรายคน เช่น ประกันกลุ่มหลังผ่านทดลองงาน</p></div></div><div id="benefitEnrollmentList" class="phase5-list"></div></article>
-        </div>
-      </section>
+      <section id="view-benefits" class="view nk-benefits-workspace">
+<div class="page-intro"><div><p class="kicker">ดูแลทีมของคุณ</p><h1>สวัสดิการของทีม</h1><p>จัดสิทธิ์ให้ชัดเจน เลือกพนักงานได้ในครั้งเดียว และตรวจช่วงเวลาที่ได้รับสิทธิ์</p></div><button id="addBenefitBtn" class="primary-btn" type="button">+ เพิ่มสวัสดิการ</button></div>
+<div id="benefitSummary" class="benefit-summary"></div><section id="nkBenefitGuide" class="nk-benefit-guide" aria-label="ขั้นตอนถัดไป" hidden></section>
+<div class="nk-benefit-toolbar"><label>ค้นหาสวัสดิการ<input id="nkBenefitSearch" type="search" placeholder="ชื่อหรือประเภทสวัสดิการ"/></label><label>แสดงรายการ<select id="nkBenefitFilter"><option value="all">สวัสดิการทั้งหมด</option><option value="active">เปิดใช้งาน</option><option value="pending">ยังไม่มีผู้ได้รับสิทธิ์วันนี้</option></select></label></div>
+<div class="benefit-layout"><article class="panel nk-benefit-programs"><div class="panel-head"><div><h2>สวัสดิการบริษัท</h2><p class="panel-subtitle">เลือกรายการเพื่อดูผู้ได้รับสิทธิ์ หรือเริ่มกำหนดสิทธิ์ให้ทีม</p></div></div><div id="benefitProgramList" class="benefit-program-list"></div></article><aside class="panel nk-benefit-detail" id="nkBenefitDetail"><div class="panel-head"><div><p class="kicker">รายละเอียดสิทธิ์</p><h2 id="nkBenefitDetailTitle">ผู้ได้รับสิทธิ์</h2></div></div><div id="benefitEnrollmentList" class="phase5-list"></div></aside></div>
+</section>
 
       <section id="view-performance" class="view">
         <div class="page-intro"><div><p class="kicker">GROWTH OS</p><h1>Learning & Performance</h1><p>Onboarding วิดีโอจาก Google Drive · Quiz · KPI · 1:1 · Probation Review ใน Timeline เดียว</p></div><div class="page-actions"><button id="createCourseBtn" class="primary-btn" type="button">+ สร้างคอร์ส</button><button id="createKpiBtn" class="secondary-btn" type="button">+ KPI</button><button id="createOneOnOneBtn" class="secondary-btn" type="button">+ 1:1</button><button id="createProbationReviewBtn" class="secondary-btn" type="button">ประเมิน Probation</button></div></div>
@@ -1540,7 +1539,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.12" type="module"></script>
+  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.13" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
