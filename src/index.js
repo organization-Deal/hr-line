@@ -5,8 +5,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.27-MOBILE-PERFORMANCE';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.27-MOBILE-PERFORMANCE';
+const NAKNA_RUNTIME_RELEASE = 'P10.28-MOBILE-DASHBOARD';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.28-MOBILE-DASHBOARD';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.

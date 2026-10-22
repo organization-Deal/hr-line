@@ -1,7 +1,7 @@
 import {createReadGate,shouldPreloadPeople,resetRoutePosition} from './ux-runtime.js?v=P10.27';
 const apiReadGate=createReadGate();
 import {accessRoleLabels,accessRoleHelp,accessEsc,accessMemberRows,accessApproverRows,accessRoleComparison,accessHistoryHtml} from './access-ui.js?v=P10.26';
-import {dashboardModel,dashboardSummaryHtml,dashboardAttendanceHtml,dashboardQueueHtml,dashboardMomentsHtml,dashboardDocumentsHtml,dashboardRecruitmentHtml,dashboardTaskTarget,dashboardPeopleHtml} from './dashboard.js?v=P10.26';
+import {dashboardModel,dashboardSummaryHtml,dashboardAttendanceHtml,dashboardQueueHtml,dashboardMomentsHtml,dashboardDocumentsHtml,dashboardRecruitmentHtml,dashboardTaskTarget,dashboardPeopleHtml} from './dashboard.js?v=P10.28';
 import {payrollTaskModel,salaryExplanation,nextPayrollMonth} from './payroll-workflow.js?v=P10.26';
 import { createNotificationCenter } from './notifications.js?v=P10.26';
 /* NAKNA_OA_SETTINGS_REMOVED_20261019: P10.14 keeps retired company OA controls out of HTML; central LINE stays available. */
@@ -2760,11 +2760,15 @@ function renderDashboard() {
   delete d.payroll;
   const m=dashboardModel(d),cached=Boolean(d.__fromCache),updated=$('#dashboardUpdated');
   $('#heroSub').textContent=`${d.client?.name||'บริษัทของคุณ'} · ${formatDate(d.today)}`;
+  const mobileCompany=$('#dashboardMobileCompany'),mobileDate=$('#dashboardMobileDate');
+  if(mobileCompany)mobileCompany.textContent=d.client?.name||'บริษัทของคุณ';
+  if(mobileDate)mobileDate.textContent=formatDate(d.today);
   if(updated)updated.textContent=d.__refreshFailed?'อัปเดตไม่สำเร็จ · แสดงข้อมูลที่มีล่าสุด':cached?'ข้อมูลที่แสดงไว้ล่าสุด · กำลังอัปเดต':d.generated_at?`อัปเดต ${new Intl.DateTimeFormat('th-TH',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Bangkok'}).format(new Date(d.generated_at))} น.`:'กำลังรอข้อมูลล่าสุด';
   const day=$('#nkDayContext');if(day){day.hidden=!d.summary.holiday_name;day.textContent=d.summary.holiday_name?`วันหยุดบริษัท · ${d.summary.holiday_name}`:'';}
   $('#attentionTotal').textContent=Array.isArray(d.work_queue)?String(m.total):'—';
   $('#navAttention').textContent=Array.isArray(d.work_queue)?String(m.total):'';
   $('#navAttention').dataset.empty=m.total?'false':'true';
+  $('#view-dashboard').dataset.noSchedule=m.reconciled&&m.scheduled===0?'true':'false';
   $('#summaryGrid').innerHTML=dashboardSummaryHtml(d);
   $('#attendanceSnapshot').innerHTML=dashboardAttendanceHtml(d);
   $('#attentionList').innerHTML=dashboardQueueHtml(d);

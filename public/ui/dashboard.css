@@ -76,3 +76,58 @@
 @media(max-width:1100px){#view-dashboard .nk-dash-task-action{display:none}#view-dashboard .nk-dash-stat{padding:16px 14px}}
 @media(max-width:760px){#view-dashboard.nk-dashboard.active{display:flex;flex-direction:column}#view-dashboard .nk-dash-header{order:0;align-items:flex-start;flex-direction:column;gap:10px;margin-bottom:18px}#view-dashboard .nk-dash-header h1{font-size:26px}#view-dashboard .nk-dash-main{display:contents}#view-dashboard .nk-dash-work{order:1;margin-bottom:16px}#view-dashboard .nk-dash-team{order:2;margin-bottom:16px}#view-dashboard .nk-dash-upcoming{order:3;margin-bottom:16px}#view-dashboard .nk-dash-more{order:4}#view-dashboard .nk-dash-work,#view-dashboard .nk-dash-team,#view-dashboard .nk-dash-upcoming{padding:18px;border-radius:18px}#view-dashboard .nk-dash-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}#view-dashboard .nk-dash-stat>strong{font-size:30px}#view-dashboard .nk-dash-stat>small{font-size:10px}#view-dashboard .nk-dash-secondary{grid-template-columns:1fr}#view-dashboard .nk-dash-recruitment{border-left:0;border-top:1px solid var(--dash-line)}#view-dashboard .nk-dash-pipeline{grid-template-columns:repeat(3,minmax(0,1fr))}#view-dashboard .nk-dash-more>summary small{display:block;margin:4px 0 0}#view-dashboard .nk-dash-updated{font-size:10px}#view-dashboard .nk-dash-section-head h2{font-size:16px}}
 @media(prefers-reduced-motion:reduce){#view-dashboard *{scroll-behavior:auto!important;transition:none!important}}
+
+/* P10.28: mobile shows decisions and numbers; explanations stay one tap away. */
+#view-dashboard .nk-dash-mobile-heading,#view-dashboard .nk-dash-mobile-label,#view-dashboard .nk-dash-mobile-details{display:none}
+#view-dashboard .nk-dash-task-mark svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+@media(max-width:760px){
+  #view-dashboard .nk-dash-heading-full,#view-dashboard .nk-dash-desktop-label,#view-dashboard .nk-dash-desktop-context{display:none}
+  #view-dashboard .nk-dash-mobile-label{display:inline}
+  #view-dashboard .nk-dash-header{flex-direction:row;align-items:center;gap:12px;margin-bottom:14px;padding:0;min-height:44px}
+  #view-dashboard .nk-dash-mobile-heading{display:grid;min-width:0;gap:3px;flex:1}
+  #view-dashboard .nk-dash-mobile-heading strong{font-size:13px;line-height:1.5;font-weight:500;color:#3e626a;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+  #view-dashboard .nk-dash-mobile-heading>span{font-size:12px;line-height:1.5;color:#607d83}
+  #view-dashboard .nk-dash-updated{background:transparent;border-radius:0;padding:0;font-size:11px;line-height:1.5;max-width:116px;white-space:normal;text-align:right;flex:none}
+  #view-dashboard .nk-dash-work{padding:4px 16px 0;border-radius:16px;margin-bottom:18px}
+  #view-dashboard .nk-dash-work .nk-dash-section-head{min-height:52px;margin-bottom:0}
+  #view-dashboard .nk-dash-work .nk-dash-section-head p{display:none}
+  #view-dashboard .nk-dash-section-head h2{font-size:15px;line-height:1.5}
+  #view-dashboard .nk-dash-count{display:inline-flex;align-items:center;justify-content:center;min-width:25px;min-height:25px;padding:0 7px;background:#fff2d7;color:#805700;font-size:13px;margin-left:5px}
+  #view-dashboard .nk-dash-task{gap:10px;padding:13px 0;min-height:64px}
+  #view-dashboard .nk-dash-task-mark{width:28px;height:28px;border-radius:9px}
+  #view-dashboard .nk-dash-task-copy strong{font-size:14px;line-height:1.6;font-weight:500}
+  #view-dashboard .nk-dash-task-copy small,#view-dashboard .nk-dash-task>b small{display:none}
+  #view-dashboard .nk-dash-task>b{font-size:22px;min-width:28px}
+  #view-dashboard .nk-dash-team{padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;margin-bottom:18px}
+  #view-dashboard .nk-dash-team .nk-dash-section-head{min-height:44px;margin-bottom:6px}
+  #view-dashboard .nk-dash-team .nk-dash-section-head .text-btn{font-size:13px;padding:4px 0 4px 12px}
+  #view-dashboard .nk-dash-stats{gap:8px}
+  #view-dashboard .nk-dash-stat{padding:12px 14px;gap:7px;min-height:92px;border-radius:14px;justify-content:center}
+  #view-dashboard .nk-dash-stat>span:first-child{font-size:13px;line-height:1.5;color:#526f77}
+  #view-dashboard .nk-dash-stat>strong{font-size:28px;line-height:1.1;letter-spacing:-.5px}
+  #view-dashboard .nk-dash-stat strong small{font-size:11px;margin-left:5px}
+  #view-dashboard .nk-dash-stat-help,#view-dashboard .nk-dash-stat-link{display:none}
+  #view-dashboard .nk-dash-stat::after{content:'›';position:absolute;right:12px;top:10px;font-size:18px;color:#64847f;line-height:1}
+  #view-dashboard .nk-dash-outside-status{display:block;font-size:12px;color:#28766a;margin-top:5px}
+  #view-dashboard[data-no-schedule=true] .nk-dash-stats,#view-dashboard[data-no-schedule=true] .nk-dash-progress{display:none}
+  #view-dashboard[data-no-schedule=true] .nk-dash-attendance-foot{padding:12px 14px 0;background:#fff;border:1px solid var(--dash-line);border-radius:14px}
+  #view-dashboard[data-no-schedule=true] .nk-dash-compact-status{font-size:14px;color:var(--dash-ink)}
+  #view-dashboard[data-no-schedule=true] .nk-dash-mobile-details{border-bottom:0}
+  #view-dashboard .nk-dash-attendance-foot{padding-top:10px}
+  #view-dashboard .nk-dash-compact-status{display:block;font-size:12px;line-height:1.7;color:#4b6b72;overflow-wrap:anywhere}
+  #view-dashboard .nk-dash-progress{height:4px;margin:8px 0 0}
+  #view-dashboard .nk-dash-mobile-details{display:block;margin-top:4px;border-bottom:1px solid #e0e9e6}
+  #view-dashboard .nk-dash-mobile-details>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;font-size:13px;color:#32796f;cursor:pointer;list-style:none}
+  #view-dashboard .nk-dash-mobile-details>summary::-webkit-details-marker{display:none}
+  #view-dashboard .nk-dash-mobile-details svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;flex:none}
+  #view-dashboard .nk-dash-mobile-details[open] svg{transform:rotate(180deg)}
+  #view-dashboard .nk-dash-mobile-details .nk-dash-context{display:grid;gap:0}
+  #view-dashboard .nk-dash-mobile-details .text-btn{justify-self:start;text-align:left;white-space:normal}
+  #view-dashboard .nk-dash-upcoming{padding:14px 16px;border-radius:16px;margin-bottom:14px}
+  #view-dashboard .nk-dash-upcoming .nk-dash-section-head{margin-bottom:8px}
+  #view-dashboard .nk-dash-upcoming .nk-dash-section-head p{display:none}
+  #view-dashboard .nk-dash-moment{padding:11px 0;gap:10px}
+  #view-dashboard .nk-dash-more{border-radius:16px}
+  #view-dashboard .nk-dash-more>summary{padding:14px 16px;min-height:48px;box-sizing:border-box}
+  #view-dashboard .nk-dash-more>summary small{display:none}
+}
