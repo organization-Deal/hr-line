@@ -3474,12 +3474,15 @@ window.enrollBenefit=benefitId=>{
   const employees=state.employees.filter(e=>e.status==='active');
   const selected=new Set(),completed=new Set();let search='',department='',saving=false;
   const label=e=>`${e.nickname||e.first_name||''} ${e.last_name||''}`.trim();
-  openPhase5Form({eyebrow:'กำหนดสิทธิ์สวัสดิการ',title:benefit.name,subtitle:'1 เลือกพนักงานและช่วงเวลา → 2 ตรวจทาน → 3 ยืนยัน',saveText:'ตรวจทานสิทธิ์',
-    html:`<div class="field full" id="nkBenefitPicker"><div class="nk-benefit-pick-tools"><input id="nkBenefitEmployeeSearch" placeholder="ค้นหาชื่อ / รหัสพนักงาน" aria-label="ค้นหาพนักงาน"/><select id="nkBenefitDepartment" aria-label="กรองแผนก"><option value="">ทุกแผนก</option>${[...new Set(employees.map(e=>e.department_name).filter(Boolean))].sort().map(d=>`<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('')}</select><button type="button" class="secondary-btn" id="nkBenefitSelectVisible">เลือกที่แสดง (สูงสุด 50)</button><button type="button" class="secondary-btn" id="nkBenefitClear">ล้างที่เลือก</button></div><p id="nkBenefitSelectionCount" role="status"></p><div id="nkBenefitEmployeeList" class="nk-benefit-pick-list"></div></div><div id="nkBenefitFields" class="field full nk-benefit-form-fields"><label>สถานะ<select id="p7BenefitEnrollStatus"><option value="active">ได้รับสิทธิ์</option><option value="paused">พักสิทธิ์</option><option value="ended">สิ้นสุดสิทธิ์</option></select></label><label>วันเริ่ม<input id="p7BenefitStart" type="date" value="${currentBangkokDateKey()}"/></label><label>วันสิ้นสุด (ไม่บังคับ)<input id="p7BenefitEnd" type="date"/></label><label class="nk-benefit-note-label">หมายเหตุ<input id="p7BenefitNote" placeholder="เช่น ผ่านทดลองงานแล้ว"/></label></div><div class="field full" id="nkBenefitReview" hidden></div><p class="field full" id="nkBenefitSaveStatus" role="status"></p>`,onSave:async()=>{}});
+  openPhase5Form({eyebrow:'กำหนดสิทธิ์สวัสดิการ',title:benefit.name,subtitle:'เลือกผู้ได้รับสิทธิ์ พร้อมกำหนดวันเริ่มใช้งาน',saveText:'ตรวจทานสิทธิ์',
+    html:`<ol class="nk-benefit-steps field full" aria-label="ขั้นตอนกำหนดสิทธิ์"><li data-benefit-step="select"><span>1</span> เลือกพนักงาน</li><li data-benefit-step="review"><span>2</span> ตรวจทานและยืนยัน</li></ol><div class="field full" id="nkBenefitPicker"><h3 class="nk-benefit-section-title">ผู้ได้รับสิทธิ์</h3><div class="nk-benefit-pick-tools"><input id="nkBenefitEmployeeSearch" placeholder="ค้นหาชื่อหรือรหัสพนักงาน" aria-label="ค้นหาพนักงาน"/><select id="nkBenefitDepartment" aria-label="กรองแผนก"><option value="">ทุกแผนก</option>${[...new Set(employees.map(e=>e.department_name).filter(Boolean))].sort().map(d=>`<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('')}</select></div><div class="nk-benefit-selectionbar"><p id="nkBenefitSelectionCount" role="status"></p><div><button type="button" class="text-btn" id="nkBenefitSelectVisible">เลือกที่แสดง</button><button type="button" class="text-btn" id="nkBenefitClear">ล้าง</button></div></div><div id="nkBenefitEmployeeList" class="nk-benefit-pick-list"></div><small class="nk-benefit-pick-hint">เลือกได้สูงสุดครั้งละ 50 คน</small></div><div id="nkBenefitFields" class="field full nk-benefit-form-fields"><h3 class="nk-benefit-section-title">เงื่อนไขสิทธิ์</h3><label for="p7BenefitEnrollStatus">สถานะ</label><select id="p7BenefitEnrollStatus"><option value="active">ได้รับสิทธิ์</option><option value="paused">พักสิทธิ์</option><option value="ended">สิ้นสุดสิทธิ์</option></select><label for="p7BenefitStart">เริ่มมีสิทธิ์วันที่</label><input id="p7BenefitStart" type="date" value="${currentBangkokDateKey()}"/><details class="nk-benefit-optional"><summary>วันสิ้นสุดและหมายเหตุ</summary><label for="p7BenefitEnd">วันสิ้นสุด (ไม่บังคับ)</label><input id="p7BenefitEnd" type="date"/><label for="p7BenefitNote">หมายเหตุ</label><input id="p7BenefitNote" placeholder="เช่น ผ่านทดลองงานแล้ว"/></details><p class="nk-benefit-form-hint">เงื่อนไขนี้ใช้กับพนักงานทุกคนที่เลือก ตรวจทานอีกครั้งก่อนบันทึก</p></div><div class="field full" id="nkBenefitReview" hidden></div><p class="field full" id="nkBenefitSaveStatus" role="status"></p>`,onSave:async()=>{}});
+  $('#modal').dataset.nkBenefitDialog='1';
+
   const visible=()=>employees.filter(e=>(!department||e.department_name===department)&&(!search||[label(e),e.employee_code].some(v=>String(v||'').toLowerCase().includes(search))));
   const render=()=>{
     $('#nkBenefitSelectionCount').textContent=`เลือก ${selected.size} คน · แสดง ${visible().length} จาก ${employees.length} คน`;
-    $('#nkBenefitEmployeeList').innerHTML=visible().length?visible().map(e=>`<label class="nk-benefit-pick-person"><input type="checkbox" data-benefit-person="${Number(e.id)}" ${selected.has(Number(e.id))?'checked':''}/><span><strong>${escapeHtml(label(e))}</strong><small>${escapeHtml(e.employee_code||'')} · ${escapeHtml(e.department_name||'ไม่ระบุแผนก')}</small></span></label>`).join(''):'<p class="nk-benefit-empty">ไม่พบพนักงานที่ตรงกับตัวกรอง</p>';
+    $('#nkBenefitClear').disabled=!selected.size;$('#nkBenefitSelectVisible').disabled=!visible().length;$('#modalSave').disabled=!selected.size;
+    $('#nkBenefitEmployeeList').innerHTML=visible().length?visible().map(e=>`<label class="nk-benefit-pick-person ${selected.has(Number(e.id))?'is-selected':''}"><input type="checkbox" data-benefit-person="${Number(e.id)}" ${selected.has(Number(e.id))?'checked':''}/><span class="nk-benefit-pick-avatar" aria-hidden="true">${escapeHtml(label(e).slice(0,1)||'?')}</span><span class="nk-benefit-pick-name"><strong>${escapeHtml(label(e))}</strong><small>${escapeHtml(e.employee_code||'')} · ${escapeHtml(e.department_name||'ไม่ระบุแผนก')}</small></span></label>`).join(''):'<p class="nk-benefit-empty">ไม่พบพนักงานที่ตรงกับตัวกรอง</p>';
   };
   $('#nkBenefitEmployeeSearch').addEventListener('input',e=>{search=e.target.value.trim().toLowerCase();render();});
   $('#nkBenefitDepartment').addEventListener('change',e=>{department=e.target.value;render();});
@@ -3487,6 +3490,7 @@ window.enrollBenefit=benefitId=>{
   $('#nkBenefitSelectVisible').onclick=()=>{visible().forEach(e=>{if(selected.size<50)selected.add(Number(e.id));});if(visible().length>50)toast('เลือกได้สูงสุดครั้งละ 50 คน');render();};
   $('#nkBenefitClear').onclick=()=>{selected.clear();render();};
   const choose=()=>{
+    $('#modal').dataset.benefitStep='select';
     $('#nkBenefitPicker').hidden=false;$('#nkBenefitFields').hidden=false;$('#nkBenefitReview').hidden=true;$('#modalSave').textContent='ตรวจทานสิทธิ์';$('#modalSave').onclick=review;
   };
   const review=()=>{
@@ -3494,6 +3498,7 @@ window.enrollBenefit=benefitId=>{
     const start=$('#p7BenefitStart').value,end=$('#p7BenefitEnd').value,status=$('#p7BenefitEnrollStatus').value;
     if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||end&&end<start)return toast('ตรวจวันเริ่มและวันสิ้นสุดสิทธิ์',true);
     const chosen=employees.filter(e=>selected.has(Number(e.id))),note=$('#p7BenefitNote').value.trim();
+    $('#modal').dataset.benefitStep='review';
     $('#nkBenefitPicker').hidden=true;$('#nkBenefitFields').hidden=true;$('#nkBenefitReview').hidden=false;
     $('#nkBenefitReview').innerHTML=`<h3>ตรวจทานก่อนบันทึก ${chosen.length} คน</h3><p>${escapeHtml(benefit.name)} · ${status==='active'?'ได้รับสิทธิ์':status==='paused'?'พักสิทธิ์':'สิ้นสุดสิทธิ์'}</p><p>เริ่ม ${formatDate(start)}${end?' · ถึง '+formatDate(end):' · ไม่กำหนดวันสิ้นสุด'}</p><p>${escapeHtml(note)}</p><ul>${chosen.map(e=>`<li>${escapeHtml(label(e))} · ${escapeHtml(e.employee_code||'')}</li>`).join('')}</ul><p>หากมีสิทธิ์รายการนี้อยู่แล้ว ระบบจะอัปเดตสถานะและช่วงเวลาตามที่เลือก</p><button type="button" class="secondary-btn" id="nkBenefitBack">กลับไปแก้ไข</button>`;
     $('#nkBenefitBack').onclick=choose;$('#modalSave').textContent='ยืนยันกำหนดสิทธิ์';
@@ -3518,7 +3523,7 @@ window.enrollBenefit=benefitId=>{
   const blockClose=e=>{if(saving){e.preventDefault();e.stopImmediatePropagation();}};
   dialog.addEventListener('cancel',blockClose);
   dialog.addEventListener('click',blockClose,true);
-  dialog.addEventListener('close',()=>{dialog.removeEventListener('cancel',blockClose);dialog.removeEventListener('click',blockClose,true);},{once:true});
+  dialog.addEventListener('close',()=>{delete dialog.dataset.nkBenefitDialog;delete dialog.dataset.benefitStep;dialog.removeEventListener('cancel',blockClose);dialog.removeEventListener('click',blockClose,true);},{once:true});
   render();choose();
 };
 

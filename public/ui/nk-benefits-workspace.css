@@ -56,3 +56,65 @@
 
 @media(max-width:800px){#view-benefits .nk-benefit-row{grid-template-columns:42px minmax(0,1fr)}#view-benefits .nk-benefit-actions{grid-column:2;justify-content:space-between}#view-benefits .nk-benefit-inline-detail{grid-column:2}}
 @media(max-width:640px){#view-benefits .page-intro{display:flex;align-items:start;gap:12px}#view-benefits .page-intro h1{font-size:24px}#view-benefits .page-intro>button{font-size:12px;white-space:nowrap}#view-benefits .nk-benefit-programs{padding:0 16px}#view-benefits .nk-benefit-toolbar{display:grid;grid-template-columns:1fr}#view-benefits .nk-benefit-toolbar label:first-child{max-width:none}#view-benefits .nk-benefit-actions{gap:8px}.nk-benefit-form-fields{grid-template-columns:1fr}.nk-benefit-form-fields .nk-benefit-note-label{grid-column:auto}}
+
+/* P10.16 — Scoped dialog styles take precedence over shared .field label/input rules. */
+html.nk-p10 #modal[data-nk-benefit-dialog][open]{display:block!important;width:min(960px,calc(100vw - 48px))!important;max-width:calc(100vw - 48px)!important;height:min(740px,calc(100dvh - 48px))!important;max-height:calc(100dvh - 48px)!important;inset:0!important;margin:auto!important;padding:0!important;overflow:hidden!important;border:1px solid #dce8e2!important;border-radius:22px!important;box-shadow:0 24px 90px #173c4530!important}
+html.nk-p10 #modal[data-nk-benefit-dialog]>form{height:100%!important;max-height:100%!important;display:flex!important;flex-direction:column!important;min-height:0!important;overflow:hidden!important}
+html.nk-p10 #modal[data-nk-benefit-dialog] .modal-head{flex:0 0 auto!important;position:static!important;padding:22px 26px 18px!important;border-bottom:1px solid #e7eeea!important;align-items:flex-start}
+html.nk-p10 #modal[data-nk-benefit-dialog] #modalTitle{font-size:23px;line-height:1.4;margin:5px 0 8px;color:#173d43}
+html.nk-p10 #modal[data-nk-benefit-dialog] #modalSubtitle{margin:0;color:#6c817b;font-size:13px!important}
+html.nk-p10 #modal[data-nk-benefit-dialog] #modalFields{display:grid!important;grid-template-columns:minmax(0,1.5fr) minmax(250px,1fr)!important;gap:20px 26px!important;flex:1 1 auto!important;min-height:0!important;max-height:none!important;overflow:auto!important;overscroll-behavior:contain;padding:20px 26px!important;align-content:start;align-items:start}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-steps{grid-column:1/-1!important;display:flex;list-style:none;gap:26px;margin:0;padding:0 0 18px;border-bottom:1px solid #e7eeea;font-size:13px;color:#8a9a95}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-steps li{display:flex;gap:8px;align-items:center}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-steps li>span{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:#f0f4f2;color:#7c9188;font-size:12px}
+html.nk-p10 #modal[data-nk-benefit-dialog][data-benefit-step=select] [data-benefit-step=select],html.nk-p10 #modal[data-nk-benefit-dialog][data-benefit-step=review] [data-benefit-step=review]{color:#087f77;font-weight:600}
+html.nk-p10 #modal[data-nk-benefit-dialog][data-benefit-step=select] [data-benefit-step=select]>span,html.nk-p10 #modal[data-nk-benefit-dialog][data-benefit-step=review] [data-benefit-step=review]>span{background:#dff3eb;color:#087f77}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitPicker{grid-column:1!important;min-width:0;display:block}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-section-title{font-size:15px;line-height:1.5;margin:0 0 12px;color:#25473e}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-tools{display:grid!important;grid-template-columns:minmax(0,1fr) 148px!important;gap:8px}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-tools :is(input,select){width:100%!important;min-width:0!important;min-height:44px!important;height:44px!important;max-width:none!important;padding:9px 11px!important;font-size:13px!important;border:1px solid #d8e6df!important;border-radius:10px!important;background:#fff;color:#244b40}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-selectionbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0 8px;flex-wrap:wrap}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitSelectionCount{margin:0;font-size:12px;color:#668174;line-height:1.6}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-selectionbar>div{display:flex;align-items:center;gap:10px}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-selectionbar button{padding:3px 0!important;min-height:32px!important;line-height:1.5;font-size:12px!important;color:#087f77;background:none;border:0;box-shadow:none}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-selectionbar button:disabled{opacity:.4}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-list{border:1px solid #e1eae5;border-radius:13px;padding:4px 8px;max-height:clamp(160px,calc(100dvh - 470px),280px);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#c4d8ce transparent}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-person{display:flex!important;flex-direction:row!important;align-items:center!important;gap:11px!important;padding:11px 8px!important;margin:0!important;min-height:67px!important;border:0!important;border-bottom:1px solid #eef3ef!important;border-radius:8px!important;cursor:pointer;transition:background .15s}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-person:last-child{border-bottom:0!important}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-person:hover{background:#f5faf7}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-person.is-selected{background:#eaf7f0}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-person input[type=checkbox]{appearance:auto!important;width:18px!important;height:18px!important;min-width:18px!important;min-height:18px!important;max-height:18px!important;flex:0 0 18px!important;margin:0!important;padding:0!important;accent-color:#07887b;box-shadow:none!important;border-radius:4px!important}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-avatar{display:grid!important;place-items:center;width:34px;height:34px;flex:0 0 34px;border-radius:50%;background:#e6f1eb;color:#427862;font-size:13px;font-weight:600}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-name{display:grid!important;gap:3px!important;min-width:0;flex:1}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-name strong{font-size:14px!important;color:#23473d;line-height:1.5;overflow-wrap:anywhere}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-name small{font-size:11px!important;line-height:1.5;color:#7b9187;overflow-wrap:anywhere}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-hint{display:block;margin-top:8px;color:#8a9c93;font-size:11px}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitFields{grid-column:2!important;display:flex!important;flex-direction:column!important;gap:8px!important;padding:18px!important;border:1px solid #e7eeea;background:#f6f9f7;border-radius:14px;min-width:0}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitFields[hidden]{display:none!important}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitFields label{display:block!important;font-size:12px!important;color:#5c776a;margin:0!important;padding:0!important}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitFields :is(input,select){width:100%!important;min-width:0;min-height:44px!important;padding:9px 11px!important;border:1px solid #d9e5de;border-radius:10px;background:#fff;font:inherit;font-size:14px!important;color:#244b40;margin:0 0 10px!important}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-optional{border-top:1px solid #e1e9e4;padding-top:10px;font-size:12px;line-height:1.7}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-optional summary{color:#557866;cursor:pointer;min-height:30px}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-optional[open] summary{margin-bottom:12px}
+html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-form-hint{font-size:11px;line-height:1.8;color:#7b9186;margin:4px 0 0}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitReview,html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitSaveStatus{grid-column:1/-1!important}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitReview{padding:18px 22px;border:1px solid #dceae2;border-radius:14px;background:#f7fbf8;line-height:1.8}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitReview h3{font-size:19px;color:#244c3e;margin:0 0 12px}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitReview ul{list-style:none;padding:0;max-height:230px;overflow:auto;border-top:1px solid #e0eae3}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitReview li{padding:9px 0;border-bottom:1px solid #e6eee8;font-size:13px}
+html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitSaveStatus:empty{display:none}
+html.nk-p10 #modal[data-nk-benefit-dialog] .modal-actions{flex:0 0 auto!important;position:static!important;bottom:auto!important;padding:15px 26px!important;margin:0!important;display:flex!important;justify-content:flex-end!important;gap:10px!important;border-top:1px solid #e5ede7;background:white!important;box-shadow:0 -4px 18px #21492e04!important}
+html.nk-p10 #modal[data-nk-benefit-dialog] .modal-actions button{flex:0 0 auto!important;min-width:96px;min-height:44px!important;border-radius:11px!important;font-size:14px!important}
+html.nk-p10 #modal[data-nk-benefit-dialog] #modalSave{min-width:160px;background:#07887b}
+@media(max-width:700px){
+ html.nk-p10 #modal[data-nk-benefit-dialog][open]{width:calc(100vw - 20px)!important;max-width:calc(100vw - 20px)!important;height:calc(100dvh - 24px)!important;max-height:calc(100dvh - 24px)!important;border-radius:18px!important}
+ html.nk-p10 #modal[data-nk-benefit-dialog] .modal-head{padding:18px 18px 14px!important}
+ html.nk-p10 #modal[data-nk-benefit-dialog] #modalFields{grid-template-columns:1fr!important;padding:16px 18px!important;gap:16px!important}
+ html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitPicker,html.nk-p10 #modal[data-nk-benefit-dialog] #nkBenefitFields{grid-column:1!important}
+ html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-steps{gap:18px;font-size:12px;padding-bottom:14px}
+ html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-tools{grid-template-columns:minmax(0,1fr) 120px!important}
+ html.nk-p10 #modal[data-nk-benefit-dialog] .nk-benefit-pick-list{max-height:240px}
+ html.nk-p10 #modal[data-nk-benefit-dialog] .modal-actions{padding:12px 18px calc(12px + env(safe-area-inset-bottom))!important}
+ html.nk-p10 #modal[data-nk-benefit-dialog] .modal-actions button{min-width:0;flex:1 1 0!important}
+}
+@media(prefers-reduced-motion:reduce){#modal[data-nk-benefit-dialog] .nk-benefit-pick-person{transition:none}}

@@ -44,3 +44,5 @@ assert.ok(!html.includes('id="nkBenefitGuide"'));
 assert.ok(!html.includes('id="nkBenefitDetail"'));
 assert.ok(!app.includes('data-benefit-start='));
 console.log('PASS simplicity: one management action per active benefit, inline disclosure, no duplicate CTA or side panel');
+
+ctx.window.enrollBenefit(10);assert.equal($('#modal').dataset.nkBenefitDialog,'1');assert.equal($('#modal').dataset.benefitStep,'select');assert.equal($('#modalSave').disabled,true);assert.ok(form.html.includes('nk-benefit-steps'));assert.ok(form.html.includes('<details class="nk-benefit-optional">'));assert.ok($('#nkBenefitEmployeeList').innerHTML.includes('nk-benefit-pick-avatar'));$('#nkBenefitSelectVisible').onclick();assert.equal($('#modalSave').disabled,false);$('#modalSave').onclick();assert.equal($('#modal').dataset.benefitStep,'review');$('#modal').handlers.close();assert.equal($('#modal').dataset.nkBenefitDialog,undefined);console.log('PASS dialog presentation: scoped lifecycle, step state, disabled empty selection, compact rows and optional fields');
