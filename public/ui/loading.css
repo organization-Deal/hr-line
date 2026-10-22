@@ -1,0 +1,33 @@
+/* P10.23 — calm startup, local page placeholders, motion preference respected. */
+.boot-splash{background:radial-gradient(ellipse at 50% 40%,#fff 0%,#f6faf9 68%,#edf5f3 100%)}
+.boot-splash .boot-stage{width:min(390px,calc(100vw - 40px));padding:32px 24px;background:transparent;border:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;animation:nk-loading-enter .3s ease-out both}
+.boot-splash .boot-ambient{display:none}
+.boot-splash .boot-logo-shell{width:104px;height:104px;border-radius:32px;box-shadow:0 10px 30px #194f4b0b,inset 0 0 0 1px #e6f1ee;background:#fff;margin-bottom:22px}
+.boot-splash .boot-logo{inset:8px;width:88px;height:88px;animation:nk-otter-breathe 3s ease-in-out infinite}
+.boot-splash .boot-logo-fallback{width:88px;height:88px}
+.boot-splash .boot-logo-glow{display:none}
+.boot-splash .boot-wordmark{font-size:32px;letter-spacing:-.5px;margin-bottom:14px}
+.boot-splash .boot-status-line{font-size:13px;min-height:40px;line-height:1.7;color:#527078}
+.boot-splash .boot-progress{max-width:200px;height:3px;margin:22px 0 16px;background:#deeeea}
+.boot-splash .boot-progress i{box-shadow:none}
+.boot-hint{font-size:11px;line-height:1.8;color:#7d9396;max-width:280px;margin:0}
+.boot-splash.is-waiting .boot-progress i{animation:none;width:100%;opacity:.45}
+.boot-splash.is-waiting .boot-status-dots{display:none}
+.boot-splash .boot-retry-btn{box-shadow:none;background:#e7f3ef;font-size:13px;padding:11px 20px}
+.nk-loading-frame{padding:12px 0 20px;pointer-events:none;animation:nk-loading-enter .18s ease-out both}
+.nk-loading-caption{display:flex;align-items:center;gap:9px;font-size:12px;color:#627f84;margin:0 0 16px;line-height:1.6}
+.nk-loading-caption:before{content:'';width:6px;height:6px;border-radius:50%;background:#279c96;flex:none;animation:nk-load-pulse 1.4s ease-in-out infinite}
+.nk-loading-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:12px 0 20px}
+.nk-loading-metrics i{height:112px;border-radius:18px}
+.nk-loading-rows{padding:20px;border:1px solid #e7efed;border-radius:18px;background:#fff;display:grid;gap:16px}
+.nk-loading-rows i{height:42px;border-radius:8px}
+.nk-loading-shapes i{display:block;background:linear-gradient(100deg,#edf3f1 15%,#f7faf9 40%,#edf3f1 65%);background-size:240% 100%;animation:nk-skeleton-flow 1.8s ease-in-out infinite}
+.view.nk-first-load>:not(.nk-loading-frame):not(.view-loading-overlay):not(.nk-load-error){display:none!important}
+.nk-load-error{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border:1px solid #e6d9b7;border-radius:14px;background:#fffaf0;color:#775e29;font-size:13px;margin:12px 0}
+.nk-load-error button{flex:none}
+@keyframes nk-loading-enter{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@keyframes nk-otter-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes nk-skeleton-flow{from{background-position:100% 0}to{background-position:-100% 0}}
+@keyframes nk-load-pulse{50%{opacity:.35}}
+@media(max-width:600px){.nk-loading-metrics{gap:8px}.nk-loading-metrics i{height:84px;border-radius:12px}.nk-loading-rows{padding:14px}.nk-load-error{align-items:flex-start;flex-direction:column}.boot-splash .boot-stage{padding:24px 16px}}
+@media(prefers-reduced-motion:reduce){.boot-splash .boot-stage,.boot-splash .boot-logo,.boot-splash .boot-progress i,.boot-splash .boot-status-dots i,.nk-loading-frame,.nk-loading-caption:before,.nk-loading-shapes i,.view-loading-progress-bar{animation:none!important;transition:none!important}}

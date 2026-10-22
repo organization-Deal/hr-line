@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.22" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.23" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -45,9 +45,11 @@
 <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1-P10.12">
 <link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A">
 <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A">
-<link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.22">
-<link rel="stylesheet" href="/notifications.css?v=P10.22">
-<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.22">
+<link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.23">
+<link rel="stylesheet" href="/notifications.css?v=P10.23">
+<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.23">
+<link rel="stylesheet" href="/ui/loading.css?v=P10.23">
+<script defer src="/ui/loading.js?v=P10.23"></script>
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -62,14 +64,11 @@
       </div>
       <div class="boot-wordmark">นากนะ</div>
       <div class="boot-status-line">
-        <span id="bootStatusText">กำลังเตรียมพื้นที่ทำงานของคุณ</span>
+        <span id="bootStatusText">กำลังตรวจสอบบัญชีของคุณ</span>
         <span class="boot-status-dots" aria-hidden="true"><i></i><i></i><i></i></span>
       </div>
       <div class="boot-progress" aria-hidden="true"><i></i></div>
-      <div class="boot-security-note" aria-hidden="true">
-        <span class="boot-lock">✓</span>
-        <span>กำลังเชื่อมข้อมูลบริษัทอย่างปลอดภัย</span>
-      </div>
+      <p id="bootHint" class="boot-hint">เมนูจะเปิดให้ใช้งานทันทีที่ตรวจสอบบัญชีเสร็จ</p>
       <button id="bootRetryBtn" class="boot-retry-btn hidden" type="button">ลองเชื่อมต่ออีกครั้ง</button>
     </div>
   </div>
@@ -1451,7 +1450,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.22" type="module"></script>
+  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.23" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

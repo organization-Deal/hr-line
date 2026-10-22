@@ -1,5 +1,5 @@
-import {payrollTaskModel,salaryExplanation,nextPayrollMonth} from './payroll-workflow.js?v=P10.22';
-import { createNotificationCenter } from './notifications.js?v=P10.22';
+import {payrollTaskModel,salaryExplanation,nextPayrollMonth} from './payroll-workflow.js?v=P10.23';
+import { createNotificationCenter } from './notifications.js?v=P10.23';
 /* NAKNA_OA_SETTINGS_REMOVED_20261019: P10.14 keeps retired company OA controls out of HTML; central LINE stays available. */
 /* NAKNA_BOOT_RECOVERY_20261019; combines retired Stretch + retired company OA without dangling boot handlers. */
 const NAKNA_FRONTEND_BUILD=window.NaknaRelease?.version||'unknown'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
@@ -90,9 +90,9 @@ const DEFAULT_ATTENDANCE_REMINDER_MESSAGE = 'ตอนนี้ 12:30 น. ห�
 let bootWatchdog = null;
 let onboardingRefreshInFlight = false;
 function isLineInAppBrowser(){const ua=String(navigator.userAgent||'');return /(?:^|[;\s])Line\/[0-9]|LIFF/i.test(ua);}
-function setBootStatus(message,showRetry=false){const text=$('#bootStatusText');if(text)text.textContent=message;$('#bootRetryBtn')?.classList.toggle('hidden',!showRetry);}
+function setBootStatus(message,showRetry=false){window.NaknaLoading?.status(message,showRetry);const text=$('#bootStatusText');if(text)text.textContent=message;$('#bootRetryBtn')?.classList.toggle('hidden',!showRetry);}
 function initBootLogo(){const logo=$('#bootLogo');if(!logo)return;const markMissing=()=>logo.classList.add('is-missing');logo.addEventListener('error',markMissing,{once:true});if(logo.complete&&logo.naturalWidth===0)markMissing();}
-function startBootWatchdog(){clearTimeout(bootWatchdog);setBootStatus('กำลังเตรียมพื้นที่ทำงานของคุณ',false);bootWatchdog=setTimeout(()=>{if(!$('#bootSplash')?.classList.contains('hidden'))setBootStatus('เครือข่ายตอบช้ากว่าปกติ',true);},7000);}
+function startBootWatchdog(){clearTimeout(bootWatchdog);window.NaknaLoading?.beginBoot();setBootStatus('กำลังตรวจสอบบัญชีของคุณ',false);bootWatchdog=setTimeout(()=>{if(!$('#bootSplash')?.classList.contains('hidden'))setBootStatus('เครือข่ายตอบช้ากว่าปกติ',true);},7000);}
 function stopBootWatchdog(){clearTimeout(bootWatchdog);bootWatchdog=null;}
 
 // P7.61 — Stale-while-revalidate startup cache.
@@ -152,7 +152,7 @@ function refreshDashboardSoon(delay = 250){
   clearTimeout(dashboardRefreshTimer);
   dashboardRefreshTimer = setTimeout(() => {
     viewLoadedAt.delete('dashboard');
-    loadDashboardFast({ silent: true }).then(()=>markViewLoaded('dashboard')).catch(()=>{});
+    loadDashboardFast({ silent: true }).then(ok=>{if(ok)markViewLoaded('dashboard');}).catch(()=>{});
   }, Math.max(0, delay));
 }
 function attentionItemByKey(key){
@@ -192,6 +192,7 @@ function hydrateDashboardCache() {
   const cached = readDashboardCache();
   if (!cached) return false;
   state.dashboard = cached.dashboard;
+  viewPresentedCompany.set('dashboard',Number(state.me?.active_company_id||0));
   if (cached.companyProfile) state.companyProfile = cached.companyProfile;
   try {
     renderDashboard();
@@ -203,6 +204,8 @@ function hydrateDashboardCache() {
 }
 async function loadDashboardFast({ silent = true } = {}) {
   const started = performance.now();
+  setViewLoading('dashboard',true);
+  let dashboardFailed=false;
   try {
     // Dashboard is the only first-paint API. Company profile is not required to
     // paint the shell and is fetched after the dashboard so D1 does not compete
@@ -223,11 +226,14 @@ async function loadDashboardFast({ silent = true } = {}) {
     if (!silent) toast('อัปเดตภาพรวมแล้ว');
     return true;
   } catch (error) {
+    dashboardFailed=true;
     if (!state.dashboard) state.dashboard = emptyDashboard();
     try { renderDashboard(); } catch {}
     renderLoadProblem([{ label: 'ภาพรวม', message: error.message }]);
     return false;
   } finally {
+    setViewLoading('dashboard',false);
+    if(dashboardFailed)window.NaknaLoading?.endView('dashboard',{failed:true,retry:()=>loadViewData('dashboard',{force:true})});
     const elapsed = Math.round(performance.now() - started);
     console.info(`[Nakna] fast dashboard ${elapsed}ms`);
   }
@@ -259,8 +265,9 @@ function scheduleDeferredLoad(delay = 4800) {
 
 const VIEW_CACHE_TTL_MS = 45 * 1000;
 const viewLoadedAt = new Map();
+const viewPresentedCompany = new Map();
 const viewLoadInFlight = new Map();
-function markViewLoaded(name){ viewLoadedAt.set(name, Date.now()); }
+function markViewLoaded(name){ viewLoadedAt.set(name, Date.now());viewPresentedCompany.set(name,Number(state.me?.active_company_id||0)); }
 function mergePeopleCoreFromServer(incoming){
   if(!incoming)return state.peopleCore;
   if(incoming.attendance_face && typeof incoming.attendance_face.mode === 'string') state.attendanceFaceLoaded = true;
@@ -279,6 +286,7 @@ function setViewLoading(name, loading, label = 'กำลังโหลดข�
   const view=$(`#view-${name}`); if(!view)return;
   let overlay=view.querySelector(':scope > .view-loading-overlay');
   if(loading){
+    window.NaknaLoading?.beginView(name,{first:viewPresentedCompany.get(name)!==Number(state.me?.active_company_id||0),label:`กำลังโหลด${viewMeta[name]?.[0]||'ข้อมูล'}`});
     if(!overlay){
       overlay=document.createElement('div');
       overlay.className='view-loading-overlay';
@@ -289,6 +297,7 @@ function setViewLoading(name, loading, label = 'กำลังโหลดข�
     }
     view.classList.add('is-view-loading');
   }else{
+    window.NaknaLoading?.endView(name);
     view.classList.remove('is-view-loading');
     overlay?.remove();
   }
@@ -316,10 +325,9 @@ function renderViewData(name){
   }catch(error){ console.warn('[Nakna] render view failed', name, error); }
 }
 async function loadViewData(name,{force=false}={}){
-  if(name==='notifications')return notificationUi().load();
+  if(name==='notifications'){setViewLoading(name,true);try{return await notificationUi().load();}finally{setViewLoading(name,false);}}
   if(!name || name==='dashboard'){
-    if(force || !isViewFresh('dashboard')) await loadDashboardFast({silent:true});
-    markViewLoaded('dashboard');
+    if(force || !isViewFresh('dashboard')){if(await loadDashboardFast({silent:true}))markViewLoaded('dashboard');}
     return;
   }
   if(!force && isViewFresh(name)){ renderViewData(name); return; }
@@ -329,7 +337,8 @@ async function loadViewData(name,{force=false}={}){
   const canPayroll=isHr||role==='payroll_admin';
   const canReadBroadcasts=['owner','primary_owner','co_owner','hr_admin','hr','manager'].includes(role);
   const canViewPeople=['owner','co_owner','hr_admin','hr','manager','viewer'].includes(role);
-  const load=async(path,fallback=null)=>{ try{return await api(path,{timeoutMs:15000});}catch(error){console.warn('[Nakna] view load',name,path,error?.message||error);return fallback;} };
+  let routeFailed=false;
+  const load=async(path,fallback=null)=>{ try{return await api(path,{timeoutMs:15000});}catch(error){routeFailed=true;if(['AUTH_REQUIRED','COMPANY_REQUIRED'].includes(error.message))throw error;console.warn('[Nakna] view load',name,path,error?.message||error);return fallback;} };
   const run=(async()=>{
     setViewLoading(name,true);
     try{
@@ -373,7 +382,7 @@ async function loadViewData(name,{force=false}={}){
           try {
             const fresh = await api('/api/engagement/overview', {timeoutMs:15000, silentStatus:true});
             if(fresh) { state.engagement=fresh; state.engagementLoadError=''; }
-          } catch(error) {state.engagementLoadError=String(error?.message||'โหลดข้อมูลแต้มไม่สำเร็จ'); console.warn('[Nakna] Engagement load failed',error);}
+          } catch(error) {routeFailed=true;state.engagementLoadError=String(error?.message||'โหลดข้อมูลแต้มไม่สำเร็จ'); console.warn('[Nakna] Engagement load failed',error);}
         }
       }else if(name==='analytics'){
         if(canViewPeople){ state.analytics=await load('/api/analytics/overview',state.analytics)||state.analytics; }
@@ -403,9 +412,9 @@ async function loadViewData(name,{force=false}={}){
         const [peopleCore,workLocations,leavePolicies,google,line,approver]=result;
         state.peopleCore=mergePeopleCoreFromServer(peopleCore)||state.peopleCore; state.workLocations=workLocations?.data||state.workLocations; state.leavePolicies=leavePolicies?.data||state.leavePolicies; state.googleWorkspace=google||state.googleWorkspace; state.lineIntegration=line||state.lineIntegration; if(approver){state.approverAccess=approver?.data||state.approverAccess;state.approverPermissionCatalog=approver?.catalog||state.approverPermissionCatalog;}
       }
-      markViewLoaded(name);
+      if(!routeFailed)markViewLoaded(name);
       renderViewData(name);
-    }finally{ setViewLoading(name,false); viewLoadInFlight.delete(name); }
+    }finally{ setViewLoading(name,false);if(routeFailed)window.NaknaLoading?.endView(name,{failed:true,retry:()=>loadViewData(name,{force:true})}); viewLoadInFlight.delete(name); }
   })();
   viewLoadInFlight.set(name,run);
   return run;
@@ -1139,7 +1148,7 @@ async function boot() {
       try { renderFallbackShell(); } catch {}
     }
     console.info(`[Nakna] shell visible ${Math.round(performance.now()-bootStarted)}ms`);
-    loadDashboardFast({ silent: true }).then(()=>markViewLoaded('dashboard')).catch(() => {});
+    loadDashboardFast({ silent: true }).then(ok=>{if(ok)markViewLoaded('dashboard');}).catch(() => {});
     scheduleDeferredLoad(hadCache ? 7000 : 5200);
 
     // Public LINE config and onboarding checks are useful but not part of first
@@ -1172,7 +1181,7 @@ function bindEvents() {
   initMobileDialogSystem();
   initGlobalInteractionFeedback();
   $('#lineBusinessBtn').onclick = openLineBusinessOnboarding;
-  $('#bootRetryBtn').onclick = () => window.location.reload();
+  if(!window.NaknaLoading)$('#bootRetryBtn').onclick = () => window.location.reload();
   $('#googleLoginBtn').onclick = () => { window.location.href = '/auth/google/start'; };
   $('#retryDataLoadBtn').onclick = async () => {
     if (await ensureWorkspaceReady()) await loadViewData(state.currentView || 'dashboard',{force:true});
@@ -1465,6 +1474,7 @@ function bindEvents() {
 }
 
 function applySessionPayload(data,{forceNewBusiness=false}={}){
+  setBootStatus('ยืนยันบัญชีแล้ว กำลังเปิดพื้นที่ทำงาน',false);
   state.me=data;
   hideLogin();
   renderIdentity();
@@ -1501,7 +1511,7 @@ function showBootSplash() {
   $('#onboarding')?.classList.add('hidden');
   $('#appShell')?.classList.add('hidden');
 }
-function hideBootSplash() { stopBootWatchdog(); $('#bootSplash')?.classList.add('hidden'); }
+function hideBootSplash() { window.NaknaLoading?.endBoot();stopBootWatchdog(); $('#bootSplash')?.classList.add('hidden'); }
 function showLogin() {
   hideBootSplash();
   $('#login').classList.remove('hidden');
@@ -7073,7 +7083,7 @@ $('#openDocumentCaseBtn')?.addEventListener('click',quickOpenDocumentCase);
 
 let notificationCenterController;
 function notificationUi(){return notificationCenterController ||= createNotificationCenter({api,escapeHtml,escapeAttr,toast,openForm:openPhase5Form,companyId:()=>Number(state.me?.active_company_id||0),role:activeCompanyRole});}
-// P10.22 task guidance; retain the existing payroll controls and calculation engine.
+// P10.23 task guidance; retain the existing payroll controls and calculation engine.
 var nkPayrollFilter='all',nkPayrollSearch='',nkPayrollView='summary';
 function nkPayrollPrioritize(detail){const model=payrollTaskModel(detail);return [...(detail.items||[])].sort((a,b)=>{const priority=x=>model.errors.has(Number(x.employee_id))?0:model.warnings.has(Number(x.employee_id))?1:2;return priority(a)-priority(b);});}
 function nkPayrollPeopleGuide(detail){const m=payrollTaskModel(detail),missing=detail.workflow_people?.not_calculated||[];return `<section id="nkPayrollPeopleGuide" class="nk-payroll-task-note"><strong>รอบนี้มีพนักงานตามช่วงงาน ${m.eligible} คน · มีผลคำนวณ ${m.included} คน · ข้อมูลพร้อมตรวจ ${m.ready} คน</strong><p>${m.blocking?`ต้องแก้ข้อมูล ${m.blocking} คน · `:''}${m.warningPeople?`มีข้อมูลควรตรวจ ${m.warningPeople} คน · `:''}ฐานเงินเดือน เวลาเข้างาน และใบลาใช้ข้อมูลของช่วงรอบนี้ รายการพิเศษเพิ่มเฉพาะรอบได้โดยไม่แก้ฐานเงินเดือนประจำ</p>${missing.length?`<details><summary>ยังไม่มีผลคำนวณ ${missing.length} คน</summary>${missing.map(e=>`<p>${escapeHtml(e.name)} · ${escapeHtml(e.reason)} <button type="button" class="text-btn" onclick="window.openPayrollProfile(${Number(e.employee_id)})">ตรวจโปรไฟล์</button></p>`).join('')}<button class="secondary-btn" type="button" onclick="window.recalculatePayroll(${Number(detail.period.id)})">ตั้งค่าครบแล้ว คำนวณรอบใหม่</button></details>`:''}</section>`;}
