@@ -21,3 +21,7 @@ for(const id of ['recruitmentGmailAccountList','nkScreeningList','nkScreeningSou
  assert.ok(html.includes(`id="${id}"`),`Missing feature mount ${id}`);
 }
 console.log('PASS: asset references, unique IDs, mandatory event targets, restored UI mounts');
+
+// Previously retired features must not return when old HTML is restored.
+await import('./verify-line-oa-settings-retired.mjs');
+await import('./verify-move-retired.mjs');

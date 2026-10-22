@@ -1,3 +1,4 @@
+/* NAKNA_OA_SETTINGS_REMOVED_20261019: P10.14 keeps retired company OA controls out of HTML; central LINE stays available. */
 /* NAKNA_BOOT_RECOVERY_20261019; combines retired Stretch + retired company OA without dangling boot handlers. */
 const NAKNA_FRONTEND_BUILD=window.NaknaRelease?.version||'unknown'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
 // P9.15.3 — Face settings render lifecycle + deployment visibility fix.
