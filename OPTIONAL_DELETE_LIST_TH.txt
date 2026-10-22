@@ -1,0 +1,31 @@
+รายการไฟล์ที่ลบได้ (ทางเลือก ไม่จำเป็นต้องลบเพื่อใช้แพตช์)
+
+ไม่ต้องลบไฟล์ใดก่อนติดตั้ง แพตช์นี้เพิ่ม/แทนที่ตาม path เดิมเท่านั้น
+
+จาก wrangler.jsonc ของ ZIP นี้:
+- main = src/index.js
+- assets.directory = ./public
+ดังนั้นโฟลเดอร์แพตช์เก่าต่อไปนี้ไม่ได้เป็นไฟล์ Runtime และลบออกจาก Repo ได้หลังเก็บสำรอง:
+Nakna-Learning-Performance-Redesign-CHANGED-ONLY/
+nakna-hr-documents-redesign-CHANGED-ONLY/
+
+ไฟล์ที่ Root ต่อไปนี้อยู่นอก public/ และ src/ จึงไม่ถูกใช้โดยคำสั่ง npm run deploy ตาม config นี้
+ลบได้หากไม่ได้ตั้งระบบ Deploy อื่นให้อ้างไฟล์ Root และได้เก็บสำรองแล้ว:
+app.js
+index.js
+index.html
+styles.css
+attendance.js
+attendance.html
+attendance.css
+hr-case.js
+hr-case.html
+hr-case.css
+wellness.js
+wellness.html
+wellness.css
+
+ลบเฉพาะสำเนาที่ Root เท่านั้น ห้ามสับสนกับชื่อเดียวกันใน public/ หรือ src/
+อย่าลบ public/, src/, migrations/, wrangler.jsonc, package.json หรือไฟล์ UI รุ่นก่อนเพียงเพราะชื่อเก่า
+แพตช์ UI หลายรุ่นยังโหลดต่อกันอยู่ การลบต้องตรวจ dependency ก่อน
+แพตช์นี้ยังไม่ได้ลบสิ่งใดออกจาก Repository จริง

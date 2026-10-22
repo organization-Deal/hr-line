@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=P10.1-a1&ed=P10.4" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.11" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -33,8 +33,8 @@
   </style>
   <link rel="stylesheet" href="/ui/p10.css?v=P10.0-ui1" />
   <script defer src="/ui/p10.js?v=P10.0-ui1"></script>
-  <link rel="stylesheet" href="/ui/attendance-p10.css?v=P10.1-a1" />
-  <script defer src="/ui/attendance-p10.js?v=P10.1-a1"></script>
+  <link rel="stylesheet" href="/ui/attendance-p10.css?v=P10.11" />
+  <script defer src="/ui/attendance-p10.js?v=P10.11"></script>
   <link rel="stylesheet" href="/ui/p10-5.css?v=P10.5-ux1" />
   <script defer src="/ui/p10-5.js?v=P10.5-ux1"></script>
   <link rel="stylesheet" href="/ui/p10-7-recruitment-gmail.css?v=P10.7-1" />
@@ -43,6 +43,10 @@
   <script defer src="/ui/p10-8-recruitment-simple.js?v=P10.8-1"></script>
   <link rel="stylesheet" href="/ui/p10-9-recruitment-quickstart.css?v=P10.9-1" />
   <script defer src="/ui/p10-9-recruitment-quickstart.js?v=P10.9-1"></script>
+<link rel="stylesheet" href="/ui/nk-multi-gmail.css?v=MGMAIL20261020A">
+<link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1">
+<link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A">
+<link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A">
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -432,8 +436,26 @@
             <div><span>IMPORTED MAIL</span><strong id="recruitmentGmailImported">0 อีเมล</strong></div>
           </div>
           <div id="recruitmentGmailError" class="integration-error hidden"></div>
-          <div class="gmail-sync-actions"><button id="recruitmentGmailConnectBtn" class="primary-btn" type="button">เชื่อม Google</button><button id="recruitmentGmailSyncBtn" class="primary-btn hidden" type="button">Sync Gmail ตอนนี้</button><button id="recruitmentGmailSettingsBtn" class="secondary-btn hidden" type="button">ตั้งค่า Query</button></div>
+          <div class="gmail-sync-actions"><button id="recruitmentGmailAddAccount" class="primary-btn" type="button">+ เชื่อม Gmail รับสมัครงาน</button><button id="recruitmentGmailConnectBtn" class="secondary-btn" type="button">เชื่อม Google หลัก</button><button id="recruitmentGmailSyncBtn" class="secondary-btn hidden" type="button">Sync Google หลัก</button><button id="recruitmentGmailSettingsBtn" class="secondary-btn hidden" type="button">ตั้งค่า Google หลัก</button></div>
+<div class="nk-mgmail-heading"><h4>บัญชีรับสมัครงานที่เชื่อม</h4><small>เลือกแหล่งเมลของแต่ละบัญชีก่อน Sync</small></div><div id="recruitmentGmailAccountList" class="nk-mgmail-list" aria-live="polite"></div><p class="nk-mgmail-help">เชื่อมบัญชีรับสมัครงานแยกได้ โดยไม่เปลี่ยน Google หลัก · ตรวจคิวแล้วกดรับจึงเป็นผู้สมัคร</p>
         </article>
+        <section class="panel nk-screening" id="nkScreeningPanel" aria-label="คิวคัดกรองอีเมลรับสมัครงาน">
+          <div class="nk-screening-top"><div><p class="kicker">APPLICATION SCREENING</p><h3>คิวคัดกรองอีเมล</h3><p>เมลที่ Sync เข้ามายังไม่ใช่ผู้สมัคร HR ตรวจแล้วกดรับจึงเข้าสู่ Pipeline</p></div><button class="secondary-btn" id="nkScreeningReload" type="button">↻ โหลดคิวใหม่</button></div>
+          <div class="nk-screening-metrics" id="nkScreeningMetrics"></div>
+          <div class="nk-screening-tools"><input type="search" id="nkScreeningSearch" placeholder="ค้นหาผู้ส่ง / หัวข้อ / อีเมล" aria-label="ค้นหาคิวคัดกรอง"/><select id="nkScreeningFilter" aria-label="กรองผลคัดกรอง"><option value="pending">ยังไม่ตัดสินใจ</option><option value="all">ทั้งหมด</option><option value="likely">น่าจะสมัครจริง</option><option value="review">รอตรวจ</option><option value="noise">ไม่เกี่ยวข้อง</option><option value="accepted">รับเป็นผู้สมัครแล้ว</option><option value="rejected">คัดออกแล้ว</option><option value="archived">ลบจากคิว (กู้คืนได้)</option></select><select id="nkScreeningSourceFilter" aria-label="กรองตามบัญชี Gmail ที่นำเข้า"><option value="">ทุกบัญชี Gmail</option></select></div>
+          <div class="nk-screening-bulk" id="nkScreeningBulk" aria-label="เลือกอีเมลหลายรายการ">
+            <label class="nk-screening-select-all"><input type="checkbox" id="nkScreeningSelectAll"/> เลือกทั้งหมดที่แสดง (สูงสุด 50)</label>
+            <strong id="nkScreeningSelectedCount" aria-live="polite">เลือก 0 รายการ</strong>
+            <button type="button" class="secondary-btn" id="nkScreeningBulkReject" disabled>คัดออกที่เลือก</button>
+            <button type="button" class="secondary-btn nk-screening-delete" id="nkScreeningBulkArchive" disabled>ลบออกจากคิว</button>
+            <button type="button" class="secondary-btn" id="nkScreeningBulkRestore" hidden disabled>กู้คืนที่เลือก</button>
+            <button type="button" class="nk-screening-clear" id="nkScreeningClearSelection" disabled>ยกเลิกเลือก</button>
+          </div>
+          <div class="nk-screening-result" id="nkScreeningResult" role="status" aria-live="polite">กำลังโหลดคิวอีเมล…</div>
+          <div class="nk-screening-list" id="nkScreeningList"></div>
+          <p class="nk-screening-note">การจัดประเภทเป็นเพียงคำแนะนำจากกติกา ไม่ได้ตัดสินผู้สมัครโดยอัตโนมัติ • เมลที่คัดออกยังตรวจย้อนหลังได้</p>
+        </section>
+
         <div class="ats-summary"><span><strong id="candidateTotal">0</strong> ผู้สมัครทั้งหมด</span><span><strong id="candidateInterview">0</strong> รอสัมภาษณ์</span><span><strong id="candidateOffer">0</strong> อยู่ขั้น Offer</span></div>
         <div id="kanban" class="kanban"></div>
       </section>
@@ -472,7 +494,7 @@
 <section aria-label="ภาพรวมเวลาเข้างาน" class="nd-overview">
 <div class="nd-overview-title"><div><span class="nd-context" id="ndContextTag">ตามช่วงที่เลือก</span><strong id="teamWorkLogRangeLabel">กำลังโหลดข้อมูล…</strong></div><span class="nd-asof" id="ndAsOf"></span></div>
 <div class="nd-metrics" id="ndMetricStrip"></div>
-<p class="nd-day-note" hidden="" id="ndDayNote"></p>
+<p class="nd-day-note" hidden="" id="nkAttendanceDayNote"></p>
 <details class="nd-metric-details"><summary>ดูตัวเลขทั้งหมด <span>ตรงเวลา · นอกพื้นที่ · ขาด / ไม่ลงเวลา</span></summary><div class="team-worklog-summary attendance-summary-expanded" id="teamWorkLogSummary">
 <div><span>เช็กอินแล้ว</span><strong>0</strong><small>ครั้ง</small></div>
 <div><span>ตรงเวลา</span><strong>0</strong><small>ครั้ง</small></div>
@@ -502,16 +524,16 @@
 <option value="missing">ยังไม่เช็กอิน</option>
 </select>
 <button class="secondary-btn compact-btn" id="teamWorkLogClearFilterBtn" type="button">ล้างตัวกรอง</button>
-</div><label class="nd-sort-label">เรียงลำดับ<select id="ndSort"><option value="attention">เรื่องที่ควรตรวจสอบก่อน</option><option value="name">ชื่อพนักงาน</option></select></label><button aria-label="ตั้งค่าเวลางานและ Work Location" class="secondary-btn nd-settings" data-settings-sidebar-open="attendance" type="button">ตั้งค่าเวลางาน</button></div><p class="nd-filter-description" id="ndFilterDescription">ทุกแผนก · ทุกสถานะ · เรื่องที่ควรตรวจสอบก่อน</p></div>
+</div><button aria-label="ตั้งค่าเวลางานและ Work Location" class="secondary-btn nd-settings" data-settings-sidebar-open="attendance" type="button">ตั้งค่าเวลางาน</button></div><p class="nd-filter-description" id="ndFilterDescription">ทุกแผนก · ทุกสถานะ · เรื่องที่ควรตรวจสอบก่อน</p></div>
 <div aria-labelledby="ndTab-list" class="nd-pane" id="ndPane-list" role="tabpanel">
 <p class="nd-list-tip">แตะชื่อเพื่อดูเวลาเข้า–ออก เหตุผล และสถานที่ที่บันทึกไว้</p>
-<div class="nd-list" id="ndPeopleList"></div><div class="nd-pager" id="ndListPager"></div>
+<div class="nd-list" id="nkTeamWorkLogMobile"></div><div class="nd-pager" id="ndListPager"></div>
 </div>
 <div aria-labelledby="ndTab-summary" class="nd-pane" hidden="" id="ndPane-summary" role="tabpanel">
 <div class="nd-subhead"><div><h3 id="attendancePersonSummaryTitle">สรุปเวลารายบุคคล</h3><p>จำนวนวันตามข้อมูลสรุปจากระบบ</p></div><button class="secondary-btn compact-btn" id="attendanceSummaryExportBtn" type="button">ดาวน์โหลด CSV</button></div>
 <div class="attendance-summary-asof" id="attendanceSummaryAsOf"></div>
 <div class="nd-list" id="ndSummaryList"></div><div class="nd-pager" id="ndSummaryPager"></div>
-<details class="nd-full-summary" id="ndFullSummary"><summary>เปิดตารางสรุปทุกคอลัมน์</summary><p>เลื่อนแนวนอนเฉพาะตารางเพื่อดูข้อมูลครบทุกช่อง</p><div class="attendance-person-summary-wrap">
+<details class="nd-full-summary" id="ndFullSummary"><summary>เปิดตารางสรุปทุกคอลัมน์</summary><p>เลื่อนแนวนอนเฉพาะตารางเพื่อดูข้อมูลครบทุกช่อง</p><div id="nkAttendanceMobileSummary" class="nk-attendance-mobile-summary"></div><div class="attendance-person-summary-wrap">
 <table class="attendance-person-summary-table">
 <thead><tr><th>พนักงาน</th><th>วันทำงาน</th><th>มาทำงาน</th><th>ตรงเวลา</th><th>สาย</th><th>ขาด</th><th>ลา</th><th>ประเภทการลา</th><th>นอกพื้นที่</th><th>ยังไม่เช็กเอาต์</th></tr></thead>
 <tbody id="attendancePersonSummaryBody"><tr><td colspan="10">กำลังโหลดข้อมูล…</td></tr></tbody>
@@ -1521,7 +1543,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=P10.1-a1&ed=P10.4" type="module"></script>
+  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.11" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

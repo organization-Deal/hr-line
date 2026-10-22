@@ -1,0 +1,10 @@
+{
+  "public/index.html": "8b29fa61bac58539762a838c050cdea14040e9a9afd4dbc1df47d5e739a460fb",
+  "public/app.js": "385c09f372be0e49a4258ffd79a8329271a10e166228530e6439aef277ad72cd",
+  "public/attendance.html": "6a390abfb04f789037b86318689cb891187870afd38a0b459e121e8660724dab",
+  "public/attendance.css": "01cb607a64e76270799136b6753b05e536e327f6a49fb24d031b1573eff19e72",
+  "public/ui/attendance-p10.css": "ca4552f84e33272e7fe127c9f676925581bbec35d463de64d4314baef2a26ce2",
+  "public/ui/attendance-p10.js": "96d6e1502a8db80666a3e635ed66cec1a95bb550b82e73fdf7010ddfc8232d79",
+  "scripts/audit.mjs": "af73edde2a1acf13729e8bcc5578d5809997cf80268bb0ccce572ed29c7ed016",
+  "tests/test-p10.11.mjs": "ed24397ec9d071bcbcd661d36f19a30cfbca8839d73b9e7912a17d96f0101e77"
+}

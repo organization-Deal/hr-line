@@ -1,0 +1,51 @@
+/* P10.11 attendance workspace. Existing report calculations and actions are retained. */
+#view-attendance [hidden]{display:none!important}
+#view-attendance{min-width:0}
+#view-attendance .nd-intro,#view-attendance .nd-overview-title,#view-attendance .nd-filters{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#view-attendance .nd-intro{margin-bottom:18px}
+#view-attendance .nd-intro h1{margin:4px 0;font-size:26px}
+#view-attendance .nd-eyebrow{color:#04878a;font-size:11px;letter-spacing:.12em}
+#view-attendance .nd-period-bar select,#view-attendance .nd-filter-options select{min-height:44px;padding:8px 12px;border:1px solid #d7e5e1;border-radius:10px;background:white;color:#173b46;font:inherit;max-width:100%}
+#view-attendance #teamWorkLogMode{display:none}
+#view-attendance .team-worklog-controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+#view-attendance .nd-overview{padding:16px;border:1px solid #e0eae7;border-radius:16px;background:#fff}
+#view-attendance .nd-overview-title>div{display:grid;gap:4px}
+#view-attendance .nd-context{color:#68827c;font-size:12px}
+#view-attendance #ndMetricStrip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}
+#view-attendance #ndMetricStrip>div{display:grid;gap:6px;background:#f2f8f5;padding:12px;border-radius:10px}
+#view-attendance #ndMetricStrip strong{font-size:23px;color:#143c45}
+#view-attendance #ndMetricStrip span{font-size:12px}
+#view-attendance .nd-tabs{display:flex;gap:6px;overflow-x:auto;margin:16px 0;border-bottom:1px solid #dce8e3}
+#view-attendance .nd-tabs button{flex-shrink:0;min-height:46px;border:0;border-bottom:3px solid transparent;background:transparent;padding:8px 14px;font:inherit;color:#627c76}
+#view-attendance .nd-tabs button[aria-selected=true]{border-bottom-color:#04878a;color:#047477;font-weight:600}
+#view-attendance .nd-filters{margin:12px 0}
+#view-attendance .nd-filter-options{width:100%;display:flex;flex-wrap:wrap;gap:8px}
+#view-attendance .nd-filter-description{width:100%;margin:0;color:#70837e;font-size:12px}
+#view-attendance #nkTeamWorkLogMobile{display:block!important}
+#view-attendance .nk-attendance-work-row{display:flex;gap:12px;padding:16px 0;border-bottom:1px solid #e5eeea;align-items:start}
+#view-attendance .nk-attendance-person-avatar{display:grid;place-items:center;flex:0 0 38px;height:38px;border-radius:50%;background:#eaf6f1;color:#047477}
+#view-attendance .nk-attendance-work-copy{display:grid;gap:5px;flex:1;min-width:0;overflow-wrap:anywhere}
+#view-attendance .nk-attendance-work-copy small,#view-attendance .nk-attendance-day-meta{color:#70837e;font-size:12px}
+#view-attendance .nk-attendance-detail-link{background:transparent;border:0;text-align:left;padding:4px 0;color:#04878a;min-height:36px}
+#view-attendance .nd-pane{padding:12px 16px;background:#fff;border:1px solid #e0eae7;border-radius:14px}
+#view-attendance .nd-list-tip,#view-attendance .nd-metric-details{font-size:12px;color:#70837e}
+#view-attendance .nd-metric-details{margin-top:12px}
+#view-attendance .nk-attendance-mobile-summary{display:none}
+#view-attendance .nd-filter-options .attendance-filterbar{display:flex;flex-wrap:wrap;gap:8px}
+@media(max-width:720px){
+ #view-attendance .nd-intro{display:block}#view-attendance .nd-period-bar{margin-top:12px}
+ #view-attendance #ndMetricStrip{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #view-attendance .nd-pane{padding:10px}
+ #view-attendance .nk-attendance-work-row{flex-wrap:wrap;gap:8px}
+ #view-attendance .nk-attendance-work-state{margin-left:46px}
+ #view-attendance .attendance-person-summary-wrap{display:none}
+ #view-attendance .nk-attendance-mobile-summary{display:block}
+ #view-attendance .nk-attendance-person-row{padding:12px 0;border-bottom:1px solid #e5eeea}
+ #view-attendance .nk-attendance-person-row summary{display:flex;gap:10px;min-height:48px;align-items:center}
+ #view-attendance .nk-attendance-person-name{display:grid;gap:4px;flex:1}
+ #view-attendance .nk-attendance-person-name small{font-size:11px;color:#70837e}
+ #view-attendance .nk-attendance-person-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding-top:12px}
+ #view-attendance .nk-attendance-person-stats>div{display:grid;font-size:12px;padding:8px;background:#f2f8f5;border-radius:8px}
+}
+#view-attendance .nd-load-state{padding:16px;border:1px solid #d7e5e1;background:#fff;border-radius:12px;margin-bottom:14px;overflow-wrap:anywhere}
+#view-attendance :is(button,select,input):focus-visible{outline:3px solid #76c6c1;outline-offset:2px}

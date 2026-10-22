@@ -2280,6 +2280,9 @@ async function loadTeamWorkLog(){
     if($('#teamWorkLogDate')) $('#teamWorkLogDate').value=date; params.set('date',date);
   }
   syncTeamWorkLogControls();
+  const loadState=$('#ndLoadState'),dataArea=$('#ndDataArea');
+  if(loadState){loadState.hidden=false;loadState.textContent='กำลังโหลดเวลาเข้างานของทีม…';}
+  if(dataArea)dataArea.hidden=true;
   const body=$('#teamWorkLogBody'); if(body) body.innerHTML=`<tr><td colspan="7"><div class="leave-report-empty">กำลังโหลดเวลาเข้างานของทีม…</div></td></tr>`;
   try{
     const canApproveRetro=['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));
@@ -2289,7 +2292,11 @@ async function loadTeamWorkLog(){
     ]);
     state.teamWorkLog=workLog;state.attendanceRetroRequests=retro?.data||[];
     renderAttendanceRetroRequests();renderTeamWorkLog();
-  }catch(e){if(body) body.innerHTML=`<tr><td colspan="7"><div class="leave-report-empty">${escapeHtml(e.message||'โหลดข้อมูลไม่สำเร็จ')}</div></td></tr>`;}
+    if(loadState)loadState.hidden=true;
+    if(dataArea)dataArea.hidden=false;
+  }catch(e){
+    if(loadState){loadState.hidden=false;loadState.textContent=e.message||'โหลดข้อมูลไม่สำเร็จ';const retry=document.createElement('button');retry.type='button';retry.className='secondary-btn';retry.textContent='ลองใหม่';retry.onclick=()=>loadTeamWorkLog();loadState.append(' ',retry);}
+    if(body) body.innerHTML=`<tr><td colspan="7"><div class="leave-report-empty">${escapeHtml(e.message||'โหลดข้อมูลไม่สำเร็จ')}</div></td></tr>`;}
 }
 function renderAttendanceRetroRequests(){
   const panel=$('#attendanceRetroApprovalPanel');if(!panel)return;

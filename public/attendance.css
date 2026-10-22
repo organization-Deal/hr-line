@@ -74,3 +74,18 @@ h1{margin:0;font-size:27px;line-height:1.25;color:var(--teal-dark);letter-spacin
 .retro-open-hint{margin:6px 0 0;color:#93a09f;font-size:11px;line-height:1.4;text-align:center}
 .retro-back-btn{width:100%;min-height:48px;margin-top:10px;border:1px solid #d5e3df;border-radius:16px;background:#fff;color:#496568;font-size:14px;font-weight:700;cursor:pointer}
 .retro-panel input[type="date"]{-webkit-appearance:none;appearance:none}
+
+/* P10.11: use the available screen for face verification. */
+body.face-mode .quick-shell{padding:0}
+body.face-mode .quick-card{width:100%;max-width:760px;border:0;border-radius:0;box-shadow:none}
+body.face-mode .face-camera-wrap{height:68svh;min-height:320px;max-height:none;aspect-ratio:auto!important}
+body.face-mode .face-camera-wrap video{object-fit:cover}
+body.face-mode .face-guide span{width:min(65%,300px)}
+@media(max-width:520px){
+ body.face-mode .brand-row{margin-bottom:6px}
+ body.face-mode h1{font-size:20px}
+ body.face-mode .face-panel{margin-top:10px}
+ body.face-mode .face-camera-wrap{height:calc(100svh - 210px);min-height:300px;max-height:none}
+ body.face-mode .face-copy{margin-top:10px}
+ body.face-mode .privacy-note{margin-top:10px}
+}
