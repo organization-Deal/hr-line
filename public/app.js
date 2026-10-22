@@ -1,5 +1,6 @@
-import {payrollTaskModel,salaryExplanation,nextPayrollMonth} from './payroll-workflow.js?v=P10.23';
-import { createNotificationCenter } from './notifications.js?v=P10.23';
+import {dashboardModel,dashboardSummaryHtml,dashboardAttendanceHtml,dashboardQueueHtml,dashboardMomentsHtml,dashboardDocumentsHtml,dashboardRecruitmentHtml,dashboardTaskTarget,dashboardPeopleHtml} from './dashboard.js?v=P10.24';
+import {payrollTaskModel,salaryExplanation,nextPayrollMonth} from './payroll-workflow.js?v=P10.24';
+import { createNotificationCenter } from './notifications.js?v=P10.24';
 /* NAKNA_OA_SETTINGS_REMOVED_20261019: P10.14 keeps retired company OA controls out of HTML; central LINE stays available. */
 /* NAKNA_BOOT_RECOVERY_20261019; combines retired Stretch + retired company OA without dangling boot handlers. */
 const NAKNA_FRONTEND_BUILD=window.NaknaRelease?.version||'unknown'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
@@ -121,6 +122,7 @@ function readDashboardCache() {
       localStorage.removeItem(key);
       return null;
     }
+    if(cached.dashboard?.payroll!==undefined){delete cached.dashboard.payroll;localStorage.setItem(key,JSON.stringify(cached));}
     cached.is_stale = age > DASHBOARD_CACHE_FRESH_MS;
     cached.age_ms = Math.max(0, age);
     return cached;
@@ -129,9 +131,10 @@ function readDashboardCache() {
 function writeDashboardCache() {
   const key = dashboardCacheKey();
   if (!key || !state.dashboard) return;
+  delete state.dashboard.payroll;
   try {
     localStorage.setItem(key, JSON.stringify({
-      cache_version: 2,
+      cache_version: 3,
       saved_at: Date.now(),
       dashboard: state.dashboard,
       companyProfile: state.companyProfile || null,
@@ -191,7 +194,7 @@ function acknowledgeAttentionForView(viewName){
 function hydrateDashboardCache() {
   const cached = readDashboardCache();
   if (!cached) return false;
-  state.dashboard = cached.dashboard;
+  state.dashboard = {...cached.dashboard,__fromCache:true};
   viewPresentedCompany.set('dashboard',Number(state.me?.active_company_id||0));
   if (cached.companyProfile) state.companyProfile = cached.companyProfile;
   try {
@@ -212,6 +215,7 @@ async function loadDashboardFast({ silent = true } = {}) {
     // with the critical request on LINE mobile.
     const dashboard = await api('/api/dashboard', { timeoutMs: 12000 });
     state.dashboard = dashboard || emptyDashboard();
+    delete state.dashboard.payroll;delete state.dashboard.__fromCache;delete state.dashboard.__refreshFailed;
     renderDashboard();
     renderIdentity();
     $('#todayText').textContent = formatDate(state.dashboard.today);
@@ -228,6 +232,7 @@ async function loadDashboardFast({ silent = true } = {}) {
   } catch (error) {
     dashboardFailed=true;
     if (!state.dashboard) state.dashboard = emptyDashboard();
+    state.dashboard.__refreshFailed=true;
     try { renderDashboard(); } catch {}
     renderLoadProblem([{ label: 'ภาพรวม', message: error.message }]);
     return false;
@@ -2733,118 +2738,34 @@ function dashboardCompactEmpty(title, detail, tone='clear') {
 }
 
 function renderDashboard() {
-  const d = state.dashboard;
-  if (!d?.summary) return;
-  const dashboardAttention=(d.attention||[]).filter(item=>item.key!=='missing');
-  const total = dashboardAttention.reduce((sum, item) => sum + Number(item.count||0), 0);
-  const summaryData=d.summary||{};
-
-  $('#attentionTotal').textContent = total;
-  $('#navAttention').textContent = total;
-  $('#navAttention').dataset.empty = total ? 'false' : 'true';
-  $('#heroSub').textContent = `${d.client.name} · ${summaryData.employees} คน · ${formatDate(d.today)}${summaryData.holiday_name ? ` · ${summaryData.holiday_name}` : ''}`;
-
-  const dayContext = $('#nkDayContext');
-  if (dayContext) { dayContext.hidden = !summaryData.holiday_name; dayContext.textContent = summaryData.holiday_name ? 'วันหยุดบริษัท · ตัวเลขเช็กอินแสดงรายการที่บันทึกจริง ไม่ใช่จำนวนผู้ที่ต้องมาทำงาน' : ''; }
-
-  const summary = [
-    ['พนักงานทั้งหมด', summaryData.employees, 'brand', 'คน'],
-    ['เช็กอินแล้ว', summaryData.present, 'success', 'คน'],
-    ['ลาวันนี้', summaryData.leave, 'info', 'คน'],
-    ['ยังไม่เช็กอิน', summaryData.missing, summaryData.missing ? 'danger' : 'success', 'คน'],
-    ['มาสาย', summaryData.late, summaryData.late ? 'warning' : 'success', 'คน'],
-  ];
-  $('#summaryGrid').innerHTML = summary.map(([label, value, tone, unit]) => `
-    <div class="summary-item">
-      <div class="summary-label"><span class="summary-dot ${tone}"></span>${escapeHtml(label)}</div>
-      <div class="summary-value">${Number(value||0)}<small>${escapeHtml(unit)}</small></div>
-    </div>`).join('');
-
-  $('#attentionList').innerHTML = dashboardAttention.length
-    ? dashboardAttention.map(item => `
-      <div class="list-row actionable dashboard-action-row" data-attention="${escapeHtml(item.key)}">
-        <div class="list-icon ${attentionTone(item)}">${attentionIcon(item.key)}</div>
-        <div class="list-copy">
-          <strong>${attentionCopy(item)}</strong>
-          <small>${attentionHelp(item.key)}</small>
-        </div>
-        <div class="count">${item.count}</div>
-      </div>`).join('')
-    : dashboardCompactEmpty('วันนี้ไม่มีงานเร่งด่วน', 'รายการอนุมัติและเรื่องที่ต้องจัดการเคลียร์แล้ว');
-
-  $$('[data-attention]').forEach(row => {
-    row.onclick = () => {
-      const key=row.dataset.attention;
-      const item=attentionItemByKey(key);
-      if(item?.item_keys?.length) markAttentionRead(key,item.item_keys,{optimistic:true});
-      const target = attentionTarget(key);
-      if (target) showView(target);
-    };
-  });
-
-  const scheduled=Math.max(0,Number(summaryData.scheduled_today||0));
-  const present=Math.max(0,Number(summaryData.present||0));
-  const leave=Math.max(0,Number(summaryData.leave||0));
-  const missing=Math.max(0,Number(summaryData.missing||0));
-  const late=Math.max(0,Number(summaryData.late||0));
-  const attendanceRate=scheduled?Math.min(100,Math.round((present/scheduled)*100)):0;
-  const attendanceRoot=$('#attendanceSnapshot');
-  if(attendanceRoot) attendanceRoot.innerHTML=`
-    <div class="attendance-progress-head"><div><strong>${present}/${scheduled || summaryData.employees}</strong><span>เช็กอินแล้ว</span></div><b>${attendanceRate}%</b></div>
-    <div class="attendance-progress"><span style="width:${attendanceRate}%"></span></div>
-    <div class="attendance-mini-grid">
-      <div><span>มาแล้ว</span><strong>${present}</strong></div>
-      <div><span>ลา</span><strong>${leave}</strong></div>
-      <div class="${missing?'warn':''}"><span>ยังไม่มา</span><strong>${missing}</strong></div>
-      <div class="${late?'warn':''}"><span>สาย</span><strong>${late}</strong></div>
-    </div>`;
-
-  const payrollRoot=$('#payrollSnapshot');
-  const payroll=d.payroll||null;
-  if(payrollRoot){
-    if(payroll){
-      const statusText=payrollStatusLabel(payroll.status);
-      payrollRoot.innerHTML=`<div class="module-snapshot-main"><div><span class="dashboard-module-label">${escapeHtml(payroll.period_key||'รอบล่าสุด')}</span><strong>${formatDate(payroll.period_start)} → ${formatDate(payroll.period_end)}</strong><small>${Number(payroll.employee_count||0)} คน · จ่าย ${formatDate(payroll.pay_date)}</small></div><span class="badge ${payrollStatusClass(payroll.status)}">${escapeHtml(statusText)}</span></div><div class="module-snapshot-money"><span>ยอดโอนสุทธิ</span><strong>${money(payroll.net_total||0)}</strong></div>`;
-    }else{
-      payrollRoot.innerHTML=dashboardCompactEmpty('ยังไม่มีรอบเงินเดือน', 'สร้างรอบแรกเมื่อข้อมูลพนักงานพร้อม', 'neutral');
-    }
-  }
-
-  const documentRoot=$('#documentSnapshot');
-  const docs=d.documents||{};
-  if(documentRoot){
-    const pendingHr=Number(docs.pending_hr_sign||0),pendingEmployee=Number(docs.pending_employee_sign||0),finalTotal=Number(docs.final_total||0);
-    documentRoot.innerHTML=`<div class="module-stat-grid"><div class="${pendingHr?'needs-action':''}"><span>รอ HR เซ็น</span><strong>${pendingHr}</strong></div><div class="${pendingEmployee?'needs-action':''}"><span>รอพนักงานเซ็น</span><strong>${pendingEmployee}</strong></div><div><span>Final</span><strong>${finalTotal}</strong></div></div>${pendingHr||pendingEmployee?'':'<div class="module-clean-note">ไม่มีเอกสารรอลงนามตอนนี้</div>'}`;
-  }
-
-  const pipelineStages = ['new', 'screening', 'hr_interview', 'manager_interview', 'offer', 'hired'];
-  $('#recruitmentPipeline').innerHTML = pipelineStages.map((stage,index) => `
-    <div class="pipe-item ${Number(d.recruitment?.[stage]||0)?'has-data':''}">
-      <b>${d.recruitment?.[stage] || 0}</b>
-      <span>${stageLabels[stage]}</span>${index<pipelineStages.length-1?'<i>→</i>':''}
-    </div>`).join('');
-
-  const moments = [
-    ...(d.birthdays||[]).map(item => ({...item,type:'วันเกิด',icon:'gift',priority:item.days===0?0:item.days})),
-    ...(d.probation||[]).map(item => ({ ...item, type: 'Probation', icon: 'clock', priority:item.days })),
-    ...(d.contracts||[]).map(item => ({ ...item, type: 'สัญญา', icon: 'document', priority:item.days })),
-  ].sort((a,b)=>Number(a.priority||0)-Number(b.priority||0)).slice(0,7);
-
-  $('#upcomingList').innerHTML = moments.length
-    ? moments.map(item => `
-      <div class="list-row timeline-row">
-        <div class="list-icon ${item.type==='วันเกิด'?'coral':item.days<=7?'warning':'info'}">${iconSvg(item.icon)}</div>
-        <div class="list-copy">
-          <strong>${escapeHtml(item.name)}</strong>
-          <small>${escapeHtml(item.type)} · ${formatDate(item.date)}</small>
-        </div>
-        <span class="badge ${item.days===0?'badge-brand':item.days<=7?'badge-warning':'badge-neutral'}">${item.days===0?'วันนี้':`${item.days} วัน`}</span>
-      </div>`).join('')
-    : dashboardCompactEmpty('ยังไม่มีกำหนดการใกล้ถึง', 'วันเกิด Probation และสัญญาจะมาแสดงตรงนี้', 'neutral');
-
-  const birthdayRoot=$('#birthdayList');
-  if(birthdayRoot){birthdayRoot.innerHTML='';birthdayRoot.classList.add('hidden');}
+  const d=state.dashboard;if(!d?.summary)return;
+  // Old cached API payloads must not keep financial figures on the dashboard.
+  delete d.payroll;
+  const m=dashboardModel(d),cached=Boolean(d.__fromCache),updated=$('#dashboardUpdated');
+  $('#heroSub').textContent=`${d.client?.name||'บริษัทของคุณ'} · ${formatDate(d.today)}`;
+  if(updated)updated.textContent=d.__refreshFailed?'อัปเดตไม่สำเร็จ · แสดงข้อมูลที่มีล่าสุด':cached?'ข้อมูลที่แสดงไว้ล่าสุด · กำลังอัปเดต':d.generated_at?`อัปเดต ${new Intl.DateTimeFormat('th-TH',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Bangkok'}).format(new Date(d.generated_at))} น.`:'กำลังรอข้อมูลล่าสุด';
+  const day=$('#nkDayContext');if(day){day.hidden=!d.summary.holiday_name;day.textContent=d.summary.holiday_name?`วันหยุดบริษัท · ${d.summary.holiday_name}`:'';}
+  $('#attentionTotal').textContent=Array.isArray(d.work_queue)?String(m.total):'—';
+  $('#navAttention').textContent=Array.isArray(d.work_queue)?String(m.total):'';
+  $('#navAttention').dataset.empty=m.total?'false':'true';
+  $('#summaryGrid').innerHTML=dashboardSummaryHtml(d);
+  $('#attendanceSnapshot').innerHTML=dashboardAttendanceHtml(d);
+  $('#attentionList').innerHTML=dashboardQueueHtml(d);
+  $('#documentSnapshot').innerHTML=dashboardDocumentsHtml(d);
+  $('#recruitmentPipeline').innerHTML=dashboardRecruitmentHtml(d);
+  $('#upcomingList').innerHTML=dashboardMomentsHtml(d,formatDate);
+  $('#birthdayList').innerHTML='';
+  $('#view-dashboard').querySelectorAll('[data-dashboard-group]').forEach(button=>{button.onclick=()=>window.openDashboardGroup(button.dataset.dashboardGroup);});
+  $('#view-dashboard').querySelectorAll('[data-dashboard-task]').forEach(button=>{button.onclick=()=>{const target=dashboardTaskTarget(button.dataset.dashboardTask);if(target)showView(target);};});
+  const modal=$('#nkDashboardPeopleModal');if(modal?.open){if(modal.dataset.company!==String(d.client?.id)||modal.dataset.date!==String(d.today))modal.close();else window.openDashboardGroup(modal.dataset.group);}
 }
+window.openDashboardGroup=key=>{
+  const d=state.dashboard;if(Number(d?.client?.id)!==Number(state.me?.active_company_id||activeCompany()?.id))return;
+  const info=dashboardPeopleHtml(d,key);if(!info)return toast('ยังไม่มีรายชื่อสำหรับข้อมูลนี้ กรุณาอัปเดตข้อมูลอีกครั้ง',true);
+  let modal=$('#nkDashboardPeopleModal');if(!modal){modal=document.createElement('dialog');modal.id='nkDashboardPeopleModal';modal.className='nk-dash-people-modal';modal.innerHTML='<form method="dialog"><div class="nk-dash-people-head"><div><h2 id="nkDashboardPeopleTitle"></h2><p id="nkDashboardPeopleMeta"></p></div><button type="submit" class="secondary-btn" aria-label="ปิดรายชื่อ">ปิด</button></div><ul id="nkDashboardPeopleList"></ul></form>';modal.setAttribute('aria-labelledby','nkDashboardPeopleTitle');document.body.append(modal);}
+  modal.dataset.company=String(d.client?.id);modal.dataset.date=String(d.today);modal.dataset.group=key;
+  $('#nkDashboardPeopleTitle').textContent=info.title;$('#nkDashboardPeopleMeta').textContent=`${info.count} คน · ${formatDate(d.today)} · ${d.__fromCache?'ข้อมูลที่แสดงไว้ล่าสุด':'ข้อมูลเดียวกับสรุปในหน้า'}`;$('#nkDashboardPeopleList').innerHTML=info.html;if(!modal.open)modal.showModal();
+};
 
 function renderEmployees(query = '') {
   const normalized = query.trim().toLowerCase();
@@ -7083,7 +7004,7 @@ $('#openDocumentCaseBtn')?.addEventListener('click',quickOpenDocumentCase);
 
 let notificationCenterController;
 function notificationUi(){return notificationCenterController ||= createNotificationCenter({api,escapeHtml,escapeAttr,toast,openForm:openPhase5Form,companyId:()=>Number(state.me?.active_company_id||0),role:activeCompanyRole});}
-// P10.23 task guidance; retain the existing payroll controls and calculation engine.
+// P10.24 task guidance; retain the existing payroll controls and calculation engine.
 var nkPayrollFilter='all',nkPayrollSearch='',nkPayrollView='summary';
 function nkPayrollPrioritize(detail){const model=payrollTaskModel(detail);return [...(detail.items||[])].sort((a,b)=>{const priority=x=>model.errors.has(Number(x.employee_id))?0:model.warnings.has(Number(x.employee_id))?1:2;return priority(a)-priority(b);});}
 function nkPayrollPeopleGuide(detail){const m=payrollTaskModel(detail),missing=detail.workflow_people?.not_calculated||[];return `<section id="nkPayrollPeopleGuide" class="nk-payroll-task-note"><strong>รอบนี้มีพนักงานตามช่วงงาน ${m.eligible} คน · มีผลคำนวณ ${m.included} คน · ข้อมูลพร้อมตรวจ ${m.ready} คน</strong><p>${m.blocking?`ต้องแก้ข้อมูล ${m.blocking} คน · `:''}${m.warningPeople?`มีข้อมูลควรตรวจ ${m.warningPeople} คน · `:''}ฐานเงินเดือน เวลาเข้างาน และใบลาใช้ข้อมูลของช่วงรอบนี้ รายการพิเศษเพิ่มเฉพาะรอบได้โดยไม่แก้ฐานเงินเดือนประจำ</p>${missing.length?`<details><summary>ยังไม่มีผลคำนวณ ${missing.length} คน</summary>${missing.map(e=>`<p>${escapeHtml(e.name)} · ${escapeHtml(e.reason)} <button type="button" class="text-btn" onclick="window.openPayrollProfile(${Number(e.employee_id)})">ตรวจโปรไฟล์</button></p>`).join('')}<button class="secondary-btn" type="button" onclick="window.recalculatePayroll(${Number(detail.period.id)})">ตั้งค่าครบแล้ว คำนวณรอบใหม่</button></details>`:''}</section>`;}

@@ -1,10 +1,11 @@
+import {dashboardAttendance} from './dashboard-summary.js';
 import {payrollPaymentApi,payrollPayment,payrollPeople,ensurePayrollPayment} from './payroll-payment.js';
 import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnostics, ensureNotificationCenter } from './notification-center.js';
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.23-LOADING-EXPERIENCE';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.23-LOADING-EXPERIENCE';
+const NAKNA_RUNTIME_RELEASE = 'P10.24-DASHBOARD-CLARITY';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.24-DASHBOARD-CLARITY';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -5245,10 +5246,9 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
   const candidates = candidatesRes.results || [];
   const requests = requestsRes.results || [];
   await ensureDashboardAttentionReady(db);
-  const [hrCasesOpenRes,attentionReadRes,latestPayroll,documentSummary]=await Promise.all([
+  const [hrCasesOpenRes,attentionReadRes,documentSummary]=await Promise.all([
     includeHrCases ? db.prepare(`SELECT id,created_at FROM hr_cases WHERE client_id=?1 AND status NOT IN ('resolved','closed')`).bind(clientId).all().catch(()=>({results:[]})) : Promise.resolve({results:[]}),
     userId ? db.prepare(`SELECT attention_key,item_key FROM dashboard_attention_reads WHERE client_id=?1 AND user_id=?2`).bind(clientId,Number(userId)).all().catch(()=>({results:[]})) : Promise.resolve({results:[]}),
-    db.prepare(`SELECT id,period_key,period_start,period_end,pay_date,status,employee_count,gross_total,net_total,approval_status FROM payroll_periods WHERE client_id=?1 AND status!='void' ORDER BY period_end DESC,id DESC LIMIT 1`).bind(clientId).first().catch(()=>null),
     db.prepare(`SELECT
       COALESCE(SUM(CASE WHEN approval_status='pending' THEN 1 ELSE 0 END),0) AS pending_hr_sign,
       COALESCE(SUM(CASE WHEN workflow_status='awaiting_employee_signature' THEN 1 ELSE 0 END),0) AS pending_employee_sign,
@@ -5281,13 +5281,9 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
     const rule=employeeRule||deptRule||companyRule;
     return rule?Boolean(Number(rule.is_workday)):weekday<=5;
   };
-  const present = employees.filter(e => { const a=attendanceByEmployee.get(Number(e.id)); return Boolean(a?.check_in_at || ['present','late'].includes(a?.status)); }).length;
-  const late = attendance.filter(a => a.status === 'late').length;
-  const onLeave = employees.filter(e => onLeaveTodayIds.has(Number(e.id))).length;
-  const expectedToday=employees.filter(employeeExpected);
-  const scheduledPresent=expectedToday.filter(e=>Boolean(attendanceByEmployee.get(Number(e.id))?.check_in_at)).length;
-  const missingEmployees = expectedToday.filter(e=>!attendanceByEmployee.get(Number(e.id))?.check_in_at&&!onLeaveTodayIds.has(Number(e.id)));
-  const missing = missingEmployees.length;
+  const attendanceModel=dashboardAttendance({employees,attendance,leaveIds:onLeaveTodayIds,expected:employeeExpected,today});
+  const {present,late,leave:onLeave,missing,scheduled_today:scheduledToday,scheduled_present:scheduledPresent}=attendanceModel.summary;
+  const missingEmployees=attendanceModel.groups.missing;
 
   const birthdays = upcomingBirthdays(employees, today, Number(client.birthday_reminder_days || 7));
   const probation = employees.filter(e => e.probation_end_date && daysBetween(today, e.probation_end_date) >= 0 && daysBetween(today, e.probation_end_date) <= 14)
@@ -5318,8 +5314,18 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
   return {
     client: { id: client.id, name: client.name, work_start: client.work_start, timezone: client.timezone },
     today,
-    summary: { employees: employees.length, scheduled_today: expectedToday.length, scheduled_present: scheduledPresent, present, late, leave: onLeave, missing, holiday_name: holidayToday?.name || null },
-    missing_employees: missingEmployees.slice(0,20).map(e=>({id:Number(e.id),name:displayName(e),department:e.department_name||null,position:e.position_name||null})),
+    summary: { ...attendanceModel.summary, holiday_name: holidayToday?.name || null },
+    attendance_groups: attendanceModel.groups,
+    generated_at: nowIso,
+    work_queue: includeHrCases ? [
+      {key:'hr_private',count:hrCasesOpen.length},
+      {key:'leave_pending',count:leaves.length},
+      {key:'document_sign',count:Number(documentSummary?.pending_hr_sign||0)},
+      {key:'request',count:requests.length},
+      {key:'candidate_new',count:Number(stages.new||0)},
+      {key:'candidate_stale',count:staleCandidates.filter(c=>c.stage!=='new').length},
+    ].filter(x=>x.count>0) : [],
+    missing_employees: missingEmployees.slice(0,20),
     attention,
     birthdays,
     probation,
@@ -5330,12 +5336,6 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
     requests: requests.slice(0, 6),
     hr_cases_open: hrCasesOpen.length,
     recent_attendance: attendance.slice(0, 8),
-    payroll: latestPayroll ? {
-      id: Number(latestPayroll.id), period_key: latestPayroll.period_key, period_start: latestPayroll.period_start,
-      period_end: latestPayroll.period_end, pay_date: latestPayroll.pay_date, status: latestPayroll.status,
-      approval_status: latestPayroll.approval_status || 'not_required', employee_count: Number(latestPayroll.employee_count||0),
-      gross_total: Number(latestPayroll.gross_total||0), net_total: Number(latestPayroll.net_total||0)
-    } : null,
     documents: {
       pending_hr_sign: Number(documentSummary?.pending_hr_sign||0),
       pending_employee_sign: Number(documentSummary?.pending_employee_sign||0),

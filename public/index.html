@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.23" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.24" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -45,11 +45,12 @@
 <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1-P10.12">
 <link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A">
 <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A">
-<link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.23">
-<link rel="stylesheet" href="/notifications.css?v=P10.23">
-<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.23">
-<link rel="stylesheet" href="/ui/loading.css?v=P10.23">
-<script defer src="/ui/loading.js?v=P10.23"></script>
+<link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.24">
+<link rel="stylesheet" href="/notifications.css?v=P10.24">
+<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.24">
+<link rel="stylesheet" href="/ui/loading.css?v=P10.24">
+<script defer src="/ui/loading.js?v=P10.24"></script>
+<link rel="stylesheet" href="/ui/dashboard.css?v=P10.24">
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -301,83 +302,33 @@
         <button id="retryDataLoadBtn" class="secondary-btn" type="button">ลองโหลดใหม่</button>
       </div>
 
-      <section id="view-dashboard" class="view active dashboard-command-center">
-        <div class="welcome-bar dashboard-hero-v2">
-          <div class="dashboard-hero-copy">
-            <p class="kicker">HR COMMAND CENTER</p>
-            <h1>วันนี้ ทีมเป็นอย่างไรบ้าง</h1>
-            <p id="heroSub">กำลังโหลดข้อมูลบริษัท...</p><p id="nkDayContext" class="nk-day-context" hidden></p>
+      <section id="view-dashboard" class="view active nk-dashboard" data-dashboard-version="24">
+        <header class="nk-dash-header">
+          <div><p class="kicker">พื้นที่ทำงานของทีม</p><h1>ภาพรวมวันนี้</h1><p id="heroSub">กำลังโหลดข้อมูลบริษัท…</p><p id="nkDayContext" hidden></p></div>
+          <span id="dashboardUpdated" class="nk-dash-updated">กำลังอัปเดตข้อมูล</span>
+        </header>
+        <section class="nk-dash-team" aria-labelledby="nkDashTeamTitle">
+          <div class="nk-dash-section-head"><h2 id="nkDashTeamTitle">สถานะทีมวันนี้</h2><button type="button" class="text-btn" data-jump="attendance">เปิดเวลาเข้างาน →</button></div>
+          <div id="summaryGrid" class="nk-dash-stats" aria-label="สรุปคนตามตารางงานวันนี้"></div>
+          <div id="attendanceSnapshot"></div>
+        </section>
+        <div class="nk-dash-main">
+          <section class="nk-dash-work" aria-labelledby="nkDashWorkTitle">
+            <div class="nk-dash-section-head"><div><h2 id="nkDashWorkTitle">งานที่รอจัดการ <span id="attentionTotal" class="nk-dash-count">—</span></h2><p>งานที่ยังเปิดอยู่ แม้เคยเปิดอ่านแล้ว</p></div></div>
+            <div id="attentionList"></div>
+          </section>
+          <section class="nk-dash-upcoming" aria-labelledby="nkDashUpcomingTitle">
+            <div class="nk-dash-section-head"><div><h2 id="nkDashUpcomingTitle">กำหนดการใกล้ถึง</h2><p>วันเกิด · ทดลองงาน · สัญญาจ้าง</p></div></div>
+            <div id="upcomingList"></div><div id="birthdayList" hidden></div>
+          </section>
+        </div>
+        <details class="nk-dash-more">
+          <summary><span>ภาพรวมเพิ่มเติม<small>เอกสารและการรับสมัคร</small></span><span aria-hidden="true">⌄</span></summary>
+          <div class="nk-dash-secondary">
+            <section class="nk-dash-docs"><div class="nk-dash-section-head"><h2>เอกสาร</h2><button type="button" class="text-btn" data-jump="documents">เปิดเอกสาร →</button></div><div id="documentSnapshot"></div></section>
+            <section class="nk-dash-recruitment"><div class="nk-dash-section-head"><h2>การรับสมัคร</h2><button type="button" class="text-btn" data-jump="recruitment">เปิดการรับสมัคร →</button></div><div id="recruitmentPipeline" class="nk-dash-pipeline"></div></section>
           </div>
-          <div class="attention-summary dashboard-attention-summary">
-            <div class="attention-ring"><strong id="attentionTotal">0</strong><span>เรื่อง</span></div>
-            <div><strong>ต้องจัดการวันนี้</strong><span>งานสำคัญที่ควรเช็กก่อนเริ่มวัน</span></div>
-          </div>
-        </div>
-
-        <div class="dashboard-quick-actions" aria-label="ทางลัด HR">
-          <button type="button" data-jump="attendance"><span>เวลาเข้างาน</span><small>เช็กคนมา / สาย / ยังไม่มา</small></button>
-          <button type="button" data-jump="leave"><span>อนุมัติการลา</span><small>ดูคำขอลาและสิทธิ์คงเหลือ</small></button>
-          <button type="button" data-jump="documents"><span>เอกสาร</span><small>เซ็น ส่ง และติดตามเอกสาร</small></button>
-          <button type="button" data-jump="payroll"><span>Payroll</span><small>ตรวจรอบเงินเดือนล่าสุด</small></button>
-          <button type="button" data-jump="broadcast"><span>ประกาศ</span><small>ส่งข่าวให้ทีมงาน</small></button>
-        </div>
-
-        <div id="summaryGrid" class="summary-strip summary-strip-v2" aria-label="สรุปวันนี้"></div>
-
-        <div class="dashboard-grid dashboard-grid-v2 primary-dashboard-grid">
-          <article class="panel radar-panel dashboard-compact-panel">
-            <div class="panel-head">
-              <div><p class="kicker">TODAY'S ATTENTION</p><h3>เรื่องที่ควรจัดการก่อน</h3><p class="panel-subtitle">รายการที่ต้องตัดสินใจหรือดำเนินการวันนี้</p></div>
-              <span class="badge badge-brand">Auto</span>
-            </div>
-            <div id="attentionList" class="list-stack"></div>
-          </article>
-
-          <article class="panel dashboard-compact-panel attendance-panel-v2">
-            <div class="panel-head">
-              <div><p class="kicker">TODAY ATTENDANCE</p><h3>สถานะเข้างานวันนี้</h3><p class="panel-subtitle">ดูภาพรวมก่อนเปิดหน้ารายละเอียด</p></div>
-              <button class="text-btn" data-jump="attendance">ดูเวลาเข้างาน <span>→</span></button>
-            </div>
-            <div id="attendanceSnapshot" class="attendance-snapshot"></div>
-          </article>
-        </div>
-
-        <div class="dashboard-grid dashboard-grid-v2 operations-dashboard-grid">
-          <article class="panel dashboard-compact-panel payroll-dashboard-card">
-            <div class="panel-head">
-              <div><p class="kicker">PAYROLL</p><h3>รอบเงินเดือน</h3></div>
-              <button class="text-btn" data-jump="payroll">เปิด Payroll <span>→</span></button>
-            </div>
-            <div id="payrollSnapshot" class="dashboard-module-snapshot"></div>
-          </article>
-
-          <article class="panel dashboard-compact-panel document-dashboard-card">
-            <div class="panel-head">
-              <div><p class="kicker">DOCUMENTS</p><h3>เอกสารที่กำลังดำเนินการ</h3></div>
-              <button class="text-btn" data-jump="documents">เปิดเอกสาร <span>→</span></button>
-            </div>
-            <div id="documentSnapshot" class="dashboard-module-snapshot"></div>
-          </article>
-        </div>
-
-        <div class="dashboard-grid dashboard-grid-v2 secondary-dashboard-grid">
-          <article class="panel recruitment-panel dashboard-compact-panel">
-            <div class="panel-head">
-              <div><p class="kicker">RECRUITMENT</p><h3>สถานะผู้สมัคร</h3><p class="panel-subtitle">ดู Funnel ทั้งหมดในหน้าเดียว</p></div>
-              <button class="text-btn" data-jump="recruitment">ดู Recruitment <span>→</span></button>
-            </div>
-            <div id="recruitmentPipeline" class="pipeline pipeline-v2"></div>
-          </article>
-
-          <article class="panel dashboard-compact-panel moments-panel">
-            <div class="panel-head">
-              <div><p class="kicker">UPCOMING</p><h3>กำหนดการและวันสำคัญ</h3><p class="panel-subtitle">วันเกิด · Probation · สัญญา</p></div>
-              <span class="badge badge-soft">ใกล้ถึง</span>
-            </div>
-            <div id="upcomingList" class="list-stack compact-list timeline-list"></div>
-            <div id="birthdayList" class="list-stack compact-list birthday-list-merged"></div>
-          </article>
-        </div>
+        </details>
       </section>
 
       <section id="view-employees" class="view">
@@ -1450,7 +1401,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.23" type="module"></script>
+  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.24" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

@@ -39,7 +39,7 @@
     return wrap;
   }
   function initDashboard(){
-    const view=$('#view-dashboard');if(!view)return;
+    const view=$('#view-dashboard');if(!view||view.dataset.dashboardVersion==='24')return;
     const ops=$('.operations-dashboard-grid',view);
     const more=$('.secondary-dashboard-grid',view);
     const primary=$('.primary-dashboard-grid',view);
