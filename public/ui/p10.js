@@ -353,7 +353,7 @@
     });
     observe(); schedule();
   }
-  window.NaknaUI = Object.freeze({ version: 'P10.1-attendance', refresh: schedule, setLeaveTab, columnLabels, metrics });
+  window.NaknaUI = Object.freeze({ get version() { return window.NaknaRelease?.version || 'unknown'; }, refresh: schedule, setLeaveTab, columnLabels, metrics });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
   else init();
 })();
