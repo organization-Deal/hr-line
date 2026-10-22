@@ -58,7 +58,7 @@ check((await ncSetting(db,{id:2,attendance_reminder_enabled:0},'checkin')).enabl
 await run("INSERT INTO company_holidays VALUES(1,1,'2026-10-23')");
 await runNotificationCenter(env,{},h,{now:new Date('2026-10-23T05:33:00Z')});check(calls.length===before+3,'company holiday');
 let response=await notificationCenterApi(new Request('https://test/api/notification-center'),env,{clientId:1,role:'employee',user:{id:1}},h);check(response.status===403,'API role guard');
-response=await notificationCenterApi(new Request('https://test/api/notification-center'),env,{clientId:1,role:'hr',user:{id:1}},h);const body=await response.json();check(body.heartbeat.release==='P10.24','heartbeat exposed');check(!JSON.stringify(body).includes('test-token')&&!JSON.stringify(body).includes('"line_user_id"')&&!JSON.stringify(body).includes('payload_json'),'API excludes tokens, LINE IDs, payload');
+response=await notificationCenterApi(new Request('https://test/api/notification-center'),env,{clientId:1,role:'hr',user:{id:1}},h);const body=await response.json();check(body.heartbeat.release==='P10.25','heartbeat exposed');check(!JSON.stringify(body).includes('test-token')&&!JSON.stringify(body).includes('"line_user_id"')&&!JSON.stringify(body).includes('payload_json'),'API excludes tokens, LINE IDs, payload');
 response=await notificationCenterApi(new Request('https://test/api/notification-center',{method:'PATCH',body:JSON.stringify({...base,kind:'hr_summary',recipient_keys:['u:999']})}),env,{clientId:1,role:'hr',user:{id:1}},h);check(response.status===400,'recipient authorization');
 response=await notificationCenterApi(new Request('https://test/api/notification-center',{method:'PATCH',body:JSON.stringify({...base,send_time:'11:45',message_text:'Hello {ชื่อ}'})}),env,{clientId:1,role:'hr',user:{id:1}},h);check(response.ok,'settings persist');check((await ncSetting(db,client,'checkin')).send_time==='11:45','saved time');
 check((await ncSetting(db,{id:2,attendance_reminder_enabled:0},'checkin')).send_time==='12:30','tenant settings isolated');
@@ -81,7 +81,8 @@ await runNotificationCenter(env,{},h,{now:new Date('2026-10-22T11:02:00Z')});che
 const testBefore=calls.length;
 response=await notificationCenterApi(new Request('https://test/api/notification-center/test',{method:'POST',body:JSON.stringify({to:'ATTACKER'})}),env,{clientId:1,role:'hr',user:{id:1}},h);check((await response.json()).ok,'self-test accepted');check(calls.length===testBefore+1&&JSON.parse(calls.at(-1).body).to==='U1','test recipient cannot be overridden');
 response=await notificationCenterApi(new Request('https://test/api/notification-center/test',{method:'POST'}),env,{clientId:1,role:'hr',user:{id:99}},h);check(response.status===400&&calls.length===testBefore+1,'unbound test account cannot send');
-const diagnostic=await notificationCenterDiagnostics(db,1,recipient,[recipient]);
+// Diagnostic defaults to today; freeze only this check to the fixture day.
+const OriginalDate=globalThis.Date;let diagnostic;try{globalThis.Date=class extends OriginalDate{constructor(...args){super(...(args.length?args:['2026-10-22T11:03:00Z']));}static now(){return OriginalDate.parse('2026-10-22T11:03:00Z');}};diagnostic=await notificationCenterDiagnostics(db,1,recipient,[recipient]);}finally{globalThis.Date=OriginalDate;}
 check(diagnostic.scheduler.last_seen_at&&diagnostic.send_time==='13:00','legacy diagnostic uses new heartbeat and configured time');
 check(diagnostic.accepted===1&&diagnostic.me.status==='accepted','legacy diagnostic reads central send results');
 const previewCalls=calls.length,outboxBefore=(await first('SELECT COUNT(*) n FROM notification_center_outbox')).n;

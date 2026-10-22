@@ -1,11 +1,12 @@
+import {accessManagementApi} from './access-management.js';
 import {dashboardAttendance} from './dashboard-summary.js';
 import {payrollPaymentApi,payrollPayment,payrollPeople,ensurePayrollPayment} from './payroll-payment.js';
 import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnostics, ensureNotificationCenter } from './notification-center.js';
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.24-DASHBOARD-CLARITY';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.24-DASHBOARD-CLARITY';
+const NAKNA_RUNTIME_RELEASE = 'P10.25-ACCESS-WORKSPACE';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.25-ACCESS-WORKSPACE';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -2043,6 +2044,8 @@ async function handleApi(request, env, url, auth, ctx) {
     return withCookie(json({ ok: true, client_id: nextClientId, synced_sessions: true }), companyCookie(nextClientId));
   }
 
+  const accessEdit=path.match(/^\/api\/company-access\/(\d+)$/);
+  if((path==='/api/access-history'&&method==='GET')||(accessEdit&&method==='PATCH'))return accessManagementApi(request,env,auth,{kind:path==='/api/access-history'?'history':'edit',userId:accessEdit?Number(accessEdit[1]):null},{canManageWorkspaceAccess,getPrimaryOwnerUserId,safeAudit,clearAuth:()=>AUTH_CACHE.clear()});
   if (path === '/api/company-access' && method === 'GET') {
     if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
     if (!(await canManageWorkspaceAccess(env.DB,clientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner หรือ Co-Owner เท่านั้นที่จัดการสิทธิ์ระดับ Workspace ได้' }, 403);
@@ -2104,6 +2107,7 @@ async function handleApi(request, env, url, auth, ctx) {
     if (!employee) return json({ error: 'ไม่พบพนักงานในบริษัทนี้' }, 404);
     const targetUser = await ensureEmployeeNaknaUser(env.DB, employee);
     if (!targetUser?.id) return json({ error: 'พนักงานคนนี้ยังไม่ได้เชื่อม LINE หรือ Google กับนากนะ กรุณาเชื่อมบัญชีก่อน แล้วค่อยเพิ่มสิทธิ์ Owner' }, 409);
+    if(Number(targetUser.id)===Number(await getPrimaryOwnerUserId(env.DB,clientId))||Number(targetUser.id)===Number(auth.user.id))return json({error:'ไม่สามารถเปลี่ยนบทบาทเจ้าของหลักหรือบัญชีตนเองจากหน้านี้'},400);
     await env.DB.prepare(`INSERT INTO company_members (client_id,user_id,role,status,created_at,updated_at)
       VALUES (?1,?2,?3,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
       ON CONFLICT(client_id,user_id) DO UPDATE SET role=excluded.role,status='active',updated_at=CURRENT_TIMESTAMP`)
@@ -2126,6 +2130,7 @@ async function handleApi(request, env, url, auth, ctx) {
     if (!clientId) return json({ error: 'COMPANY_REQUIRED' }, 409);
     if (!(await canManageWorkspaceAccess(env.DB,clientId,auth.user.id))) return json({ error: 'เฉพาะ Primary Owner หรือ Co-Owner เท่านั้นที่ถอนสิทธิ์ระดับ Workspace ได้' }, 403);
     const targetUserId = Number(companyAccessDeleteMatch[1]);
+    if(targetUserId===Number(auth.user.id))return json({error:'ไม่สามารถถอนสิทธิ์บัญชีตนเองจากหน้านี้'},400);
     const primaryOwnerUserId=await getPrimaryOwnerUserId(env.DB,clientId);
     if (targetUserId === Number(primaryOwnerUserId)) return json({ error: 'ไม่สามารถถอน Primary Owner ได้ กรุณาโอนความเป็นเจ้าของก่อน' }, 400);
     const target = await env.DB.prepare(`SELECT * FROM company_members WHERE client_id=?1 AND user_id=?2 AND status='active' LIMIT 1`).bind(clientId,targetUserId).first();
@@ -3395,7 +3400,7 @@ async function handleApi(request, env, url, auth, ctx) {
     if (!canManageApproverAccess(auth.role)) return json({ error: 'ไม่มีสิทธิ์ดูหรือจัดการสิทธิ์ผู้อนุมัติ' }, 403);
     const rows = await env.DB.prepare(`
       SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.status,e.line_user_id,e.line_display_name,e.line_picture_url,
-             d.name AS department_name, GROUP_CONCAT(ep.permission_key) AS permission_keys
+             d.name AS department_name, (SELECT COUNT(*) FROM employees assigned WHERE assigned.client_id=e.client_id AND assigned.status='active' AND assigned.leave_approver_employee_id=e.id) AS leave_assigned_count, GROUP_CONCAT(ep.permission_key) AS permission_keys
       FROM employees e
       LEFT JOIN departments d ON d.id=e.department_id
       LEFT JOIN employee_permissions ep ON ep.employee_id=e.id AND ep.client_id=e.client_id
@@ -3403,7 +3408,8 @@ async function handleApi(request, env, url, auth, ctx) {
       GROUP BY e.id
       ORDER BY e.first_name,e.last_name
     `).bind(clientId).all();
-    return json({ data:(rows.results||[]).map(row=>({ ...row, permissions:String(row.permission_keys||'').split(',').filter(Boolean) })), catalog:approverPermissionCatalog() });
+    const assigned=(await env.DB.prepare("SELECT id,nickname,first_name,last_name,leave_approver_employee_id FROM employees WHERE client_id=?1 AND status='active' AND leave_approver_employee_id IS NOT NULL").bind(clientId).all()).results||[];
+    return json({ data:(rows.results||[]).map(row=>({ ...row, assigned_people:assigned.filter(e=>Number(e.leave_approver_employee_id)===Number(row.id)).map(e=>({id:Number(e.id),name:displayName(e)})), permissions:String(row.permission_keys||'').split(',').filter(Boolean) })), catalog:approverPermissionCatalog() });
   }
 
   const approverAccessMatch = path.match(/^\/api\/approver-access\/(\d+)$/);
@@ -9379,10 +9385,10 @@ function canManageApproverAccess(role) {
 function approverPermissionCatalog(){
   return [
     {key:'leave.approve',label:'อนุมัติการลา',description:'รับและตัดสินคำขอลาที่ถูกมอบหมายผ่าน LINE'},
-    {key:'attendance.approve',label:'อนุมัติแก้เวลา',description:'สิทธิ์สำหรับ Flow แก้ไขเวลาเข้างาน/ออก'},
-    {key:'ot.approve',label:'อนุมัติ OT',description:'เตรียมไว้สำหรับโมดูล OT'},
+    {key:'attendance.approve',label:'อนุมัติแก้เวลา (เตรียมไว้)',description:'บันทึกสิทธิ์ไว้ก่อน ยังไม่ใช่การให้อนุมัติทุกขั้นตอนของการแก้เวลา'},
+    {key:'ot.approve',label:'อนุมัติ OT (เตรียมไว้)',description:'เตรียมไว้สำหรับโมดูล OT'},
     {key:'hr_request.approve',label:'อนุมัติคำขอ HR',description:'เตรียมไว้สำหรับคำขอเอกสารและคำร้อง'},
-    {key:'team.read',label:'ดูข้อมูลทีม',description:'ให้ผู้อนุมัติเห็นข้อมูลพื้นฐานของทีมที่เกี่ยวข้อง'}
+    {key:'team.read',label:'ดูข้อมูลทีม (เตรียมไว้)',description:'สิทธิ์ที่เตรียมไว้ ไม่ได้จำกัดขอบเขตการมองเห็นข้อมูลของบทบาททั้งระบบ'}
   ];
 }
 

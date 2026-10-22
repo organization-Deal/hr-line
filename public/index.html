@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.24" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.25" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -45,12 +45,13 @@
 <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1-P10.12">
 <link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A">
 <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A">
-<link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.24">
-<link rel="stylesheet" href="/notifications.css?v=P10.24">
-<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.24">
-<link rel="stylesheet" href="/ui/loading.css?v=P10.24">
-<script defer src="/ui/loading.js?v=P10.24"></script>
-<link rel="stylesheet" href="/ui/dashboard.css?v=P10.24">
+<link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.25">
+<link rel="stylesheet" href="/notifications.css?v=P10.25">
+<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.25">
+<link rel="stylesheet" href="/ui/loading.css?v=P10.25">
+<script defer src="/ui/loading.js?v=P10.25"></script>
+<link rel="stylesheet" href="/ui/dashboard.css?v=P10.25">
+<link rel="stylesheet" href="/ui/access.css?v=P10.25">
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -838,31 +839,20 @@
             </div>
 
             <div class="settings-category-panel hidden" data-settings-category="approvals">
-              <div id="companyAccessSection" class="company-access-section">
-                <div class="page-intro compact">
-                  <div><p class="kicker">OWNER & ADMIN ACCESS</p><h2>เจ้าของร่วม & ผู้ดูแลระบบ</h2><p>เพิ่มคนที่ไว้ใจให้เข้าจัดการ Workspace เดียวกันได้ โดยไม่ต้องใช้บัญชี Owner คนเดียว</p></div>
-                  <div class="section-action-group"><span id="companyAccessCount" class="badge badge-soft">0 คน</span><button id="addCompanyAccessBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มสิทธิ์</button></div>
-                </div>
-                <div class="access-role-guide">
-                  <div><strong>Primary Owner</strong><span>เจ้าของหลัก 1 คน · Billing · ลบบริษัท · จัดการสิทธิ์ระดับ Workspace</span></div>
-                  <div><strong>Co-Owner / HR Admin</strong><span>ช่วยบริหารบริษัทและงาน HR โดยไม่เข้า Flow สร้างธุรกิจใหม่</span></div>
-                  <div><strong>Payroll / Manager / Approver</strong><span>ให้เฉพาะสิทธิ์ตามหน้าที่ ลดการเห็นข้อมูลเกินจำเป็น</span></div>
-                </div>
-                <div id="companyAccessList" class="company-access-list"></div>
+              <div id="nkAccessWorkspace" class="nk-access-workspace">
+                <header class="nk-access-header"><div><h2>ผู้ใช้งานและสิทธิ์</h2><p>กำหนดว่าใครเข้าจัดการบริษัท และใครรับหน้าที่อนุมัติ</p></div></header>
+                <div class="nk-access-tabs" role="tablist" aria-label="ประเภทสิทธิ์"><button type="button" id="nkAccessAdminTab" role="tab" data-access-tab="admins" aria-controls="companyAccessSection">ผู้ดูแลระบบ <span id="nkAccessAdminCount">—</span></button><button type="button" id="nkAccessApproverTab" role="tab" data-access-tab="approvers" aria-controls="approverAccessSection">ผู้อนุมัติ <span id="nkAccessApproverCount">—</span></button></div>
+                <section id="companyAccessSection" role="tabpanel" aria-labelledby="nkAccessAdminTab">
+                  <div class="nk-access-toolbar"><p>บัญชีที่เข้าจัดการบริษัทนี้ได้ <span id="companyAccessCount"></span></p><button id="addCompanyAccessBtn" class="primary-btn" type="button">+ เพิ่มผู้ดูแล</button></div>
+                  <details class="nk-access-comparison"><summary>เปรียบเทียบบทบาท</summary><div id="nkAccessComparison"></div></details>
+                  <div id="companyAccessList"></div>
+                </section>
+                <section id="approverAccessSection" role="tabpanel" aria-labelledby="nkAccessApproverTab" hidden>
+                  <div class="nk-access-toolbar"><p>พนักงานที่ได้รับสิทธิ์อนุมัติ <span id="approverAccessCount"></span></p><button id="addApproverAccessBtn" class="primary-btn" type="button">+ เพิ่มผู้อนุมัติ</button></div>
+                  <p class="nk-access-note">การอนุมัติการลาใช้กับคนที่มอบหมายให้ดูแล ต้องกำหนดผู้อนุมัติในข้อมูลพนักงานด้วย การเพิ่มสิทธิ์ไม่ใช่การอนุมัติคำขอทันที</p><div id="approverAccessList"></div>
+                </section>
+                <details class="nk-access-history"><summary>ประวัติการเปลี่ยนสิทธิ์</summary><button type="button" id="nkAccessHistoryRefresh" class="text-btn">อัปเดตประวัติ</button><ul id="nkAccessHistoryList"><li>กดเปิดเพื่อโหลดประวัติ</li></ul></details>
               </div>
-              <div class="settings-subsection">
-                <article id="approverAccessShortcut" class="setting-card setting-card-action settings-wide-action"><div class="setting-icon"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.5 8.2 8 9 4.5-.8 8-4 8-9V7l-8-4Z"/><path d="m9 12 2 2 4-4"/></svg></div><div><strong>สิทธิ์ผู้อนุมัติ</strong><p>กำหนดให้หัวหน้าหรือ HR อนุมัติการลา เวลา และคำขอต่าง ๆ</p></div><span>→</span></article>
-              </div>
-              <div id="approverAccessSection" class="approver-access-section">
-            <div class="page-intro compact">
-              <div><p class="kicker">APPROVER ACCESS</p><h2>สิทธิ์ผู้อนุมัติ</h2><p>แนวเดียวกับระบบรับจ่าย: เลือกบทบาท → เลือกพนักงาน → เปิดสิทธิ์ที่ต้องใช้ แล้วระบบจะตรวจสิทธิ์ก่อนอนุมัติจริง</p></div>
-              <div class="section-action-group"><span id="approverAccessCount" class="badge badge-soft">0 คน</span><button id="addApproverAccessBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>เพิ่มสิทธิ์</button></div>
-            </div>
-            <div class="approver-role-guide">
-              <div><strong>ผู้อนุมัติ</strong><span>เหมาะกับหัวหน้าทีม/Manager</span></div><div><strong>LINE-first</strong><span>อนุมัติจาก LINE ได้เมื่อเชื่อมบัญชีแล้ว</span></div><div><strong>แยกสิทธิ์</strong><span>เปิดเฉพาะงานที่ต้องอนุมัติ ไม่เห็นข้อมูลเกินจำเป็น</span></div>
-            </div>
-            <div id="approverAccessList" class="approver-access-list"></div>
-          </div>
             </div>
 
             <div class="settings-category-panel hidden" data-settings-category="integrations">
@@ -1257,31 +1247,31 @@
   <dialog id="companyAccessModal">
     <form method="dialog">
       <div class="modal-head">
-        <div><p class="kicker">WORKSPACE ACCESS</p><h3>เพิ่มสิทธิ์ผู้ดูแล Workspace</h3><p>เลือกพนักงานที่เชื่อม LINE/Google แล้วกำหนดบทบาทให้เหมาะกับงาน โดยผู้รับจะเข้าร่วมบริษัทเดิมทันที ไม่ต้องสร้างธุรกิจใหม่</p></div>
+        <div><p class="kicker">WORKSPACE ACCESS</p><h3>เพิ่มผู้ดูแลระบบ</h3><p>เลือกพนักงานที่เชื่อม LINE/Google แล้วกำหนดบทบาทให้เหมาะกับงาน โดยผู้รับจะเข้าร่วมบริษัทเดิมทันที ไม่ต้องสร้างธุรกิจใหม่</p></div>
         <button type="button" class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
       <div class="modal-fields single-column">
         <div class="field"><label>พนักงาน <em>*</em></label><select id="companyAccessEmployeeSelect"></select><small id="companyAccessEmployeeHint" class="field-help">ต้องเชื่อม LINE หรือ Google ก่อนจึงให้สิทธิ์ได้</small></div>
         <div class="field"><label>สิทธิ์ <em>*</em></label><select id="companyAccessRoleSelect"><option value="co_owner">Co-Owner · เจ้าของร่วม</option><option value="hr_admin">HR Admin · ผู้ดูแล HR</option><option value="payroll_admin">Payroll Admin · ผู้ดูแลเงินเดือน</option><option value="manager">Manager · หัวหน้าทีม</option><option value="approver">Approver · ผู้อนุมัติ</option></select><small id="companyAccessRoleHint" class="field-help">Co-Owner ดูแลได้เกือบทั้งหมด แต่ Billing / ลบบริษัทยังเป็นของ Primary Owner</small></div>
-        <div class="access-warning-card"><strong>ผู้รับจะเข้าร่วม Workspace เดิมทันที</strong><span>หลังเพิ่มสิทธิ์ LINE จะส่งปุ่มเข้า Dashboard ของบริษัทนี้โดยตรง ระบบจะไม่พาไปหน้า “สร้าง Workspace ใหม่”</span></div>
+        <div class="access-warning-card"><strong>ผู้รับจะเข้าร่วม Workspace เดิมทันที</strong><span>หลังบันทึกผู้รับเข้าบริษัทนี้ได้ ระบบจะพยายามส่งแจ้งทาง LINE หากบัญชีรองรับ</span></div>
       </div>
-      <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="companyAccessSaveBtn" class="primary-btn">เพิ่มสิทธิ์</button></div>
+      <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="companyAccessSaveBtn" class="primary-btn">ตรวจสิทธิ์ก่อนบันทึก</button></div>
     </form>
   </dialog>
 
   <dialog id="approverAccessModal">
     <form method="dialog">
       <div class="modal-head">
-        <div><p class="kicker">APPROVER ACCESS</p><h3>เพิ่มสิทธิ์ผู้อนุมัติ</h3><p>กำหนดสิทธิ์ตามหน้าที่จริง ไม่ต้องให้สิทธิ์ HR ทั้งระบบ</p></div>
+        <div><p class="kicker">APPROVER ACCESS</p><h3>กำหนดผู้อนุมัติ</h3><p>กำหนดสิทธิ์ตามหน้าที่จริง ไม่ต้องให้สิทธิ์ HR ทั้งระบบ</p></div>
         <button type="button" class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
       <div class="modal-fields single-column">
-        <div class="field"><label>บทบาท</label><select id="approverRolePreset"><option value="leave_approver">ผู้อนุมัติการลา</option><option value="team_manager">หัวหน้าทีม / Manager</option><option value="full_approver">ผู้อนุมัติเต็ม</option><option value="custom">กำหนดเอง</option></select></div>
         <div class="field"><label>พนักงาน <em>*</em></label><select id="approverEmployeeSelect"></select></div>
+        <div class="field"><label>บทบาท</label><select id="approverRolePreset"><option value="leave_approver">ผู้อนุมัติการลา</option><option value="team_manager">หัวหน้าทีม</option><option value="full_approver">ชุดสิทธิ์ทั้งหมด</option><option value="custom">กำหนดเอง</option></select></div>
         <div><label class="field-label">สิทธิ์ที่อนุญาต</label><div id="approverPermissionChecks" class="permission-option-list"></div></div>
         <p id="approverLineHint" class="settings-hint"></p>
       </div>
-      <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="approverAccessSaveBtn" class="primary-btn">บันทึกสิทธิ์</button></div>
+      <div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button type="button" id="approverAccessSaveBtn" class="primary-btn">ตรวจสิทธิ์ก่อนบันทึก</button></div>
     </form>
   </dialog>
 
@@ -1401,7 +1391,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.24" type="module"></script>
+  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.25" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

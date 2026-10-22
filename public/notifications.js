@@ -1,7 +1,7 @@
-import {mountFullNotificationPreview} from './notification-preview.js?v=P10.24';
-import {NOTIFICATION_TYPES,fieldsForKind} from './notification-catalog.js?v=P10.24';
-import {mountNotificationEditor} from './notification-editor.js?v=P10.24';
-// Notification Center P10.24. Refresh only reads; test sends exclusively to the signed-in HR user.
+import {mountFullNotificationPreview} from './notification-preview.js?v=P10.25';
+import {NOTIFICATION_TYPES,fieldsForKind} from './notification-catalog.js?v=P10.25';
+import {mountNotificationEditor} from './notification-editor.js?v=P10.25';
+// Notification Center P10.25. Refresh only reads; test sends exclusively to the signed-in HR user.
 export function createNotificationCenter({api,escapeHtml:e,escapeAttr:a,toast,openForm,companyId,role}){
  let data=null,tenant=0,sequence=0,busy=false,error='',editSequence=0,previewController=null;
  const roleLabel=value=>({owner:'เจ้าของบริษัท',co_owner:'เจ้าของร่วม',hr_admin:'ผู้ดูแล HR',hr:'ฝ่ายบุคคล',hr_delegate:'ผู้รับงาน HR'})[value]||value;
@@ -18,7 +18,7 @@ export function createNotificationCenter({api,escapeHtml:e,escapeAttr:a,toast,op
   const cid=companyId(),ticket=++sequence;error='';if(!allowed()){data=null;render();return;}
   if(tenant!==cid)data=null;render('กำลังโหลดการแจ้งเตือน…');
   try{const result=await api('/api/notification-center',{timeoutMs:20000});if(cid!==companyId()||ticket!==sequence)return;data=result;tenant=cid;}
-  catch(err){if(cid!==companyId()||ticket!==sequence)return;error=(err.message||'โหลดไม่สำเร็จ')+' · หากเพิ่งอัปเดต กรุณา Deploy โค้ด Worker พร้อมหน้าเว็บ P10.24';data=null;}
+  catch(err){if(cid!==companyId()||ticket!==sequence)return;error=(err.message||'โหลดไม่สำเร็จ')+' · หากเพิ่งอัปเดต กรุณา Deploy โค้ด Worker พร้อมหน้าเว็บ P10.25';data=null;}
   render();
  }
  function render(loading=''){

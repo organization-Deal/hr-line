@@ -1,6 +1,7 @@
-import {dashboardModel,dashboardSummaryHtml,dashboardAttendanceHtml,dashboardQueueHtml,dashboardMomentsHtml,dashboardDocumentsHtml,dashboardRecruitmentHtml,dashboardTaskTarget,dashboardPeopleHtml} from './dashboard.js?v=P10.24';
-import {payrollTaskModel,salaryExplanation,nextPayrollMonth} from './payroll-workflow.js?v=P10.24';
-import { createNotificationCenter } from './notifications.js?v=P10.24';
+import {accessRoleLabels,accessRoleHelp,accessEsc,accessMemberRows,accessApproverRows,accessRoleComparison,accessHistoryHtml} from './access-ui.js?v=P10.25';
+import {dashboardModel,dashboardSummaryHtml,dashboardAttendanceHtml,dashboardQueueHtml,dashboardMomentsHtml,dashboardDocumentsHtml,dashboardRecruitmentHtml,dashboardTaskTarget,dashboardPeopleHtml} from './dashboard.js?v=P10.25';
+import {payrollTaskModel,salaryExplanation,nextPayrollMonth} from './payroll-workflow.js?v=P10.25';
+import { createNotificationCenter } from './notifications.js?v=P10.25';
 /* NAKNA_OA_SETTINGS_REMOVED_20261019: P10.14 keeps retired company OA controls out of HTML; central LINE stays available. */
 /* NAKNA_BOOT_RECOVERY_20261019; combines retired Stretch + retired company OA without dangling boot handlers. */
 const NAKNA_FRONTEND_BUILD=window.NaknaRelease?.version||'unknown'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
@@ -714,7 +715,7 @@ const settingsCategoryMeta = {
   worktime: { title: 'ตั้งค่าเวลาทำงาน', kicker: 'WORK SCHEDULE', description: 'ตั้งเวลาระดับบริษัท รายแผนก หรือรายคน พร้อม Grace period' },
   attendance: { title: 'ตั้งค่าการเช็กอิน', kicker: 'ATTENDANCE', description: 'กำหนดสถานที่ พิกัด รัศมี และกติกาเช็กเอาต์นอกพื้นที่' },
   leave: { title: 'การลา & วันหยุด', kicker: 'LEAVE & HOLIDAY', description: 'ตั้งประเภทลา สิทธิ์ช่วงทดลองงาน และปฏิทินวันหยุดบริษัท' },
-  approvals: { title: 'สิทธิ์ & การอนุมัติ', kicker: 'APPROVAL FLOW', description: 'กำหนดหัวหน้า ผู้อนุมัติ และสิทธิ์ที่ใช้ในแต่ละ Workflow' },
+  approvals: { title: 'ผู้ใช้งานและสิทธิ์', kicker: 'APPROVAL FLOW', description: 'กำหนดหัวหน้า ผู้อนุมัติ และสิทธิ์ที่ใช้ในแต่ละ Workflow' },
   integrations: { title: 'การเชื่อมต่อ', kicker: 'INTEGRATIONS', description: 'เชื่อม LINE, Gmail, Google Drive และ Google Sheets' },
   payroll: { title: 'ตั้งค่า Payroll', kicker: 'PAYROLL', description: 'กำหนดวันจ่าย ภาษี ประกันสังคม และกติกาการหัก' },
   billing: { title: 'แพ็กเกจ & Billing', kicker: 'SUBSCRIPTION', description: 'ดู Free Trial, Active Seats, แพ็กเกจ และ Invoice' },
@@ -1286,12 +1287,12 @@ function bindEvents() {
   $('#googleWorkspaceSyncBtn').onclick = syncGoogleWorkspace;
   $('#googleWorkspaceDisconnectBtn').onclick = disconnectGoogleWorkspace;
   $('#statusGoogleAction').onclick = connectGoogleWorkspace;
-  $('#approverAccessShortcut').onclick = () => document.querySelector('#approverAccessSection')?.scrollIntoView({behavior:'smooth',block:'start'});
+  nkBindAccessWorkspace();
   $('#addCompanyAccessBtn').onclick = openCompanyAccessModal;
-  $('#companyAccessSaveBtn').onclick = saveCompanyAccess;
+  $('#companyAccessSaveBtn').onclick = ()=>nkReviewAccess('admin',saveCompanyAccess);
   $('#companyAccessRoleSelect').onchange = renderCompanyAccessRoleHint;
   $('#addApproverAccessBtn').onclick = () => openApproverAccessModal();
-  $('#approverAccessSaveBtn').onclick = saveApproverAccess;
+  $('#approverAccessSaveBtn').onclick = ()=>nkReviewAccess('approver',saveApproverAccess);
   $('#approverRolePreset').onchange = applyApproverRolePreset;
   $('#refreshBtn').onclick = () => loadViewData(state.currentView || 'dashboard',{force:true});
   document.querySelectorAll('#view-requests [data-nk-service-tab]').forEach(button=>button.addEventListener('click',()=>window.nkServiceSelectTab(button.dataset.nkServiceTab)));
@@ -4024,7 +4025,7 @@ function openSettingsCategory(category, { scroll = true } = {}) {
   if (category === 'leave') { setLeaveSettingsTab(nkLeaveActiveTab); renderCompanyHolidays(); if(!holidayUi.loading && Date.now()-holidayUi.loadedAt>15000) refreshCompanyHolidays(); }
   if (category === 'company') fillCompanyProfileForm();
   if (category === 'attendance') renderAttendanceSettingsControls({fetchFace:true});
-  if (category === 'approvals' && ['owner','co_owner'].includes(String(activeCompanyRole()||''))) loadCompanyAccess();
+  if(category==='approvals'){nkAccessSync();if(['owner','co_owner'].includes(String(activeCompanyRole()||'')))loadCompanyAccess();}
   if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -5531,13 +5532,14 @@ function renderSetupOverview(){
 }
 
 async function loadCompanyAccess({ silent = true } = {}) {
+  const cid=Number(state.me?.active_company_id||0);
   if (!['owner','co_owner'].includes(String(activeCompanyRole()||''))) {
     state.companyAccess = { members: [], eligible_employees: [], current_user_id: null };
     renderCompanyAccess();
     return;
   }
   try {
-    state.companyAccess = await api('/api/company-access');
+    const result=await api('/api/company-access');if(cid!==Number(state.me?.active_company_id||0))return;state.companyAccess=result;
     renderCompanyAccess();
     renderSettingsSidebar();
   } catch (error) {
@@ -5556,16 +5558,10 @@ function renderCompanyAccess() {
   if ($('#companyAccessCount')) $('#companyAccessCount').textContent = `${members.length} คน`;
   const root = $('#companyAccessList');
   if (!root) return;
-  root.innerHTML = members.length ? members.map(member => {
-    const role = String(member.role || '');
-    const provider = String(member.auth_provider || '').includes('line') && String(member.auth_provider || '').includes('google') ? 'Google + LINE' : String(member.auth_provider || '').includes('line') ? 'LINE' : 'Google';
-    return `<article class="company-access-card">
-      <div class="company-access-avatar">${member.picture_url ? `<img src="${escapeHtml(member.picture_url)}" alt="" />` : escapeHtml(String(member.name || member.email || '?').trim().charAt(0).toUpperCase())}</div>
-      <div class="company-access-copy"><strong>${escapeHtml(member.name || member.email || 'บัญชีนากนะ')}</strong><p>${escapeHtml(member.email || provider)} · ${provider}</p></div>
-      <span class="badge ${member.is_primary_owner ? 'badge-success' : role === 'co_owner' ? 'badge-soft' : 'badge-neutral'}">${escapeHtml(roleLabel(role))}</span>
-      ${member.is_primary_owner ? '<span class="company-access-self">เจ้าของหลัก</span>' : member.is_me ? '<span class="company-access-self">บัญชีคุณ</span>' : `<button class="text-btn danger-text" type="button" onclick="window.revokeCompanyAccess(${Number(member.user_id)},'${escapeHtml(member.name || member.email || '')}')">ถอนสิทธิ์</button>`}
-    </article>`;
-  }).join('') : emptyState('ยังไม่มีผู้ดูแลเพิ่มเติม', 'เพิ่ม Co-Owner, HR Admin, Payroll Admin, Manager หรือ Approver ให้เหมาะกับงาน');
+  root.innerHTML=accessMemberRows(members);
+  root.querySelectorAll('[data-access-member]').forEach(button=>button.onclick=()=>window.manageAccessMember(Number(button.dataset.accessMember)));
+  nkAccessSync();nkAccessAvatarFallback(root);
+
 }
 
 function renderCompanyAccessRoleHint(){
@@ -5573,7 +5569,7 @@ function renderCompanyAccessRoleHint(){
   const catalog=state.companyAccess?.role_catalog||[];
   const item=catalog.find(row=>row.value===role);
   const hint=$('#companyAccessRoleHint');
-  if(hint) hint.textContent=item?.description||({
+  if(hint) hint.textContent=accessRoleHelp[role]||item?.description||({
     co_owner:'ดูแลได้เกือบทั้งหมด แต่ Billing / ลบบริษัท / โอนเจ้าของหลักยังเป็นของ Primary Owner',
     hr_admin:'จัดการพนักงาน เวลา ลา Recruitment เอกสาร Learning และงาน HR',
     payroll_admin:'เข้าถึง Payroll ภาษี SSO Payslip และเอกสารเงินเดือน',
@@ -5583,32 +5579,33 @@ function renderCompanyAccessRoleHint(){
 }
 
 async function openCompanyAccessModal() {
+  const accessCompany=Number(state.me?.active_company_id||0);
   // Always refresh Workspace access data before opening the modal.
   // Employee list can change after the page first loads, so stale state must never drive this selector.
   try {
-    state.companyAccess = await api(`/api/company-access?ts=${Date.now()}`);
+    const freshAccess=await api(`/api/company-access?ts=${Date.now()}`);if(accessCompany!==Number(state.me?.active_company_id||0))return;state.companyAccess=freshAccess;
     renderCompanyAccess();
   } catch (error) {
     return toast(error.message || 'โหลดรายชื่อพนักงานไม่สำเร็จ', true);
   }
   const data = state.companyAccess || { members: [], eligible_employees: [] };
-  const employees = data.eligible_employees || [];
+  const employees = (data.eligible_employees || []).filter(e=>Number(e.account_user_id)!==Number(data.primary_owner_user_id)&&Number(e.account_user_id)!==Number(data.current_user_id));
   const select = $('#companyAccessEmployeeSelect');
   if (!select) return;
   select.innerHTML = employees.length ? employees.map(employee => {
     const name = employee.nickname || `${employee.first_name || ''} ${employee.last_name || ''}`.trim() || employee.employee_code;
-    const status = employee.current_role ? ` · ${roleLabel(employee.current_role)} แล้ว` : employee.linked ? (employee.account_backfill_needed ? ' · LINE เชื่อมแล้ว' : '') : ' · ยังไม่เชื่อมบัญชี';
+    const status = employee.current_role ? ` · ${accessRoleLabels[employee.current_role]||employee.current_role} แล้ว` : employee.linked ? (employee.account_backfill_needed ? ' · LINE เชื่อมแล้ว' : '') : ' · ยังไม่เชื่อมบัญชี';
     return `<option value="${Number(employee.id)}" ${employee.linked ? '' : 'disabled'}>${escapeHtml(name)}${escapeHtml(status)}</option>`;
   }).join('') : '<option value="">ยังไม่มีพนักงาน</option>';
   const firstLinked = employees.find(item => item.linked && !item.current_role) || employees.find(item => item.linked);
   if (firstLinked) select.value = String(firstLinked.id);
   const roleSelect=$('#companyAccessRoleSelect');
   const catalog=data.role_catalog||[];
-  if(roleSelect&&catalog.length) roleSelect.innerHTML=catalog.map(item=>`<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join('');
-  if(roleSelect) roleSelect.value = 'co_owner';
+  if(roleSelect&&catalog.length) roleSelect.innerHTML=catalog.map(item=>`<option value="${escapeHtml(item.value)}">${escapeHtml(accessRoleLabels[item.value]||item.label)}</option>`).join('');
+  if(roleSelect) roleSelect.value = 'hr_admin';
   $('#companyAccessEmployeeHint').textContent = employees.some(item => !item.linked) ? 'พนักงานที่เชื่อม LINE แล้วเพิ่มสิทธิ์ได้ทันที ส่วนคนที่เป็นสีเทายังต้องเชื่อม LINE หรือ Google ก่อน' : 'เลือกคนที่ต้องการให้ช่วยดูแล Workspace · บัญชี LINE เก่าจะถูกผูกเป็นบัญชีนากนะให้อัตโนมัติ';
   renderCompanyAccessRoleHint();
-  $('#companyAccessModal').showModal();
+  $('#companyAccessModal').dataset.company=String(accessCompany);$('#companyAccessModal').showModal();
 }
 
 async function saveCompanyAccess() {
@@ -5623,9 +5620,9 @@ async function saveCompanyAccess() {
     await loadCompanyAccess({ silent: false });
     await loadSessionOnly();
     renderIdentity();
-    toast(`เพิ่มสิทธิ์ ${roleLabel(role)} แล้ว · LINE ของผู้รับจะมีปุ่มเข้า Workspace เดิม`);
+    toast(`บันทึกบทบาท ${accessRoleLabels[role]||role} แล้ว`);
   } catch (error) {
-    toast(error.message, true);
+    throw error;
   } finally {
     button.disabled = false;
   }
@@ -5650,25 +5647,23 @@ function renderApproverAccess() {
   if (!canManage) return;
   const granted = (state.approverAccess || []).filter(item => (item.permissions || []).length);
   $('#approverAccessCount').textContent = `${granted.length} คน`;
-  $('#approverAccessList').innerHTML = granted.length ? granted.map(item => {
-    const labels=(item.permissions||[]).map(key=>state.approverPermissionCatalog.find(x=>x.key===key)?.label||key);
-    return `<article class="approver-access-row">
-      <div class="employee-cell"><span class="avatar ${item.line_picture_url?'photo':''}" ${item.line_picture_url?`style="background-image:url('${escapeHtml(item.line_picture_url)}')"`:''}>${item.line_picture_url?'':initial(item)}</span><div><strong>${escapeHtml(item.nickname||item.first_name)} ${escapeHtml(item.last_name||'')}</strong><small>${escapeHtml(item.department_name||'ไม่ระบุทีม')} · ${item.line_user_id?'LINE เชื่อมแล้ว':'ยังไม่เชื่อม LINE'}</small></div></div>
-      <div class="permission-chip-list">${labels.map(label=>`<span class="permission-chip">${escapeHtml(label)}</span>`).join('')}</div>
-      <button class="text-btn" type="button" onclick="window.editApproverAccess(${Number(item.id)})">แก้สิทธิ์</button>
-    </article>`;
-  }).join('') : emptyState('ยังไม่มีผู้อนุมัติ','เพิ่มสิทธิ์ให้พนักงานที่ต้องอนุมัติการลา หรือ Flow อื่น ๆ');
+  $('#approverAccessList').innerHTML=accessApproverRows(state.approverAccess,state.approverPermissionCatalog);
+  $('#approverAccessList').querySelectorAll('[data-access-approver]').forEach(button=>button.onclick=()=>openApproverAccessModal(Number(button.dataset.accessApprover)));
+  $('#approverAccessList').querySelector('[data-access-first]')?.addEventListener('click',()=>openApproverAccessModal());
+  nkAccessSync();nkAccessAvatarFallback($('#approverAccessList'));
+
 }
 
 window.editApproverAccess = id => openApproverAccessModal(Number(id));
-function openApproverAccessModal(employeeId=null){
+async function openApproverAccessModal(employeeId=null){
+  const cid=Number(state.me?.active_company_id||0);try{const fresh=await api('/api/approver-access',{silentStatus:true});if(cid!==Number(state.me?.active_company_id||0))return;state.approverAccess=fresh.data||[];state.approverPermissionCatalog=fresh.catalog||[];renderApproverAccess();}catch(error){return toast(error.message,true);}
   const available=(state.approverAccess||[]);
   if(!available.length) return toast('ยังไม่มีข้อมูลพนักงานสำหรับกำหนดสิทธิ์',true);
   state.activeApproverEmployeeId=employeeId || Number(available[0]?.id||0);
   $('#approverEmployeeSelect').innerHTML=available.map(emp=>`<option value="${emp.id}" ${Number(emp.id)===Number(state.activeApproverEmployeeId)?'selected':''}>${escapeHtml(emp.nickname||emp.first_name)}${emp.department_name?` · ${escapeHtml(emp.department_name)}`:''}${emp.line_user_id?' · LINE✓':''}</option>`).join('');
   $('#approverEmployeeSelect').onchange=()=>{state.activeApproverEmployeeId=Number($('#approverEmployeeSelect').value);fillApproverPermissionChecks();};
   fillApproverPermissionChecks();
-  $('#approverAccessModal').showModal();
+  $('#approverAccessModal').dataset.company=String(state.me?.active_company_id||0);$('#approverAccessModal').showModal();
 }
 function applyApproverRolePreset(){
   const preset=$('#approverRolePreset').value;
@@ -5693,7 +5688,8 @@ function fillApproverPermissionChecks(){
     ['attendance.approve|hr_request.approve|leave.approve|ot.approve|team.read'.split('|').sort().join('|')]:'full_approver'
   };
   $('#approverRolePreset').value=presetMap[key]||'custom';
-  $('#approverLineHint').textContent=row?.line_user_id?'LINE เชื่อมแล้ว · สิทธิ์อนุมัติการลาจะใช้ผ่าน LINE ได้ทันที':'ยังไม่เชื่อม LINE · ตั้งสิทธิ์ไว้ก่อนได้ แต่การอนุมัติผ่าน LINE ต้องเชื่อมบัญชีก่อน';
+  $('#approverLineHint').textContent=row?.line_user_id?'เชื่อม LINE แล้ว · รับแจ้งการลาได้เมื่อกำหนดเป็นผู้อนุมัติของพนักงาน':'ยังไม่เชื่อม LINE · ตั้งสิทธิ์ไว้ก่อนได้ แต่การอนุมัติผ่าน LINE ต้องเชื่อมบัญชีก่อน';
+  $('#approverLineHint').textContent+=' · ผู้ที่มอบหมายการลา: '+((row?.assigned_people||[]).map(x=>x.name).join(', ')||'ยังไม่มี ต้องกำหนดในข้อมูลพนักงาน')+' · สิทธิ์บางรายการเป็นสิทธิ์ที่เตรียมไว้ ยังไม่เปิดใช้งานครบทุกขั้นตอน';
 }
 async function saveApproverAccess(){
   const employeeId=Number($('#approverEmployeeSelect').value||state.activeApproverEmployeeId); if(!employeeId)return;
@@ -5706,7 +5702,7 @@ async function saveApproverAccess(){
     state.approverAccess=approver?.data||state.approverAccess; state.approverPermissionCatalog=approver?.catalog||state.approverPermissionCatalog;
     try{renderSettings();renderSettingsSidebar();}catch{}
     toast('บันทึกสิทธิ์ผู้อนุมัติแล้ว');
-  }catch(error){toast(error.message,true);}finally{button.disabled=false;}
+  }catch(error){throw error;}finally{button.disabled=false;}
 }
 
 function renderLineIntegration() {
@@ -7004,7 +7000,7 @@ $('#openDocumentCaseBtn')?.addEventListener('click',quickOpenDocumentCase);
 
 let notificationCenterController;
 function notificationUi(){return notificationCenterController ||= createNotificationCenter({api,escapeHtml,escapeAttr,toast,openForm:openPhase5Form,companyId:()=>Number(state.me?.active_company_id||0),role:activeCompanyRole});}
-// P10.24 task guidance; retain the existing payroll controls and calculation engine.
+// P10.25 task guidance; retain the existing payroll controls and calculation engine.
 var nkPayrollFilter='all',nkPayrollSearch='',nkPayrollView='summary';
 function nkPayrollPrioritize(detail){const model=payrollTaskModel(detail);return [...(detail.items||[])].sort((a,b)=>{const priority=x=>model.errors.has(Number(x.employee_id))?0:model.warnings.has(Number(x.employee_id))?1:2;return priority(a)-priority(b);});}
 function nkPayrollPeopleGuide(detail){const m=payrollTaskModel(detail),missing=detail.workflow_people?.not_calculated||[];return `<section id="nkPayrollPeopleGuide" class="nk-payroll-task-note"><strong>รอบนี้มีพนักงานตามช่วงงาน ${m.eligible} คน · มีผลคำนวณ ${m.included} คน · ข้อมูลพร้อมตรวจ ${m.ready} คน</strong><p>${m.blocking?`ต้องแก้ข้อมูล ${m.blocking} คน · `:''}${m.warningPeople?`มีข้อมูลควรตรวจ ${m.warningPeople} คน · `:''}ฐานเงินเดือน เวลาเข้างาน และใบลาใช้ข้อมูลของช่วงรอบนี้ รายการพิเศษเพิ่มเฉพาะรอบได้โดยไม่แก้ฐานเงินเดือนประจำ</p>${missing.length?`<details><summary>ยังไม่มีผลคำนวณ ${missing.length} คน</summary>${missing.map(e=>`<p>${escapeHtml(e.name)} · ${escapeHtml(e.reason)} <button type="button" class="text-btn" onclick="window.openPayrollProfile(${Number(e.employee_id)})">ตรวจโปรไฟล์</button></p>`).join('')}<button class="secondary-btn" type="button" onclick="window.recalculatePayroll(${Number(detail.period.id)})">ตั้งค่าครบแล้ว คำนวณรอบใหม่</button></details>`:''}</section>`;}
@@ -7023,3 +7019,16 @@ function nkPayrollPersonIssues(item){const m=payrollTaskModel(state.payrollDetai
 function nkPayrollSimpleTable(detail,items){const m=payrollTaskModel(detail);return `<div class="nk-payroll-simple-wrap"><table class="nk-payroll-simple-table"><thead><tr><th>พนักงาน</th><th>รายรับรวม</th><th>รายการหัก</th><th>รับสุทธิ</th><th>สิ่งที่ต้องตรวจ</th><th></th></tr></thead><tbody>${items.map(item=>{const id=Number(item.employee_id),errors=m.errors.get(id)||[],warnings=m.warnings.get(id)||[],reasons=[...errors,...warnings],search=`${item.nickname||''} ${item.first_name||''} ${item.last_name||''} ${item.employee_code||''} ${item.department_name||''}`.toLowerCase();return `<tr data-payroll-employee-id="${id}" data-payroll-search="${escapeAttr(search)}"><td><strong>${escapeHtml(item.nickname||item.first_name||'')} ${escapeHtml(item.last_name||'')}</strong><small>${escapeHtml(item.department_name||'ยังไม่ระบุแผนก')}</small></td><td data-label="รายรับรวม">${money(item.gross_income)}</td><td data-label="รายการหัก">${money(item.total_deductions??(Number(item.gross_income||0)-Number(item.net_pay||0)))}</td><td class="net" data-label="รับสุทธิ"><strong>${money(item.net_pay)}</strong></td><td><span class="badge ${errors.length?'badge-danger':warnings.length?'badge-warning':'badge-success'}">${errors.length?'ต้องแก้':warnings.length?'ควรตรวจ':'ข้อมูลพร้อมตรวจ'}</span>${reasons.map(t=>`<small>${escapeHtml(t)}</small>`).join('')}${!reasons.length&&!(Number(item.prior_net_pay)>0)?'<small>ยังไม่มีรอบก่อนให้เทียบ</small>':''}</td><td><button type="button" class="secondary-btn" onclick="window.openPayrollEmployeeDetail(${id})">${errors.length?'ดูและแก้ไข':'ดูรายละเอียด'}</button></td></tr>`;}).join('')}</tbody></table>${!items.length?'<p>ยังไม่มีผลคำนวณในรอบนี้</p>':''}</div>`;}
 
 window.openPayrollPersonAdjustment=(employeeId,category)=>{const d=state.payrollDetail;if(!d?.items?.some(x=>Number(x.employee_id)===Number(employeeId))||!['draft','review'].includes(d.period?.status))return;$('#payrollEmployeeDetailModal')?.close();window.openPayrollAdjustment(d.period.id,employeeId);$('#payrollAdjustmentCategory').value=category==='other_deduction'?'other_deduction':'bonus';syncPayrollAdjustmentMode();};
+
+var nkAccessTab='admins';
+function nkAccessAvatarFallback(root){root?.querySelectorAll('img').forEach(img=>{const hide=()=>img.remove();img.addEventListener('error',hide,{once:true});if(img.complete&&!img.naturalWidth)hide();});}
+function nkAccessSync(){const owner=['owner','co_owner'].includes(String(activeCompanyRole()||'')),manage=['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));if(!owner)nkAccessTab='approvers';if(!manage)return;const admin=$('#nkAccessAdminTab');if(admin)admin.hidden=!owner;const count=$('#nkAccessAdminCount');if(count)count.textContent=(state.companyAccess?.members||[]).length;const ac=$('#nkAccessApproverCount');if(ac)ac.textContent=(state.approverAccess||[]).filter(x=>x.permissions?.length).length;$('#companyAccessSection')?.toggleAttribute('hidden',!owner||nkAccessTab!=='admins');$('#approverAccessSection')?.toggleAttribute('hidden',nkAccessTab!=='approvers');$$('[data-access-tab]').forEach(b=>{const active=b.dataset.accessTab===nkAccessTab;b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1;});const comparison=$('#nkAccessComparison');if(comparison)comparison.innerHTML=accessRoleComparison();}
+function nkBindAccessWorkspace(){$$('[data-access-tab]').forEach(button=>{button.onclick=()=>{nkAccessTab=button.dataset.accessTab;nkAccessSync();};button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const tabs=$$('[data-access-tab]').filter(b=>!b.hidden);const index=tabs.indexOf(button),next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+1)%tabs.length;tabs[next]?.click();tabs[next]?.focus();};});$('#nkAccessHistoryRefresh')?.addEventListener('click',nkLoadAccessHistory);$('.nk-access-history')?.addEventListener('toggle',event=>{if(event.target.open)nkLoadAccessHistory();});}
+async function nkLoadAccessHistory(){const cid=Number(state.me?.active_company_id||0),root=$('#nkAccessHistoryList');if(!root)return;root.textContent='กำลังโหลดประวัติ…';try{const result=await api('/api/access-history',{silentStatus:true});if(cid!==Number(state.me?.active_company_id||0))return;root.innerHTML=accessHistoryHtml(result.data||[]);}catch(error){if(cid===Number(state.me?.active_company_id||0))root.textContent='โหลดประวัติไม่สำเร็จ กรุณากดอัปเดตประวัติอีกครั้ง';}}
+function nkAccessDialog(id,title){let d=$('#'+id);if(!d){d=document.createElement('dialog');d.id=id;d.className='nk-access-dialog';document.body.append(d);}d.setAttribute('aria-label',title);return d;}
+function nkConfirmAccess(title,body,save){const cid=Number(state.me?.active_company_id||0),d=nkAccessDialog('nkAccessReviewModal',title);d.innerHTML=`<form method="dialog"><h3>${accessEsc(title)}</h3><div class="nk-access-review">${body}</div><p class="nk-access-note">ตรวจชื่อผู้รับและสิทธิ์ให้ครบก่อนยืนยัน</p><div class="modal-actions"><button type="button" class="secondary-btn" data-review-cancel>กลับไปแก้ไข</button><button type="button" class="primary-btn" data-review-confirm>ยืนยันบันทึก</button></div><p class="nk-access-review-error" role="alert"></p></form>`;d.querySelector('[data-review-cancel]').onclick=()=>d.close();d.querySelector('[data-review-confirm]').onclick=async event=>{if(cid!==Number(state.me?.active_company_id||0)){d.close();return toast('บริษัทเปลี่ยนแล้ว กรุณาเปิดข้อมูลใหม่',true);}const button=event.currentTarget;button.disabled=true;try{await save();if(d.open)d.close();}catch(error){d.querySelector('.nk-access-review-error').textContent=error.message||'บันทึกไม่สำเร็จ';}finally{button.disabled=false;}};d.showModal();}
+function nkReviewAccess(kind,save){const modal=$(kind==='admin'?'#companyAccessModal':'#approverAccessModal');if(Number(modal?.dataset.company)!==Number(state.me?.active_company_id||0))return toast('บริษัทเปลี่ยนแล้ว กรุณาเปิดข้อมูลใหม่',true);let body,snapshot;
+ if(kind==='admin'){const select=$('#companyAccessEmployeeSelect'),role=$('#companyAccessRoleSelect').value;if(!Number(select.value)||select.selectedOptions[0]?.disabled)return toast('กรุณาเลือกพนักงานที่เชื่อมบัญชีแล้ว',true);snapshot=JSON.stringify([select.value,role]);body=`<h4>${accessEsc(select.selectedOptions[0]?.textContent)}</h4><strong>${accessEsc(accessRoleLabels[role]||role)}</strong><p>${accessEsc(accessRoleHelp[role])}</p><p>ผู้รับเข้าจัดการบริษัทนี้ได้ทันที ระบบอาจแจ้งผู้รับผ่าน LINE</p>`;
+ }else{const id=Number($('#approverEmployeeSelect').value),person=(state.approverAccess||[]).find(x=>Number(x.id)===id),permissions=$$('#approverPermissionChecks input:checked').map(x=>x.value);if(!person)return;snapshot=JSON.stringify([id,permissions]);body=`<h4>${accessEsc(person.nickname||person.first_name)}</h4><ul>${permissions.length?permissions.map(key=>`<li>${accessEsc(state.approverPermissionCatalog.find(x=>x.key===key)?.label||key)}</li>`).join(''):'<li>ถอนสิทธิ์ผู้อนุมัติทั้งหมดที่กำหนดไว้</li>'}</ul><p>การลา: มีพนักงานมอบหมาย ${Number(person.leave_assigned_count||0)} คน · ${person.line_user_id?'เชื่อม LINE แล้ว':'ยังไม่เชื่อม LINE'}</p><p>การให้สิทธิ์ไม่กำหนดคนที่ดูแลให้อัตโนมัติ ต้องกำหนดผู้อนุมัติในข้อมูลพนักงาน สิทธิ์ที่ระบุว่าเตรียมไว้ยังไม่ใช่ฟีเจอร์ที่พร้อมใช้งาน</p>${(person.permissions||[]).includes('leave.approve')&&!permissions.includes('leave.approve')?'<p>ถอนสิทธิ์อนุมัติการลา: ระบบจะล้างการมอบหมายผู้อนุมัติของพนักงานและคำขอที่รออนุมัติตามกติกาเดิม</p>':''}`;}
+ nkConfirmAccess('ตรวจสิทธิ์ก่อนบันทึก',body,async()=>{const current=kind==='admin'?JSON.stringify([$('#companyAccessEmployeeSelect').value,$('#companyAccessRoleSelect').value]):JSON.stringify([Number($('#approverEmployeeSelect').value),$$('#approverPermissionChecks input:checked').map(x=>x.value)]);if(current!==snapshot)throw Error('ข้อมูลเปลี่ยนแล้ว กรุณากลับไปตรวจอีกครั้ง');await save();});}
+window.manageAccessMember=async userId=>{const cid=Number(state.me?.active_company_id||0);try{const latest=await api('/api/company-access',{silentStatus:true});if(cid!==Number(state.me?.active_company_id||0))return;state.companyAccess=latest;renderCompanyAccess();const member=latest.members.find(x=>Number(x.user_id)===userId);if(!member)return;const locked=member.is_primary_owner||member.is_me,d=nkAccessDialog('nkAccessMemberModal','จัดการสิทธิ์ผู้ใช้งาน');d.innerHTML=`<form method="dialog"><h3>${accessEsc(member.name||'บัญชีนากนะ')}</h3><p>${accessEsc(accessRoleLabels[member.role]||member.role)}</p><p>${accessEsc(accessRoleHelp[member.role])}</p>${locked?'<p class="nk-access-note">เจ้าของหลักและบัญชีของคุณดูสิทธิ์ได้ แต่เปลี่ยนหรือถอนสิทธิ์จากหน้านี้ไม่ได้</p>':`<label>บทบาท<select id="nkAccessMemberRole">${(latest.role_catalog||[]).map(x=>`<option value="${accessEsc(x.value)}" ${member.role===x.value?'selected':''}>${accessEsc(accessRoleLabels[x.value]||x.label)}</option>`).join('')}</select></label><p id="nkAccessMemberRoleHelp"></p>`}<div class="modal-actions"><button type="button" class="secondary-btn" data-member-close>ปิด</button>${locked?'':'<button type="button" class="text-btn danger-text" data-member-revoke>ถอนสิทธิ์ผู้ดูแล</button><button type="button" class="primary-btn" data-member-save>ตรวจสิทธิ์ก่อนบันทึก</button>'}</div></form>`;d.querySelector('[data-member-close]').onclick=()=>d.close();if(!locked){const select=d.querySelector('select'),help=d.querySelector('#nkAccessMemberRoleHelp');select.onchange=()=>help.textContent=accessRoleHelp[select.value]||'';select.onchange();d.querySelector('[data-member-save]').onclick=()=>{const role=select.value;nkConfirmAccess('เปลี่ยนบทบาท',`<h4>${accessEsc(member.name)}</h4><p>${accessEsc(accessRoleLabels[member.role])} → ${accessEsc(accessRoleLabels[role])}</p><p>${accessEsc(accessRoleHelp[role])}</p>`,async()=>{if(cid!==Number(state.me?.active_company_id||0))throw Error('บริษัทเปลี่ยนแล้ว');await api(`/api/company-access/${userId}`,{method:'PATCH',body:JSON.stringify({role,expected_role:member.stored_role||member.role})});d.close();await loadCompanyAccess();});};d.querySelector('[data-member-revoke]').onclick=()=>nkConfirmAccess('ถอนสิทธิ์ผู้ดูแล',`<h4>${accessEsc(member.name)}</h4><p>จะเสียสิทธิ์เข้าจัดการบริษัทในบทบาท ${accessEsc(accessRoleLabels[member.role])} บัญชีพนักงานและสิทธิ์ผู้อนุมัติที่แยกไว้ไม่ได้ถูกลบด้วย</p>`,async()=>{if(cid!==Number(state.me?.active_company_id||0))throw Error('บริษัทเปลี่ยนแล้ว');await api(`/api/company-access/${userId}`,{method:'DELETE',body:'{}'});d.close();await loadCompanyAccess();});}d.showModal();}catch(error){toast(error.message,true);}};
