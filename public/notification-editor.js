@@ -1,4 +1,4 @@
-import {fieldsForKind,canonicalTemplate,NOTIFICATION_TYPES} from './notification-catalog.js?v=P10.20';
+import {fieldsForKind,canonicalTemplate,NOTIFICATION_TYPES} from './notification-catalog.js?v=P10.21';
 export function templateParts(text,fields){const keys=new Map(fields.map(f=>[f.key,f]));return canonicalTemplate(text).split(/(\{[^{}]+\})/g).filter(Boolean).map(part=>{const field=part.startsWith('{')?keys.get(part.slice(1,-1)):null;return field?{field:field.key,label:field.label}:{text:part};});}
 export function templatePreview(text,fields,values={}){const lookup=Object.fromEntries(fields.map(f=>[f.key,values[f.key]??f.sample]));return canonicalTemplate(text).replace(/\{([^{}]+)\}/g,(m,key)=>String(lookup[key]??m));}
 export function serializeEditor(root){

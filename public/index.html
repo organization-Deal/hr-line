@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.20" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.21" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -45,8 +45,9 @@
 <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1-P10.12">
 <link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A">
 <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A">
-<link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.20">
-<link rel="stylesheet" href="/notifications.css?v=P10.20">
+<link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.21">
+<link rel="stylesheet" href="/notifications.css?v=P10.21">
+<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.21">
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -676,7 +677,7 @@
       </section>
 
       <section id="view-payroll" class="view">
-        <div class="page-intro payroll-page-intro"><div><p class="kicker">THAILAND PAYROLL CONTROL CENTER</p><h1>Payroll</h1><p>ทำเงินเดือนให้จบเป็นขั้นตอน · เตรียมข้อมูล → ตรวจสอบ → อนุมัติ → ปิดรอบ → ส่งสลิป</p></div><div class="page-actions"><button id="payrollComponentsBtn" class="secondary-btn" type="button">รายการเงิน</button><button id="payrollSettingsBtn" class="secondary-btn" type="button">ตั้งค่า Payroll</button><button id="createPayrollPeriodBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>สร้างรอบเงินเดือน</button></div></div>
+        <div class="page-intro payroll-page-intro"><div><p class="kicker">THAILAND PAYROLL CONTROL CENTER</p><h1>Payroll</h1><p>ทำเงินเดือนให้จบเป็นขั้นตอน · เตรียมรอบ → ตรวจยอดและปรับรายการ → อนุมัติและเตรียมจ่าย</p></div><div class="page-actions"><button id="payrollComponentsBtn" class="secondary-btn" type="button">รายการเงิน</button><button id="payrollSettingsBtn" class="secondary-btn" type="button">ตั้งค่า Payroll</button><button type="button" class="secondary-btn" onclick="window.openNextPayrollCycle()">สร้างเดือนถัดไป</button><button id="createPayrollPeriodBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>สร้างรอบเงินเดือน</button></div></div>
         <div id="payrollSummary" class="payroll-summary"></div>
         <div class="payroll-workspace">
           <aside class="panel payroll-period-panel"><div class="panel-head"><div><p class="kicker">PAY PERIODS</p><h3>รอบเงินเดือน</h3></div><span id="payrollReadyBadge" class="badge badge-soft">กำลังโหลด</span></div><div id="payrollPeriods" class="payroll-period-list"></div></aside>
@@ -1220,7 +1221,7 @@
 
   <dialog id="payrollEmployeeDetailModal" class="payroll-employee-detail-modal"><form method="dialog"><div class="modal-head"><div><p class="kicker">PAYROLL DETAIL</p><h3 id="payrollEmployeeDetailTitle">รายละเอียดเงินเดือน</h3><p>ที่มาของยอดเดือนนี้ + YTD + ภาษี + Attendance</p></div><button type="button" class="close-btn" value="cancel">×</button></div><div id="payrollEmployeeDetailBody"></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ปิด</button></div></form></dialog>
 
-  <dialog id="payrollLockPreviewModal" class="payroll-lock-preview-modal"><form method="dialog"><div class="modal-head"><div><p class="kicker">FINAL CHECK</p><h3 id="payrollLockPreviewTitle">ตรวจสรุปก่อนปิดรอบ</h3><p>ตรวจยอดรวม ความพร้อม และบัญชีรับเงินก่อนปิดการแก้ไขรอบนี้</p></div><button type="button" class="close-btn" value="cancel">×</button></div><input id="payrollLockPreviewPeriodId" type="hidden"/><div id="payrollLockPreviewBody"></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">กลับไปแก้ไข</button><button id="payrollLockConfirmBtn" type="button" class="primary-btn" onclick="window.confirmPayrollLockPreview()">ยืนยันปิดการแก้ไขรอบ</button></div></form></dialog>
+  <dialog id="payrollLockPreviewModal" class="payroll-lock-preview-modal"><form method="dialog"><div class="modal-head"><div><p class="kicker">FINAL CHECK</p><h3 id="payrollLockPreviewTitle">ตรวจสรุปและเตรียมจ่าย</h3><p>ตรวจยอดและบัญชีรับเงิน เมื่อยืนยันระบบจะป้องกันการแก้ตัวเลข ขั้นตอนนี้ยังไม่โอนเงินจริง</p></div><button type="button" class="close-btn" value="cancel">×</button></div><input id="payrollLockPreviewPeriodId" type="hidden"/><div id="payrollLockPreviewBody"></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">กลับไปแก้ไข</button><button id="payrollLockConfirmBtn" type="button" class="primary-btn" onclick="window.confirmPayrollLockPreview()">ยืนยันปิดการแก้ไขรอบ</button></div></form></dialog>
 
   <dialog id="documentSettingsModal" class="document-settings-dialog"><form method="dialog"><div class="modal-head"><div><p class="kicker">DOCUMENT BRANDING & SIGNATURE</p><h3>ตั้งค่าเอกสารและลายเซ็น</h3><p>ใช้กับเอกสารของบริษัทนี้เท่านั้น · Logo จะดึงจากข้อมูลบริษัทอัตโนมัติ</p></div><button type="button" class="close-btn" value="cancel"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="document-settings-grid"><section class="document-brand-card"><span class="settings-label">Logo บริษัท</span><div id="docCompanyLogoPreview" class="document-logo-preview"><span>กำลังโหลด…</span></div><small>เปลี่ยน Logo ได้จากหน้าข้อมูลบริษัท</small></section><section class="document-brand-card"><span class="settings-label">ลายเซ็น HR / ผู้มีอำนาจ</span><div id="docSignaturePreview" class="document-signature-preview"><span>ยังไม่มีลายเซ็น</span></div><div class="document-signature-actions"><label class="secondary-btn file-button">อัปโหลด PNG / JPG<input id="docSignerSignatureFile" type="file" accept="image/png,image/jpeg" hidden></label><button id="clearDocSignerSignatureBtn" type="button" class="text-btn danger-text">ลบลายเซ็น</button></div><input id="docSignatureDataUrl" type="hidden"></section><div class="field"><label>ชื่อผู้ลงนาม</label><input id="docSignerName" placeholder="เช่น นางสาว..." /></div><div class="field"><label>ตำแหน่งผู้ลงนาม</label><input id="docSignerPosition" placeholder="เช่น HR Manager / กรรมการผู้มีอำนาจ" /></div><div class="field full"><label>ข้อความท้ายเอกสาร</label><input id="docFooterText" placeholder="เอกสารฉบับนี้จัดทำผ่านระบบ Nakna HR" /></div><div class="document-signature-note full"><strong>ลายเซ็นรับทราบของพนักงาน</strong><p>Workflow ลายเซ็น: HR ตรวจและลงนามก่อน → ระบบส่งให้พนักงานทาง LINE → พนักงานลงลายเซ็นต่อ → ระบบสร้าง Final PDF ที่มีลายเซ็นครบตามประเภทเอกสาร พร้อมเก็บหลักฐานเวลาและ Version</p></div></div><div class="modal-actions"><button type="button" value="cancel" class="secondary-btn">ยกเลิก</button><button id="saveDocumentSettingsBtn" type="button" class="primary-btn">บันทึกการตั้งค่า</button></div></form></dialog>
 
@@ -1450,7 +1451,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.20" type="module"></script>
+  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.21" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

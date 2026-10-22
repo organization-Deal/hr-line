@@ -1,0 +1,3 @@
+-- P10.21: manual confirmation audit ledger, no money movement.
+CREATE TABLE IF NOT EXISTS payroll_payment_confirmations(id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,period_id INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'confirmed',payment_date TEXT NOT NULL,reference TEXT NOT NULL,net_total REAL NOT NULL,item_count INTEGER NOT NULL,confirmed_by_user_id INTEGER NOT NULL,confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,voided_by_user_id INTEGER,voided_at TEXT,void_reason TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_payment_active ON payroll_payment_confirmations(client_id,period_id) WHERE status='confirmed';

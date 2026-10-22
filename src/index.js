@@ -1,9 +1,10 @@
+import {payrollPaymentApi,payrollPayment,payrollPeople,ensurePayrollPayment} from './payroll-payment.js';
 import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnostics, ensureNotificationCenter } from './notification-center.js';
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.20-NOTIFICATION-CENTER';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.20-NOTIFICATION-CENTER';
+const NAKNA_RUNTIME_RELEASE = 'P10.21-PAYROLL-WORKFLOW';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.21-PAYROLL-WORKFLOW';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -1747,6 +1748,9 @@ async function handleApi(request, env, url, auth, ctx) {
   const method = request.method;
   const path = url.pathname;
   const clientId = auth.clientId ? Number(auth.clientId) : null;
+  const paymentMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/payment-confirmation$/);
+  if(paymentMatch)return payrollPaymentApi(request,env,auth,Number(paymentMatch[1]),{canManagePayroll,ensurePayrollDefaults,getPayrollPeriodDetail,recordPayrollPeriodEvent,today:dateInBangkok});
+
 
   if(['/api/notification-center','/api/notification-center/test','/api/notification-center/preview','/api/attendance-reminder-settings'].includes(path)) return notificationCenterApi(request,env,auth,notificationCenterHelpers());
 
@@ -3532,7 +3536,7 @@ async function handleApi(request, env, url, auth, ctx) {
     await ensurePayrollDefaults(env.DB, clientId);
     const [settings, periods, profiles, rules, documents, components] = await Promise.all([
       env.DB.prepare('SELECT * FROM payroll_settings WHERE client_id=?1').bind(clientId).first(),
-      env.DB.prepare(`SELECT * FROM payroll_periods WHERE client_id=?1 ORDER BY period_start DESC,id DESC LIMIT 24`).bind(clientId).all(),
+      env.DB.prepare(`SELECT p.*,(SELECT COUNT(*) FROM payroll_items pi WHERE pi.period_id=p.id AND pi.client_id=p.client_id) AS actual_item_count FROM payroll_periods p WHERE client_id=?1 ORDER BY period_start DESC,id DESC LIMIT 24`).bind(clientId).all(),
       env.DB.prepare(`SELECT e.id,e.employee_code,e.first_name,e.last_name,e.nickname,e.people_status,e.status,d.name AS department_name,p.name AS position_name,
         pp.base_salary,pp.social_security_enabled,pp.tax_enabled,pp.monthly_tax_override,pp.bank_name,pp.bank_account_name,pp.bank_account_no,pp.effective_from
         FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id
@@ -3963,8 +3967,11 @@ async function handleApi(request, env, url, auth, ctx) {
     await ensurePayrollDefaults(env.DB,clientId);
     const id=Number(payrollUnlockMatch[1]),b=await safeJson(request); const reason=String(b.reason||'').trim(); if(reason.length<5)return json({error:'กรุณาระบุเหตุผลการปลด Lock อย่างน้อย 5 ตัวอักษร'},400);
     const period=await env.DB.prepare(`SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2`).bind(id,clientId).first(); if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(period.status!=='locked')return json({error:'ปลด Lock ได้เฉพาะรอบที่ Lock และยังไม่ Publish'},409);
+    await ensurePayrollPayment(env.DB);
+    if(await payrollPayment(env.DB,clientId,id))return json({error:'รอบนี้มีบันทึกว่าจ่ายแล้ว ต้องแก้บันทึกการจ่ายพร้อมเหตุผลก่อนเปิดรอบแก้ไข'},409);
     const delivered=await env.DB.prepare(`SELECT COUNT(*) n FROM payroll_documents WHERE period_id=?1 AND client_id=?2 AND (email_sent_at IS NOT NULL OR line_notified_at IS NOT NULL)`).bind(id,clientId).first(); if(Number(delivered?.n||0)>0)return json({error:'มี Payslip ถูกส่งให้พนักงานแล้ว จึงปลด Lock ไม่ได้ ให้ทำรอบปรับย้อนหลังแทน'},409);
-    await env.DB.prepare(`UPDATE payroll_periods SET status='review',locked_by_user_id=NULL,locked_at=NULL,approval_status='pending',payroll_note=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3`).bind(`UNLOCK: ${reason}`,id,clientId).run();
+    const unlocked=await env.DB.prepare(`UPDATE payroll_periods SET status='review',locked_by_user_id=NULL,locked_at=NULL,approval_status='pending',payroll_note=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2 AND client_id=?3 AND status='locked' AND NOT EXISTS(SELECT 1 FROM payroll_payment_confirmations pc WHERE pc.client_id=?3 AND pc.period_id=?2 AND pc.status='confirmed')`).bind(`UNLOCK: ${reason}`,id,clientId).run();
+    if(Number(unlocked.meta?.changes)!==1)return json({error:'สถานะรอบหรือบันทึกการจ่ายเปลี่ยนแล้ว กรุณาโหลดใหม่'},409);
     await env.DB.prepare(`UPDATE payroll_items SET status='preview',updated_at=CURRENT_TIMESTAMP WHERE period_id=?1`).bind(id).run();
     await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'unlocked',{reason});
     return json({ok:true});
@@ -7860,7 +7867,8 @@ async function getPayrollPeriodDetail(db,clientId,periodId){
   ]);
   const itemRows=items.results||[];
   const settingRow=settings.results?.[0]||{};
-  return {period,items:itemRows,adjustments:adjustments.results||[],documents:documents.results||[],timeline:events.results||[],components:components.results||[],exports:exports.results||[],settings:settingRow,exceptions:payrollExceptionRows(period,itemRows,settingRow)};
+  const [payment_confirmation,workflow_people]=await Promise.all([payrollPayment(db,Number(clientId),Number(periodId)),payrollPeople(db,Number(clientId),period,itemRows)]);
+  return {payment_confirmation,workflow_people,period,items:itemRows,adjustments:adjustments.results||[],documents:documents.results||[],timeline:events.results||[],components:components.results||[],exports:exports.results||[],settings:settingRow,exceptions:payrollExceptionRows(period,itemRows,settingRow)};
 }
 
 function validPayrollDateKey(value){
