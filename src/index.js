@@ -5,8 +5,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.25-ACCESS-WORKSPACE';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.25-ACCESS-WORKSPACE';
+const NAKNA_RUNTIME_RELEASE = 'P10.27-MOBILE-PERFORMANCE';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.27-MOBILE-PERFORMANCE';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -5234,16 +5234,20 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
   const today = dateInBangkok();
   const nowIso = new Date().toISOString();
 
-  const [employeesRes, attendanceRes, leaveRes, candidatesRes, requestsRes] = await db.batch([
-    db.prepare(`SELECT e.*, d.name AS department_name, p.name AS position_name FROM employees e
+  const weekday=weekdayBangkok(today);
+  const [employeesRes, attendanceRes, leaveRes, candidatesRes, requestsRes, approvedLeaveToday, scheduleRows, holidayRows] = await db.batch([
+    db.prepare(`SELECT e.id,e.nickname,e.first_name,e.last_name,e.department_id,e.start_date,e.end_date,e.birth_date,e.probation_end_date,e.contract_end_date, d.name AS department_name, p.name AS position_name FROM employees e
                 LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions p ON p.id=e.position_id
                 WHERE e.client_id=?1 AND e.status='active'`).bind(clientId),
     db.prepare(`SELECT * FROM attendance WHERE client_id=?1 AND work_date=?2`).bind(clientId, today),
     db.prepare(`SELECT l.*, e.nickname, e.first_name FROM leave_requests l JOIN employees e ON e.id=l.employee_id
                 WHERE l.client_id=?1 AND l.status IN ('pending','awaiting_evidence')`).bind(clientId),
-    db.prepare(`SELECT * FROM candidates WHERE client_id=?1`).bind(clientId),
+    db.prepare(`SELECT id,nickname,first_name,position_name,stage,last_activity_at,created_at FROM candidates WHERE client_id=?1`).bind(clientId),
     db.prepare(`SELECT r.*, e.nickname, e.first_name FROM employee_requests r JOIN employees e ON e.id=r.employee_id
                 WHERE r.client_id=?1 AND r.status NOT IN ('ready','delivered','closed')`).bind(clientId),
+    db.prepare(`SELECT employee_id FROM leave_requests WHERE client_id=?1 AND status='approved' AND start_date <= ?2 AND end_date >= ?2`).bind(clientId,today),
+    db.prepare('SELECT * FROM work_schedule_rules WHERE client_id=?1 AND weekday=?2').bind(clientId,weekday),
+    db.prepare('SELECT * FROM company_holidays WHERE client_id=?1 AND holiday_date=?2 LIMIT 1').bind(clientId,today),
   ]);
 
   const employees = employeesRes.results || [];
@@ -5267,17 +5271,9 @@ async function getDashboard(db, clientId, { includeHrCases=false, userId=null }=
   const attendanceByEmployee = new Map(attendance.map(a => [Number(a.employee_id), a]));
 
   const onLeaveTodayIds = new Set();
-  const approvedLeaveToday = await db.prepare(`
-    SELECT employee_id FROM leave_requests
-    WHERE client_id=?1 AND status='approved' AND start_date <= ?2 AND end_date >= ?2
-  `).bind(clientId, today).all();
   for (const row of approvedLeaveToday.results || []) onLeaveTodayIds.add(Number(row.employee_id));
+  const holidayToday=holidayRows.results?.[0]||null;
 
-  const weekday=weekdayBangkok(today);
-  const [scheduleRows,holidayToday]=await Promise.all([
-    db.prepare('SELECT * FROM work_schedule_rules WHERE client_id=?1 AND weekday=?2').bind(clientId,weekday).all(),
-    db.prepare('SELECT * FROM company_holidays WHERE client_id=?1 AND holiday_date=?2 LIMIT 1').bind(clientId,today).first(),
-  ]);
   const rules=scheduleRows.results||[];
   const employeeExpected=e=>{
     if(holidayToday)return false;

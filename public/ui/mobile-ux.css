@@ -1,0 +1,44 @@
+/* P10.27 — mobile reading and touch targets, scoped to the HR workspace. */
+@media(max-width:760px){
+  html.nk-p10 #nkMain .topbar .icon-btn,html.nk-p10 #accountMenuBtn{min-width:44px;min-height:44px}
+  html.nk-p10 #nkMain :where(.primary-btn,.secondary-btn,.text-btn,.close-btn),
+  html.nk-p10 #view-dashboard .text-btn,
+  html.nk-p10 dialog :where(.primary-btn,.secondary-btn,.text-btn,.close-btn){min-height:44px;font-size:14px;touch-action:manipulation}
+  html.nk-p10 #nkMain :where(input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]),select,textarea),
+  html.nk-p10 dialog :where(input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]),select,textarea){font-size:16px!important;min-height:44px;max-width:100%;box-sizing:border-box}
+  html.nk-p10 #nkMain .switch,html.nk-p10 dialog .switch{width:48px;height:44px}
+  html.nk-p10 #nkMain .switch span,html.nk-p10 dialog .switch span{top:9px;bottom:9px}
+  html.nk-p10 .switch:has(input:focus-visible){outline:3px solid #83bfb5;outline-offset:3px;border-radius:12px}
+  #view-dashboard .nk-dash-stat>small,#view-dashboard .nk-dash-attendance-foot p,
+  #view-dashboard .nk-dash-task-copy small,#view-dashboard .nk-dash-moment small,
+  #view-dashboard .nk-dash-updated{font-size:12px;color:#526f76;line-height:1.7}
+  #view-dashboard .nk-dash-stat-link{font-size:12px;color:#39766f}
+  #notificationCenter .nc-actions{flex-wrap:wrap}
+  #notificationCenter .nc-row-actions{gap:14px;min-height:44px}
+  #notificationCenter .nc-copy{min-width:0;flex:1 1 170px}
+  #notificationCenter :where(.nc-copy>small,.nc-result,.nc-health p,.nc-auto-explainer p){font-size:13px;color:#526e64;line-height:1.7}
+  #modal[data-nc-preview] .nc-dialog-config{grid-template-columns:minmax(0,1fr)}
+  #modal[data-nc-preview] .nc-rich-message{font-size:16px}
+  #modal[data-nc-preview] :where(.nc-days label,.nc-recipients label){min-height:44px;box-sizing:border-box}
+  #modal[data-nc-preview] .nc-token-remove{min-width:32px;min-height:32px}
+}
+@media(max-width:620px){
+  #view-requests .nk-service-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  #view-requests .nk-service-metric{min-width:0;padding:14px;min-height:100px}
+  #view-requests .nk-service-metric span:first-child{font-size:13px;line-height:1.6;color:#526d73}
+  #view-requests .nk-service-metric strong{font-size:26px}
+  #view-requests .nk-service-metric:last-child{grid-column:1/-1;min-height:0}
+  #view-requests .nk-service-metric:last-child>div{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px}
+  #view-requests .nk-service-metric small{display:none}
+  #view-requests .nk-service-tabbar{padding:4px 6px 0;gap:0;scroll-padding-inline:6px}
+  #view-requests .nk-service-tab{font-size:13px;min-height:48px;padding:12px 10px;flex:none}
+  #view-requests .nk-service-tab-count{font-size:12px}
+  #view-requests .nk-service-case-list .hr-case-row{grid-template-columns:minmax(0,1fr)}
+  #view-requests .nk-service-case-list .hr-case-row>span:last-child{justify-self:start}
+  #view-requests .nk-service-case-list .hr-case-copy p,
+  #view-requests .nk-service-case-list .hr-case-copy small,
+  #view-requests .nk-service-panel-head p,
+  #view-requests .nk-service-broadcast-list .broadcast-row p,
+  #view-requests .nk-service-broadcast-list .broadcast-row small{font-size:13px;color:#526e75;line-height:1.7;overflow-wrap:anywhere}
+  #view-requests .nk-service-message summary{display:flex;align-items:center;min-height:44px;font-size:14px}
+}

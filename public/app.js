@@ -1,7 +1,9 @@
-import {accessRoleLabels,accessRoleHelp,accessEsc,accessMemberRows,accessApproverRows,accessRoleComparison,accessHistoryHtml} from './access-ui.js?v=P10.25';
-import {dashboardModel,dashboardSummaryHtml,dashboardAttendanceHtml,dashboardQueueHtml,dashboardMomentsHtml,dashboardDocumentsHtml,dashboardRecruitmentHtml,dashboardTaskTarget,dashboardPeopleHtml} from './dashboard.js?v=P10.25';
-import {payrollTaskModel,salaryExplanation,nextPayrollMonth} from './payroll-workflow.js?v=P10.25';
-import { createNotificationCenter } from './notifications.js?v=P10.25';
+import {createReadGate,shouldPreloadPeople,resetRoutePosition} from './ux-runtime.js?v=P10.27';
+const apiReadGate=createReadGate();
+import {accessRoleLabels,accessRoleHelp,accessEsc,accessMemberRows,accessApproverRows,accessRoleComparison,accessHistoryHtml} from './access-ui.js?v=P10.26';
+import {dashboardModel,dashboardSummaryHtml,dashboardAttendanceHtml,dashboardQueueHtml,dashboardMomentsHtml,dashboardDocumentsHtml,dashboardRecruitmentHtml,dashboardTaskTarget,dashboardPeopleHtml} from './dashboard.js?v=P10.26';
+import {payrollTaskModel,salaryExplanation,nextPayrollMonth} from './payroll-workflow.js?v=P10.26';
+import { createNotificationCenter } from './notifications.js?v=P10.26';
 /* NAKNA_OA_SETTINGS_REMOVED_20261019: P10.14 keeps retired company OA controls out of HTML; central LINE stays available. */
 /* NAKNA_BOOT_RECOVERY_20261019; combines retired Stretch + retired company OA without dangling boot handlers. */
 const NAKNA_FRONTEND_BUILD=window.NaknaRelease?.version||'unknown'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
@@ -208,6 +210,7 @@ function hydrateDashboardCache() {
 }
 async function loadDashboardFast({ silent = true } = {}) {
   const started = performance.now();
+  const companyId=Number(state.me?.active_company_id||0);
   setViewLoading('dashboard',true);
   let dashboardFailed=false;
   try {
@@ -215,6 +218,7 @@ async function loadDashboardFast({ silent = true } = {}) {
     // paint the shell and is fetched after the dashboard so D1 does not compete
     // with the critical request on LINE mobile.
     const dashboard = await api('/api/dashboard', { timeoutMs: 12000 });
+    if(companyId!==Number(state.me?.active_company_id||0))return false;
     state.dashboard = dashboard || emptyDashboard();
     delete state.dashboard.payroll;delete state.dashboard.__fromCache;delete state.dashboard.__refreshFailed;
     renderDashboard();
@@ -223,14 +227,16 @@ async function loadDashboardFast({ silent = true } = {}) {
     $('#sidebarCompany').textContent = state.dashboard.client?.name || activeCompany()?.name || 'บริษัทของคุณ';
     writeDashboardCache();
     setTimeout(async()=>{
+      if(companyId!==Number(state.me?.active_company_id||0))return;
       try{
         const companyProfile=await api('/api/company-profile',{timeoutMs:12000});
-        if(companyProfile){state.companyProfile=companyProfile.company||companyProfile;renderIdentity();writeDashboardCache();}
+        if(companyProfile&&companyId===Number(state.me?.active_company_id||0)){state.companyProfile=companyProfile.company||companyProfile;renderIdentity();writeDashboardCache();}
       }catch{}
     },650);
     if (!silent) toast('อัปเดตภาพรวมแล้ว');
     return true;
   } catch (error) {
+    if(companyId!==Number(state.me?.active_company_id||0))return false;
     dashboardFailed=true;
     if (!state.dashboard) state.dashboard = emptyDashboard();
     state.dashboard.__refreshFailed=true;
@@ -250,15 +256,17 @@ function scheduleDeferredLoad(delay = 4800) {
     try { cancelIdleCallback(deferredIdleHandle); } catch {}
   }
   const run = async () => {
-    if (deferredLoadInFlight || document.hidden) return;
+    if (deferredLoadInFlight || !shouldPreloadPeople({hidden:document.hidden,mobile:window.matchMedia('(max-width: 760px)').matches,connection:navigator.connection,currentView:state.currentView,busy:viewLoadInFlight.size>0})) return;
     deferredLoadInFlight = true;
+    const companyId=Number(state.me?.active_company_id||0);
     try {
       // Warm only the two datasets used by the most common People screens.
       // Do NOT load Payroll / Analytics / Recruitment / Integrations in the
       // background: those modules are fetched only when the user opens them.
       await refreshPeopleData({ includeLookups: false, render: ['employees','organization'].includes(state.currentView) });
-      markViewLoaded('employees');
-      markViewLoaded('organization');
+      // Employees also needs invites and work locations: a partial warm-up
+      // must not mark that complete route fresh.
+      if(Number(state.me?.active_company_id||0)===companyId)markViewLoaded('organization');
     } catch (error) {
       console.warn('[Nakna] common preload failed', error?.message || error);
     } finally { deferredLoadInFlight = false; }
@@ -476,9 +484,11 @@ function renderPeopleFast() {
 }
 
 async function refreshPeopleData({ includeLookups = false, render = true } = {}) {
+  const companyId=Number(state.me?.active_company_id||0);
   const tasks = [api('/api/employees'), api('/api/people-core')];
   if (includeLookups) tasks.push(api('/api/lookups'));
   const [employees, peopleCore, lookups] = await Promise.all(tasks);
+  if(companyId!==Number(state.me?.active_company_id||0))return false;
   state.employees = employees?.data || state.employees || [];
   state.peopleCore = mergePeopleCoreFromServer(peopleCore) || state.peopleCore || { departments: [], positions: [], schedules: [], holidays: [], attendance_policy: {} };
   if (includeLookups && lookups) state.lookups = lookups;
@@ -969,7 +979,11 @@ function recordApiTiming(path, method, elapsedMs, status, ok) {
   } catch {}
 }
 
-async function api(path, options = {}) {
+function api(path, options = {}) {
+  const scope = `${Number(state.me?.user?.id||0)}:${Number(state.me?.active_company_id||0)}`;
+  return apiReadGate.run(path, options, scope, () => apiRequest(path, options));
+}
+async function apiRequest(path, options = {}) {
   const controller = new AbortController();
   const apiStartedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const { timeoutMs: requestedTimeout, silentStatus = false, ...fetchOptions } = options;
@@ -1295,7 +1309,9 @@ function bindEvents() {
   $('#approverAccessSaveBtn').onclick = ()=>nkReviewAccess('approver',saveApproverAccess);
   $('#approverRolePreset').onchange = applyApproverRolePreset;
   $('#refreshBtn').onclick = () => loadViewData(state.currentView || 'dashboard',{force:true});
-  document.querySelectorAll('#view-requests [data-nk-service-tab]').forEach(button=>button.addEventListener('click',()=>window.nkServiceSelectTab(button.dataset.nkServiceTab)));
+  document.querySelectorAll('#view-requests [data-nk-service-tab]').forEach(button=>{button.addEventListener('click',()=>window.nkServiceSelectTab(button.dataset.nkServiceTab));button.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const tabs=$$('#view-requests [data-nk-service-tab]').filter(b=>!b.hidden),index=tabs.indexOf(button),next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowLeft'?-1:1)+tabs.length)%tabs.length;tabs[next]?.click();tabs[next]?.focus();});});
+  $('#holidayYearSelect')?.addEventListener('change',event=>{holidayUi.year=Number(event.target.value);holidayUi.yearTouched=true;renderCompanyHolidays();});
+  $('#nkHolidayReloadBtn')?.addEventListener('click',()=>refreshCompanyHolidays());
   $('#nkServiceCaseSearch')?.addEventListener('input',renderEmployeeService);
   $('#nkServiceCaseStatus')?.addEventListener('change',renderEmployeeService);
   $('#nkServiceBroadcastSearch')?.addEventListener('input',renderEmployeeService);
@@ -3769,20 +3785,21 @@ function renderEmployeeService(){
   const openCases=cases.filter(c=>!['resolved','closed'].includes(c.status)).length;
   $('#createBroadcastBtn').classList.toggle('hidden',!isHr);
   const totalInbox=openCases+Number(state.requests?.length||0);
-  $('#requestCountBadge').textContent=`${totalInbox} รายการ`;
-  $('#hrCaseOpenCount').textContent=String(openCases);
+  $('#requestCountBadge').textContent=isHr?`${totalInbox} เรื่องเปิดและคำขอ HR`:'ประกาศและบริการบน LINE';
+  $('#hrCaseOpenCount').textContent=String(isHr?openCases:0);
   $('#broadcastTotalCount').textContent=String(broadcasts.length);
   const urgent=cases.filter(c=>!['resolved','closed'].includes(String(c.status))&&['urgent','high'].includes(String(c.priority))).length;
   if($('#nkServiceUrgentCount'))$('#nkServiceUrgentCount').textContent=String(isHr?urgent:0);
   if($('#nkServiceOpenPill'))$('#nkServiceOpenPill').textContent=String(isHr?openCases:0);
   const caseTab=$('#nkServiceTabCases');if(caseTab)caseTab.hidden=!isHr;
-  document.querySelectorAll('#view-requests [data-nk-private-metric]').forEach(el=>el.hidden=!isHr);
+  document.querySelectorAll('#view-requests [data-nk-private-metric],#view-requests [data-nk-private-content]').forEach(el=>el.hidden=!isHr);
   $('.nk-service-metrics')?.classList.toggle('only-public',!isHr);
   $('#nkServiceCreateBroadcast')?.classList.toggle('hidden',!isHr);
   window.nkServiceSelectTab(nkServiceActiveTab);
   const rich=service.rich_menu||{};
-  $('#richMenuStatusText').textContent=rich.configured?'พร้อมใช้':'ยังไม่ตั้ง';
-  $('#setupRichMenuBtn').textContent=rich.configured?'อัปเดต Rich Menu':'ตั้ง Rich Menu ให้ LINE บริษัท';
+  $('#richMenuStatusText').textContent=rich.configured?'เมนูบริษัทพร้อมใช้':rich.dedicated_line?'ยังไม่ได้ตั้งเมนูบริษัท':'ไม่ได้ใช้ LINE เฉพาะบริษัท';
+  if($('#nkServiceLineNote'))$('#nkServiceLineNote').textContent=rich.dedicated_line?'เมนูนี้จัดการได้โดยเจ้าของบริษัทหรือผู้ดูแล HR ที่มีสิทธิ์':'ส่วนนี้ใช้ตั้งเมนูให้ LINE เฉพาะบริษัท ไม่ใช่สถานะของ LINE นากนะกลาง';
+  $('#setupRichMenuBtn').textContent=rich.configured?'อัปเดตเมนู LINE บริษัท':'ตั้งเมนู LINE บริษัท';
   $('#setupRichMenuBtn').disabled=!rich.dedicated_line || !['owner','co_owner','hr_admin'].includes(String(activeCompanyRole()||''));
   $('#removeRichMenuBtn').classList.toggle('hidden',!rich.configured || !['owner','co_owner','hr_admin'].includes(String(activeCompanyRole()||'')));
 
@@ -3801,7 +3818,7 @@ function renderEmployeeService(){
         if(!query)return true;
         return [c.id&&('HR-'+String(c.id).padStart(4,'0')),c.subject,c.detail,c.category,c.nickname,c.first_name,c.last_name,c.department_name].some(v=>String(v||'').toLowerCase().includes(query));
       });
-      root.innerHTML=filtered.length?filtered.map(c=>{
+      root.innerHTML=filtered.length?[...filtered].sort((a,b)=>{const rank=c=>['resolved','closed'].includes(c.status)?3:c.priority==='urgent'?0:c.priority==='high'?1:2;return rank(a)-rank(b)||String(b.created_at||'').localeCompare(String(a.created_at||''));}).map(c=>{
       const priorityClass=c.priority==='urgent'?'badge-danger':c.priority==='high'?'badge-warning':'badge-neutral';
       const statusLabel=({open:'รับเรื่องแล้ว',in_progress:'กำลังดำเนินการ',waiting_employee:'รอพนักงาน',resolved:'แก้ไขแล้ว',closed:'ปิดเรื่อง'})[c.status]||c.status;
       return `<button class="hr-case-row" type="button" onclick="window.openHrCase(${Number(c.id)})"><div class="hr-case-id"><span class="badge ${priorityClass}">${escapeHtml(c.priority==='urgent'?'ด่วน':c.priority==='high'?'สูง':'ส่วนตัว')}</span><strong>#HR-${String(c.id).padStart(4,'0')}</strong></div><div class="hr-case-copy"><strong>${escapeHtml(c.subject)}</strong><p>${escapeHtml(c.detail)}</p><small>${escapeHtml(c.nickname||c.first_name)}${c.department_name?` · ${escapeHtml(c.department_name)}`:''} · ${formatDateTime(c.created_at)}</small></div><span class="badge ${['resolved','closed'].includes(c.status)?'badge-success':'badge-soft'}">${escapeHtml(statusLabel)}</span></button>`;
@@ -3815,7 +3832,7 @@ function renderEmployeeService(){
     const filter=String($('#nkServiceBroadcastStatus')?.value||'all');
     const filtered=broadcasts.filter(b=>(filter==='all'||String(b.status)===filter)&&(!query||[b.title,b.message].some(v=>String(v||'').toLowerCase().includes(query))));
     const labels={draft:'ฉบับร่าง',sending:'กำลังส่ง',sent:'ส่งแล้ว',partial:'ส่งบางส่วน',failed:'ส่งไม่สำเร็จ'};
-    broadcastRoot.innerHTML=filtered.length?filtered.map(b=>`<article class="broadcast-row"><div><strong>${escapeHtml(b.title)}</strong><p>${escapeHtml(b.message)}</p><small>${formatDateTime(b.created_at)} · ${escapeHtml(b.audience_type==='all'?'ทั้งบริษัท':b.audience_type==='department'?'เฉพาะแผนก':'เลือกพนักงาน')}</small></div><div class="broadcast-stats"><span class="badge ${b.status==='sent'?'badge-success':b.status==='partial'?'badge-warning':'badge-neutral'}">${escapeHtml(labels[b.status]||b.status)}</span><small>${Number(b.delivered_count||0)}/${Number(b.total_recipients||0)} ส่งสำเร็จ</small>${broadcastAckStatHtml(b)}${b.status==='draft'&&isHr?`<button class="text-btn" onclick="window.sendBroadcastById(${Number(b.id)})">ส่งตอนนี้</button>`:''}</div></article>`).join(''):emptyState(query||filter!=='all'?'ไม่พบประกาศตามตัวกรอง':'ยังไม่มีประกาศ','กด “สร้างประกาศ” เพื่อส่งข้อมูลถึงพนักงานผ่าน LINE');
+    broadcastRoot.innerHTML=filtered.length?filtered.map(b=>`<article class="broadcast-row"><div><strong>${escapeHtml(b.title)}</strong><p>${escapeHtml(b.message)}</p><details class="nk-service-message"><summary>อ่านประกาศเต็ม</summary><div>${escapeHtml(b.message)}</div></details><small>${formatDateTime(b.created_at)} · ${escapeHtml(b.audience_type==='all'?'ทั้งบริษัท':b.audience_type==='department'?'เฉพาะแผนก':'เลือกพนักงาน')}</small></div><div class="broadcast-stats"><span class="badge ${b.status==='sent'?'badge-success':b.status==='partial'?'badge-warning':'badge-neutral'}">${escapeHtml(labels[b.status]||b.status)}</span><small>${Number(b.delivered_count||0)}/${Number(b.total_recipients||0)} ส่งสำเร็จ</small>${broadcastAckStatHtml(b)}${b.status==='draft'&&isHr?`<button class="text-btn" onclick="window.sendBroadcastById(${Number(b.id)})">ส่งตอนนี้</button>`:''}</div></article>`).join(''):emptyState(query||filter!=='all'?'ไม่พบประกาศตามตัวกรอง':'ยังไม่มีประกาศ',isHr?'กด “สร้างประกาศ” เพื่อส่งข้อมูลถึงพนักงานผ่าน LINE':'ประกาศจากบริษัทจะแสดงตรงนี้');
   }
   renderBroadcastPage();
   renderHrInbox();
@@ -3989,7 +4006,7 @@ function showView(name) {
     openSettingsCategory(state.activeSettingsCategory, { scroll: false });
   }
   syncSettingsSidebar();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  resetRoutePosition(window,document);
   // Entering a task-specific inbox means the HR user has seen the current
   // notification set. Hide those attention items immediately and persist the
   // read state, while unresolved records remain available inside the page.
@@ -7000,7 +7017,7 @@ $('#openDocumentCaseBtn')?.addEventListener('click',quickOpenDocumentCase);
 
 let notificationCenterController;
 function notificationUi(){return notificationCenterController ||= createNotificationCenter({api,escapeHtml,escapeAttr,toast,openForm:openPhase5Form,companyId:()=>Number(state.me?.active_company_id||0),role:activeCompanyRole});}
-// P10.25 task guidance; retain the existing payroll controls and calculation engine.
+// P10.26 task guidance; retain the existing payroll controls and calculation engine.
 var nkPayrollFilter='all',nkPayrollSearch='',nkPayrollView='summary';
 function nkPayrollPrioritize(detail){const model=payrollTaskModel(detail);return [...(detail.items||[])].sort((a,b)=>{const priority=x=>model.errors.has(Number(x.employee_id))?0:model.warnings.has(Number(x.employee_id))?1:2;return priority(a)-priority(b);});}
 function nkPayrollPeopleGuide(detail){const m=payrollTaskModel(detail),missing=detail.workflow_people?.not_calculated||[];return `<section id="nkPayrollPeopleGuide" class="nk-payroll-task-note"><strong>รอบนี้มีพนักงานตามช่วงงาน ${m.eligible} คน · มีผลคำนวณ ${m.included} คน · ข้อมูลพร้อมตรวจ ${m.ready} คน</strong><p>${m.blocking?`ต้องแก้ข้อมูล ${m.blocking} คน · `:''}${m.warningPeople?`มีข้อมูลควรตรวจ ${m.warningPeople} คน · `:''}ฐานเงินเดือน เวลาเข้างาน และใบลาใช้ข้อมูลของช่วงรอบนี้ รายการพิเศษเพิ่มเฉพาะรอบได้โดยไม่แก้ฐานเงินเดือนประจำ</p>${missing.length?`<details><summary>ยังไม่มีผลคำนวณ ${missing.length} คน</summary>${missing.map(e=>`<p>${escapeHtml(e.name)} · ${escapeHtml(e.reason)} <button type="button" class="text-btn" onclick="window.openPayrollProfile(${Number(e.employee_id)})">ตรวจโปรไฟล์</button></p>`).join('')}<button class="secondary-btn" type="button" onclick="window.recalculatePayroll(${Number(detail.period.id)})">ตั้งค่าครบแล้ว คำนวณรอบใหม่</button></details>`:''}</section>`;}

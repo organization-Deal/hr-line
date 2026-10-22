@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.25" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.27" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -43,16 +43,18 @@
   <script defer src="/ui/p10-7-recruitment-gmail.js?v=P10.7-1"></script>
 <link rel="stylesheet" href="/ui/nk-multi-gmail.css?v=MGMAIL20261020A">
 <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1-P10.12">
-<link rel="stylesheet" href="/ui/nk-employee-service.css?v=SERVICE20261020A">
-<link rel="stylesheet" href="/ui/nk-leave-settings.css?v=LEAVE20261020A">
-<link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.25">
-<link rel="stylesheet" href="/notifications.css?v=P10.25">
-<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.25">
-<link rel="stylesheet" href="/ui/loading.css?v=P10.25">
-<script defer src="/ui/loading.js?v=P10.25"></script>
-<link rel="stylesheet" href="/ui/dashboard.css?v=P10.25">
-<link rel="stylesheet" href="/ui/access.css?v=P10.25-layout2">
-<link rel="stylesheet" href="/ui/leave-pending-emphasis.css?v=P10.25-pending1">
+<link rel="stylesheet" href="/ui/nk-employee-service.css?v=P10.26-service">
+<link rel="stylesheet" href="/ui/nk-leave-settings.css?v=P10.26-holiday">
+<link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.26">
+<link rel="stylesheet" href="/notifications.css?v=P10.26">
+<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.26">
+<link rel="stylesheet" href="/ui/loading.css?v=P10.26">
+<script defer src="/ui/loading.js?v=P10.26"></script>
+<link rel="stylesheet" href="/ui/dashboard.css?v=P10.26">
+<link rel="stylesheet" href="/ui/access.css?v=P10.26-layout2">
+<link rel="stylesheet" href="/ui/leave-pending-emphasis.css?v=P10.26-pending1">
+<link rel="stylesheet" href="/ui/mobile-ux.css?v=P10.27">
+<link rel="modulepreload" href="/ux-runtime.js?v=P10.27">
 </head>
 <body>
   <a class="nk-skip-link" href="#nkMain">ข้ามไปยังเนื้อหา</a>
@@ -602,30 +604,37 @@
         </article>
       </section>
 
-      <section id="view-requests" class="view">
-        <div class="page-intro">
-          <div><p class="kicker">EMPLOYEE SERVICE</p><h1>Employee Service</h1><p>เรื่องส่วนตัวถึง HR, ประกาศบริษัท และประสบการณ์พนักงานบน LINE อยู่ที่เดียว</p></div>
-          <div class="page-actions"><span class="badge badge-warning" id="requestCountBadge">0 เรื่องเปิด</span><button id="createBroadcastBtn" class="primary-btn" type="button">+ ส่งประกาศ</button></div>
+      <section id="view-requests" class="view nk-service-view">
+        <div class="page-intro nk-service-intro"><div><p class="kicker">บริการพนักงาน</p><h1>ศูนย์บริการพนักงาน</h1><p>รับเรื่องถึง HR ติดตามประกาศ และดูช่องทางบริการบน LINE</p></div><div class="page-actions nk-service-head-actions"><span class="badge badge-soft" id="requestCountBadge">กำลังโหลด</span><button id="createBroadcastBtn" class="primary-btn" type="button">+ สร้างประกาศ</button></div></div>
+        <div class="nk-service-metrics">
+          <div class="nk-service-metric" data-nk-private-metric><div><span>เรื่องถึง HR ที่ยังเปิด</span><strong id="hrCaseOpenCount">—</strong><small>รอดำเนินการ รวมเรื่องที่กำลังติดตาม</small></div><span class="nk-service-metric-icon" aria-hidden="true">↗</span></div>
+          <div class="nk-service-metric" data-nk-private-metric><div><span>เรื่องที่ควรดูแลก่อน</span><strong id="nkServiceUrgentCount">—</strong><small>เร่งด่วน / สูง ในเรื่องที่ยังเปิด</small></div><span class="nk-service-metric-icon" aria-hidden="true">!</span></div>
+          <div class="nk-service-metric"><div><span>ประกาศทั้งหมด</span><strong id="broadcastTotalCount">—</strong><small>รวมฉบับร่างและประกาศที่ส่งแล้ว</small></div><span class="nk-service-metric-icon" aria-hidden="true">≡</span></div>
         </div>
-        <div class="service-summary-grid">
-          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="3"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10"/></svg></span><div><small>เรื่องส่วนตัวถึง HR</small><strong id="hrCaseOpenCount">0</strong><p>เห็นเฉพาะ Owner / HR Admin / HR</p></div></article>
-          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><path d="M4 13.5h3l8 4V6.5l-8 4H4z"/><path d="M7 13.5 8.5 19h3"/></svg></span><div><small>ประกาศที่ส่งแล้ว</small><strong id="broadcastTotalCount">0</strong><p>Broadcast เข้า LINE พนักงาน</p></div></article>
-          <article class="service-summary-card"><span class="nakna-metric-icon"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M12 5v14M4 12h16"/></svg></span><div><small>LINE Rich Menu</small><strong id="richMenuStatusText">ยังไม่ตั้ง</strong><p>6 เมนูหลักสำหรับพนักงาน</p></div></article>
-        </div>
-        <div class="service-grid">
-          <article class="panel service-cases-panel">
-            <div class="panel-head"><div><p class="kicker">PRIVATE HR INBOX</p><h3>เรื่องส่วนตัวถึง HR</h3><p class="panel-subtitle">พนักงานแจ้งจาก LINE และข้อมูลส่วนนี้ไม่แสดงให้ Manager</p></div><span class="badge badge-coral">Confidential</span></div>
-            <div id="hrCasesList" class="hr-case-list"></div>
-          </article>
-          <article class="panel service-tools-panel">
-            <div class="panel-head"><div><p class="kicker">LINE EXPERIENCE</p><h3>เครื่องมือพนักงาน</h3></div></div>
-            <div class="rich-menu-preview"><img src="/richmenu-nakna.png" alt="Nakna LINE Rich Menu preview" /><div><strong>Rich Menu พนักงาน</strong><p>เช็กอิน · เช็กเอาต์ · ขอลา · สิทธิ์ลา · วันหยุด · แจ้ง HR</p></div></div>
-            <div class="service-tool-actions"><button id="setupRichMenuBtn" class="primary-btn" type="button">ตั้ง Rich Menu ให้ LINE บริษัท</button><button id="removeRichMenuBtn" class="text-btn danger-text hidden" type="button">ลบ Rich Menu</button></div>
-            <div class="panel-head service-broadcast-head"><div><p class="kicker">BROADCAST HISTORY</p><h3>ประกาศล่าสุด</h3></div></div>
-            <div id="broadcastList" class="broadcast-list"></div>
-          </article>
-        </div>
-        <article class="panel legacy-request-panel"><div class="panel-head"><div><p class="kicker">OTHER REQUESTS</p><h3>คำขอ HR เดิม</h3></div></div><div id="requestsList" class="request-grid"></div></article>
+        <article class="nk-service-workspace">
+          <div class="nk-service-tabbar" role="tablist" aria-label="บริการพนักงาน">
+            <button type="button" class="nk-service-tab" id="nkServiceTabCases" data-nk-service-tab="cases" role="tab" aria-controls="nkServicePanelCases" aria-selected="true">เรื่องถึง HR <span id="nkServiceOpenPill" class="nk-service-tab-count">—</span></button>
+            <button type="button" class="nk-service-tab" id="nkServiceTabBroadcast" data-nk-service-tab="broadcast" role="tab" aria-controls="nkServicePanelBroadcast" aria-selected="false" tabindex="-1">ประกาศบริษัท</button>
+            <button type="button" class="nk-service-tab" id="nkServiceTabLine" data-nk-service-tab="line" role="tab" aria-controls="nkServicePanelLine" aria-selected="false" tabindex="-1">เมนูบน LINE</button>
+          </div>
+          <section id="nkServicePanelCases" class="nk-service-panel" role="tabpanel" aria-labelledby="nkServiceTabCases">
+            <div class="nk-service-panel-head"><div><h2>เรื่องส่วนตัวถึง HR</h2><p>เห็นเฉพาะเจ้าของบริษัทและฝ่าย HR ผู้จัดการทีมไม่เห็นเรื่องในส่วนนี้</p></div><span class="nk-service-confidential">ข้อมูลส่วนตัว</span></div>
+            <div class="nk-service-filters"><label><span class="sr-only">ค้นหาเรื่องถึง HR</span><input id="nkServiceCaseSearch" type="search" placeholder="ค้นหาชื่อพนักงาน หัวข้อ หรือเลขเรื่อง"></label><label><span class="sr-only">สถานะเรื่อง</span><select id="nkServiceCaseStatus"><option value="open">เรื่องที่ยังเปิด</option><option value="urgent">เร่งด่วน / สำคัญ</option><option value="resolved">แก้ไขหรือปิดแล้ว</option><option value="all">ทุกเรื่อง</option></select></label></div>
+            <div id="hrCasesList" class="hr-case-list nk-service-case-list"></div>
+            <details class="nk-service-legacy-requests" data-nk-private-content><summary>คำขอ HR จากระบบเดิม</summary><div id="requestsList" class="request-grid"></div></details>
+          </section>
+          <section id="nkServicePanelBroadcast" class="nk-service-panel" role="tabpanel" aria-labelledby="nkServiceTabBroadcast" hidden>
+            <div class="nk-service-panel-head"><div><h2>ประกาศบริษัท</h2><p>ติดตามฉบับร่าง สถานะการส่ง และจำนวนผู้รับที่ส่งสำเร็จ</p></div></div>
+            <div class="nk-service-filters"><label><span class="sr-only">ค้นหาประกาศ</span><input id="nkServiceBroadcastSearch" type="search" placeholder="ค้นหาหัวข้อหรือข้อความประกาศ"></label><label><span class="sr-only">สถานะประกาศ</span><select id="nkServiceBroadcastStatus"><option value="all">ทุกสถานะ</option><option value="draft">ฉบับร่าง</option><option value="sending">กำลังส่ง</option><option value="sent">ส่งแล้ว</option><option value="partial">ส่งบางส่วน</option><option value="failed">ส่งไม่สำเร็จ</option></select></label></div>
+            <div id="broadcastList" class="broadcast-list nk-service-broadcast-list"></div>
+          </section>
+          <section id="nkServicePanelLine" class="nk-service-panel" role="tabpanel" aria-labelledby="nkServiceTabLine" hidden>
+            <div class="nk-service-panel-head"><div><h2>เมนูบริการบน LINE</h2><p>ทางเข้าบริการสำหรับพนักงาน แยกจากงานรับเรื่องและประกาศ</p></div><span class="badge badge-soft" id="richMenuStatusText">กำลังตรวจสอบ</span></div>
+            <div class="nk-service-line-card"><div class="nk-service-line-mark" aria-hidden="true">LINE</div><div><strong>เมนูพนักงาน</strong><p>เช็กอิน · เช็กเอาต์ · ขอลา · สิทธิ์ลา · วันหยุด · แจ้ง HR</p><span id="nkServiceLineNote">กำลังตรวจสอบช่องทางของบริษัท</span></div></div>
+            <div class="service-tool-actions"><button id="setupRichMenuBtn" class="primary-btn" type="button" disabled>ตั้งค่าเมนู LINE</button><button id="removeRichMenuBtn" class="text-btn danger-text hidden" type="button">ลบเมนู LINE</button></div>
+            <div class="nk-service-line-steps"><div><strong>1</strong>พนักงานเปิด LINE นากนะ</div><div><strong>2</strong>เลือกบริการที่ต้องการ</div><div><strong>3</strong>ติดตามผลใน LINE</div></div>
+          </section>
+        </article>
       </section>
 
       <section id="view-payroll" class="view">
@@ -816,12 +825,13 @@
           </div>
             </div>
 
-            <div class="settings-category-panel hidden" data-settings-category="leave">
+            <div class="settings-category-panel nk-leave-settings hidden" data-settings-category="leave">
               <div id="holidaySection" class="people-core-section">
             <div class="page-intro compact">
               <div><p class="kicker">COMPANY HOLIDAYS</p><h2>วันหยุดบริษัท</h2><p>HR กำหนดปฏิทินวันหยุดประจำปีไว้ให้พนักงานใช้เป็นข้อมูลกลางเดียวกัน</p></div>
               <div class="section-action-group"><span id="holidayCountBadge" class="badge badge-soft">0 วัน</span><button id="addHolidayBtn" class="primary-btn" type="button">+ วันหยุด</button></div>
             </div>
+            <div class="nk-holiday-toolbar"><label for="holidayYearSelect">ปีที่แสดง</label><select id="holidayYearSelect" aria-label="ปีวันหยุด"></select><button type="button" class="secondary-btn" id="nkHolidayReloadBtn">โหลดใหม่</button><span id="holidayDataStatus" class="nk-holiday-data-status" role="status"></span></div>
             <div id="holidayCompliance" class="holiday-compliance warn"></div>
             <div id="holidayList" class="holiday-list"></div>
           </div>
@@ -1392,7 +1402,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.25" type="module"></script>
+  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.27" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">
