@@ -12,3 +12,17 @@
 #companyAccessModal .modal-fields,#approverAccessModal .modal-fields{gap:18px}#companyAccessModal .modal-head p,#approverAccessModal .modal-head p{font-size:12px;line-height:1.8}
 @media(max-width:760px){.nk-access-header h2{font-size:24px}.nk-access-row{flex-wrap:wrap;gap:12px;padding:16px}.nk-access-person{flex-basis:calc(100% - 60px)}.nk-access-role{margin-left:56px}.nk-access-row>button{margin-left:auto}.nk-access-comparison>div{grid-template-columns:1fr}.nk-access-toolbar{align-items:flex-start}.nk-access-tabs button{font-size:12px;padding:10px}.nk-access-dialog{padding:20px}.nk-access-dialog .modal-actions>button{flex:1}.nk-access-history{margin-top:18px}}
 .nk-access-tabs button:focus-visible,.nk-access-workspace summary:focus-visible{outline:3px solid #97cdbf;outline-offset:3px}
+/* P10.25 layout fix: explicit grid-item width prevents auto margins shrinking the workspace. */
+[data-settings-category="approvals"]>.nk-access-workspace{box-sizing:border-box;width:100%;max-width:1200px;min-width:0;margin:0;justify-self:start}
+.nk-access-workspace .nk-access-header{margin:4px 0 20px}
+.nk-access-workspace .nk-access-tabs{margin-bottom:18px;padding-bottom:10px}
+.nk-access-workspace .nk-access-toolbar{margin-bottom:12px;min-height:42px}
+.nk-access-workspace .nk-access-comparison{margin-bottom:12px}
+.nk-access-workspace .nk-access-row{box-sizing:border-box;display:grid;grid-template-columns:44px minmax(0,1fr) max-content max-content;column-gap:16px;row-gap:6px;padding:16px 18px;margin-bottom:10px}
+.nk-access-workspace .nk-access-person{min-width:0}
+.nk-access-workspace .nk-access-person p{margin-top:4px}
+.nk-access-workspace .nk-access-role{justify-self:end}
+.nk-access-workspace .nk-access-row>button{justify-self:end}
+#approverAccessList .nk-access-row{grid-template-columns:44px minmax(0,1fr) max-content}
+@media(min-width:761px) and (max-width:1050px){.nk-access-workspace .nk-access-row{grid-template-columns:44px minmax(0,1fr) max-content}.nk-access-workspace .nk-access-role{grid-column:2;grid-row:2;justify-self:start}.nk-access-workspace .nk-access-row>button{grid-column:3;grid-row:1 / span 2}.nk-access-workspace .nk-access-avatar{grid-row:1 / span 2}}
+@media(max-width:760px){[data-settings-category="approvals"]>.nk-access-workspace{max-width:none}.nk-access-workspace .nk-access-row,#approverAccessList .nk-access-row{grid-template-columns:40px minmax(0,1fr);padding:15px;gap:10px 12px}.nk-access-workspace .nk-access-avatar{width:40px;height:40px;grid-column:1;grid-row:1}.nk-access-workspace .nk-access-person{grid-column:2;grid-row:1;flex-basis:auto}.nk-access-workspace .nk-access-role{grid-column:2;grid-row:2;justify-self:start;margin:0}.nk-access-workspace .nk-access-row>button{grid-column:2;justify-self:start;margin:2px 0 0}.nk-access-workspace .nk-access-toolbar{gap:12px;align-items:center}.nk-access-workspace .nk-access-toolbar p{line-height:1.7}}
