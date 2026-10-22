@@ -85,3 +85,11 @@
 #view-recruitment #nkScreeningSourceFilter{max-width:100%;}
 @media(max-width:880px){#view-recruitment .nk-screening-tools{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}#view-recruitment .nk-screening-tools>input{grid-column:1/-1;}}
 @media(max-width:520px){#view-recruitment .nk-screening-tools{grid-template-columns:minmax(0,1fr);}#view-recruitment .nk-screening-tools>input{grid-column:auto;}}
+
+/* P10.12: visible screening groups and explicit mail presets. */
+button.nk-screening-stat{font:inherit;text-align:left;color:inherit;cursor:pointer;width:100%;min-width:0}
+button.nk-screening-stat[aria-pressed="true"]{border-color:#04878a;background:#eaf7f4;box-shadow:0 0 0 1px #04878a}
+button.nk-screening-stat:focus-visible{outline:3px solid #76c6c1;outline-offset:2px}
+.nk-mail-presets{padding:14px;background:#f0f8f5;border-radius:12px;display:flex;gap:8px;flex-wrap:wrap}
+.nk-mail-presets>strong,.nk-mail-presets>p,.nk-mail-presets>small{flex-basis:100%;margin:0}
+.nk-mail-presets button{min-height:44px;white-space:normal}

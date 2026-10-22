@@ -1423,6 +1423,7 @@ function bindEvents() {
   $('#nkScreeningReload')?.addEventListener('click',()=>reloadRecruitmentScreening());
   $('#nkScreeningSearch')?.addEventListener('input',()=>{nkScreeningSelected.clear();renderRecruitmentScreening();});
   $('#nkScreeningFilter')?.addEventListener('change',()=>{nkScreeningSelected.clear();renderRecruitmentScreening();});
+  $('#nkScreeningMetrics')?.addEventListener('click',event=>{const btn=event.target.closest('[data-screening-filter]');if(!btn)return;const field=$('#nkScreeningFilter');if(field){field.value=btn.dataset.screeningFilter;field.dispatchEvent(new Event('change',{bubbles:true}));}});
   $('#nkScreeningSourceFilter')?.addEventListener('change',()=>{nkScreeningSelected.clear();renderRecruitmentScreening();});
   $('#nkScreeningList')?.addEventListener('click',handleRecruitmentScreeningAction);
   $('#nkScreeningList')?.addEventListener('change',event=>{
@@ -3037,6 +3038,14 @@ function showInviteCreated(url, expiresAt, maxUses) {
 // Bulk selection is scoped to this page; never selects or deletes Gmail messages.
 const nkScreeningSelected=new Set();
 let nkScreeningBulkBusy=false;
+function nkScreeningGroup(row){
+  if(row.decision==='review')return 'review';
+  return ['likely','review','noise'].includes(row.kind)?row.kind:'review';
+}
+function nkApplicationMailQuery(days=30){
+  const n=[7,30,90,365].includes(Number(days))?Number(days):30;
+  return `newer_than:${n}d {"สมัครงาน" "สมัครตำแหน่ง" "ขอสมัคร" "job application" "apply for" "applying for" "resume" "résumé" "เรซูเม่" "curriculum vitae" "portfolio" filename:cv filename:resume}`;
+}
 function nkScreeningRowsVisible(data,filter,query,sourceEmail=''){
   return data.filter(x=>{
     if(sourceEmail && String(x.source_email||'')!==sourceEmail)return false;
@@ -3045,7 +3054,7 @@ function nkScreeningRowsVisible(data,filter,query,sourceEmail=''){
     if(filter==='all')return true;
     if(filter==='pending')return !['accepted','rejected'].includes(x.decision);
     if(filter==='accepted'||filter==='rejected')return x.decision===filter;
-    return !['accepted','rejected'].includes(x.decision)&&x.kind===filter;
+    return !['accepted','rejected'].includes(x.decision)&&nkScreeningGroup(x)===filter;
   }).filter(x=>!query||[x.sender_name,x.sender_email,x.subject,x.snippet,x.source_email].some(v=>String(v||'').toLowerCase().includes(query)));
 }
 function refreshRecruitmentScreeningBulkControls(){
@@ -3069,8 +3078,8 @@ function renderRecruitmentScreening(){
   $('#nkScreeningPanel')?.classList.remove('hidden');
   const data=state.recruitmentScreening?.data||[];
   const counts={all:data.length,pending:0,likely:0,review:0,noise:0,accepted:0,rejected:0,archived:0};
-  data.forEach(x=>{if(x.archived_at){counts.archived++;return;}if(x.decision==='accepted'||x.decision==='rejected')counts[x.decision]++;else{counts.pending++;counts[x.kind]++;}});
-  metrics.innerHTML=[['pending','ยังไม่ตัดสินใจ'],['likely','น่าจะสมัคร'],['review','รอตรวจ'],['noise','ไม่เกี่ยวข้อง'],['accepted','รับแล้ว'],['rejected','คัดออก'],['archived','ลบจากคิว']].map(([k,label])=>`<div class="nk-screening-stat"><small>${label}</small><strong>${counts[k]||0}</strong></div>`).join('');
+  data.forEach(x=>{if(x.archived_at){counts.archived++;return;}if(x.decision==='accepted'||x.decision==='rejected')counts[x.decision]++;else{counts.pending++;counts[nkScreeningGroup(x)]++;}});
+  metrics.innerHTML=[['likely','น่าจะเป็นใบสมัคร'],['review','ไม่แน่ใจ · HR ตรวจ'],['noise','เมลทั่วไป'],['pending','ทั้งหมดที่ยังไม่ตัดสินใจ'],['accepted','รับแล้ว'],['rejected','คัดออก'],['archived','ลบจากคิว']].map(([k,label])=>`<button type="button" class="nk-screening-stat" data-screening-filter="${k}" aria-pressed="${$('#nkScreeningFilter')?.value===k}"><small>${label}</small><strong>${counts[k]||0}</strong></button>`).join('');
   const sourceFilter=$('#nkScreeningSourceFilter');
   const sourceValue=sourceFilter?.value||'';
   if(sourceFilter){
@@ -3082,14 +3091,14 @@ function renderRecruitmentScreening(){
       sourceFilter.value=emails.includes(sourceValue)?sourceValue:'';
     }
   }
-  const filter=$('#nkScreeningFilter')?.value||'pending',query=($('#nkScreeningSearch')?.value||'').toLowerCase().trim();
+  const filter=$('#nkScreeningFilter')?.value||'likely',query=($('#nkScreeningSearch')?.value||'').toLowerCase().trim();
   const allShown=nkScreeningRowsVisible(data,filter,query,sourceFilter?.value||'');
   const shown=allShown.slice(0,150);
   const allowedKeys=new Set(shown.filter(x=>x.decision!=='accepted').map(x=>x.source_kind+':'+x.id));
   for(const key of [...nkScreeningSelected])if(!allowedKeys.has(key))nkScreeningSelected.delete(key);
-  result.textContent=state.recruitmentScreening?.error||`แสดง ${shown.length} จาก ${allShown.length} รายการที่ตรงตัวกรอง • เลือกได้สูงสุด 50 รายการต่อครั้ง`;
+  result.textContent=state.recruitmentScreening?.error||`ระบบคัดเบื้องต้นจากหัวข้อ ข้อความตัวอย่าง และชื่อไฟล์แนบ · ไม่ได้อ่านเนื้อหาไฟล์ · แสดง ${shown.length} จาก ${allShown.length} รายการที่ตรงตัวกรอง • เลือกได้สูงสุด 50 รายการต่อครั้ง`;
   root.innerHTML=shown.length?shown.map(x=>{
-    const kindLabel={likely:'น่าจะสมัครจริง',review:'รอตรวจ',noise:'ไม่น่าใช่ใบสมัคร'}[x.kind]||'รอตรวจ';
+    const kindLabel={likely:'น่าจะเป็นใบสมัคร',review:'ไม่แน่ใจ · HR ตรวจ',noise:'เมลทั่วไป'}[x.kind]||'รอตรวจ';
     const stateLabel=x.archived_at?'ลบจากคิวแล้ว':x.decision==='accepted'?'รับเป็นผู้สมัครแล้ว':x.decision==='rejected'?'คัดออกแล้ว':x.decision==='review'?'HR รอตรวจ':kindLabel;
     const badges=(x.reasons||[]).map(t=>`<span class="nk-screening-reason">${escapeHtml(t)}</span>`).join('');
     const date=x.received_at?formatDateTime(x.received_at):'ไม่ทราบเวลา';
@@ -3105,7 +3114,7 @@ function renderRecruitmentScreening(){
       <div class="nk-screening-reasons">${badges}${x.imported_as_candidate&&!x.decision?'<span class="nk-screening-reason nk-screening-prior">เคยนำเข้าระบบเก่า · รอยืนยัน</span>':''}${x.possible_duplicate_id?`<span class="nk-screening-reason nk-screening-prior">พบ Candidate เดิม #${Number(x.possible_duplicate_id)}</span>`:''}${x.candidate_id&&!x.possible_duplicate_id?`<span class="nk-screening-reason">Candidate #${Number(x.candidate_id)}</span>`:''}</div>
       ${x.attachments?.length?`<details><summary>ไฟล์แนบ ${x.attachments.length} รายการ</summary><p>${x.attachments.map(a=>escapeHtml(a)).join(' · ')}</p></details>`:''}
       </div><div class="nk-screening-actions">${x.archived_at?`<button class="secondary-btn" data-screening="restore" data-key="${key}" type="button">กู้คืน</button>`:x.decision==='accepted'?'<span class="nk-screening-done">ยืนยันแล้ว</span>':`<button class="primary-btn" data-screening="accepted" data-key="${key}" type="button">รับเป็นผู้สมัคร</button><button class="secondary-btn" data-screening="review" data-key="${key}" type="button">รอตรวจ</button><button class="secondary-btn" data-screening="rejected" data-key="${key}" type="button">คัดออก</button>`}</div></article>`;
-  }).join(''):`<div class="nk-screening-empty"><strong>ไม่มีอีเมลในกลุ่มนี้</strong><p>ลองเปลี่ยนตัวกรองหรือกด Sync ที่บัญชี Gmail ด้านบน</p></div>`;
+  }).join(''):`<div class="nk-screening-empty"><strong>ยังไม่มีเมลในกลุ่มนี้</strong><p>ลองเปิดกลุ่มไม่แน่ใจหรือทั้งหมดเพื่อไม่ให้พลาดใบสมัคร หรือ Sync บัญชี Gmail ด้านบน</p></div>`;
   refreshRecruitmentScreeningBulkControls();
 }
 async function bulkRecruitmentScreeningAction(action){
@@ -3243,7 +3252,7 @@ function renderRecruitmentGmail() {
     return `<div class="nk-mgmail-account" data-inbox="${a.id}">
       <div class="nk-mgmail-avatar">G</div>
       <div class="nk-mgmail-info"><strong>${escapeHtml(a.email)}</strong><div class="nk-mgmail-meta"><span class="nk-mgmail-status ${statusClass}">${escapeHtml(statusText)}</span><span>นำเข้า ${Number(a.imported_messages||0).toLocaleString('th-TH')} อีเมล</span><span>${a.last_sync_at?'Sync '+escapeHtml(formatDateTime(a.last_sync_at)):'ยังไม่เคย Sync'}</span></div><small>รับเมลจาก: ${escapeHtml(!a.source_configured?'ยังไม่ได้เลือก — ต้องตั้งค่าก่อน Sync':a.scope_mode==='recipient'?'เฉพาะส่งถึง '+(a.scope_value||''):a.scope_mode==='sender'?'เฉพาะผู้ส่ง '+(a.scope_value||''):a.scope_mode==='label'?'Gmail Label '+(a.scope_value||''):a.scope_mode==='all'?'ทั้ง Inbox':a.query||'Query เดิม')}</small>${a.auto_sync?'':'<small class="nk-mgmail-muted">Sync อัตโนมัติปิดอยู่</small>'}${hasError?`<p class="nk-mgmail-error">${escapeHtml(a.last_error)}</p>`:''}</div>
-      <div class="nk-mgmail-actions">${live?`<button type="button" data-action="sync" data-id="${a.id}" ${disabled||!a.source_configured||!a.enabled?'disabled title="ตั้งแหล่งเมลและเปิดใช้งานก่อน"':''}>Sync</button><button type="button" data-action="settings" data-id="${a.id}" ${disabled?'disabled':''}>${a.source_configured?'ตั้งค่า':'เลือกแหล่งเมล'}</button>`:`<button type="button" data-action="reconnect" data-id="${a.id}" ${disabled?'disabled':''}>เชื่อมใหม่</button>`}<button type="button" data-action="disconnect" data-id="${a.id}" ${disabled?'disabled':''} ${!live?'hidden':''}>ยกเลิก</button></div>
+      <div class="nk-mgmail-actions">${live?`<button type="button" data-action="sync" data-id="${a.id}" ${disabled||!a.source_configured||!a.enabled?'disabled title="ตั้งแหล่งเมลและเปิดใช้งานก่อน"':''}>Sync</button><button type="button" data-action="settings" data-id="${a.id}" ${disabled?'disabled':''}>${a.source_configured?'เลือกรับเมล':'เลือกแหล่งเมล'}</button>`:`<button type="button" data-action="reconnect" data-id="${a.id}" ${disabled?'disabled':''}>เชื่อมใหม่</button>`}<button type="button" data-action="disconnect" data-id="${a.id}" ${disabled?'disabled':''} ${!live?'hidden':''}>ยกเลิก</button></div>
     </div>`;
   }).join('') : `<div class="nk-mgmail-empty">ยังไม่เชื่อม Gmail รับสมัครงานแยก · กด <b>+ เชื่อม Gmail รับสมัครงาน</b> เพื่อเพิ่ม Inbox ใหม่ โดยไม่ต้องเปลี่ยนบัญชี Google หลัก</div>`;
 }
@@ -3268,7 +3277,7 @@ async function handleRecruitmentGmailAccountAction(event){
     const options=modes.map(([v,label])=>`<option value="${v}" ${mode===v?'selected':''}>${label}</option>`).join('');
     openPhase5Form({eyebrow:'RECRUITMENT INBOX',title:`เลือกอีเมลที่ Nakna อ่านจาก ${account.email}`,
       subtitle:'ไม่ต้องดึงเมลส่วนตัวทั้งหมด · ตั้งค่าบัญชีนี้ได้อิสระจาก Gmail อื่นและ Google หลัก',
-      html:`<div class="field full"><div class="nk-mgmail-safe-box">📬 <b>บัญชีที่เชื่อม:</b> ${escapeHtml(account.email)}<br><small>เลือกเฉพาะอีเมลที่ใช้รับสมัครงานได้ ก่อน Sync ครั้งถัดไป อีเมลที่เคยดึงไว้จะยังอยู่ในคิวจนกว่าจะคัดออกเอง</small></div></div>
+      html:`<div class="field full nk-mail-presets"><strong>เลือกรับเมลแบบไหน?</strong><p>เลือกวิธีแล้วกดบันทึก · ไม่มีการอ่าน Gmail เพิ่มจนกว่าจะ Sync</p><button type="button" class="secondary-btn" id="mgmailPresetApplications">ค้นหาเมลที่น่าจะสมัครงาน</button><button type="button" class="secondary-btn" id="mgmailPresetLabel">เฉพาะที่ HR ติดป้ายใน Gmail</button><small>ค้นหาจากคำสมัครงาน/Resume อาจพลาดเมลที่ไม่ระบุชัด · การติดป้ายเป็นวิธีที่ HR เลือกเองได้</small></div><div class="field full"><div class="nk-mgmail-safe-box">📬 <b>บัญชีที่เชื่อม:</b> ${escapeHtml(account.email)}<br><small>เลือกเฉพาะอีเมลที่ใช้รับสมัครงานได้ ก่อน Sync ครั้งถัดไป อีเมลที่เคยดึงไว้จะยังอยู่ในคิวจนกว่าจะคัดออกเอง</small></div></div>
         <div class="field full"><label>อ่านอีเมลจากส่วนไหนของบัญชีนี้</label><select id="mgmailScopeMode">${options}</select></div>
         <div class="field full" id="mgmailScopeValueWrap"><label id="mgmailScopeValueLabel">อีเมล / Label</label><textarea id="mgmailScopeValue" rows="2" maxlength="500" placeholder="jobs@company.com">${escapeHtml(account.scope_value||'')}</textarea><small id="mgmailScopeHint">คั่นหลายรายการด้วยเครื่องหมาย , เช่น jobs@company.com, hr@company.com</small></div>
         <div class="field full" id="mgmailQueryWrap"><label>Gmail Query ขั้นสูง</label><input id="mgmailQuery" maxlength="500" value="${escapeHtml(account.query||'newer_than:30d {สมัครงาน resume CV &quot;job application&quot;}')}"/><small>ใช้ไวยากรณ์ Gmail Search เช่น to:jobs@company.com newer_than:30d</small></div>
@@ -3300,7 +3309,7 @@ async function handleRecruitmentGmailAccountAction(event){
       $('#mgmailAllWarning').hidden=selected!=='all';
       $('#mgmailScopeDays').closest('.field').hidden=selected==='query';
       const t=$('#mgmailScopeValueLabel'),h=$('#mgmailScopeHint'),v=$('#mgmailScopeValue');
-      if(selected==='recipient'){t.textContent='ส่งถึงอีเมลเหล่านี้ (To)';h.textContent='เช่น jobs@company.com, careers@company.com · ต้องเป็นอีเมลที่รับใน Gmail นี้';v.placeholder='jobs@company.com, careers@company.com';}
+      if(selected==='recipient'){t.textContent='ส่งถึงอีเมลเหล่านี้ (To)';h.textContent='กรองเพียงผู้รับ: เมลแจ้งเตือน/โฆษณาที่ส่งถึงที่อยู่นี้ก็เข้ามาได้ หากต้องการเฉพาะสมัครงานให้ใช้ปุ่มด้านบน';v.placeholder='jobs@company.com, careers@company.com';}
       if(selected==='sender'){t.textContent='รับเฉพาะจากผู้ส่ง/โดเมนเหล่านี้';h.textContent='เช่น jobthai.com, jobs@jobboard.com, @linkedin.com';v.placeholder='jobs@jobboard.com, jobthai.com';}
       if(selected==='label'){t.textContent='ชื่อ Gmail Label';h.textContent='เช่น Recruitment หรือ สมัครงาน · ต้องสร้าง Label ใน Gmail ก่อน';v.placeholder='Recruitment';}
       let preview='';
@@ -3316,6 +3325,15 @@ async function handleRecruitmentGmailAccountAction(event){
     };
     controls.forEach(x=>$('#'+x)?.addEventListener(x==='mgmailScopeMode'?'change':'input',updateScopePreview));
     $('#mgmailScopeDays')?.addEventListener('change',updateScopePreview);
+    $('#mgmailPresetApplications')?.addEventListener('click',()=>{
+      $('#mgmailScopeMode').value='query';$('#mgmailScopeValue').value='';
+      $('#mgmailQuery').value=nkApplicationMailQuery($('#mgmailScopeDays').value);
+      $('#mgmailScopeMode').dispatchEvent(new Event('change',{bubbles:true}));updateScopePreview();
+    });
+    $('#mgmailPresetLabel')?.addEventListener('click',()=>{
+      $('#mgmailScopeMode').value='label';$('#mgmailScopeValue').value='สมัครงาน';
+      $('#mgmailScopeMode').dispatchEvent(new Event('change',{bubbles:true}));updateScopePreview();$('#mgmailScopeValue').focus();
+    });
     updateScopePreview();
     return;
   }
@@ -3367,8 +3385,8 @@ function openRecruitmentGmailSettings() {
   const d = state.recruitmentGmail || {};
   openPhase5Form({
     eyebrow:'RECRUITMENT GMAIL',
-    title:'ตั้งค่า Gmail ผู้สมัคร',
-    subtitle:'ตั้งค่าการอ่านใบสมัครจากบัญชี Google หลักเท่านั้น หากเชื่อม Gmail แยกแล้วไม่จำเป็นต้องเปิดส่วนนี้',
+    title:'ตั้งค่าอ่านเมลจาก Google หลัก (ขั้นสูง)',
+    subtitle:'นี่คือ Google หลัก ไม่ใช่บัญชี HR ที่เชื่อมแยก หากใช้บัญชีรับสมัครงานแยก ให้ปิดหน้าต่างนี้แล้วกด เลือกรับเมล ข้างบัญชีนั้น',
     html:`<div class="field full"><label class="toggle-line"><input id="p7RecruitEnabled" type="checkbox" ${d.enabled !== false ? 'checked' : ''}/> อ่านผู้สมัครจาก Google หลัก (ทางเลือก)</label></div>
       <div class="field full"><label>Gmail Search Query</label><input id="p7RecruitQuery" value="${escapeHtml(d.query || 'newer_than:30d {สมัคร resume CV &quot;job application&quot;}')}"/><small>ตัวอย่าง: <code>to:jobs@company.com newer_than:30d</code></small></div>`,
     onSave:async()=>{
