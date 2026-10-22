@@ -6,7 +6,7 @@ export function payrollTaskModel(detail,userId=0){
  for(const item of items){if(Number(item.base_salary||0)<=0)put(errors,item.employee_id,'ยังไม่ได้ตั้งฐานเงินเดือน');if(!String(item.bank_account_no||'').trim())put(warnings,item.employee_id,'ยังไม่มีบัญชีรับเงิน');}
  for(const item of items){
   if(Number(item.prior_net_pay||0)>0&&Math.abs(Number(item.net_pay||0)-Number(item.prior_net_pay))>.005)put(warnings,item.employee_id,'ยอดรับสุทธิเปลี่ยนจากรอบก่อน');
-  if(item.prior_net_pay!==undefined&&Number(item.prior_net_pay)===0)put(warnings,item.employee_id,'ยังไม่มีรอบก่อนสำหรับเทียบยอด');
+  // No comparison history is information, not a warning.
   if(item.payable_days_override!=null||item.prorated_salary_override!=null)put(warnings,item.employee_id,'มีการปรับวันหรือยอดเฉพาะรอบนี้');
  }
  for(const adjustment of detail?.adjustments||[])put(warnings,adjustment.employee_id,'มีรายการพิเศษในรอบนี้');

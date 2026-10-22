@@ -1,3 +1,22 @@
 /* Keep existing UI; change only guidance and task flow. */
 .nk-payroll-three-steps{grid-template-columns:repeat(3,minmax(0,1fr))!important}.nk-payroll-task-note{border:1px solid #dce8e2;border-radius:13px;padding:15px 17px;background:#f7fbf8;margin:12px 0}.nk-payroll-task-note>strong{font-size:13px;color:#234a40}.nk-payroll-task-note p{font-size:12px;line-height:1.8;color:#6a8076;margin:6px 0}.nk-payroll-task-note>small{font-size:11px;color:#7b8f84;line-height:1.8}.nk-payroll-task-note summary{cursor:pointer;font-size:12px;color:#167d7f}.nk-payroll-review-filters{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:18px 0 12px}.nk-payroll-review-filters>span{font-size:12px;color:#4c6c5e}.nk-payroll-review-filters button{font-size:12px;min-height:34px}.nk-payroll-review-filters small{font-size:11px;color:#7f9388}.nk-payroll-guide-actions{display:flex;gap:10px;align-items:center;margin:10px 0}.nk-payroll-helper{font-size:12px;line-height:1.7;color:#6f8579}@media(max-width:600px){.nk-payroll-three-steps{gap:6px!important}.nk-payroll-three-steps>div{padding:10px 7px!important}.nk-payroll-three-steps span{font-size:11px}.nk-payroll-review-filters{gap:7px}.nk-payroll-guide-actions{flex-wrap:wrap}}
 .nk-payroll-filter-status{flex-basis:100%;font-size:11px;color:#6c8377;margin:2px 0 0}.nk-payroll-review-filters button[aria-pressed=true]{background:#e5f3ec;border-color:#9fcbb9;color:#21694f}
+/* P10.22: short review first, full sheet on demand. */
+#nkPayrollAdvanced[hidden],#nkPayrollSimple[hidden],#nkPayrollRoundEdit[hidden]{display:none!important}
+.nk-payroll-view-switch{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap}
+.nk-payroll-view-switch .active{background:#e6f5f3;color:#076f74;border-color:#69b9b9}
+.nk-payroll-support{border-top:1px solid #e2eaea;margin:16px 0;padding:14px 0}
+.nk-payroll-support>summary{cursor:pointer;color:#48636d;font-weight:600}
+.nk-payroll-simple-wrap{width:100%;overflow:auto}
+.nk-payroll-simple-table{width:100%;border-collapse:collapse;font-size:14px}
+.nk-payroll-simple-table th{text-align:left;color:#5f7882;font-weight:500;background:#f5f9f9}
+.nk-payroll-simple-table th,.nk-payroll-simple-table td{padding:16px 12px;border-bottom:1px solid #e3ecee;vertical-align:top}
+.nk-payroll-simple-table small{display:block;color:#6e8088;line-height:1.6;margin-top:5px}
+.nk-payroll-simple-table .net{color:#00868b}
+.nk-payroll-simple-table td:nth-child(2),.nk-payroll-simple-table td:nth-child(3),.nk-payroll-simple-table td:nth-child(4){white-space:nowrap}
+.nk-payroll-person-issues{padding:14px 18px;background:#f0f8f7;border-radius:14px;margin-bottom:14px}
+.nk-payroll-person-issues p{margin:5px 0;color:#526e75}
+#nkPayrollRoundEdit{flex-basis:100%;padding:14px;background:#f5f9f9;border-radius:12px}
+#nkPayrollRoundEdit label{display:block;margin:10px 0}
+@media(min-width:761px){.nk-payroll-once{grid-template-columns:repeat(3,minmax(0,1fr))!important}}
+@media(max-width:760px){.nk-payroll-simple-table thead{display:none}.nk-payroll-simple-table,.nk-payroll-simple-table tbody{display:block}.nk-payroll-simple-table tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid #e0ebed;border-radius:14px;margin-bottom:12px;padding:12px}.nk-payroll-simple-table td{display:block;border:0;padding:8px 4px;font-size:13px;overflow-wrap:anywhere}.nk-payroll-simple-table td:first-child,.nk-payroll-simple-table td:nth-child(5),.nk-payroll-simple-table td:last-child{grid-column:1/-1}.nk-payroll-simple-table td[data-label]:before{content:attr(data-label);display:block;color:#71848a;font-size:11px;margin-bottom:5px}}
