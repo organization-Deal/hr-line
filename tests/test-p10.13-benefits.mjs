@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 const app=fs.readFileSync('public/app.js','utf8');
-const code=app.slice(app.indexOf('let nkBenefitSelectedId='),app.indexOf('\nfunction renderAttendance()',app.indexOf('let nkBenefitSelectedId=')));
+const code=app.slice(app.indexOf('let nkBenefitQuery='),app.indexOf('\nfunction renderAttendance()',app.indexOf('let nkBenefitQuery=')));
 class Element{
  constructor(){this.handlers={};this.dataset={};this.innerHTML='';this.value='';this.textContent='';this.classList={toggle(){}};}
  addEventListener(t,fn){this.handlers[t]=fn;}
@@ -20,7 +20,7 @@ assert.equal(ctx.nkBenefitCurrent({status:'active',end_date:'2026-10-21'}),false
 assert.equal(ctx.nkBenefitCurrent({status:'paused'}),false);
 assert.equal(ctx.nkBenefitCurrent({status:'active',start_date:'2026-10-22',end_date:'2026-10-22'}),true);
 ctx.renderBenefits();
-assert.ok($('#benefitSummary').innerHTML.includes('พนักงานที่มีสิทธิ์วันนี้</span><strong>1<small>คน'));
+assert.ok($('#benefitSummary').innerHTML.includes('data-benefit-metric="people">มีสิทธิ์วันนี้ <strong>1</strong> คน'));
 assert.ok($('#benefitProgramList').innerHTML.includes('Medical &lt;script&gt;'));
 assert.ok(!$('#benefitProgramList').innerHTML.includes('Medical <script>'));
 ctx.window.enrollBenefit(10);assert.equal(writes.length,0);assert.ok(form.html.includes('nkBenefitDepartment'));
@@ -33,3 +33,14 @@ const before=writes.length;ctx.window.enrollBenefit(10);assert.equal(writes.leng
 console.log('PASS benefits: date-aware counts, unique people, HTML escaping, role guard, review before save, inactive exclusion, partial failure and retry without duplicate successful writes');
 
 role='hr';state.employees=Array.from({length:60},(_,i)=>({id:i+1,status:'active',nickname:'Staff '+i}));ctx.window.enrollBenefit(10);$('#nkBenefitSelectVisible').onclick();assert.ok($('#nkBenefitSelectionCount').textContent.startsWith('เลือก 50 คน'));console.log('PASS selection capped at 50 employees');
+
+role='hr';ctx.renderBenefits();
+const listHtml=$('#benefitProgramList').innerHTML;
+assert.equal((listHtml.match(/data-benefit-enroll=/g)||[]).length,2);
+assert.ok(!listHtml.includes('data-benefit-select='));
+assert.ok(listHtml.includes('<details class="nk-benefit-inline-detail">'));
+const html=fs.readFileSync('public/index.html','utf8');
+assert.ok(!html.includes('id="nkBenefitGuide"'));
+assert.ok(!html.includes('id="nkBenefitDetail"'));
+assert.ok(!app.includes('data-benefit-start='));
+console.log('PASS simplicity: one management action per active benefit, inline disclosure, no duplicate CTA or side panel');

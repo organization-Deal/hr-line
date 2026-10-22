@@ -3397,7 +3397,6 @@ function openRecruitmentGmailSettings() {
   });
 }
 
-let nkBenefitSelectedId=null;
 let nkBenefitQuery='';
 let nkBenefitFilter='all';
 function nkBenefitIcon(type){
@@ -3423,32 +3422,23 @@ function renderBenefits(){
   const current=enrollments.filter(e=>active.some(b=>Number(b.id)===Number(e.benefit_id))&&nkBenefitCurrent(e));
   const count=id=>current.filter(e=>Number(e.benefit_id)===Number(id)).length;
   const pending=active.filter(b=>!count(b.id));
-  root.innerHTML=[['สวัสดิการที่เปิดใช้',active.length,'รายการ'],['พนักงานที่มีสิทธิ์วันนี้',new Set(current.map(e=>Number(e.employee_id))).size,'คน'],['ยังไม่มีผู้ได้รับสิทธิ์วันนี้',pending.length,'รายการ']].map(([label,value,unit])=>`<article><span>${label}</span><strong>${value}<small>${unit}</small></strong></article>`).join('');
+  root.innerHTML=[['programs','เปิดใช้',active.length,'สวัสดิการ'],['people','มีสิทธิ์วันนี้',new Set(current.map(e=>Number(e.employee_id))).size,'คน'],['pending','ยังไม่มีผู้ได้รับสิทธิ์',pending.length,'รายการ']].map(([key,label,value,unit])=>`<p data-benefit-metric="${key}">${label} <strong>${value}</strong> ${unit}</p>`).join('');
   $('#addBenefitBtn').classList.toggle('hidden',!canManage);
-  const guide=$('#nkBenefitGuide');
-  if(guide){guide.hidden=!canManage||(!pending.length&&data.length>0);guide.innerHTML=data.length?`<div><strong>ขั้นต่อไป: กำหนดผู้ได้รับสิทธิ์</strong><p>มี ${pending.length} สวัสดิการที่ยังไม่มีผู้ได้รับสิทธิ์วันนี้ ตรวจวันเริ่มและเลือกพนักงานให้แต่ละรายการ</p></div><button type="button" class="primary-btn" data-benefit-start="${Number(pending[0]?.id||0)}">เริ่มกำหนดสิทธิ์</button>`:`<div><strong>เริ่มดูแลสวัสดิการของทีม</strong><p>เพิ่มสวัสดิการ → เลือกพนักงาน → ตรวจทานและบันทึกสิทธิ์</p></div><button type="button" class="primary-btn" data-benefit-create>เพิ่มสวัสดิการแรก</button>`;}
   const shown=data.filter(b=>(!nkBenefitQuery||[b.name,b.description,benefitTypeLabel(b.benefit_type)].some(v=>String(v||'').toLowerCase().includes(nkBenefitQuery)))&&(nkBenefitFilter==='all'||nkBenefitFilter==='pending'&&b.status==='active'&&!count(b.id)||nkBenefitFilter==='active'&&b.status==='active'));
-  if(!data.some(b=>Number(b.id)===Number(nkBenefitSelectedId)))nkBenefitSelectedId=data[0]?.id||null;
   $('#benefitProgramList').innerHTML=shown.length?shown.map(b=>{
-    const n=count(b.id),selected=Number(b.id)===Number(nkBenefitSelectedId);
-    const status=b.status!=='active'?'ปิดใช้งาน':n?'มีผู้ได้รับสิทธิ์':'ยังไม่มีสิทธิ์ที่มีผลวันนี้';
-    const price=Number(b.employer_amount)>0||Number(b.employee_amount)>0?`บริษัท ${money(b.employer_amount||0)} · พนักงาน ${money(b.employee_amount||0)} / ${benefitFrequencyLabel(b.frequency)}`:'ตรวจเงื่อนไขและเงินสมทบก่อนกำหนดสิทธิ์';
-    return `<article class="nk-benefit-row ${selected?'is-selected':''}"><span class="nk-benefit-icon" aria-hidden="true">${nkBenefitIcon(b.benefit_type)}</span><div class="nk-benefit-copy"><div class="nk-benefit-name"><h3>${escapeHtml(b.name)}</h3><span class="badge ${n?'badge-success':'badge-neutral'}">${status}</span></div><p>${escapeHtml(b.description||benefitTypeLabel(b.benefit_type))}</p><span class="nk-benefit-meta">${Number(b.is_statutory)?'รายการตามกฎหมาย':'สวัสดิการเพิ่มเติม'} · ${escapeHtml(price)}</span></div><div class="nk-benefit-actions"><strong>${n}<small> คนมีสิทธิ์วันนี้</small></strong><button type="button" class="secondary-btn" data-benefit-select="${Number(b.id)}" aria-pressed="${selected}">ดูผู้ได้รับสิทธิ์</button>${canManage&&b.status==='active'?`<button type="button" class="primary-btn" data-benefit-enroll="${Number(b.id)}">กำหนดผู้ได้รับสิทธิ์</button>`:''}</div></article>`;
+    const n=count(b.id),list=enrollments.filter(e=>Number(e.benefit_id)===Number(b.id));
+    const recipients=list.length?list.map(e=>`<article class="nk-benefit-person"><span class="nk-benefit-avatar">${escapeHtml(String(e.nickname||e.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml(e.nickname||e.first_name||'ไม่ระบุชื่อ')}</strong><small>${escapeHtml(e.employee_code||'')}${e.start_date?' · เริ่ม '+formatDate(e.start_date):''}${e.end_date?' · ถึง '+formatDate(e.end_date):''}</small><span class="badge ${nkBenefitCurrent(e)?'badge-success':'badge-neutral'}">${nkBenefitStatus(e)}</span></div></article>`).join(''):'<p class="nk-benefit-empty">ยังไม่ได้กำหนดผู้ได้รับสิทธิ์</p>';
+    return `<article class="nk-benefit-row"><span class="nk-benefit-icon" aria-hidden="true">${nkBenefitIcon(b.benefit_type)}</span><div class="nk-benefit-copy"><div class="nk-benefit-name"><h3>${escapeHtml(b.name)}</h3>${b.status!=='active'?'<span class="badge badge-neutral">ปิดใช้งาน</span>':''}</div><span class="nk-benefit-meta">${escapeHtml(benefitTypeLabel(b.benefit_type))} · ${Number(b.is_statutory)?'รายการตามกฎหมาย':'สวัสดิการเพิ่มเติม'}</span></div><div class="nk-benefit-actions"><span>${n} คนมีสิทธิ์วันนี้</span>${canManage&&b.status==='active'?`<button type="button" class="primary-btn" data-benefit-enroll="${Number(b.id)}">จัดการสิทธิ์</button>`:''}</div><details class="nk-benefit-inline-detail"><summary>รายละเอียดและผู้ได้รับสิทธิ์</summary><div class="nk-benefit-detail-body"><p>${escapeHtml(b.description||'ยังไม่มีรายละเอียดเงื่อนไข')}</p><p>เงินสมทบที่บันทึก: บริษัท ${money(b.employer_amount||0)} · พนักงาน ${money(b.employee_amount||0)} / ${benefitFrequencyLabel(b.frequency)}</p><small>ตรวจนโยบายจริงก่อนใช้จำนวนเงิน 0 ซึ่งอาจเป็นค่าเริ่มต้น</small><h4>รายการสิทธิ์ ${list.length} รายการ</h4>${recipients}</div></details></article>`;
   }).join(''):`<div class="nk-benefit-empty"><strong>${data.length?'ไม่พบสวัสดิการที่ตรงกับตัวกรอง':'ยังไม่มีสวัสดิการ'}</strong><p>${data.length?'ลองค้นหาคำอื่นหรือเลือกแสดงทั้งหมด':'เพิ่มรายการแรก แล้วเลือกพนักงานที่ได้รับสิทธิ์'}</p></div>`;
-  const selected=data.find(b=>Number(b.id)===Number(nkBenefitSelectedId));
-  const list=enrollments.filter(e=>Number(e.benefit_id)===Number(nkBenefitSelectedId));
-  $('#nkBenefitDetailTitle').textContent=selected?.name||'ผู้ได้รับสิทธิ์';
-  $('#benefitEnrollmentList').innerHTML=selected?`<p class="nk-benefit-detail-note">${list.length} รายการสิทธิ์ · รวมสิทธิ์ที่ยังไม่เริ่ม พัก หรือสิ้นสุดแล้ว</p><details class="nk-benefit-terms"><summary>เงื่อนไขและเงินสมทบที่บันทึก</summary><p>${escapeHtml(selected.description||'ยังไม่มีรายละเอียดเงื่อนไข')}</p><p>บริษัท ${money(selected.employer_amount||0)} · พนักงาน ${money(selected.employee_amount||0)} / ${benefitFrequencyLabel(selected.frequency)}</p><small>จำนวนเงิน 0 อาจเป็นค่าเริ่มต้น ควรตรวจนโยบายก่อนนำไปใช้</small></details>`+(list.length?list.map(e=>`<article class="nk-benefit-person"><span class="nk-benefit-avatar">${escapeHtml(String(e.nickname||e.first_name||'?').slice(0,1))}</span><div><strong>${escapeHtml(e.nickname||e.first_name||'ไม่ระบุชื่อ')}</strong><small>${escapeHtml(e.employee_code||'')}${e.start_date?' · เริ่ม '+formatDate(e.start_date):''}${e.end_date?' · ถึง '+formatDate(e.end_date):''}</small><span class="badge ${nkBenefitCurrent(e)?'badge-success':'badge-neutral'}">${nkBenefitStatus(e)}</span></div></article>`).join(''):`<div class="nk-benefit-empty"><strong>ยังไม่ได้กำหนดผู้ได้รับสิทธิ์</strong><p>เลือกพนักงานและวันเริ่มสิทธิ์ ระบบจะแสดงสิทธิ์และช่วงเวลาที่บันทึก</p>${canManage&&selected.status==='active'?`<button type="button" class="primary-btn" data-benefit-enroll="${Number(selected.id)}">เลือกพนักงาน</button>`:''}</div>`):'<p class="nk-benefit-empty">เลือกสวัสดิการเพื่อดูรายละเอียดสิทธิ์</p>';
+
 }
 function nkInitBenefits(){
   const view=$('#view-benefits');if(!view||view.dataset.benefitsBound)return;view.dataset.benefitsBound='1';
   $('#nkBenefitSearch')?.addEventListener('input',e=>{nkBenefitQuery=e.target.value.trim().toLowerCase();renderBenefits();});
   $('#nkBenefitFilter')?.addEventListener('change',e=>{nkBenefitFilter=e.target.value;renderBenefits();});
   view.addEventListener('click',e=>{
-    const btn=e.target.closest('[data-benefit-select],[data-benefit-enroll],[data-benefit-start],[data-benefit-create]');if(!btn)return;
-    if(btn.hasAttribute('data-benefit-select')){nkBenefitSelectedId=Number(btn.dataset.benefitSelect);renderBenefits();if(window.matchMedia('(max-width:900px)').matches)$('#nkBenefitDetail')?.scrollIntoView({behavior:'smooth',block:'start'});}
-    else if(btn.hasAttribute('data-benefit-create')){if(nkCanManageBenefits())openBenefitCreate();}
-    else window.enrollBenefit(Number(btn.dataset.benefitEnroll||btn.dataset.benefitStart));
+    const btn=e.target.closest('[data-benefit-enroll]');if(!btn)return;
+    window.enrollBenefit(Number(btn.dataset.benefitEnroll));
   });
 }
 
@@ -3519,7 +3509,7 @@ window.enrollBenefit=benefitId=>{
         if(failed.length){$('#nkBenefitSaveStatus').textContent=`สำเร็จ ${completed.size} คน · ไม่สำเร็จ ${failed.map(f=>f.name).join(', ')} · กดยืนยันอีกครั้งเพื่อลองเฉพาะรายที่ยังไม่สำเร็จ`;
           // Keep the submitted selection and dates fixed while retrying partial results.
           throw new Error('บางรายการยังบันทึกไม่สำเร็จ กรุณาลองใหม่');}
-        state.benefits=await api('/api/benefits');nkBenefitSelectedId=Number(benefitId);renderBenefits();$('#modal').close();toast(`บันทึกสิทธิ์เรียบร้อย ${completed.size} คน`);
+        state.benefits=await api('/api/benefits');renderBenefits();$('#modal').close();toast(`บันทึกสิทธิ์เรียบร้อย ${completed.size} คน`);
       }catch(err){toast(err.message||'บันทึกไม่สำเร็จ',true);}
       finally{saving=false;$('#modalSave').disabled=false;$('#nkBenefitBack').disabled=completed.size>0;}
     };

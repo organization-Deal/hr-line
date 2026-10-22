@@ -1,15 +1,16 @@
-NAKNA P10.14 ต่อจาก P10.13
-อัป 5 ไฟล์ใน ZIP ทับ path เดิม รอ Cloudflare Deploy แล้ว Ctrl+Shift+R
-ไม่ต้องลบไฟล์ใดหรือ Migration
+NAKNA P10.15 — ลดปุ่มซ้ำหน้าสวัสดิการ
+ต่อจาก P10.14 / อัป 6 ไฟล์ทับ path เดิม รอ Deploy แล้ว Ctrl+Shift+R
+ไม่ต้องลบไฟล์หรือ Migration
 
-นำออกจาก HTML จริง ไม่ใช่เพียงซ่อนด้วย CSS:
-- เมนูและหน้าพักยืดกับนากนะ
-- การ์ดเชื่อม LINE OA บริษัท, shortcut, ปุ่มตั้งค่า OA และ modal กรอก token
-คง statusLineBadge/statusLineText และ LINE นากนะกลางไว้
-ไม่เปลี่ยน src/index.js, LINE token, ฐานข้อมูล หรือระบบแจ้งเตือน HR
-คง Recruitment P10.12 และสวัสดิการ P10.13
-เพิ่มตรวจ retired UI ใน npm run audit เพื่อกัน HTML เก่าพากลับมาอีก
+- เหลือ + เพิ่มสวัสดิการ ที่หัวหน้า
+- หนึ่งปุ่ม จัดการสิทธิ์ ต่อสวัสดิการที่เปิดใช้งาน สำหรับ Role ที่จัดการได้
+- เอากล่องเริ่มกำหนดสิทธิ์และแผงรายละเอียดขวาออก
+- รายชื่อผู้ได้รับสิทธิ์ เงื่อนไข และเงินสมทบ อยู่ในส่วนกางดูของแต่ละรายการ
+- ย่อสรุปตัวเลขเป็นบรรทัดสั้น ไม่ใช้การ์ดสูง
+- ไม่เพิ่มปุ่มลัดซ้ำในกรณีข้อมูลว่าง
+- คงการเลือกหลายคน กรองแผนก ตรวจทานก่อนบันทึก และ retry เฉพาะรายการล้มเหลว
+- คงการเอาเมนูพักยืดและ OA บริษัทออกตาม P10.14
 
-ทดสอบ npm run audit, test-release-version.mjs, test-p10.13-benefits.mjs, test-p10.12-recruitment.mjs ผ่าน
-Audit ใช้ scripts/verify-line-oa-settings-retired.mjs และ scripts/verify-move-retired.mjs ที่มีใน ZIP ฐานเดิม
-ยังไม่ได้ Deploy หรือทดสอบหน้าเว็บจริง
+ทดสอบ npm run audit, test-release-version.mjs, test-p10.13-benefits.mjs และ test-p10.12-recruitment.mjs ผ่าน
+เพิ่มตรวจว่ามีปุ่มจัดการเพียงหนึ่งปุ่มต่อรายการ และไม่มีปุ่ม/แผงซ้ำเดิม
+ยังไม่ได้ Deploy หรือทดสอบภาพบน Browser/มือถือจริง
