@@ -1,8 +1,9 @@
+import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnostics, ensureNotificationCenter } from './notification-center.js';
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P9.33-EMPLOYEE-DOCUMENT-UPLOAD-FIX';
-const NAKNA_RUNTIME_VERSION = '1.0-P9.33-EMPLOYEE-DOCUMENT-UPLOAD-FIX';
+const NAKNA_RUNTIME_RELEASE = 'P10.17-NOTIFICATION-CENTER';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.17-NOTIFICATION-CENTER';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -1731,21 +1732,13 @@ export default {
     const jobs=[]; // Nakna Move reminders removed; other HR cron jobs unchanged.
     if(clock.hour===8 && clock.minute===0){
       jobs.push(
-        sendDailyHrBrief(env),
         runPhase5DailyAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'phase5_daily_failed',message:String(error?.message||error)}))),
         syncAllRecruitmentGmail(env).catch(error=>console.error(JSON.stringify({level:'error',event:'recruitment_gmail_daily_failed',message:String(error?.message||error)}))),
         syncAllDedicatedRecruitmentInboxes(env).catch(error=>console.error(JSON.stringify({level:'error',event:'recruitment_multi_gmail_daily_failed',message:String(error?.message||error)}))),
         runDocumentEvidenceAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'document_evidence_daily_failed',message:String(error?.message||error)})))
       );
     }
-    // P7.93: once per day at 12:30 Asia/Bangkok, notify only employees who are
-    // scheduled to work and still have no check-in. Already checked-in staff,
-    // leave requests (approved/pending/awaiting evidence), holidays/non-workdays, later shifts, and duplicate sends are skipped.
-    if(clock.time===MISSING_CHECKIN_REMINDER_TIME){
-      jobs.push(runMissingCheckinReminderAutomation(env).catch(error=>console.error(JSON.stringify({level:'error',event:'missing_checkin_reminder_failed',message:String(error?.message||error)}))));
-    }
-    // P9.28: heartbeat + catch up after a missed 13:00 tick, per recipient.
-    jobs.push(runDailyHrStatusTick(env,controller).catch(error=>console.error(JSON.stringify({level:'error',event:'hr_daily_status_failed',message:String(error?.message||error)}))));
+    jobs.push(runNotificationCenter(env,controller,notificationCenterHelpers()).catch(error=>console.error(JSON.stringify({level:'error',event:'notification_center_failed',message:String(error?.message||error)}))));
     await Promise.all(jobs);
   },
 };
@@ -1754,6 +1747,44 @@ async function handleApi(request, env, url, auth, ctx) {
   const method = request.method;
   const path = url.pathname;
   const clientId = auth.clientId ? Number(auth.clientId) : null;
+
+  if(['/api/notification-center','/api/notification-center/test','/api/attendance-reminder-settings'].includes(path)) return notificationCenterApi(request,env,auth,notificationCenterHelpers());
+
+  if(path==='/api/hr/notification-health' && method==='GET'){
+    if(!clientId)return json({error:'COMPANY_REQUIRED'},409);
+    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์'},403);
+    await ensureMissingCheckinReminderReady(env.DB);
+    await ensureDailyHrStatusReady(env.DB);
+    await ensureNotificationCenter(env.DB);
+    const clock=bangkokClock();
+    const reportDate=String(url.searchParams.get('date')||clock.date);
+    const oldest=new Date(Date.parse(clock.date+'T00:00:00Z')-14*86400000).toISOString().slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate) || reportDate>clock.date || reportDate<oldest)
+      return json({error:'INVALID_REPORT_DATE',hint:'ใช้ YYYY-MM-DD ไม่เกิน 14 วันย้อนหลัง'},400);
+    const [settings,counts,summary,heartbeat,hrHistory,holiday]=await Promise.all([
+      getMissingCheckinReminderSettings(env.DB,clientId),
+      env.DB.prepare(`SELECT status,COUNT(*) AS n,MAX(http_status) AS http_status
+        FROM (SELECT status,http_status,client_id,reminder_date FROM attendance_reminder_logs UNION ALL SELECT CASE WHEN status='accepted' THEN 'sent' ELSE status END,http_status,client_id,send_date FROM notification_center_outbox WHERE kind='checkin') WHERE client_id=?1 AND reminder_date=?2 GROUP BY status`)
+        .bind(clientId,reportDate).all(),
+      getDailyHrSummaryDiagnostics(env,clientId),
+      env.DB.prepare(`SELECT value_json FROM notification_center_runtime WHERE client_id=?1 AND runtime_key='checkin'`).bind(clientId).first(),
+      env.DB.prepare(`SELECT status,COUNT(*) AS n,MAX(http_status) AS http_status
+        FROM (SELECT status,http_status,client_id,summary_date FROM hr_daily_status_deliveries UNION ALL SELECT status,http_status,client_id,send_date FROM notification_center_outbox WHERE kind='hr_summary') WHERE client_id=?1 AND summary_date=?2 GROUP BY status`)
+        .bind(clientId,reportDate).all(),
+      env.DB.prepare('SELECT name FROM company_holidays WHERE client_id=?1 AND holiday_date=?2 LIMIT 1')
+        .bind(clientId,reportDate).first()
+    ]);
+    const aggregate=rs=>Object.fromEntries((rs.results||[]).map(r=>[String(r.status),{
+      count:Number(r.n||0),last_http_status:r.http_status||null}]));
+    const lastReminderRun=safeJsonParse(heartbeat?.value_json,null);
+    return json({ok:true,date:reportDate,time:clock.time,
+      company_holiday:holiday?String(holiday.name||'วันหยุดบริษัท'):null,
+      checkin_reminder:{enabled:Boolean(settings?.enabled),send_time:settings.reminder_time,send_window:'ภายใน 60 นาทีหลังเวลาที่ตั้ง (Bangkok)',
+        deliveries:aggregate(counts),latest_automated_attempt:lastReminderRun?.date===reportDate?{
+          at:lastReminderRun.at,time:lastReminderRun.time}:null},
+      hr_summary_history:{date:reportDate,deliveries:aggregate(hrHistory)},
+      hr_summary_today:summary});
+  }
 
   if(path==='/api/hr/daily-summary/status'&&method==='GET'){
     if(!clientId)return json({error:'COMPANY_REQUIRED'},409);
@@ -2436,40 +2467,6 @@ async function handleApi(request, env, url, auth, ctx) {
   const holidayDeleteMatch=path.match(/^\/api\/company-holidays\/(\d+)$/);
   if(holidayDeleteMatch && method==='DELETE'){
     if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์จัดการวันหยุด'},403); await env.DB.prepare('DELETE FROM company_holidays WHERE id=?1 AND client_id=?2').bind(Number(holidayDeleteMatch[1]),clientId).run(); return json({ok:true});
-  }
-
-  if(path==='/api/attendance-reminder-settings' && method==='GET'){
-    const settings=await getMissingCheckinReminderSettings(env.DB,clientId);
-    return json({ok:true,settings});
-  }
-
-  if(path==='/api/attendance-reminder-settings' && method==='PATCH'){
-    if(!canManagePeopleAdmin(auth.role))return json({error:'ไม่มีสิทธิ์แก้การแจ้งเตือนเช็กอิน'},403);
-    try{
-      await ensureMissingCheckinReminderReady(env.DB);
-      const body=await safeJson(request);
-      const enabled=body.enabled===false||body.enabled===0||String(body.enabled).toLowerCase()==='false'||String(body.enabled)==='0'?0:1;
-      const messageText=normalizeMissingCheckinReminderMessage(body.message_text);
-      // P7.95: store the live setting on clients (a table every workspace already has).
-      // This avoids save failures caused by an older/partially-created reminder settings table.
-      const write=await env.DB.prepare(`UPDATE clients SET attendance_reminder_enabled=?1,attendance_reminder_message=?2 WHERE id=?3`)
-        .bind(enabled,messageText,clientId).run();
-      if(Number(write.meta?.changes||0)<1)return json({error:'ไม่พบบริษัทสำหรับบันทึกการตั้งค่า'},404);
-      // Keep the legacy table in sync when available for backward compatibility only.
-      try{
-        await env.DB.prepare(`DELETE FROM attendance_reminder_settings WHERE client_id=?1`).bind(clientId).run();
-        await env.DB.prepare(`INSERT INTO attendance_reminder_settings (client_id,enabled,message_text,updated_at) VALUES (?1,?2,?3,CURRENT_TIMESTAMP)`)
-          .bind(clientId,enabled,messageText).run();
-      }catch(error){
-        console.warn(JSON.stringify({level:'warn',event:'attendance_reminder_legacy_sync_failed',client_id:Number(clientId),message:String(error?.message||error)}));
-      }
-      const settings=await getMissingCheckinReminderSettings(env.DB,clientId);
-      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'attendance.reminder.update','client',String(clientId),settings);
-      return json({ok:true,settings});
-    }catch(error){
-      console.error(JSON.stringify({level:'error',event:'attendance_reminder_settings_save_failed',client_id:Number(clientId),message:String(error?.message||error)}));
-      return json({error:'บันทึกการแจ้งเตือนไม่สำเร็จ',detail:String(error?.message||error).slice(0,240)},500);
-    }
   }
 
   if(path==='/api/attendance-face-settings' && method==='GET'){
@@ -9130,6 +9127,14 @@ async function ensureMissingCheckinReminderReady(db){
   }catch(error){
     console.warn(JSON.stringify({level:'warn',event:'attendance_reminder_settings_migration_skipped',message:String(error?.message||error)}));
   }
+  await ensureColumns(db,'attendance_reminder_logs',[
+    ['attempts','INTEGER NOT NULL DEFAULT 0'],
+    ['lease_until','INTEGER NOT NULL DEFAULT 0'],
+    ['next_attempt_at','INTEGER NOT NULL DEFAULT 0'],
+    ['retry_key','TEXT'],
+    ['message_json','TEXT'],
+    ['http_status','INTEGER']
+  ]);
   SCHEMA_READY.add('missing_checkin_reminders');
 }
 
@@ -9141,6 +9146,8 @@ function normalizeMissingCheckinReminderMessage(value){
 async function getMissingCheckinReminderSettings(db,clientId){
   await ensureMissingCheckinReminderReady(db);
   const row=await db.prepare('SELECT attendance_reminder_enabled AS enabled,attendance_reminder_message AS message_text FROM clients WHERE id=?1 LIMIT 1').bind(Number(clientId)).first();
+  let central=null;try{central=await db.prepare("SELECT enabled,send_time,message_text,updated_at FROM notification_center_settings WHERE client_id=?1 AND kind='checkin'").bind(Number(clientId)).first();}catch{}
+  if(central)return {enabled:Boolean(central.enabled),reminder_time:central.send_time,message_text:central.message_text,updated_at:central.updated_at};
   return {
     enabled: row?Boolean(Number(row.enabled)):true,
     reminder_time:MISSING_CHECKIN_REMINDER_TIME,
@@ -9190,16 +9197,44 @@ async function writeMissingCheckinReminderLogs(db,rows,today){
   }
 }
 
+// P10.10-DAILY-NOTIFICATION-RECOVERY INSTALLED
+// Only between 12:30 and 12:59 Bangkok, once per 5-minute slot.
+// Sunday is always skipped, even if there are employee-specific Sunday shifts.
+// Daily per-employee acceptance logs prevent multiple LINE sends.
+function isNaknaP1010ReminderDue(clock){
+  return Boolean(clock && Number(clock.weekday)!==7 && clock.time>='12:30' && clock.time<'13:00' && Number(clock.minute)%5===0);
+}
+
+// LINE accepts retry keys for push; a 409 + accepted request ID means that the
+// SAME notification was previously accepted (not necessarily displayed).
+async function pushNaknaReliableReminderRequest(accessToken,to,payloadJson,retryKey){
+  if(!accessToken)return {accepted:false,retryable:true,http_status:0,error:'LINE_TOKEN_MISSING'};
+  const abort=new AbortController();
+  const timer=setTimeout(()=>abort.abort(),10000);
+  try{
+    const response=await fetch('https://api.line.me/v2/bot/message/push',{
+      method:'POST',signal:abort.signal,
+      headers:{'content-type':'application/json',authorization:'Bearer '+accessToken,'X-Line-Retry-Key':retryKey},
+      body:JSON.stringify({to,messages:JSON.parse(payloadJson)})
+    });
+    const accepted=response.ok||(response.status===409&&Boolean(response.headers.get('x-line-accepted-request-id')));
+    const status=response.status;
+    return {accepted,retryable:status===429||status===408||status>=500,http_status:status,
+      error:accepted?null:'LINE_HTTP_'+status};
+  }catch(error){
+    return {accepted:false,retryable:true,http_status:0,
+      error:error?.name==='AbortError'?'LINE_TIMEOUT':'LINE_NETWORK_ERROR'};
+  }finally{clearTimeout(timer);}
+}
+
 async function runMissingCheckinReminderAutomation(env){
   await ensureMissingCheckinReminderReady(env.DB);
   const clock=bangkokClock();
-  if(clock.time!==MISSING_CHECKIN_REMINDER_TIME)return {sent:0,eligible:0,skipped:true,time:clock.time};
+  if(!isNaknaP1010ReminderDue(clock))return {skipped:true,reason:'outside_time_or_sunday',time:clock.time};
   const today=clock.date,weekday=Number(clock.weekday||7),fallbackWorkday=weekday<=5?1:0;
   const tokenCache=new Map();
-  let lastEmployeeId=0,eligible=0,sent=0,failed=0,batches=0;
+  let lastEmployeeId=0,eligible=0,sent=0,failed=0,retrying=0,attempted=0;
   while(true){
-    // Resolve schedule precedence in SQL so this stays cheap even with many companies:
-    // employee rule > department rule > company rule > Mon-Fri company default.
     const result=await env.DB.prepare(`
       SELECT e.id,e.client_id,e.line_user_id,COALESCE(e.line_provider_scope,'default') AS line_provider_scope,
         COALESCE(NULLIF(TRIM(c.attendance_reminder_message),''),?6) AS reminder_message
@@ -9245,7 +9280,7 @@ async function runMissingCheckinReminderAutomation(env){
         ),c.work_start,'09:00')<=?5
         AND NOT EXISTS (
           SELECT 1 FROM attendance_reminder_logs ar
-          WHERE ar.client_id=e.client_id AND ar.employee_id=e.id AND ar.reminder_date=?2
+          WHERE ar.client_id=e.client_id AND ar.employee_id=e.id AND ar.reminder_date=?2 AND ar.status IN ('sent','failed')
         )
       ORDER BY e.id
       LIMIT 1000
@@ -9254,37 +9289,62 @@ async function runMissingCheckinReminderAutomation(env){
     if(!rows.length)break;
     lastEmployeeId=Number(rows[rows.length-1].id||lastEmployeeId);
     eligible+=rows.length;
-
-    // Multicast keeps outbound requests small. Default Nakna OA recipients can be
-    // batched across companies; dedicated company OAs are grouped by integration scope.
-    const groups=new Map();
-    for(const row of rows){
-      const scope=String(row.line_provider_scope||'default');
-      const messageText=normalizeMissingCheckinReminderMessage(row.reminder_message);
-      const providerKey=scope==='default'?'default':`${Number(row.client_id)}|${scope}`;
-      const key=JSON.stringify([providerKey,messageText]);
-      if(!groups.has(key))groups.set(key,{client_id:Number(row.client_id),scope,messageText,rows:[]});
-      groups.get(key).rows.push(row);
-    }
-    for(const group of groups.values()){
-      const tokenKey=group.scope==='default'?'default':`${group.client_id}|${group.scope}`;
-      let accessToken=tokenCache.get(tokenKey);
-      if(accessToken===undefined){
-        accessToken=await getAccessTokenForProviderScope(env,group.client_id,group.scope).catch(()=>null);
-        tokenCache.set(tokenKey,accessToken||null);
+    const now=Date.now();
+    let cursor=0;
+    const handle=async()=>{
+      while(cursor<rows.length){
+        const row=rows[cursor++];
+        const cid=Number(row.client_id),employeeId=Number(row.id),scope=String(row.line_provider_scope||'default');
+        const recipient=String(row.line_user_id||'');
+        const messageJson=JSON.stringify([buildMissingCheckinReminderFlex(row.reminder_message)]);
+        try{
+          await env.DB.prepare(`INSERT OR IGNORE INTO attendance_reminder_logs
+              (client_id,employee_id,reminder_date,reminder_time,provider_scope,status,retry_key,message_json)
+              VALUES (?1,?2,?3,?4,?5,'pending',?6,?7)`)
+            .bind(cid,employeeId,today,MISSING_CHECKIN_REMINDER_TIME,scope,crypto.randomUUID(),messageJson).run();
+          const lease=now+60000;
+          const claim=await env.DB.prepare(`UPDATE attendance_reminder_logs SET
+             status='sending',attempts=COALESCE(attempts,0)+1,lease_until=?4
+             WHERE client_id=?1 AND employee_id=?2 AND reminder_date=?3
+             AND status IN ('pending','retry','sending') AND COALESCE(attempts,0)<5
+             AND COALESCE(lease_until,0)<=?5 AND COALESCE(next_attempt_at,0)<=?5`)
+            .bind(cid,employeeId,today,lease,now).run();
+          if(Number(claim.meta?.changes||0)!==1)continue;
+          attempted++;
+          const saved=await env.DB.prepare(`SELECT retry_key,message_json,attempts FROM attendance_reminder_logs
+            WHERE client_id=?1 AND employee_id=?2 AND reminder_date=?3`)
+            .bind(cid,employeeId,today).first();
+          const tokenKey=scope==='default'?'default':cid+'|'+scope;
+          if(!tokenCache.has(tokenKey))tokenCache.set(tokenKey,getAccessTokenForProviderScope(env,cid,scope).catch(()=>null));
+          const token=await tokenCache.get(tokenKey);
+          const response=await pushNaknaReliableReminderRequest(token,recipient,saved.message_json,saved.retry_key);
+          const attempts=Number(saved.attempts||1),retry=response.retryable&&attempts<5;
+          const status=response.accepted?'sent':retry?'retry':'failed';
+          const next=retry?Date.now()+Math.min(8*60000,30000*2**(attempts-1)):0;
+          await env.DB.prepare(`UPDATE attendance_reminder_logs SET status=?4,http_status=?5,error_text=?6,
+             lease_until=0,next_attempt_at=?7,sent_at=CASE WHEN ?4='sent' THEN CURRENT_TIMESTAMP ELSE sent_at END
+             WHERE client_id=?1 AND employee_id=?2 AND reminder_date=?3 AND status='sending'`)
+            .bind(cid,employeeId,today,status,Number(response.http_status||0),response.error||null,next).run();
+          if(response.accepted)sent++;else if(retry)retrying++;else failed++;
+          if(!response.accepted)console.warn(JSON.stringify({event:'missing_checkin_delivery_failed',client_id:cid,
+            http_status:response.http_status,error:response.error,attempts,retry}));
+        }catch(error){
+          failed++;
+          console.error(JSON.stringify({event:'missing_checkin_delivery_store_failed',client_id:cid,
+            message:String(error?.message||error).slice(0,250)}));
+        }
       }
-      if(!accessToken){failed+=group.rows.length;continue;}
-      const message=buildMissingCheckinReminderFlex(group.messageText);
-      for(let i=0;i<group.rows.length;i+=500){
-        const chunk=group.rows.slice(i,i+500),to=chunk.map(row=>row.line_user_id);
-        const ok=await multicastLineMessages(accessToken,to,[message]); batches++;
-        if(ok){sent+=chunk.length;await writeMissingCheckinReminderLogs(env.DB,chunk,today);}else failed+=chunk.length;
-      }
-    }
+    };
+    await Promise.all(Array.from({length:Math.min(4,rows.length)},handle));
     if(rows.length<1000)break;
   }
-  console.log(JSON.stringify({level:'info',event:'missing_checkin_reminder_complete',date:today,time:clock.time,eligible,sent,failed,batches}));
-  return {date:today,time:clock.time,eligible,sent,failed,batches};
+  try{
+    await ensureDailyHrStatusReady(env.DB);
+    await setDailyHrRuntime(env.DB,'missing_checkin_last_run',{
+      date:today,time:clock.time,at:new Date().toISOString(),eligible,attempted,sent,failed,retrying,release:'P10.10'});
+  }catch(error){console.warn(JSON.stringify({event:'missing_checkin_run_health_write_failed',message:String(error?.message||error)}));}
+  console.log(JSON.stringify({event:'missing_checkin_reminder_complete',date:today,time:clock.time,eligible,attempted,sent,failed,retrying}));
+  return {date:today,time:clock.time,eligible,attempted,sent,failed,retrying};
 }
 
 function safeJsonParse(value,fallback=null){try{return JSON.parse(value);}catch{return fallback;}}
@@ -11139,7 +11199,7 @@ async function pushDailyHrSummaryRequest(accessToken,to,payloadJson,retryKey){
     });
     const accepted=response.ok||(response.status===409&&Boolean(response.headers.get('x-line-accepted-request-id')));
     // Do not persist tokens, names, message bodies or raw LINE request payloads in logs.
-    return {accepted,retryable:response.status>=500,status:response.status,
+    return {accepted,retryable:response.status===429||response.status===408||response.status>=500,status:response.status,
       error:accepted?null:`LINE_HTTP_${response.status}`};
   }catch(error){
     return {accepted:false,retryable:true,status:0,error:error?.name==='AbortError'?'LINE_TIMEOUT':'LINE_NETWORK_ERROR'};
@@ -11189,9 +11249,18 @@ async function deliverDailyHrSummary(env,clientId,recipient,clock,message){
   return {...result,skipped:false};
 }
 
+// P10.10: Safe automatic-only day-off guard. Manual HR summary is still accessible.
+async function getNaknaP1010HrDayOff(db,clientId,clock){
+  if(Number(clock.weekday)===7)return {skip:true,reason:'sunday'};
+  const row=await db.prepare('SELECT name FROM company_holidays WHERE client_id=?1 AND holiday_date=?2 LIMIT 1')
+    .bind(Number(clientId),clock.date).first();
+  return row?{skip:true,reason:'company_holiday',name:String(row.name||'วันหยุดบริษัท')}:{skip:false};
+}
+
 async function sendDailyHrStatusSummary(env){
   const clock=bangkokClock();
   if(!isDailyHrSummaryDue(clock))return {sent:0,clients:0,skipped:true,time:clock.time};
+  if(Number(clock.weekday)===7)return {sent:0,clients:0,skipped:true,reason:'sunday',date:clock.date};
   await ensureDailyHrStatusReady(env.DB);
   await ensureAttendanceRetroReady(env.DB);
   const clients=(await env.DB.prepare('SELECT id,name FROM clients ORDER BY id').all()).results||[];
@@ -11199,6 +11268,8 @@ async function sendDailyHrStatusSummary(env){
   for(const client of clients){
     const cid=Number(client.id);
     try{
+      const dayOff=await getNaknaP1010HrDayOff(env.DB,cid,clock);
+      if(dayOff.skip){await setDailyHrRuntime(env.DB,`client:${cid}`,{date:clock.date,time:clock.time,auto_skipped:true,skip_reason:dayOff.reason,error:null});continue;}
       const recipients=await getDailyHrLineRecipients(env.DB,cid);
       recipientCount+=recipients.length;
       if(!recipients.length){
@@ -11293,27 +11364,8 @@ async function resolveDailyHrLineAccess(db,lineCtx,lineUserId,requestedClientId=
 }
 
 async function getDailyHrSummaryDiagnostics(env,clientId,recipient=null){
-  await ensureDailyHrStatusReady(env.DB);
-  const clock=bangkokClock(),cid=Number(clientId);
-  const [heartbeat,clientRun,deliveries,recipients]=await Promise.all([
-    env.DB.prepare(`SELECT value_json FROM hr_daily_status_runtime WHERE runtime_key='scheduler'`).first(),
-    env.DB.prepare(`SELECT value_json FROM hr_daily_status_runtime WHERE runtime_key=?1`).bind(`client:${cid}`).first(),
-    env.DB.prepare(`SELECT provider_scope,line_user_id,status,attempts,http_status,last_error,accepted_at,next_attempt_at
-      FROM hr_daily_status_deliveries WHERE client_id=?1 AND summary_date=?2 AND summary_time=?3`)
-      .bind(cid,clock.date,DAILY_HR_STATUS_TIME).all(),
-    getDailyHrLineRecipients(env.DB,cid)
-  ]);
-  const scheduler=safeJsonParse(heartbeat?.value_json,null),run=safeJsonParse(clientRun?.value_json,null);
-  const rows=deliveries.results||[];
-  const mine=recipient?rows.find(r=>r.provider_scope===recipient.line_provider_scope&&r.line_user_id===recipient.line_user_id):null;
-  // Return only recipient-independent aggregates and the caller's own outcome.
-  // No raw LINE IDs, retry keys, message snapshots or credentials are exposed.
-  return {release:NAKNA_RUNTIME_RELEASE,date:clock.date,time:clock.time,send_time:DAILY_HR_STATUS_TIME,
-    catchup_until:'18:00',scheduler,last_run:run?.date===clock.date?run:null,eligible:recipients.length,
-    accepted:rows.filter(r=>r.status==='accepted').length,failed:rows.filter(r=>r.status==='failed').length,
-    retrying:rows.filter(r=>r.status==='retry'||r.status==='sending').length,
-    me:mine?{status:mine.status,attempts:Number(mine.attempts),http_status:mine.http_status,error:mine.last_error,
-      accepted_at:mine.accepted_at,next_attempt_at:mine.next_attempt_at}:null};
+  await ensureMissingCheckinReminderReady(env.DB);
+  return notificationCenterDiagnostics(env.DB,Number(clientId),recipient,await getDailyHrLineRecipients(env.DB,Number(clientId)));
 }
 
 function dailyHrErrorHint(code){
@@ -11332,7 +11384,7 @@ function dailyHrErrorHint(code){
 
 function buildDailyHrDiagnosticsFlex(client,data,recipient){
   const lastSeen=data.scheduler?.last_seen_at;
-  let heartbeat='ยังไม่พบการทำงานของ Cron หลังลง P9.28';
+  let heartbeat='ยังไม่พบการทำงานของ Cron P10.17';
   if(lastSeen){
     const d=new Date(lastSeen),c=bangkokClock(d);
     heartbeat=`${formatThaiShortDate(c.date)} ${c.time} น.`;
@@ -11340,16 +11392,16 @@ function buildDailyHrDiagnosticsFlex(client,data,recipient){
   }
   const me=data.me;
   const statusLabel=me?.status==='accepted'?'LINE รับคำขอแล้ว':me?.status==='failed'?'ส่งไม่สำเร็จ':me?'กำลังส่ง / รอลองใหม่':'ยังไม่มีการส่งถึงบัญชีนี้วันนี้';
-  const note=me?.error?dailyHrErrorHint(me.error):data.last_run?.error?dailyHrErrorHint(data.last_run.error):
+  const note=data.enabled===false?'ปิดการแจ้งเตือนนี้อยู่ เปิดได้จากเมนูการแจ้งเตือน':!data.weekdays?.includes(bangkokClock().weekday)?'วันนี้ไม่ได้อยู่ในวันที่ตั้งให้แจ้งเตือน':me?.error?dailyHrErrorHint(me.error):data.last_run?.error?dailyHrErrorHint(data.last_run.error):
     !lastSeen?'ตรวจ Cloudflare > Worker hr-line > Settings > Triggers > Cron Triggers ว่ามี * * * * *':
-    data.time<'13:00'?'ยังไม่ถึงเวลารอบ 13:00 น.':
-    data.time>='18:00'?'เลยช่วงส่งชดเชยวันนี้แล้ว กดดูสรุปวันนี้ได้โดยไม่รอรอบถัดไป':
-    'รอบอัตโนมัติตรวจทุกนาทีในช่วง 13:00–17:59 น. และบันทึกแยกผู้รับ';
+    data.time<data.send_time?`ยังไม่ถึงเวลารอบ ${data.send_time} น.`:
+    data.time>=data.catchup_until?'เลยช่วงส่งชดเชยวันนี้แล้ว กดดูสรุปวันนี้ได้โดยไม่รอรอบถัดไป':
+    `รอบอัตโนมัติตรวจทุกนาที เริ่ม ${data.send_time} น. และบันทึกแยกผู้รับ`;
   return {type:'flex',altText:`สถานะสรุป HR · ${client.name}`,contents:lineBubble({
     eyebrow:'NAKNA · HR DAILY STATUS',title:'สถานะสรุป HR',subtitle:client.name,
     status:statusLabel,statusTone:me?.status==='accepted'?'success':me?.status==='failed'?'error':'warning',
     body:[lineInfoCard([
-      lineInfoRow('เวลาส่ง','13:00 น. · เวลาไทย'),
+      lineInfoRow('เวลาส่ง',`${data.send_time} น. · เวลาไทย`),
       lineInfoRow('บัญชีนี้',lineManagementRoleLabel(recipient.role)),
       lineInfoRow('ผู้รับที่มีสิทธิ์',`${data.eligible} คน`),
       lineInfoRow('Cron ล่าสุด',heartbeat),
@@ -13475,3 +13527,11 @@ async function safeJson(request) {
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
 }
+
+function bangkokClock(date=new Date()){
+ const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date).map(p=>[p.type,p.value]));
+ const dateKey=`${parts.year}-${parts.month}-${parts.day}`;
+ return {date:dateKey,time:`${parts.hour}:${parts.minute}`,hour:Number(parts.hour),minute:Number(parts.minute),weekday:weekdayBangkok(dateKey)};
+}
+
+function notificationCenterHelpers(){return {canManagePeopleAdmin,ensureMissingCheckinReminderReady,ensureDailyHrStatusReady,ensureAttendanceRetroReady,getDailyHrLineRecipients,getAccessTokenForProviderScope,resolveEffectiveWorkSchedule,getDashboard,dashboardAttentionTotal,safeAudit};}

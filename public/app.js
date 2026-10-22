@@ -1,3 +1,4 @@
+import { createNotificationCenter } from './notifications.js?v=P10.17';
 /* NAKNA_OA_SETTINGS_REMOVED_20261019: P10.14 keeps retired company OA controls out of HTML; central LINE stays available. */
 /* NAKNA_BOOT_RECOVERY_20261019; combines retired Stretch + retired company OA without dangling boot handlers. */
 const NAKNA_FRONTEND_BUILD=window.NaknaRelease?.version||'unknown'; window.__NAKNA_FRONTEND_BUILD=NAKNA_FRONTEND_BUILD;
@@ -292,6 +293,7 @@ function setViewLoading(name, loading, label = 'กำลังโหลดข�
   }
 }
 function renderViewData(name){
+  if(name==='notifications'){return notificationUi().render();}
   try{
     if(name==='dashboard'){ renderDashboard(); return; }
     if(name==='employees'){ renderEmployees($('#employeeSearch')?.value || ''); renderInviteCenter(); return; }
@@ -313,6 +315,7 @@ function renderViewData(name){
   }catch(error){ console.warn('[Nakna] render view failed', name, error); }
 }
 async function loadViewData(name,{force=false}={}){
+  if(name==='notifications')return notificationUi().load();
   if(!name || name==='dashboard'){
     if(force || !isViewFresh('dashboard')) await loadDashboardFast({silent:true});
     markViewLoaded('dashboard');
@@ -672,6 +675,7 @@ const leaveLabels = {
 };
 
 const viewMeta = {
+  notifications: ['การแจ้งเตือน', 'NOTIFICATION CENTER'],
   dashboard: ['ภาพรวม', 'HR COMMAND CENTER'],
   employees: ['พนักงาน', 'PEOPLE'],
   organization: ['ทีมและตำแหน่ง', 'TEAM DIRECTORY'],
@@ -7057,3 +7061,6 @@ window.quickOpenDocumentCase=async function quickOpenDocumentCase(){
   }catch(e){toast(e.message,true)}
 }
 $('#openDocumentCaseBtn')?.addEventListener('click',quickOpenDocumentCase);
+
+let notificationCenterController;
+function notificationUi(){return notificationCenterController ||= createNotificationCenter({api,escapeHtml,escapeAttr,toast,openForm:openPhase5Form,companyId:()=>Number(state.me?.active_company_id||0),role:activeCompanyRole});}

@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import {createNotificationCenter} from '../public/notifications.js';
+import {NC_TYPES} from '../src/notification-center.js';
+let html='',nodes=new Map(),form,tenant=1,role='hr',writes=[],notices=[],fail=false,resolveRead;
+function node(key){if(!nodes.has(key))nodes.set(key,{handlers:{},addEventListener(event,fn){this.handlers[event]=fn;}});return nodes.get(key);}
+const root={get innerHTML(){return html;},set innerHTML(v){html=v;nodes=new Map();},querySelector(selector){return node(selector);},querySelectorAll(selector){const attr=selector.slice(1,-1);return [...html.matchAll(new RegExp(attr+'="([^"]+)"','g'))].map(m=>{const n=node(attr+':'+m[1]);n.dataset={[attr==='data-nc-edit'?'ncEdit':'ncToggle']:m[1]};return n;});}};
+const values={'#ncEnabled':{checked:true},'#ncTime':{value:'11:45'},'#ncMessage':{value:'Hello {ชื่อ}'},'#ncAll':{checked:true}};
+const modal={querySelector:s=>values[s]||null,querySelectorAll:s=>s==='[name=ncDay]:checked'?[{value:'1'},{value:'4'}]:[]};
+globalThis.document={querySelector:s=>s==='#notificationCenter'?root:s==='#modal'?modal:null};
+const data={settings:Object.entries(NC_TYPES).map(([kind,d])=>({kind,title:d.title,enabled:d.enabled,send_time:d.time,weekdays:[1,2,3,4,5,6],message_text:d.text,recipient_keys:null})),release:'P10.17',heartbeat:{at:new Date().toISOString()},recipients:[{key:'u:1',name:'<script>HR</script>',role:'hr'},{key:'u:2',name:'Owner',role:'owner'}],runs:{},logs:[],today:'2026-10-22',missing_employee_line:3};
+const escape=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+const ui=createNotificationCenter({api:async(path,options={})=>{if(fail)throw Error('API unavailable');if(options.method==='PATCH'){const s=JSON.parse(options.body);writes.push(s);data.settings=data.settings.map(x=>x.kind===s.kind?s:x);}if(resolveRead)await new Promise(r=>resolveRead=r);return structuredClone(data);},escapeHtml:escape,escapeAttr:escape,companyId:()=>tenant,role:()=>role,toast:s=>notices.push(s),openForm:f=>form=f});
+await ui.load();assert.equal((html.match(/class="nc-row /g)||[]).length,5);assert.equal((html.match(/data-nc-edit=/g)||[]).length,5);assert.equal(writes.length,0);assert.ok(html.includes('ระบบตั้งเวลาทำงานอยู่'));
+const toggle=node('data-nc-toggle:checkout');toggle.checked=true;await toggle.handlers.change();assert.equal(writes[0].enabled,true);
+node('data-nc-edit:checkin').handlers.click();assert.ok(form.html.includes('maxlength="300"'));await form.onSave();assert.equal(writes[1].send_time,'11:45');assert.deepEqual(writes[1].weekdays,[1,4]);assert.ok(html.includes('11:45'));
+node('data-nc-edit:hr_summary').handlers.click();assert.ok(form.html.includes('&lt;script&gt;HR&lt;/script&gt;'));assert.ok(!form.html.includes('<script>HR'));
+node('data-nc-edit:executive_summary').handlers.click();assert.equal((form.html.match(/name="ncRecipient"/g)||[]).length,1);
+node('data-nc-edit:checkin').handlers.click();tenant=2;await assert.rejects(()=>form.onSave(),/บริษัทเปลี่ยน/);assert.equal(writes.length,2);
+await ui.load();role='employee';ui.render();assert.ok(html.includes('เฉพาะ HR'));assert.ok(!html.includes('nc-row'));role='hr';fail=true;await ui.load();assert.ok(html.includes('API unavailable'));assert.ok(html.includes('Deploy'));assert.ok(!html.includes('nc-row'));
+console.log('P10.17 UI state PASS: five unique settings, no send on load, toggle, edited time/text/days, HTML escaping, owner-only executive recipients, company-change guard, role guard, explicit backend failure');
