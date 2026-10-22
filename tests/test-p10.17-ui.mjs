@@ -5,7 +5,8 @@ let html='',nodes=new Map(),form,tenant=1,role='hr',writes=[],notices=[],fail=fa
 function node(key){if(!nodes.has(key))nodes.set(key,{handlers:{},addEventListener(event,fn){this.handlers[event]=fn;}});return nodes.get(key);}
 const root={get innerHTML(){return html;},set innerHTML(v){html=v;nodes=new Map();},querySelector(selector){return node(selector);},querySelectorAll(selector){const attr=selector.slice(1,-1);return [...html.matchAll(new RegExp(attr+'="([^"]+)"','g'))].map(m=>{const n=node(attr+':'+m[1]);n.dataset={[attr==='data-nc-edit'?'ncEdit':'ncToggle']:m[1]};return n;});}};
 const values={'#ncEnabled':{checked:true},'#ncTime':{value:'11:45'},'#ncMessage':{value:'Hello {ชื่อ}'},'#ncAll':{checked:true}};
-const modal={querySelector:s=>values[s]||null,querySelectorAll:s=>s==='[name=ncDay]:checked'?[{value:'1'},{value:'4'}]:[]};
+Object.values(values).forEach(v=>v.addEventListener=()=>{});
+const modal={dataset:{},addEventListener(){},querySelector:s=>values[s]||null,querySelectorAll:s=>s==='[name=ncDay]:checked'?[{value:'1'},{value:'4'}]:[]};
 globalThis.document={querySelector:s=>s==='#notificationCenter'?root:s==='#modal'?modal:null};
 const data={settings:Object.entries(NC_TYPES).map(([kind,d])=>({kind,title:d.title,enabled:d.enabled,send_time:d.time,weekdays:[1,2,3,4,5,6],message_text:d.text,recipient_keys:null})),release:'P10.17',heartbeat:{at:new Date().toISOString()},recipients:[{key:'u:1',name:'<script>HR</script>',role:'hr'},{key:'u:2',name:'Owner',role:'owner'}],runs:{},logs:[],today:'2026-10-22',missing_employee_line:3};
 const escape=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');

@@ -2,8 +2,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.19-NOTIFICATION-CENTER';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.19-NOTIFICATION-CENTER';
+const NAKNA_RUNTIME_RELEASE = 'P10.20-NOTIFICATION-CENTER';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.20-NOTIFICATION-CENTER';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -1748,7 +1748,7 @@ async function handleApi(request, env, url, auth, ctx) {
   const path = url.pathname;
   const clientId = auth.clientId ? Number(auth.clientId) : null;
 
-  if(['/api/notification-center','/api/notification-center/test','/api/attendance-reminder-settings'].includes(path)) return notificationCenterApi(request,env,auth,notificationCenterHelpers());
+  if(['/api/notification-center','/api/notification-center/test','/api/notification-center/preview','/api/attendance-reminder-settings'].includes(path)) return notificationCenterApi(request,env,auth,notificationCenterHelpers());
 
   if(path==='/api/hr/notification-health' && method==='GET'){
     if(!clientId)return json({error:'COMPANY_REQUIRED'},409);
@@ -11516,7 +11516,7 @@ function buildDailyHrStatusFlex(client,dashboard,retroPending=0,{asOf=bangkokClo
   }else{
     body.push(lineInfoCard([lineText('ไม่มีคำขอหรือเอกสารค้างที่ระบบตรวจพบ','sm',LINE_CI.success,'bold')],'success'));
   }
-  body.push(lineText(`ข้อมูล ณ ${asOf.time} น. เวลาไทย · ใช้ตารางงาน วันหยุดบริษัท ใบลาที่อนุมัติ และข้อมูลเช็กอินในระบบ`,'xxs',LINE_CI.muted));
+  body.push(lineText(`${manual?'ข้อมูล ณ':'ระบบแจ้งเตือนอัตโนมัติ · ข้อมูล ณ'} ${asOf.time} น. เวลาไทย · ใช้ตารางงาน วันหยุดบริษัท ใบลาที่อนุมัติ และข้อมูลเช็กอินในระบบ`,'xxs',LINE_CI.muted));
   if(manual)body.push(lineText('สรุปตามคำขอ · ไม่ใช่การยืนยันว่ารอบส่งอัตโนมัติทำงานแล้ว','xxs',LINE_CI.muted));
   if(!includePrivate)body.push(lineText('ไม่รวมเรื่องส่วนตัวที่ต้องใช้สิทธิ์ผู้ดูแล HR','xxs',LINE_CI.muted));
   return {type:'flex',altText:`${manual?'สรุป HR วันนี้':`สรุป HR รอบ ${sendTime}`} · ${client.name}`,contents:lineBubble({
@@ -11535,7 +11535,7 @@ function buildFeatureNotificationFlex(client,title,message,lines,clock){
   return {type:'flex',altText:`${title} · ${client.name}`.slice(0,200),contents:lineBubble({
     eyebrow:'NAKNA · HR NOTIFICATION',title,
     subtitle:`${client.name} · ${formatThaiShortDate(clock.date)}`,
-    body:[lineText(message,'sm',LINE_CI.text),lineInfoCard(lines.map(([label,count])=>lineInfoRow(label,String(count))),'teal'),lineText(`ข้อมูล ณ ${clock.time} น. เวลาไทย · ดึงจากข้อมูลปัจจุบันในระบบ`,'xxs',LINE_CI.muted)],
+    body:[lineText(message,'sm',LINE_CI.text),lineInfoCard(lines.map(([label,count])=>lineInfoRow(label,String(count))),'teal'),lineText(`ระบบแจ้งเตือนอัตโนมัติ · ข้อมูล ณ ${clock.time} น. เวลาไทย · ดึงจากข้อมูลปัจจุบันในระบบ`,'xxs',LINE_CI.muted)],
     footer:[linePrimaryButton('เปิด HR Dashboard',{type:'postback',label:'เปิด HR Dashboard',data:`action=owner_dashboard&client_id=${Number(client.id)}`})]
   })};
 }

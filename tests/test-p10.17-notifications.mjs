@@ -58,7 +58,7 @@ check((await ncSetting(db,{id:2,attendance_reminder_enabled:0},'checkin')).enabl
 await run("INSERT INTO company_holidays VALUES(1,1,'2026-10-23')");
 await runNotificationCenter(env,{},h,{now:new Date('2026-10-23T05:33:00Z')});check(calls.length===before+3,'company holiday');
 let response=await notificationCenterApi(new Request('https://test/api/notification-center'),env,{clientId:1,role:'employee',user:{id:1}},h);check(response.status===403,'API role guard');
-response=await notificationCenterApi(new Request('https://test/api/notification-center'),env,{clientId:1,role:'hr',user:{id:1}},h);const body=await response.json();check(body.heartbeat.release==='P10.19','heartbeat exposed');check(!JSON.stringify(body).includes('test-token')&&!JSON.stringify(body).includes('"line_user_id"')&&!JSON.stringify(body).includes('payload_json'),'API excludes tokens, LINE IDs, payload');
+response=await notificationCenterApi(new Request('https://test/api/notification-center'),env,{clientId:1,role:'hr',user:{id:1}},h);const body=await response.json();check(body.heartbeat.release==='P10.20','heartbeat exposed');check(!JSON.stringify(body).includes('test-token')&&!JSON.stringify(body).includes('"line_user_id"')&&!JSON.stringify(body).includes('payload_json'),'API excludes tokens, LINE IDs, payload');
 response=await notificationCenterApi(new Request('https://test/api/notification-center',{method:'PATCH',body:JSON.stringify({...base,kind:'hr_summary',recipient_keys:['u:999']})}),env,{clientId:1,role:'hr',user:{id:1}},h);check(response.status===400,'recipient authorization');
 response=await notificationCenterApi(new Request('https://test/api/notification-center',{method:'PATCH',body:JSON.stringify({...base,send_time:'11:45',message_text:'Hello {ชื่อ}'})}),env,{clientId:1,role:'hr',user:{id:1}},h);check(response.ok,'settings persist');check((await ncSetting(db,client,'checkin')).send_time==='11:45','saved time');
 check((await ncSetting(db,{id:2,attendance_reminder_enabled:0},'checkin')).send_time==='12:30','tenant settings isolated');
@@ -84,6 +84,17 @@ response=await notificationCenterApi(new Request('https://test/api/notification-
 const diagnostic=await notificationCenterDiagnostics(db,1,recipient,[recipient]);
 check(diagnostic.scheduler.last_seen_at&&diagnostic.send_time==='13:00','legacy diagnostic uses new heartbeat and configured time');
 check(diagnostic.accepted===1&&diagnostic.me.status==='accepted','legacy diagnostic reads central send results');
+const previewCalls=calls.length,outboxBefore=(await first('SELECT COUNT(*) n FROM notification_center_outbox')).n;
+const previewDraft={...base,kind:'hr_summary',send_time:'14:15',message_text:'ทีม {บริษัท} เช็กอิน {เช็กอินแล้ว} คน',recipient_keys:null};
+response=await notificationCenterApi(new Request('https://test/api/notification-center/preview',{method:'POST',body:JSON.stringify(previewDraft)}),env,{clientId:1,role:'hr',user:{id:1,name:'HR'}},h);
+const previewBody=await response.json();check(response.ok&&previewBody.mode==='preview_only'&&previewBody.sent===false,'read-only preview endpoint');
+check(previewBody.messages[0].contents.header.contents[1].text==='สรุปทีมรอบ 14:15','unsaved time reflected in full card');
+check(JSON.stringify(previewBody.messages).includes('ทีม A เช็กอิน 1 คน'),'preview uses real database context');
+check(JSON.stringify(previewBody.messages).includes('ระบบแจ้งเตือนอัตโนมัติ'),'automatic system identified in actual card');
+check(calls.length===previewCalls&&(await first('SELECT COUNT(*) n FROM notification_center_outbox')).n===outboxBefore,'preview sends no LINE and creates no delivery');
+check((await ncSetting(db,client,'hr_summary')).send_time==='13:00','preview does not save draft');
+response=await notificationCenterApi(new Request('https://test/api/notification-center/preview',{method:'POST',body:JSON.stringify(previewDraft)}),env,{clientId:1,role:'employee',user:{id:1}},h);check(response.status===403,'preview role guard');
+response=await notificationCenterApi(new Request('https://test/api/notification-center/preview',{method:'POST',body:JSON.stringify({...previewDraft,recipient_keys:['u:999']})}),env,{clientId:1,role:'hr',user:{id:1}},h);check(response.status===400,'preview recipient scope guard');
 const index=readFileSync('src/index.js','utf8'),scheduled=index.slice(index.indexOf('  async scheduled('),index.indexOf('async function handleApi('));check(scheduled.includes('runNotificationCenter(')&&!scheduled.includes('sendDailyHrBrief(')&&!scheduled.includes('runDailyHrStatusTick(')&&!scheduled.includes('runMissingCheckinReminderAutomation('),'single scheduled sender');check(index.includes('function bangkokClock('),'clock exists');
 console.log(`P10.17 notifications: ${checks} checks PASS (real SQLite; mock LINE only)`);
 }finally{rmSync(dir,{recursive:true,force:true});}

@@ -1,7 +1,7 @@
 import {NOTIFICATION_TYPES as NC_TYPES,fieldsForKind,canonicalTemplate,messageDate} from '../public/notification-catalog.js';
 import {notificationFeatureData} from './notification-data.js';
 // Nakna P10.17: tenant-scoped settings, durable outbox and scheduler.
-export const NC_RELEASE='P10.19';
+export const NC_RELEASE='P10.20';
 export { NOTIFICATION_TYPES as NC_TYPES } from '../public/notification-catalog.js';
 export const NC_SCHEMA=[
  `CREATE TABLE IF NOT EXISTS notification_center_settings(client_id INTEGER NOT NULL,kind TEXT NOT NULL,enabled INTEGER NOT NULL,send_time TEXT NOT NULL,weekdays TEXT NOT NULL,message_text TEXT NOT NULL,recipient_keys TEXT NOT NULL DEFAULT 'null',updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(client_id,kind))`,
@@ -59,6 +59,7 @@ export function ncMessage(setting,client,recipient,clock,summary=null,extraValue
  const intro=ncTemplate(setting.message_text,vars);
  const contents=[{type:'text',text:d.title,weight:'bold',size:'lg',color:'#173D43',wrap:true},{type:'text',text:intro,wrap:true,size:'sm',color:'#5F7972',margin:'md'}];
  if(summary){for(const [label,value] of summary)contents.push({type:'box',layout:'horizontal',margin:'md',contents:[{type:'text',text:label,wrap:true,size:'sm',flex:3},{type:'text',text:String(value),align:'end',size:'sm',weight:'bold',flex:1}]});}
+ contents.push({type:'text',text:'ระบบแจ้งเตือนอัตโนมัติ · ส่งตามวันและเวลาที่บริษัทตั้งไว้',size:'xxs',color:'#6B787A',wrap:true,margin:'md'});
  const action=d.employee?{type:'postback',label:setting.kind==='checkin'?'เช็กอินตอนนี้':'เช็กเอาต์ตอนนี้',data:'action='+(setting.kind==='checkin'?'checkin':'checkout')}:{type:'postback',label:'เปิด Dashboard',data:'action=owner_dashboard&client_id='+Number(client.id)};
  return [{type:'flex',altText:(d.title+' · '+client.name).slice(0,200),contents:{type:'bubble',body:{type:'box',layout:'vertical',contents},footer:{type:'box',layout:'vertical',contents:[{type:'button',style:'primary',color:'#04878A',action}]}}}];
 }
@@ -83,6 +84,40 @@ async function employeeCandidates(db,client,kind,clock){
  const rows=await db.prepare(`SELECT e.*,c.work_start AS company_start,c.work_end AS company_end FROM employees e JOIN clients c ON c.id=e.client_id WHERE e.client_id=?1 AND e.status='active' AND COALESCE(e.people_status,'employee') IN ('employee','probation') AND trim(COALESCE(e.line_user_id,''))<>'' AND ${check} AND NOT EXISTS(SELECT 1 FROM leave_requests l WHERE l.client_id=e.client_id AND l.employee_id=e.id AND l.status IN ('approved','pending','awaiting_evidence') AND l.start_date<=?2 AND l.end_date>=?2) AND NOT EXISTS(SELECT 1 FROM notification_center_outbox o WHERE o.client_id=e.client_id AND o.kind=?3 AND o.send_date=?2 AND o.recipient_key='e:'||e.id AND (o.status IN ('accepted','failed','cancelled') OR o.next_attempt_at>?4 OR o.lease_until>?4)) ORDER BY e.id LIMIT 1000`).bind(client.id,clock.date,kind,Date.now()).all();
  return rows.results||[];
 }
+export async function ncBuildContext(db,cid,kind,clock,h){
+ if(NC_TYPES[kind].employee)return {};
+ let dashboard,privateDashboard,retro,lines,values={},pending=0;
+      if(NC_TYPES[kind].feature){
+       const facts=await notificationFeatureData(db,cid,kind,clock.date);
+       values=facts.values;lines=facts.lines;pending=facts.count;
+      }else{
+       dashboard=await h.getDashboard(db,cid,{includeHrCases:false});
+       retro=await db.prepare("SELECT COUNT(*) AS n FROM attendance_retro_requests WHERE client_id=?1 AND status='pending'").bind(cid).first();
+       const summary=dashboard.summary||{};
+       values={'เอกสารรอHRเซ็น':Number(dashboard.documents?.pending_hr_sign||0),'เอกสารรอพนักงานเซ็น':Number(dashboard.documents?.pending_employee_sign||0),'พนักงานทั้งหมด':Number(summary.employees||0),'มีตารางวันนี้':Number(summary.scheduled_today||0),'เช็กอินแล้ว':Number(summary.scheduled_present??summary.present??0),'มาสาย':Number(summary.late||0),'ลาวันนี้':Number(summary.leave||0),'ยังไม่เช็กอิน':Number(summary.missing||0),'ใบลารออนุมัติ':Number(h.dashboardAttentionTotal(dashboard,'leave_pending')||0),'เช็กอินย้อนหลังรออนุมัติ':Number(retro?.n||0),'คำขอรอตรวจสอบ':Number(h.dashboardAttentionTotal(dashboard,'request')||0)};
+       pending=values['ใบลารออนุมัติ']+values['เช็กอินย้อนหลังรออนุมัติ']+values['คำขอรอตรวจสอบ'];
+       lines=kind==='pending_approvals'?[['ใบลารออนุมัติ',values['ใบลารออนุมัติ']],['เช็กอินย้อนหลังรออนุมัติ',values['เช็กอินย้อนหลังรออนุมัติ']],['คำขอรอตรวจสอบ',values['คำขอรอตรวจสอบ']]]:[['มีตารางวันนี้',values['มีตารางวันนี้']],['เช็กอินแล้ว',values['เช็กอินแล้ว']],['มาสาย',values['มาสาย']],['ลาวันนี้',values['ลาวันนี้']],['ยังไม่เช็กอิน',values['ยังไม่เช็กอิน']],['งานรอตรวจสอบ',pending]];
+      }
+ return {dashboard,privateDashboard,retro,lines,values,pending};
+}
+
+export async function ncBuildMessages(db,client,setting,recipient,clock,h,context={}){
+ const kind=setting.kind;
+ let messages;
+ const {dashboard,retro,lines,values={}}=context;
+       if(kind==='hr_summary'){
+        // Use the established branded card, including its HR queue and both actions.
+        const includePrivate=Boolean(recipient.can_private)&&h.canManagePeopleAdmin(recipient.role);
+        if(includePrivate&&!context.privateDashboard)context.privateDashboard=await h.getDashboard(db,client.id,{includeHrCases:true});
+        const messageText=setting.message_text===NC_TYPES.hr_summary.text?'':ncTemplate(setting.message_text,{'ชื่อ':recipient.recipient_name||'คุณ','บริษัท':client.name,'วันที่':messageDate(clock.date),'เวลา':setting.send_time,name:recipient.recipient_name||'คุณ',company:client.name,date:messageDate(clock.date),time:setting.send_time,...values});
+        messages=[h.buildDailyHrStatusFlex(client,includePrivate?context.privateDashboard:dashboard,Number(retro?.n||0),{asOf:clock,sendTime:setting.send_time,includePrivate,messageText})];
+       }else if(NC_TYPES[kind].feature){
+        const intro=ncTemplate(setting.message_text,{'ชื่อ':recipient.recipient_name||'คุณ','บริษัท':client.name,'วันที่':messageDate(clock.date),'เวลา':setting.send_time,name:recipient.recipient_name||'คุณ',company:client.name,date:messageDate(clock.date),time:setting.send_time,...values});
+        messages=[h.buildFeatureNotificationFlex(client,setting.title,intro,lines,clock)];
+       }else messages=ncMessage(setting,client,recipient,clock,lines,values);
+ return messages;
+}
+
 export async function runNotificationCenter(env,controller,h,{now=new Date(),maxSends=60}={}){
  await ensureNotificationCenter(env.DB);await h.ensureMissingCheckinReminderReady(env.DB);await h.ensureDailyHrStatusReady(env.DB);await h.ensureAttendanceRetroReady(env.DB);
  const clock=ncClock(now),db=env.DB;
@@ -116,33 +151,13 @@ export async function runNotificationCenter(env,controller,h,{now=new Date(),max
      eligible=recipients.length;
      if(!eligible)reason='NO_AUTHORIZED_LINE_RECIPIENTS';
      if(eligible){
-      let dashboard,privateDashboard,retro,lines,values={},pending=0;
-      if(NC_TYPES[kind].feature){
-       const facts=await notificationFeatureData(db,client.id,kind,clock.date);
-       values=facts.values;lines=facts.lines;pending=facts.count;
-      }else{
-       dashboard=await h.getDashboard(db,client.id,{includeHrCases:false});
-       retro=await db.prepare("SELECT COUNT(*) AS n FROM attendance_retro_requests WHERE client_id=?1 AND status='pending'").bind(client.id).first();
-       const summary=dashboard.summary||{};
-       values={'เอกสารรอHRเซ็น':Number(dashboard.documents?.pending_hr_sign||0),'เอกสารรอพนักงานเซ็น':Number(dashboard.documents?.pending_employee_sign||0),'พนักงานทั้งหมด':Number(summary.employees||0),'มีตารางวันนี้':Number(summary.scheduled_today||0),'เช็กอินแล้ว':Number(summary.scheduled_present??summary.present??0),'มาสาย':Number(summary.late||0),'ลาวันนี้':Number(summary.leave||0),'ยังไม่เช็กอิน':Number(summary.missing||0),'ใบลารออนุมัติ':Number(h.dashboardAttentionTotal(dashboard,'leave_pending')||0),'เช็กอินย้อนหลังรออนุมัติ':Number(retro?.n||0),'คำขอรอตรวจสอบ':Number(h.dashboardAttentionTotal(dashboard,'request')||0)};
-       pending=values['ใบลารออนุมัติ']+values['เช็กอินย้อนหลังรออนุมัติ']+values['คำขอรอตรวจสอบ'];
-       lines=kind==='pending_approvals'?[['ใบลารออนุมัติ',values['ใบลารออนุมัติ']],['เช็กอินย้อนหลังรออนุมัติ',values['เช็กอินย้อนหลังรออนุมัติ']],['คำขอรอตรวจสอบ',values['คำขอรอตรวจสอบ']]]:[['มีตารางวันนี้',values['มีตารางวันนี้']],['เช็กอินแล้ว',values['เช็กอินแล้ว']],['มาสาย',values['มาสาย']],['ลาวันนี้',values['ลาวันนี้']],['ยังไม่เช็กอิน',values['ยังไม่เช็กอิน']],['งานรอตรวจสอบ',pending]];
-      }
+      const context=await ncBuildContext(db,client.id,kind,clock,h);
+      const {pending}=context;
       if((kind==='pending_approvals'||NC_TYPES[kind].feature)&&!pending)reason='NO_PENDING_TASKS';
       else for(const recipient of recipients){
        if(attempted>=maxSends){reason='BATCH_CONTINUES_NEXT_TICK';break;}
        if(kind==='hr_summary'&&await db.prepare("SELECT client_id FROM hr_daily_status_deliveries WHERE client_id=?1 AND summary_date=?2 AND status='accepted' AND provider_scope=?3 AND line_user_id=?4 LIMIT 1").bind(client.id,clock.date,recipient.line_provider_scope,recipient.line_user_id).first())continue;
-       let messages;
-       if(kind==='hr_summary'){
-        // Use the established branded card, including its HR queue and both actions.
-        const includePrivate=Boolean(recipient.can_private)&&h.canManagePeopleAdmin(recipient.role);
-        if(includePrivate&&!privateDashboard)privateDashboard=await h.getDashboard(db,client.id,{includeHrCases:true});
-        const messageText=setting.message_text===NC_TYPES.hr_summary.text?'':ncTemplate(setting.message_text,{'ชื่อ':recipient.recipient_name||'คุณ','บริษัท':client.name,'วันที่':messageDate(clock.date),'เวลา':setting.send_time,name:recipient.recipient_name||'คุณ',company:client.name,date:messageDate(clock.date),time:setting.send_time,...values});
-        messages=[h.buildDailyHrStatusFlex(client,includePrivate?privateDashboard:dashboard,Number(retro?.n||0),{asOf:clock,sendTime:setting.send_time,includePrivate,messageText})];
-       }else if(NC_TYPES[kind].feature){
-        const intro=ncTemplate(setting.message_text,{'ชื่อ':recipient.recipient_name||'คุณ','บริษัท':client.name,'วันที่':messageDate(clock.date),'เวลา':setting.send_time,name:recipient.recipient_name||'คุณ',company:client.name,date:messageDate(clock.date),time:setting.send_time,...values});
-        messages=[h.buildFeatureNotificationFlex(client,setting.title,intro,lines,clock)];
-       }else messages=ncMessage(setting,client,recipient,clock,lines,values);
+       const messages=await ncBuildMessages(db,client,setting,recipient,clock,h,context);
        const result=await ncDeliver(env,client,kind,ncRecipientKey(recipient),recipient,clock.date,messages,h);if(!result.skipped){attempted++;result.accepted?sent++:failed++;}
       }
      }
@@ -161,6 +176,7 @@ export async function notificationCenterApi(request,env,auth,h){
  const client=await db.prepare('SELECT id,name,attendance_reminder_enabled,attendance_reminder_message FROM clients WHERE id=?1').bind(cid).first();
  if(!client)return Response.json({error:'COMPANY_NOT_FOUND'},{status:404});
  const legacy=path==='/api/attendance-reminder-settings';
+ if(path==='/api/notification-center/preview'&&request.method!=='POST')return Response.json({error:'METHOD_NOT_ALLOWED'},{status:405});
  if(request.method==='GET'){
   if(legacy){const s=await ncSetting(db,client,'checkin');return Response.json({ok:true,settings:{enabled:s.enabled,reminder_time:s.send_time,message_text:s.message_text,updated_at:s.updated_at}});}
   const settings=[];for(const kind of Object.keys(NC_TYPES))settings.push(await ncSetting(db,client,kind));
@@ -170,6 +186,23 @@ export async function notificationCenterApi(request,env,auth,h){
   const logs=(await db.prepare('SELECT id,kind,send_date,recipient_label,status,attempts,http_status,error_code,updated_at FROM notification_center_outbox WHERE client_id=?1 ORDER BY id DESC LIMIT 80').bind(cid).all()).results||[];
   const missing=await db.prepare("SELECT COUNT(*) AS n FROM employees WHERE client_id=?1 AND status='active' AND trim(COALESCE(line_user_id,''))=''").bind(cid).first();
   return Response.json({ok:true,release:NC_RELEASE,timezone:'Asia/Bangkok',company_name:client.name,settings,recipients:recipients.map(r=>({key:ncRecipientKey(r),name:r.recipient_name||'ผู้รับ',role:r.role})),heartbeat:parse(heart?.value_json,null),runs:Object.fromEntries(runs.map(r=>[r.runtime_key,parse(r.value_json,{})])),logs,missing_employee_line:Number(missing?.n||0),today:ncClock().date});
+ }
+ if(request.method==='POST'&&path==='/api/notification-center/preview'){
+  let setting;
+  try{const input=await request.json();setting={...ncNormalize(input.kind,{...input,enabled:false}),title:NC_TYPES[input.kind].title};}
+  catch(e){return Response.json({error:String(e.message||'ข้อความไม่ถูกต้อง')},{status:400});}
+  try{
+   await h.ensureAttendanceRetroReady(db);
+   const clock=ncClock(),rows=ncAllowedRecipients(setting.kind,await h.getDailyHrLineRecipients(db,cid));
+   if(setting.recipient_keys!==null&&setting.recipient_keys.some(key=>!rows.some(r=>ncRecipientKey(r)===key)))return Response.json({error:'ผู้รับเปลี่ยนแปลงแล้ว กรุณาเลือกผู้รับใหม่'},{status:400});
+   const selected=rows.filter(r=>setting.recipient_keys===null||setting.recipient_keys.includes(ncRecipientKey(r)));
+   // If any selected recipient has restricted access, preview that version so
+   // private HR details are never implied to be sent to every recipient.
+   const recipient=NC_TYPES[setting.kind].employee?{recipient_name:'ชื่อพนักงานตัวอย่าง',role:'employee',can_private:false}:selected.find(r=>!r.can_private)||selected.find(r=>Number(r.user_id)===Number(auth.user.id))||selected[0]||{recipient_name:auth.user.name||'ผู้รับตัวอย่าง',role:auth.role,can_private:true};
+   const context=await ncBuildContext(db,cid,setting.kind,clock,h);
+   const messages=await ncBuildMessages(db,client,setting,recipient,clock,h,context);
+   return Response.json({ok:true,release:NC_RELEASE,messages,as_of:clock,mode:'preview_only',sent:false,recipient_label:recipient.recipient_name,employee_name_is_example:Boolean(NC_TYPES[setting.kind].employee),private_details:Boolean(recipient.can_private),has_matching_items:NC_TYPES[setting.kind].feature||setting.kind==='pending_approvals'?context.pending>0:null},{headers:{'Cache-Control':'no-store'}});
+  }catch(e){console.error(JSON.stringify({event:'notification_preview_failed',client_id:cid,kind:setting.kind}));return Response.json({error:'โหลดข้อมูลสำหรับพรีวิวไม่สำเร็จ กรุณาตรวจฟีเจอร์ต้นทางแล้วลองใหม่'},{status:503});}
  }
  if(request.method==='PATCH'){
   try{const input=await request.json(),kind=legacy?'checkin':input.kind;
