@@ -52,10 +52,12 @@ const fields=new Map(),opened=[],notices=[];const get=s=>{if(!fields.has(s))fiel
 ctx.$=get;ctx.state.payrollDetail.period={id:1,period_key:'2026-12'};ctx.state.payroll={periods:[]};ctx.nextPayrollMonth=nextPayrollMonth;ctx.configurePayrollPeriodModal=()=>{};ctx.syncPayrollPeriodRangeFromMonth=()=>{};ctx.bindPayrollPeriodModalDates=()=>{};ctx.toast=s=>notices.push(s);ctx.loadPayrollPeriod=id=>opened.push(id);ctx.openPayrollPeriodModal=()=>opened.push('first');
 const nextCode=app.slice(app.indexOf('window.openNextPayrollCycle=()=>'),app.indexOf('\n',app.indexOf('window.openNextPayrollCycle=()=>')));ctx.window={};vm.runInContext(nextCode,ctx);ctx.window.openNextPayrollCycle();check(get('#payrollPeriodKey').value==='2027-01'&&opened.includes('#payrollPeriodModal'),'next month opens dates for review, not automatic creation');check(get('#payrollPeriodModalDescription').textContent.includes('ไม่ถูกคัดลอก'),'one-off items not copied is explained');
 ctx.state.payroll.periods=[{id:2,period_key:'2027-01',status:'draft'}];ctx.window.openNextPayrollCycle();check(opened.at(-1)===2,'existing next month opens instead of replacing');
-// The monetary calculation function must remain byte-for-byte identical to P10.20.
-const source=readFileSync('src/index.js','utf8'),start=source.indexOf('async function recalculatePayrollPeriod('),end=source.indexOf('\nfunction ',start);
+// Hash only the monetary calculator. The former next-sync-function boundary
+// accidentally included the PDF renderer and delivery code below it. The actual
+// calculator remains byte-for-byte identical to the previous release.
+const source=readFileSync('src/index.js','utf8'),start=source.indexOf('async function recalculatePayrollPeriod('),end=source.indexOf('\nasync function fetchNaknaPdfFont',start);
 const digest=createHash('sha256').update(source.slice(start,end)).digest('hex');
-check(digest==='d541c024de55eee03feaabdc351a9cd765450d648d1b706361f4c544a46fd83a','payroll calculation unchanged');
+check(digest==='0c7d9fca64dbf5c2a27086a1a78317e62004d156d1f1b4e2936e99dd007376d1','payroll calculation unchanged');
 check(!app.slice(app.indexOf('window.reviewPayroll=async'),app.indexOf('window.approvePayroll=')).includes('downloadPayrollSavedExport'),'review does not unexpectedly download files');
 console.log(`P10.21 payroll workflow: ${checks} checks PASS (real SQLite, payment guards, audit retention, 3 steps, maker-checker and unchanged calculation)`);
 }finally{rmSync(dir,{recursive:true,force:true});}

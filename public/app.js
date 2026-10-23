@@ -5949,6 +5949,7 @@ function renderPayrollTools(p,editable){
   if(p.status==='review')tools.push(`<button type="button" onclick="window.createPayrollReviewExcel(${p.id})">สร้าง Excel ล่าสุด</button>`);
   if(p.status==='locked')tools.push(`<button type="button" onclick="window.generatePayrollPayslips(${p.id})">สร้างสลิปก่อนส่ง</button>`,`<button type="button" onclick="window.createPayrollReviewExcel(${p.id})">สร้าง Excel ล่าสุด</button>`,`<button type="button" onclick="window.exportPayroll(${p.id},'bank')">Export ธนาคาร CSV</button>`,`<button type="button" onclick="window.exportPayroll(${p.id},'accounting')">Export บัญชี</button>`,`<button class="danger" type="button" onclick="window.unlockPayroll(${p.id})">ปลด Lock</button>`);
   if(p.status==='published')tools.push(`<button type="button" onclick="window.createPayrollReviewExcel(${p.id})">สร้าง Excel ล่าสุด</button>`,`<button type="button" onclick="window.exportPayroll(${p.id},'bank')">Export ธนาคาร CSV</button>`,`<button type="button" onclick="window.exportPayroll(${p.id},'accounting')">Export บัญชี</button>`);
+  tools.push('<button type="button" onclick="window.openPayrollIssuerSettings()">ตั้งค่าลายเซ็นบนสลิป</button>');
   if(!tools.length)return '';
   return `<details class="payroll-more-actions"><summary>เครื่องมือเพิ่มเติม</summary><div>${tools.join('')}</div></details>`;
 }
@@ -6245,7 +6246,7 @@ async function refreshDocuments(options={}){
   if(docsError&&!options.silent)toast(docsError.message||'โหลดรายการเอกสารไม่สำเร็จ',true);
   return {documents_ok:!docsError,overview_ok:!overviewError};
 }
-async function openDocumentSettings(){
+async function openDocumentSettings({payroll=false}={}){
   const dlg=$('#documentSettingsModal'); if(!dlg)return;
   try{
     const r=await api('/api/document-settings'); const d=r?.data||{}; state.documentSettings=d;
@@ -6255,9 +6256,13 @@ async function openDocumentSettings(){
     $('#docSignatureDataUrl').value=d.signer_signature_data_url||'';
     const preview=$('#docSignaturePreview'); preview.innerHTML=d.signer_signature_data_url?`<img src="${escapeAttr(d.signer_signature_data_url)}" alt="ลายเซ็น HR"><span>ลายเซ็นที่จะใช้ในเอกสาร</span>`:'<span>ยังไม่มีรูปลายเซ็น · ระบบจะแสดงชื่อผู้อนุมัติแทน</span>';
     const logo=$('#docCompanyLogoPreview'); logo.innerHTML=d.logo_data_url?`<img src="${escapeAttr(d.logo_data_url)}" alt="โลโก้บริษัท">`:'<span>ยังไม่มี Logo บริษัท</span>';
+    const note=dlg.querySelector('.document-signature-note');
+    if(note)note.innerHTML=payroll?'<strong>ลายเซ็นผู้ออกสลิปฝั่งบริษัท</strong><p>สลิปที่สร้างใหม่ใช้ชื่อ ตำแหน่ง และลายเซ็น HR ชุดนี้ พนักงานไม่ต้องเซ็น · สลิปที่สร้างไว้แล้วคงเดิมเมื่อเปลี่ยนการตั้งค่า</p>':'<strong>ลายเซ็นรับทราบของพนักงาน</strong><p>Workflow ลายเซ็น: HR ตรวจและลงนามก่อน → ระบบส่งให้พนักงานทาง LINE → พนักงานลงลายเซ็นต่อ → ระบบสร้าง Final PDF ที่มีลายเซ็นครบตามประเภทเอกสาร พร้อมเก็บหลักฐานเวลาและ Version</p>';
     dlg.showModal();
   }catch(e){toast(e.message||'โหลดการตั้งค่าเอกสารไม่สำเร็จ',true);}
 }
+
+window.openPayrollIssuerSettings=()=>{bindDocumentSignatureUpload();return openDocumentSettings({payroll:true});};
 
 function bindDocumentSignatureUpload(){
   const input=$('#docSignerSignatureFile'); if(!input||input.dataset.bound)return; input.dataset.bound='1';
