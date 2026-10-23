@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import {payrollGuideModel,payrollGuideHtml} from '../public/payroll-guide.js';
+const base={period:{id:6,status:'draft'},items:[{employee_id:1,base_salary:20000,bank_account_no:'123',net_pay:19500},{employee_id:2,base_salary:20000,bank_account_no:'456',net_pay:19500}],settings:{},exceptions:[],documents:[]};
+const before=JSON.stringify(base);assert.equal(payrollGuideModel(base).current,2);
+const warning={...base,adjustments:[{employee_id:1,amount:500}]};assert.equal(payrollGuideModel(warning).warningPeople,1);assert.equal(payrollGuideModel(warning).blocking,0);
+let d={...base,items:[]};assert.equal(payrollGuideModel(d).current,1);
+d={...d,workflow_people:{not_calculated:[{employee_id:3,reason:'ยังไม่มีโปรไฟล์'}]}};assert.equal(payrollGuideModel(d).current,2);assert.equal(payrollGuideModel(d).blocking,1);
+d={...base,period:{...base.period,status:'review',created_by_user_id:8,approval_status:'pending'},settings:{require_separate_approver:1}};assert.equal(payrollGuideModel(d,8).current,3);assert(payrollGuideModel(d,8).maker);
+d={...base,period:{...base.period,status:'locked'}};assert.equal(payrollGuideModel(d).current,4);
+d={...d,period:{...d.period,status:'published'},documents:[{employee_id:1,document_type:'payslip',line_notified_at:'2026-10-24'}]};assert.equal(payrollGuideModel(d).current,4,'published alone never means paid');
+d={...d,payment_confirmation:{payment_date:'2026-10-24'}};assert.equal(payrollGuideModel(d).current,5);assert(!payrollGuideModel(d).complete);
+d.documents.push({...d.documents[0]},{employee_id:999,document_type:'payslip',line_notified_at:'yes'});assert.equal(payrollGuideModel(d).sent,1,'count unique current employees only');
+d.documents.push({employee_id:2,document_type:'payslip',line_notified_at:'yes'});assert(payrollGuideModel(d).complete);
+d={...d,period:{...d.period,status:'void'}};assert.equal(payrollGuideModel(d).current,0);
+const html=payrollGuideHtml(warning,{esc:x=>String(x??'').replaceAll('<','&lt;'),money:x=>String(x??0)});assert(html.includes('ควรตรวจ 1 คน'));assert(!html.includes('พร้อมไปขั้นตอนถัดไป'));assert(html.includes('data-payroll-stage="3" disabled'));assert.equal(JSON.stringify(base),before);
+console.log('PASS P10.46 guide: state transitions, no-calculation blockers, warning wording, maker/checker, paid vs published, unique delivery counts, void, disabled future stages, no data mutation');
+// Switching periods must remove the old actionable screen while the next read is pending.
+const fs=await import('node:fs'),vm=await import('node:vm');
+const source=fs.readFileSync('public/app.js','utf8'),pending=new Map(),holder={innerHTML:''},notices=[];
+const ctx={state:{me:{active_company_id:1},payrollDetail:{period:{id:6}}},nkPayrollLoadSequence:0,nkPayrollFilter:'all',nkPayrollSearch:'',nkPayrollView:'summary',nkPayrollGuideStage:2,api:id=>new Promise((resolve,reject)=>pending.set(id,{resolve,reject})),$:id=>id==='#payrollDetail'?holder:{close(){}},renderPayroll(){},renderPayrollDetail(){},toast:x=>notices.push(x),escapeHtml:x=>String(x).replaceAll('<','&lt;')};
+vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('async function loadPayrollPeriod('),source.indexOf('\n\nfunction payrollAdjustmentMaps')),ctx);
+let first=ctx.loadPayrollPeriod(7);assert.equal(ctx.state.payrollDetail,null);assert(holder.innerHTML.includes('กำลังโหลด'));
+let second=ctx.loadPayrollPeriod(8);pending.get('/api/payroll/periods/7').resolve({period:{id:7}});await first;assert.equal(ctx.state.payrollDetail,null);
+pending.get('/api/payroll/periods/8').resolve({period:{id:8}});await second;assert.equal(ctx.state.payrollDetail.period.id,8);
+let failed=ctx.loadPayrollPeriod(9);pending.get('/api/payroll/periods/9').reject(Error('<โหลดไม่สำเร็จ>'));await failed;assert(holder.innerHTML.includes('ลองโหลดรอบนี้อีกครั้ง'));assert(holder.innerHTML.includes('&lt;'));assert.equal(ctx.state.payrollDetail,null);
+let switched=ctx.loadPayrollPeriod(10);ctx.state.me.active_company_id=2;pending.get('/api/payroll/periods/10').resolve({period:{id:10}});await switched;assert.equal(ctx.state.payrollDetail,null);
+console.log('PASS P10.46 period reads: old actions cleared immediately, stale response ignored, safe error/retry, company switch guard');

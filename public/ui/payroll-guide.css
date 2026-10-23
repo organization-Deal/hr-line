@@ -1,0 +1,93 @@
+/* P10.46: one task at a time; existing calculations and API actions are reused. */
+#view-payroll .payroll-workspace{display:block!important}
+#view-payroll .payroll-period-panel{margin-bottom:18px;padding:18px 22px}
+#view-payroll .payroll-period-panel>.panel-head{display:none}
+html.nk105 #view-payroll #payrollPeriods{display:block!important}
+html.nk105 #view-payroll #nk105PayrollPeriodToggle{display:none!important}
+#view-payroll .nk-payroll-period-picker{display:flex;align-items:center;gap:16px;font-size:14px;font-weight:600}
+#view-payroll .nk-payroll-period-picker select{min-height:46px;width:min(430px,100%);font-size:14px;padding:10px 13px}
+#view-payroll .nk-payroll-period-help{font-size:12px;color:#71858a;margin:8px 0 0}
+#view-payroll .payroll-detail-head h2{font-size:22px;line-height:1.6}
+#view-payroll .payroll-period-subline{font-size:13px;gap:12px}
+#view-payroll .payroll-heading-actions{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+#view-payroll .nk-payroll-tools,#view-payroll .nk-payroll-settings-menu{position:relative}
+#view-payroll :is(.nk-payroll-tools,.nk-payroll-settings-menu)>summary{list-style:none;cursor:pointer;min-height:44px;padding:11px 15px;border:1px solid #cadcde;border-radius:10px;background:white;color:#315661;font-size:13px;line-height:1.6}
+#view-payroll :is(.nk-payroll-tools,.nk-payroll-settings-menu)>summary::after{content:'⌄';margin-left:12px}
+#view-payroll :is(.nk-payroll-tools,.nk-payroll-settings-menu)>summary::-webkit-details-marker{display:none}
+#view-payroll .nk-payroll-settings-menu[open]>div,#view-payroll .nk-payroll-tools[open]>nav{position:absolute;right:0;top:calc(100% + 7px);z-index:40;display:grid;gap:7px;min-width:230px;max-width:calc(100vw - 36px);padding:10px;border:1px solid #d7e4e4;border-radius:12px;background:#fff;box-shadow:0 14px 35px #143e481a}
+#view-payroll .nk-payroll-tools[open]>nav button{min-height:44px;text-align:left;font-size:13px}
+#view-payroll .nk-payroll-guide{border:1px solid #d5e6e5;border-radius:18px;background:#fff;margin:10px 0 24px;overflow:hidden;scroll-margin-top:90px}
+#view-payroll .nk-guide-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:24px 26px 18px}
+#view-payroll .nk-guide-heading h3{font-size:23px;line-height:1.5;margin:5px 0 8px;color:#16454d}
+#view-payroll .nk-guide-heading p:not(.kicker){font-size:14px;line-height:1.8;color:#58757b;margin:0}
+#view-payroll .nk-guide-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:0 26px 22px}
+#view-payroll .nk-guide-steps button{display:flex;align-items:center;gap:9px;text-align:left;border:1px solid #dce7e6;border-radius:11px;background:#f8fbfa;color:#4d6970;min-height:58px;padding:11px;font:inherit;font-size:13px;line-height:1.5}
+#view-payroll .nk-guide-steps b{display:grid;place-items:center;flex:none;width:27px;height:27px;border-radius:50%;background:#e6f1ee;color:#1f7777;font-size:12px}
+#view-payroll .nk-guide-steps button[aria-current=step]{border-color:#008b8e;background:#e9f7f5;color:#006d74;font-weight:600}
+#view-payroll .nk-guide-steps button[aria-current=step] b{background:#008b8e;color:#fff}
+#view-payroll .nk-guide-steps button:disabled{opacity:.55;cursor:not-allowed}
+#view-payroll .nk-guide-money{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:20px;padding:21px 26px;background:#f3f9f8;border-block:1px solid #dceae7}
+#view-payroll .nk-guide-money span{display:block;color:#57747a;font-size:12px;margin-bottom:6px}
+#view-payroll .nk-guide-money strong{font-size:21px;color:#1d4c55;line-height:1.5}
+#view-payroll .nk-guide-money>div:first-child strong{font-size:27px;color:#00878c}
+#view-payroll .nk-guide-panel{padding:24px 26px}
+#view-payroll .nk-guide-panel h4{font-size:18px;line-height:1.6;margin:0 0 8px;color:#204c56}
+#view-payroll .nk-guide-panel p{font-size:14px;line-height:1.85;margin:0 0 18px;color:#59727a}
+#view-payroll .nk-guide-panel .primary-btn{min-height:48px;padding:12px 20px;font-size:14px!important;margin:4px 8px 4px 0}
+#view-payroll .nk-guide-review-head{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+#view-payroll .nk-guide-review-head>div{flex:1;min-width:210px}
+#view-payroll .nk-guide-payment{display:grid;gap:22px;margin:18px 0;padding-left:25px}
+#view-payroll .nk-guide-payment strong{font-size:15px;color:#285562}
+#view-payroll .nk-guide-payment p{margin:5px 0 10px}
+#view-payroll .nk-guide-warning{padding:16px 26px;margin:0;background:#fff6e5;color:#856024;font-size:14px}
+#view-payroll #nkPayrollReviewSection{scroll-margin-top:90px}
+#view-payroll .nk-payroll-breakdown{padding:14px 0;margin:0 0 14px;border-bottom:1px solid #e4eceb}
+#view-payroll .nk-payroll-breakdown>summary{font-size:14px;font-weight:600;cursor:pointer;color:#3e656c;min-height:34px}
+#view-payroll .nk-payroll-breakdown .payroll-detail-totals{margin-top:12px}
+#view-payroll .nk-payroll-simple-table :is(td,th){font-size:13px;line-height:1.7;padding-block:14px}
+#view-payroll [data-payroll-stage-panel][hidden]{display:none!important}
+.nk-payroll-review-confirm{width:min(720px,calc(100vw - 28px));max-height:calc(100dvh - 28px);padding:24px;border:1px solid #d6e5e4;border-radius:18px;color:#204955;background:white;overflow:auto}
+.nk-payroll-review-confirm::backdrop{background:#173e4866}
+.nk-payroll-review-confirm .modal-head h2{font-size:24px;line-height:1.5}
+.nk-payroll-review-confirm .nk-review-summary-body{font-size:14px;line-height:1.8}
+.nk-payroll-review-confirm article{border:1px solid #e0e9e8;border-radius:12px;padding:14px 16px;margin:10px 0}
+.nk-payroll-review-confirm article p{margin:5px 0;color:#6d7470}
+.nk-payroll-review-confirm .nk-review-ack{display:flex;align-items:flex-start;gap:12px;padding:16px;margin:20px 0;background:#eef8f5;border-radius:12px;cursor:pointer}
+.nk-payroll-review-confirm .nk-review-ack input{width:20px;height:20px;flex:none;margin-top:3px;accent-color:#00888d}
+@media(max-width:900px){
+ #view-payroll .nk-guide-steps button{flex-direction:column;text-align:center;padding:9px 5px;font-size:12px;gap:6px}
+ #view-payroll .nk-guide-heading{align-items:flex-start}
+}
+@media(max-width:720px){
+ #view-payroll .payroll-page-intro .page-actions{display:flex;flex-wrap:wrap!important}
+ #view-payroll .nk-payroll-period-picker{display:grid;gap:8px}
+ #view-payroll .nk-payroll-period-picker select{width:100%}
+ #view-payroll .payroll-heading-actions{align-items:stretch;width:100%}
+ #view-payroll .nk-payroll-tools>summary{text-align:center}
+ #view-payroll .nk-guide-heading{padding:18px 15px 15px;display:block}
+ #view-payroll .nk-guide-heading h3{font-size:21px}
+ #view-payroll .nk-guide-heading p:not(.kicker){font-size:13px}
+ #view-payroll .nk-guide-steps{padding:0 12px 16px;gap:4px}
+ #view-payroll .nk-guide-steps button{font-size:10px;line-height:1.6;min-width:0;min-height:80px;overflow-wrap:anywhere}
+ #view-payroll .nk-guide-steps b{width:24px;height:24px}
+ #view-payroll .nk-guide-money{grid-template-columns:1fr 1fr;padding:17px 16px;gap:15px}
+ #view-payroll .nk-guide-money>div:first-child{grid-column:1/-1}
+ #view-payroll .nk-guide-money strong{font-size:18px}
+ #view-payroll .nk-guide-panel{padding:18px 16px}
+ #view-payroll .nk-guide-panel .primary-btn{width:100%;margin:4px 0 12px}
+ #view-payroll .nk-guide-review-head>div{min-width:0}
+ #view-payroll .nk-guide-panel .secondary-btn{max-width:100%}
+ #view-payroll .nk-payroll-settings-menu[open]>div,#view-payroll .nk-payroll-tools[open]>nav{right:0;min-width:min(250px,calc(100vw - 36px))}
+ .nk-payroll-review-confirm{padding:18px}
+ .nk-payroll-review-confirm .modal-head{display:block}
+ .nk-payroll-review-confirm .modal-actions{display:grid;gap:10px}
+}
+html.nk105 #view-payroll .payroll-workspace{display:block!important}
+html.nk-p10 #view-payroll .payroll-period-panel{position:static;top:auto;width:100%;max-height:none;overflow:visible}
+html.nk105 #view-payroll .payroll-workspace:not(.setup-mode) .payroll-period-panel>.panel-head{display:none!important}
+#view-payroll .nk-guide-heading .kicker{font-family:var(--font-th);letter-spacing:0;font-size:12px}
+#view-payroll .nk-guide-action{flex:none;max-width:100%}
+#view-payroll .nk-guide-action .primary-btn{font-size:14px!important;min-height:48px;padding:12px 18px;max-width:100%}
+@media(max-width:720px){#view-payroll .nk-guide-action{margin-top:16px}#view-payroll .nk-guide-action .primary-btn{width:100%}}
+html.nk105 #view-payroll.nk105-has-payroll-detail:not(.nk105-periods-open) #payrollPeriods{display:block!important}
+#view-payroll .nk-payroll-period-loading{padding:26px;font-size:15px;color:#42626c}
