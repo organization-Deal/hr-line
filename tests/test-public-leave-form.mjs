@@ -37,6 +37,7 @@ assert.throws(()=>db.prepare(legacySql).get({'1':1,'2':5}),/no such column: (?:d
 console.log('PASS 1 original P9.40 SQL reproduces undefined alias error');
 
 const sandbox={
+  leaveChannel:async()=>({hr_only:false}),
   getClient:async(db,id)=>({id,lock_leave_during_probation:1}),
   ensureDefaultLeavePolicies:async()=>{},
   ensureLeaveRetroSchemaReady:async()=>({ok:true}),

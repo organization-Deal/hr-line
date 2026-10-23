@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.42" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.43" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -44,10 +44,10 @@
 <link rel="stylesheet" href="/ui/nk-multi-gmail.css?v=MGMAIL20261020A">
 <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1-P10.12">
 <link rel="stylesheet" href="/ui/nk-employee-service.css?v=P10.26-service">
-<link rel="stylesheet" href="/ui/nk-leave-settings.css?v=P10.26-holiday">
+<link rel="stylesheet" href="/ui/nk-leave-settings.css?v=P10.43">
 <link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.26">
 <link rel="stylesheet" href="/notifications.css?v=P10.26">
-<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.42">
+<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.43">
 <link rel="stylesheet" href="/ui/loading.css?v=P10.26">
 <script defer src="/ui/loading.js?v=P10.26"></script>
 <link rel="stylesheet" href="/ui/dashboard.css?v=P10.28">
@@ -523,7 +523,7 @@
 <section class="view" id="view-leave"><div class="page-intro">
 <div><p class="kicker">LEAVE CONTROL</p><h1>การลา</h1><p>สิทธิ์ลา ผู้อนุมัติ เหตุผล หลักฐาน และสถานะของทุกคำขออยู่ในที่เดียว</p></div>
 <button class="primary-btn" id="addLeaveBtn" type="button"><svg viewbox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>บันทึกการลา</button>
-</div><nav aria-label="มุมมองการลา" class="nk-tabs" id="nkLeaveTabs" role="tablist">
+</div><article id="nkLeaveChannelCard" class="nk-leave-channel-card"><div><p class="kicker">ช่องทางรับคำขอลา</p><h3 id="nkLeaveChannelTitle">กำลังโหลดช่องทางการลา…</h3><p id="nkLeaveChannelHelp">ตั้งค่าว่าพนักงานยื่นผ่านออนไลน์ หรือแจ้ง HR โดยตรง</p><span id="nkLeaveChannelStatus" role="status" aria-live="polite"></span></div><label class="nk-leave-channel-switch"><input id="hrOnlyLeaveToggle" type="checkbox" disabled><span>ลากับ HR เท่านั้น</span></label></article><nav aria-label="มุมมองการลา" class="nk-tabs" id="nkLeaveTabs" role="tablist">
 <button aria-controls="nkLeaveOverviewPanel" aria-selected="true" data-nk-leave-tab="overview" id="nkLeaveTab-overview" role="tab" type="button">ภาพรวม</button>
 <button aria-controls="nkLeavePendingPanel" aria-selected="false" data-nk-leave-tab="queue" id="nkLeaveTab-queue" role="tab" tabindex="-1" type="button">รอจัดการ <span id="nkLeavePendingCount">—</span></button>
 <button aria-controls="nkLeaveHistoryPanel" aria-selected="false" data-nk-leave-tab="history" id="nkLeaveTab-history" role="tab" tabindex="-1" type="button">ประวัติ</button>
@@ -1312,7 +1312,7 @@
   <dialog id="leaveRequestModal">
     <form method="dialog" id="leaveRequestForm">
       <div class="modal-head">
-        <div><p class="kicker">LEAVE REQUEST</p><h3>บันทึกการลา</h3><p>HR สามารถสร้างคำขอแทนพนักงานได้ ระบบยังส่งให้ผู้อนุมัติตาม Flow เดิม</p></div>
+        <div><p class="kicker">LEAVE REQUEST</p><h3>บันทึกการลา</h3><p>HR บันทึกคำขอแทนพนักงานได้ รวมถึงกรณีพนักงานแจ้งลากับ HR โดยตรง ระบบส่งให้ผู้อนุมัติตาม Flow เดิม</p></div>
         <button type="button" class="close-btn" value="cancel" aria-label="ปิด"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
       <div class="modal-fields">
@@ -1409,7 +1409,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.42" type="module"></script>
+  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.43" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

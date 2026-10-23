@@ -1,3 +1,4 @@
+import {leaveChannel,requireOnlineLeave,leaveChannelApi,HR_ONLY_LEAVE_MESSAGE} from './leave-channel.js';
 import {companyProfileApi} from './company-profile.js';
 import {payrollDocumentCenterApi,handoffPeriodDetail} from './payroll-document-center.js';
 import {renderPayrollPdf} from './payroll-pdf.js';
@@ -10,8 +11,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.42-FILING-STEPS';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.42-FILING-STEPS';
+const NAKNA_RUNTIME_RELEASE = 'P10.43-HR-ONLY-LEAVE';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.43-HR-ONLY-LEAVE';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -4629,27 +4630,14 @@ async function handleApi(request, env, url, auth, ctx) {
       getWorkspaceLineIntegration(env,clientId,false),
     ]);
     return json({
-      leave_settings:{ lock_leave_during_probation:Boolean(Number(client?.lock_leave_during_probation ?? 1)) },
+      leave_settings:{ lock_leave_during_probation:Boolean(Number(client?.lock_leave_during_probation ?? 1)),...await leaveChannel(env.DB,clientId) },
       hr_cases_open:Number(openCases?.n||0),
       broadcasts_total:Number(broadcasts?.n||0),
       rich_menu:{ configured:Boolean(integration?.rich_menu_id), rich_menu_id:integration?.rich_menu_id||null, updated_at:integration?.rich_menu_updated_at||null, dedicated_line:Boolean(integration) }
     });
   }
 
-  if (path === '/api/leave-settings' && method === 'GET') {
-    await ensureV100P2Ready(env.DB);
-    const client=await getClient(env.DB,clientId);
-    return json({ lock_leave_during_probation:Boolean(Number(client?.lock_leave_during_probation ?? 1)) });
-  }
-  if (path === '/api/leave-settings' && method === 'PATCH') {
-    if(!canManagePeopleAdmin(auth.role)) return json({error:'ไม่มีสิทธิ์แก้นโยบายวันลา'},403);
-    await ensureV100P2Ready(env.DB);
-    const body=await safeJson(request);
-    const locked=body.lock_leave_during_probation===false?0:1;
-    await env.DB.prepare('UPDATE clients SET lock_leave_during_probation=?1 WHERE id=?2').bind(locked,clientId).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'leave.settings.update','client',String(clientId),{lock_leave_during_probation:Boolean(locked)});
-    return json({ok:true,lock_leave_during_probation:Boolean(locked)});
-  }
+  if (path === '/api/leave-settings' && ['GET','PATCH'].includes(method)) return leaveChannelApi(request,env.DB,auth,{canManage:canManagePeopleAdmin,ensure:ensureV100P2Ready,getClient,audit:safeAudit});
 
   if (path === '/api/hr-cases' && method === 'GET') {
     if(!canManagePeopleAdmin(auth.role)) return json({error:'เฉพาะ HR เท่านั้นที่ดูเรื่องส่วนตัวของพนักงานได้'},403);
@@ -5024,6 +5012,7 @@ async function handleApi(request, env, url, auth, ctx) {
 
   if (path === '/api/leaves' && method === 'POST') {
     if (!canManagePeople(auth.role)) return json({error:'ไม่มีสิทธิ์สร้างคำขอลาแทนพนักงาน'},403);
+    if((await leaveChannel(env.DB,clientId)).hr_only&&!canManagePeopleAdmin(auth.role))return json({error:'โหมดลากับ HR เท่านั้น ให้ HR เป็นผู้บันทึกการลา'},403);
     const body=await safeJson(request);
     try{
       const requestRow=await createLeaveRequest(env,{
@@ -5493,6 +5482,7 @@ async function processLineEvent(event, env, lineCtx) {
     const session=await getLineSession(env.DB,sessionKey);
 
     if(session?.action==='leave_reason'){
+      if((await leaveChannel(env.DB,Number(emp.client_id))).hr_only){await clearLineSession(env.DB,sessionKey);return replyLine(accessToken,event.replyToken,HR_ONLY_LEAVE_MESSAGE);}
       if(text.length<2) return replyLine(accessToken,event.replyToken,'ขอเหตุผลสั้น ๆ อย่างน้อย 2 ตัวอักษรนะ');
       try{
         const payload=session.payload||{};
@@ -5640,6 +5630,7 @@ async function processLineEvent(event, env, lineCtx) {
       await clearLineSession(env.DB,sessionKey).catch(()=>{});
       return sendQuickAttendanceEntry(env,event.replyToken,emp,accessToken,action);
     }
+    if(['leave_policy','leave_type','leave_start','leave_end','leave_daypart'].includes(action)&&(await leaveChannel(env.DB,Number(emp.client_id))).hr_only){await clearLineSession(env.DB,sessionKey);return replyLine(accessToken,event.replyToken,HR_ONLY_LEAVE_MESSAGE);}
     if(action==='leave_menu') return sendLeaveTypeMenu(env,event.replyToken,emp,accessToken);
     if(action==='leave_balance') return sendLeaveBalance(env,event.replyToken,emp,accessToken);
     if(action==='holidays') return sendCompanyHolidays(env,event.replyToken,emp,accessToken);
@@ -8765,6 +8756,7 @@ async function pushHrCaseSubmittedConfirmation(env,row){
 async function getPublicLeaveForm(env,token){
   const access=await getEmployeePortalAccess(env.DB,token);
   if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิด “ขอลางาน” จาก LINE ใหม่'},401);
+  const channel=await leaveChannel(env.DB,Number(access.client_id));if(channel.hr_only)return json({ok:true,...channel,employee:{name:access.nickname||access.first_name,company_name:access.company_name||''},policies:[]});
   await ensureLeaveRetroSchemaReady(env.DB);
   await ensureDefaultLeavePolicies(env.DB,Number(access.client_id));
   const year=Number(dateInBangkok().slice(0,4));
@@ -8783,6 +8775,7 @@ async function getPublicLeaveForm(env,token){
 async function submitPublicLeaveForm(request,env,token){
   const access=await getEmployeePortalAccess(env.DB,token);
   if(!access)return json({error:'ลิงก์หมดอายุ กรุณาเปิด “ขอลางาน” จาก LINE ใหม่'},401);
+  const channel=await leaveChannel(env.DB,Number(access.client_id));if(channel.hr_only)return json({error:channel.message,code:'ONLINE_LEAVE_DISABLED',...channel},403);
   let form;
   try{form=await request.formData();}catch{return json({error:'อ่านแบบฟอร์มไม่ได้ กรุณาลองใหม่'},400);}
   const policyId=Number(form.get('policy_id')||0);
@@ -8839,6 +8832,7 @@ async function submitPublicLeaveForm(request,env,token){
     await pushLeaveWebSubmittedConfirmation(env,row).catch(error=>console.error(JSON.stringify({level:'error',event:'leave_web_confirmation_failed',request_id:Number(row.id),message:String(error?.message||error)})));
     return json({ok:true,warning:optionalEvidenceWarning,request:{id:Number(row.id),code:`LV-${String(row.id).padStart(4,'0')}`,status:row.status,leave_type:row.leave_type_name||row.leave_type,start_date:row.start_date,end_date:row.end_date,duration_days:Number(row.duration_days||0),evidence_count:Number(row.evidence_count||0),is_retroactive:Boolean(Number(row.is_retroactive||0)),retro_reason:row.retro_reason||null}} ,201);
   }catch(e){
+    if(e.code==='ONLINE_LEAVE_DISABLED')return json({error:HR_ONLY_LEAVE_MESSAGE,message:HR_ONLY_LEAVE_MESSAGE,code:e.code,submission_mode:'hr_only'},403);
     const raw=String(e?.message||'');
     const friendly=isGoogleReauthRequiredError(e)?'การเชื่อม Google Drive ของบริษัทหมดอายุ ระบบกำลังใช้พื้นที่สำรองไม่ได้ กรุณาแจ้ง HR ให้เชื่อม Google ใหม่แล้วลองอีกครั้ง':(raw||'ส่งใบลาไม่สำเร็จ');
     return json({error:friendly},e.status||400);
@@ -10119,6 +10113,7 @@ async function resolveLeavePolicy(db,clientId,policyId,leaveType){
 }
 
 async function createLeaveRequest(env,{clientId,employeeId,policyId,leaveType,startDate,endDate,dayPart='full',reason='',retroReason='',submittedVia='line',submittedByUserId=null}){
+  if(submittedVia!=='dashboard')await requireOnlineLeave(env.DB,clientId);else await leaveChannel(env.DB,clientId);
   const employee=await getEmployeeForClient(env.DB,employeeId,clientId); if(!employee) throw httpError('ไม่พบพนักงาน',404);
   const policy=await resolveLeavePolicy(env.DB,clientId,policyId,leaveType); if(!policy) throw httpError('ไม่พบประเภทลา',400);
   if(!startDate||!endDate) throw httpError('กรุณาเลือกวันลาให้ครบ',400);
@@ -10146,8 +10141,9 @@ async function createLeaveRequest(env,{clientId,employeeId,policyId,leaveType,st
   // This matches Nakna's workflow where companies can choose manager approval OR direct HR approval.
   const status=evidenceRequired?'awaiting_evidence':'pending';
   await ensureLeaveRetroSchemaReady(env.DB);
-  const result=await env.DB.prepare(`INSERT INTO leave_requests (client_id,employee_id,leave_type,policy_id,start_date,end_date,reason,status,approver_employee_id,duration_days,day_part,evidence_required,evidence_count,submitted_via,is_retroactive,retro_reason) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,?13,?14,?15)`)
-    .bind(clientId,employeeId,policy.code,Number(policy.id),startDate,endDate,reason||null,status,approverId,duration,dayPart,evidenceRequired?1:0,submittedVia,isRetroactive?1:0,isRetroactive?String(retroReason||'').trim():null).run();
+  const result=await env.DB.prepare(`INSERT INTO leave_requests (client_id,employee_id,leave_type,policy_id,start_date,end_date,reason,status,approver_employee_id,duration_days,day_part,evidence_required,evidence_count,submitted_via,is_retroactive,retro_reason) SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,?13,?14,?15 WHERE ?16='dashboard' OR NOT EXISTS(SELECT 1 FROM company_leave_channels WHERE client_id=?1 AND hr_only=1)`)
+    .bind(clientId,employeeId,policy.code,Number(policy.id),startDate,endDate,reason||null,status,approverId,duration,dayPart,evidenceRequired?1:0,submittedVia,isRetroactive?1:0,isRetroactive?String(retroReason||'').trim():null,submittedVia).run();
+  if(Number(result.meta?.changes)===0)throw Object.assign(Error(HR_ONLY_LEAVE_MESSAGE),{status:403,code:'ONLINE_LEAVE_DISABLED'});
   const id=Number(result.meta.last_row_id);
   await env.DB.prepare(`INSERT INTO leave_approval_events (client_id,leave_request_id,action,actor_type,actor_employee_id,actor_user_id,reason) VALUES (?1,?2,'submitted',?3,?4,?5,?6)`).bind(clientId,id,submittedVia==='line'?'employee':'user',submittedVia==='line'?employeeId:null,submittedVia==='line'?null:submittedByUserId,reason||null).run();
   await env.DB.prepare(`INSERT OR IGNORE INTO leave_ledger(client_id,employee_id,leave_policy_id,year,entry_type,days,reference_type,reference_id,note) VALUES(?1,?2,?3,?4,'reserved',?5,'leave_request',?6,?7)`).bind(clientId,employeeId,Number(policy.id),Number(startDate.slice(0,4)),-duration,id,`จองสิทธิ์ ${policy.name}`).run();
@@ -10867,6 +10863,7 @@ async function sendHrCaseForm(env,replyToken,emp,accessToken){
 }
 
 async function sendLeaveTypeMenu(env,replyToken,emp,accessToken){
+  if((await leaveChannel(env.DB,Number(emp.client_id))).hr_only)return replyLine(accessToken,replyToken,HR_ONLY_LEAVE_MESSAGE);
   const token=await issueEmployeePortalToken(env.DB,Number(emp.client_id),Number(emp.id));
   const base=String(env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev').replace(/\/$/,'');
   const url=`${base}/leave.html?token=${encodeURIComponent(token)}`;

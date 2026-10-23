@@ -53,3 +53,12 @@
   .nk-leave-settings .leave-policy-list {grid-template-columns:1fr;}
   .nk-leave-settings .nk-holiday-row-copy strong {font-size:12px;}
 }
+/* P10.43: company-level submission channel, visible on the leave page. */
+#view-leave .nk-leave-channel-card{display:flex;align-items:center;justify-content:space-between;gap:24px;border:1px solid #d4e5e7;background:#f7fbfb;border-radius:16px;padding:20px 24px;margin:0 0 22px}
+#view-leave .nk-leave-channel-card h3{font-size:17px;color:#19434f;margin:5px 0 7px}
+#view-leave .nk-leave-channel-card p:not(.kicker){font-size:13px;line-height:1.8;color:#68828a;margin:0}
+#view-leave .nk-leave-channel-card [role=status]{display:block;font-size:12px;color:#007e86;line-height:1.7;margin-top:6px}
+#view-leave .nk-leave-channel-switch{display:flex;align-items:center;gap:11px;padding:13px 16px;border:1px solid #bcdadd;background:#fff;border-radius:10px;cursor:pointer;font-size:13px;font-weight:500;color:#24545f;flex:none}
+#view-leave .nk-leave-channel-switch input{width:21px;height:21px;accent-color:#00898f;margin:0}
+#view-leave .nk-leave-channel-switch[hidden]{display:none!important}
+@media(max-width:700px){#view-leave .nk-leave-channel-card{align-items:stretch;flex-direction:column;padding:18px;gap:14px}#view-leave .nk-leave-channel-switch{justify-content:space-between}}

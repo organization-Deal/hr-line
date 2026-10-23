@@ -1,4 +1,4 @@
-import {createPayrollDocumentCenter} from './payroll-document-center.js?v=P10.42';
+import {createPayrollDocumentCenter} from './payroll-document-center.js?v=P10.43';
 import {openPayslipDelivery} from './payslip-delivery.js?v=P10.30';
 import {createReadGate,shouldPreloadPeople,resetRoutePosition} from './ux-runtime.js?v=P10.27';
 const apiReadGate=createReadGate();
@@ -370,7 +370,7 @@ async function loadViewData(name,{force=false}={}){
       }else if(name==='attendance'){
         await loadTeamWorkLog();
       }else if(name==='leave'){
-        const [leaves,policies,employees,peopleCore]=await Promise.all([load('/api/leaves',{data:state.leaves}),load('/api/leave-policies',{data:state.leavePolicies}),load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore)]); state.leaves=leaves?.data||state.leaves; state.leavePolicies=policies?.data||state.leavePolicies; state.employees=employees?.data||state.employees; state.peopleCore=mergePeopleCoreFromServer(peopleCore)||state.peopleCore;
+        const [leaves,policies,employees,peopleCore,leaveChannelSettings]=await Promise.all([load('/api/leaves',{data:state.leaves}),load('/api/leave-policies',{data:state.leavePolicies}),load('/api/employees',{data:state.employees}),load('/api/people-core',state.peopleCore),load('/api/leave-settings')]);state.leaveChannelSettings=leaveChannelSettings; state.leaves=leaves?.data||state.leaves; state.leavePolicies=policies?.data||state.leavePolicies; state.employees=employees?.data||state.employees; state.peopleCore=mergePeopleCoreFromServer(peopleCore)||state.peopleCore;
       }else if(name==='requests'){
         // Consolidated Employee Service: private HR cases are only fetched for HR roles.
         const [requests,service,cases,broadcasts]=await Promise.all([
@@ -1426,6 +1426,7 @@ function bindEvents() {
   $('#peopleProfileSaveBtn').onclick = savePeopleProfile;
   if ($('#peopleFaceResetBtn')) $('#peopleFaceResetBtn').onclick = resetPeopleFaceProfile;
   $('#addLeaveBtn').onclick = openLeaveRequestModal;
+  $('#hrOnlyLeaveToggle')?.addEventListener('change',saveHrOnlyLeave);
   const bkkToday=currentBangkokDateKey();
   if ($('#leaveUnifiedYear')) { const cy=Number(bkkToday.slice(0,4)); $('#leaveUnifiedYear').innerHTML=Array.from({length:12},(_,i)=>`<option value="${cy-i}">${cy-i+543}</option>`).join(''); }
   if ($('#leaveUnifiedMonth')) $('#leaveUnifiedMonth').value=bkkToday.slice(0,7);
@@ -1793,6 +1794,7 @@ async function switchCompany(clientId) {
   if (Number(clientId) === Number(state.me?.active_company_id)) return;
   try {
     await api('/api/session/company', { method: 'POST', body: JSON.stringify({ client_id: Number(clientId) }) });
+    state.leaveChannelSettings=null;
     const ready = await loadSessionOnly();
     if (ready) {
       const onboardingReady = await maybeRunOnboarding();
@@ -3657,6 +3659,7 @@ function leaveDecisionInfo(r) {
 }
 
 function renderLeaves() {
+  renderLeaveChannel();
   const pending = state.leaves.filter(leave => leave.status === 'pending').length;
   const evidence = state.leaves.filter(leave => leave.status === 'awaiting_evidence').length;
   const approved = state.leaves.filter(leave => leave.status === 'approved').length;
@@ -3977,9 +3980,12 @@ async function saveHrCase(){
   try{await api(`/api/hr-cases/${id}`,{method:'PATCH',body:JSON.stringify({status:$('#hrCaseStatus').value,priority:$('#hrCasePriority').value,hr_note:$('#hrCaseNote').value.trim(),assigned_to_me:true})});const reply=$('#hrCaseReply').value.trim();if(reply)await api(`/api/hr-cases/${id}/reply`,{method:'POST',body:JSON.stringify({message:reply})});$('#hrCaseModal').close();toast(reply?'บันทึกและตอบกลับพนักงานแล้ว':'บันทึกเรื่อง HR แล้ว');queueBackgroundRefresh('hr-case:save',()=>loadViewData('hr-inbox',{force:true}));refreshDashboardSoon(80);}catch(e){toast(e.message,true);}finally{btn.disabled=false;}
 }
 
+function renderLeaveChannel(){const raw=state.leaveChannelSettings||state.employeeService?.leave_settings,d=Number(raw?.company_id)===Number(state.me?.active_company_id)?raw:null;const input=$('#hrOnlyLeaveToggle');if(!input)return;const admin=['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||''));input.disabled=!d||!admin;input.checked=Boolean(d?.hr_only);$('#nkLeaveChannelTitle').textContent=!d?'โหลดช่องทางการลาไม่สำเร็จ':d.hr_only?'ลากับ HR โดยตรง':'เปิดยื่นลาออนไลน์';$('#nkLeaveChannelHelp').textContent=d?.hr_only?'พนักงานติดต่อ HR โดยตรง · HR ใช้ปุ่ม “บันทึกการลา” ด้านบนเพื่อกรอกวันลาแทน':'พนักงานยื่นผ่าน LINE และฟอร์มออนไลน์ได้ · เปิดสวิตช์เพื่อให้แจ้งกับ HR เท่านั้น';input.closest('label').hidden=!admin;if($('#addLeaveBtn'))$('#addLeaveBtn').disabled=Boolean(d?.hr_only&&!admin);}
+async function saveHrOnlyLeave(){const input=$('#hrOnlyLeaveToggle'),before=!input.checked,cid=Number(state.me?.active_company_id||0);if(Number(state.leaveChannelSettings?.company_id)!==cid){input.checked=before;return toast('กรุณารอโหลดช่องทางการลาของบริษัทนี้ก่อน',true);}input.disabled=true;$('#nkLeaveChannelStatus').textContent='กำลังบันทึก…';try{const result=await api('/api/leave-settings',{method:'PATCH',body:JSON.stringify({hr_only:input.checked,expected_company_id:cid})});if(cid!==Number(state.me?.active_company_id||0))return;state.leaveChannelSettings=result;state.employeeService={...(state.employeeService||{}),leave_settings:{...(state.employeeService?.leave_settings||{}),...result}};renderLeaveChannel();$('#nkLeaveChannelStatus').textContent=result.hr_only?'บันทึกแล้ว · พนักงานต้องติดต่อ HR โดยตรง':'บันทึกแล้ว · เปิดยื่นลาออนไลน์';toast(result.hr_only?'เปิดโหมดลากับ HR เท่านั้นแล้ว':'เปิดยื่นลาออนไลน์แล้ว');}catch(e){if(cid!==Number(state.me?.active_company_id||0))return;input.checked=before;$('#nkLeaveChannelStatus').textContent='บันทึกไม่สำเร็จ: '+e.message;toast(e.message,true);}finally{if(cid===Number(state.me?.active_company_id||0))input.disabled=false;}}
+
 async function saveProbationLeaveLock(){
   const input=$('#probationLeaveLockToggle');input.disabled=true;
-  try{const result=await api('/api/leave-settings',{method:'PATCH',body:JSON.stringify({lock_leave_during_probation:input.checked})});state.employeeService={...(state.employeeService||{}),leave_settings:{lock_leave_during_probation:result.lock_leave_during_probation}};toast(result.lock_leave_during_probation?'ล็อกวันลาระหว่างทดลองงานแล้ว':'อนุญาตวันลาระหว่างทดลองงานตาม Policy แล้ว');}catch(e){input.checked=!input.checked;toast(e.message,true);}finally{input.disabled=false;}
+  try{const result=await api('/api/leave-settings',{method:'PATCH',body:JSON.stringify({lock_leave_during_probation:input.checked})});state.employeeService={...(state.employeeService||{}),leave_settings:{...(state.employeeService?.leave_settings||{}),...result}};toast(result.lock_leave_during_probation?'ล็อกวันลาระหว่างทดลองงานแล้ว':'อนุญาตวันลาระหว่างทดลองงานตาม Policy แล้ว');}catch(e){input.checked=!input.checked;toast(e.message,true);}finally{input.disabled=false;}
 }
 
 function toggleSettingsNav() {
@@ -5437,6 +5443,7 @@ async function saveLeaveProfile() {
 }
 
 function openLeaveRequestModal(){
+  if(state.leaveChannelSettings?.hr_only&&!['owner','co_owner','hr_admin','hr'].includes(String(activeCompanyRole()||'')))return toast('โหมดนี้ให้ HR เป็นผู้บันทึกการลา',true);
   $('#leaveEmployeeSelect').innerHTML=state.employees.filter(e=>e.status==='active').map(e=>`<option value="${e.id}">${escapeHtml(e.nickname||e.first_name)} · ${escapeHtml(e.employee_code)}</option>`).join('');
   $('#leavePolicySelect').innerHTML=state.leavePolicies.filter(p=>Number(p.is_active)).map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
   const today=localDateKey(new Date()); $('#leaveStartDate').value=today; $('#leaveEndDate').value=today; $('#leaveReason').value=''; $('#leaveDayPart').value='full';
