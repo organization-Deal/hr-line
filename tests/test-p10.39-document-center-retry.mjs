@@ -1,0 +1,8 @@
+import assert from 'node:assert/strict';import {createPayrollDocumentCenter} from '../public/payroll-document-center.js';
+let calls=0,retry;const elements=new Map(),node=key=>{if(!elements.has(key))elements.set(key,{textContent:'',className:'',addEventListener(){},append(...items){for(const item of items)if(item?.tag==='button')retry=item;}});return elements.get(key)};
+const dialog={open:false,innerHTML:'',querySelector:node,querySelectorAll:()=>[],showModal(){this.open=true},close(){this.open=false}};
+global.document={body:{append(){}},createTextNode:s=>s,createElement:tag=>tag==='dialog'?dialog:{tag}};
+const state={me:{active_company_id:1},payrollDetail:{period:{id:6,period_key:'2026-10',pay_date:'2026-10-28'}}};
+const ctrl=createPayrollDocumentCenter({state,escapeHtml:String,toast:()=>{},api:async(url,options)=>{assert.equal(options.timeoutMs,45000);calls++;if(calls===1)throw Error('API_TIMEOUT:/api/payroll/document-center?period_id=6&year=2026');return {company:{legal_name:'บริษัททดสอบ'},period:state.payrollDetail.period,entries:[],annual_people:[],scope_note:'จ่ายจริงเท่านั้น'};}});
+await ctrl.open();assert(dialog.open);assert.equal(node('[data-center-status]').textContent,'โหลดเอกสารนานเกินไป กรุณาลองโหลดอีกครั้ง');assert.equal(retry.textContent,'ลองโหลดอีกครั้ง');assert.equal(calls,1);await retry.onclick();assert.equal(calls,2);assert(dialog.innerHTML.includes('บริษัททดสอบ'));assert(dialog.innerHTML.includes('data-tab="settings"'));
+console.log('PASS P10.39: timeout recovery in the same dialog, useful Thai error, explicit read timeout, successful retry without reopening or writing payroll');

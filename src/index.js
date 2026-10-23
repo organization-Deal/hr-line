@@ -1,5 +1,5 @@
 import {companyProfileApi} from './company-profile.js';
-import {payrollDocumentCenterApi} from './payroll-document-center.js';
+import {payrollDocumentCenterApi,handoffPeriodDetail} from './payroll-document-center.js';
 import {renderPayrollPdf} from './payroll-pdf.js';
 import {payrollIssuer} from './payroll-issuer.js';
 import {payrollDeliveryApi,sendPayslipLine} from './payroll-delivery.js';
@@ -10,8 +10,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.38-COMPANY-PROFILE';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.38-COMPANY-PROFILE';
+const NAKNA_RUNTIME_RELEASE = 'P10.39-DOCUMENT-TIMEOUT';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.39-DOCUMENT-TIMEOUT';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -1755,7 +1755,7 @@ async function handleApi(request, env, url, auth, ctx) {
   const method = request.method;
   const path = url.pathname;
   const clientId = auth.clientId ? Number(auth.clientId) : null;
-  if(path==='/api/payroll/document-center'||/^\/api\/payroll\/document-center\/exports\/\d+$/.test(path))return payrollDocumentCenterApi(request,env,auth,{canManage:canManagePayroll,ensure:ensurePayrollDefaults,ensurePayments:ensurePayrollPayment,ensureDocuments:ensureDocumentWorkflowReady,getDetail:getPayrollPeriodDetail,payment:payrollPayment,audit:safeAudit,validDate:validPayrollDateKey,today:dateInBangkok,now:()=>new Date().toISOString()});
+  if(path==='/api/payroll/document-center'||/^\/api\/payroll\/document-center\/exports\/\d+$/.test(path))return payrollDocumentCenterApi(request,env,auth,{canManage:canManagePayroll,ensure:ensurePayrollDefaults,ensurePayments:ensurePayrollPayment,ensureDocuments:ensureDocumentWorkflowReady,getDetail:handoffPeriodDetail,payment:payrollPayment,audit:safeAudit,validDate:validPayrollDateKey,today:dateInBangkok,now:()=>new Date().toISOString()});
   const paymentMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/payment-confirmation$/);
   if(paymentMatch)return payrollPaymentApi(request,env,auth,Number(paymentMatch[1]),{canManagePayroll,ensurePayrollDefaults,getPayrollPeriodDetail,recordPayrollPeriodEvent,today:dateInBangkok});
 

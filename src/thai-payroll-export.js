@@ -6,7 +6,7 @@ export const FILING_SCHEMA=[
 `CREATE TABLE IF NOT EXISTS payroll_filing_people(client_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,title_name TEXT,sso_title_code TEXT,address1 TEXT,address2 TEXT,postal_code TEXT,sso_id TEXT,updated_by INTEGER,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(client_id,employee_id))`,
 `CREATE TABLE IF NOT EXISTS payroll_filing_wages(client_id INTEGER NOT NULL,contribution_month TEXT NOT NULL,employee_id INTEGER NOT NULL,wages REAL NOT NULL,reason TEXT NOT NULL,updated_by INTEGER,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(client_id,contribution_month,employee_id))`
 ];
-const ready=new WeakMap();export async function ensureThaiFiling(db){let p=ready.get(db);if(!p){p=(async()=>{for(const sql of FILING_SCHEMA)await db.prepare(sql).run();})();ready.set(db,p);p.catch(()=>ready.delete(db));}await p;}
+const ready=new WeakMap();export async function ensureThaiFiling(db){let p=ready.get(db);if(!p){p=(async()=>{if(db.batch)await db.batch(FILING_SCHEMA.map(sql=>db.prepare(sql)));else for(const sql of FILING_SCHEMA)await db.prepare(sql).run();})();ready.set(db,p);p.catch(()=>ready.delete(db));}await p;}
 const clean=x=>String(x??'').trim();
 export function taxId(x){return clean(x).replace(/[\s-]/g,'');}
 export function taxIdValid(value){const x=taxId(value);if(!/^\d{13}$/.test(x)||/^0+$/.test(x))return false;let n=0;for(let i=0;i<12;i++)n+=Number(x[i])*(13-i);return (11-n%11)%10===Number(x[12]);}

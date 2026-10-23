@@ -6,7 +6,7 @@ export const DOCUMENT_CENTER_SCHEMA=[
 `CREATE TABLE IF NOT EXISTS payroll_handoff_exports(id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,scope TEXT NOT NULL,document_kind TEXT NOT NULL,employee_id INTEGER,snapshot_json TEXT NOT NULL,source_fingerprint TEXT NOT NULL,created_by INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
 `CREATE INDEX IF NOT EXISTS idx_payroll_handoff_exports ON payroll_handoff_exports(client_id,scope,document_kind,id)`
 ];
-export async function ensureDocumentCenter(db){let p=cache.get(db);if(!p){p=(async()=>{for(const sql of DOCUMENT_CENTER_SCHEMA)await db.prepare(sql).run();})();cache.set(db,p);p.catch(()=>cache.delete(db));}await p;}
+export async function ensureDocumentCenter(db){let p=cache.get(db);if(!p){p=(async()=>{if(db.batch)await db.batch(DOCUMENT_CENTER_SCHEMA.map(sql=>db.prepare(sql)));else for(const sql of DOCUMENT_CENTER_SCHEMA)await db.prepare(sql).run();})();cache.set(db,p);p.catch(()=>cache.delete(db));}await p;}
 export const CENTER_KINDS={summary:{label:'สรุปเงินเดือนส่งบัญชี',scope:'period'},bank:{label:'รายชื่อและยอดโอน',scope:'period'},accounting:{label:'รายการบันทึกบัญชี',scope:'period'},pnd1:{label:'ไฟล์ ภ.ง.ด.1 สำหรับ RD Prep',scope:'month'},sso:{label:'ไฟล์ สปส.1-10 สำหรับ SSO',scope:'period'},pnd1kor:{label:'ไฟล์ ภ.ง.ด.1ก สำหรับ RD Prep',scope:'year'},tawi50:{label:'หนังสือรับรอง 50 ทวิ',scope:'year'}};
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=x=>Number(x||0).toFixed(2);
@@ -24,17 +24,36 @@ export function handoffWarnings(snapshot,kind,employeeId){const rows=employeeId?
  return warnings;
 }
 async function fingerprint(value){const bytes=new TextEncoder().encode(JSON.stringify(value));return [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(x=>x.toString(16).padStart(2,'0')).join('');}
+// Ready payroll installations only need one schema probe per DB binding, not
+// the full payroll/defaults and document-workflow initialization on every cold start.
+export const HANDOFF_SOURCE_INDEXES=[
+ ['idx_handoff_payment_month','CREATE INDEX IF NOT EXISTS idx_handoff_payment_month ON payroll_payment_confirmations(client_id,status,payment_date,period_id)'],
+ ['idx_handoff_wage_month','CREATE INDEX IF NOT EXISTS idx_handoff_wage_month ON payroll_periods(client_id,period_key,status)'],
+ ['idx_handoff_payroll_items','CREATE INDEX IF NOT EXISTS idx_handoff_payroll_items ON payroll_items(client_id,period_id,employee_id)'],
+ ['idx_handoff_adjustments','CREATE INDEX IF NOT EXISTS idx_handoff_adjustments ON payroll_adjustments(client_id,period_id,employee_id)']
+];
+const sourceReady=new WeakMap();
+export async function ensureHandoffSources(db,cid,h){let task=sourceReady.get(db);if(!task){task=(async()=>{const found=(await db.prepare("SELECT name FROM sqlite_master WHERE (type='table' AND name IN ('clients','employees','payroll_periods','payroll_items','payroll_adjustments','employee_payroll_profiles','company_onboarding','company_document_settings','payroll_payment_confirmations')) OR (type='index' AND name IN ('idx_handoff_payment_month','idx_handoff_wage_month','idx_handoff_payroll_items','idx_handoff_adjustments'))").all()).results||[];const names=new Set(found.map(x=>x.name));if(!['payroll_periods','payroll_items','payroll_adjustments','employee_payroll_profiles'].every(n=>names.has(n)))await h.ensure(db,cid);if(!names.has('company_onboarding')||!names.has('company_document_settings'))await h.ensureDocuments(db);if(!names.has('payroll_payment_confirmations'))await h.ensurePayments(db);const missing=HANDOFF_SOURCE_INDEXES.filter(([name])=>!names.has(name)).map(([,sql])=>db.prepare(sql));if(missing.length){if(db.batch)await db.batch(missing);else for(const q of missing)await q.run();}})();sourceReady.set(db,task);task.catch(()=>sourceReady.delete(db));}await task;}
+export async function handoffPeriodDetail(db,cid,pid){
+ const period=await db.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(pid,cid).first();if(!period)return {period:null,items:[]};
+ const [items,payment]=await Promise.all([
+  db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.national_id,pp.bank_name,pp.bank_account_name,pp.bank_account_no FROM payroll_items pi JOIN employees e ON e.id=pi.employee_id AND e.client_id=pi.client_id LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id AND pp.client_id=pi.client_id WHERE pi.period_id=?1 AND pi.client_id=?2 ORDER BY e.first_name,e.last_name`).bind(pid,cid).all(),
+  db.prepare("SELECT * FROM payroll_payment_confirmations WHERE client_id=?1 AND period_id=?2 AND status='confirmed'").bind(cid,pid).first()
+ ]);return {period,items:items.results||[],payment_confirmation:payment};
+}
+const nextMonth=month=>{const [y,m]=month.split('-').map(Number);return m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,'0')}`;};
 export async function loadHandoffSnapshot(db,cid,pid,year,h){
  const detail=await h.getDetail(db,cid,pid);if(!detail.period)throw Object.assign(Error('ไม่พบรอบเงินเดือน'),{status:404});
+ const paymentMonth=String(detail.payment_confirmation?.payment_date||detail.period.pay_date||detail.period.period_key).slice(0,7),wageMonth=String(detail.period.period_key).slice(0,7);
  const [company,people,annual,monthly,periodPayment,filing,ssoSource,filingPeople,filingWages]=await Promise.all([
   db.prepare(`SELECT c.name,COALESCE(NULLIF(s.legal_name,''),o.legal_name,c.name) AS legal_name,COALESCE(NULLIF(s.tax_id,''),o.tax_id) AS tax_id,COALESCE(NULLIF(s.address,''),o.address) AS address,s.signer_name,s.signer_position FROM clients c LEFT JOIN company_onboarding o ON o.client_id=c.id LEFT JOIN company_document_settings s ON s.client_id=c.id WHERE c.id=?1`).bind(cid).first(),
   db.prepare(`SELECT id,national_id FROM employees WHERE client_id=?1`).bind(cid).all(),
   db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.national_id,pc.payment_date FROM payroll_items pi JOIN payroll_periods p ON p.id=pi.period_id AND p.client_id=pi.client_id JOIN employees e ON e.id=pi.employee_id AND e.client_id=pi.client_id JOIN payroll_payment_confirmations pc ON pc.period_id=p.id AND pc.client_id=p.client_id AND pc.status='confirmed' WHERE pi.client_id=?1 AND p.status IN ('locked','published') AND pc.payment_date>=?2 AND pc.payment_date<?3 ORDER BY pc.payment_date,p.id,e.id`).bind(cid,`${year}-01-01`,`${year+1}-01-01`).all(),
   // PND1 is a calendar payment month, which can contain multiple payroll cycles.
-  db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.national_id,pc.payment_date FROM payroll_items pi JOIN payroll_periods p ON p.id=pi.period_id AND p.client_id=pi.client_id JOIN employees e ON e.id=pi.employee_id AND e.client_id=pi.client_id JOIN payroll_payment_confirmations pc ON pc.period_id=p.id AND pc.client_id=p.client_id AND pc.status='confirmed' WHERE pi.client_id=?1 AND p.status IN ('locked','published') AND substr(pc.payment_date,1,7)=?2 ORDER BY pc.payment_date,p.id,e.id`).bind(cid,String(detail.payment_confirmation?.payment_date||detail.period.pay_date||detail.period.period_key).slice(0,7)).all(),
-  h.payment(db,cid,pid),
+  db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.national_id,pc.payment_date FROM payroll_items pi JOIN payroll_periods p ON p.id=pi.period_id AND p.client_id=pi.client_id JOIN employees e ON e.id=pi.employee_id AND e.client_id=pi.client_id JOIN payroll_payment_confirmations pc ON pc.period_id=p.id AND pc.client_id=p.client_id AND pc.status='confirmed' WHERE pi.client_id=?1 AND p.status IN ('locked','published') AND pc.payment_date>=?2 AND pc.payment_date<?3 ORDER BY pc.payment_date,p.id,e.id`).bind(cid,paymentMonth+'-01',nextMonth(paymentMonth)+'-01').all(),
+  Promise.resolve(detail.payment_confirmation??null),
   db.prepare('SELECT settings_json FROM payroll_filing_settings WHERE client_id=?1').bind(cid).first(),
-  db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.national_id,(SELECT COALESCE(SUM(a.amount),0) FROM payroll_adjustments a WHERE a.client_id=pi.client_id AND a.period_id=pi.period_id AND a.employee_id=pi.employee_id AND a.adjustment_type!='deduction' AND a.sso_contributable=1 AND a.category NOT IN ('tax_add','tax_reduce')) AS saved_sso_adjustments FROM payroll_items pi JOIN payroll_periods p ON p.id=pi.period_id AND p.client_id=pi.client_id JOIN employees e ON e.id=pi.employee_id AND e.client_id=pi.client_id WHERE pi.client_id=?1 AND p.status IN ('locked','published') AND substr(p.period_key,1,7)=?2 ORDER BY p.id,e.id`).bind(cid,String(detail.period.period_key).slice(0,7)).all(),
+  db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.national_id,COALESCE(adj.amount,0) AS saved_sso_adjustments FROM payroll_items pi JOIN payroll_periods p ON p.id=pi.period_id AND p.client_id=pi.client_id JOIN employees e ON e.id=pi.employee_id AND e.client_id=pi.client_id LEFT JOIN (SELECT a.period_id,a.employee_id,SUM(a.amount) AS amount FROM payroll_adjustments a JOIN payroll_periods ap ON ap.id=a.period_id AND ap.client_id=a.client_id WHERE a.client_id=?1 AND ap.period_key>=?2 AND ap.period_key<?3 AND a.adjustment_type='earning' AND a.sso_contributable=1 AND a.category NOT IN ('tax_add','tax_reduce') GROUP BY a.period_id,a.employee_id) adj ON adj.period_id=pi.period_id AND adj.employee_id=pi.employee_id WHERE pi.client_id=?1 AND p.status IN ('locked','published') AND p.period_key>=?2 AND p.period_key<?3 ORDER BY p.id,e.id`).bind(cid,wageMonth,nextMonth(wageMonth)).all(),
   db.prepare('SELECT * FROM payroll_filing_people WHERE client_id=?1 ORDER BY employee_id').bind(cid).all(),
   db.prepare('SELECT * FROM payroll_filing_wages WHERE client_id=?1 AND contribution_month=?2 ORDER BY employee_id').bind(cid,String(detail.period.period_key).slice(0,7)).all()
  ]);
@@ -60,11 +79,12 @@ const response=(body,status=200)=>Response.json(body,{status,headers:{'cache-con
 export async function payrollDocumentCenterApi(request,env,auth,h){
  if(!h.canManage(auth.role))return response({error:'ไม่มีสิทธิ์จัดการเอกสารเงินเดือน'},403);
  const cid=Number(auth.clientId);if(!cid)return response({error:'กรุณาเลือกบริษัท'},400);
- await h.ensure(env.DB);await h.ensurePayments(env.DB);await h.ensureDocuments(env.DB);await ensureDocumentCenter(env.DB);await ensureThaiFiling(env.DB);
+ await ensureDocumentCenter(env.DB);
  const url=new URL(request.url),path=url.pathname,db=env.DB;
  const savedMatch=path.match(/^\/api\/payroll\/document-center\/exports\/(\d+)$/);
  if(savedMatch&&request.method==='GET'){const row=await db.prepare('SELECT * FROM payroll_handoff_exports WHERE id=?1 AND client_id=?2').bind(Number(savedMatch[1]),cid).first();if(!row)return response({error:'ไม่พบเอกสาร'},404);const s=JSON.parse(row.snapshot_json);s.export_id=Number(row.id);const html=row.document_kind==='tawi50';if(s.export_format==='thai-standard-v1'&&['pnd1','pnd1kor','sso'].includes(row.document_kind)){const out=row.document_kind==='sso'?buildSsoCsv(s):buildPndText(s,row.document_kind);return new Response(out.encoding==='tis-620'?encodeTis620(out.body):out.body,{headers:{'content-type':out.content_type,'content-disposition':`attachment; filename="${out.file_name}"`,'cache-control':'no-store','x-content-type-options':'nosniff'}});}const body=html?tawiHtml(s,Number(row.employee_id)):handoffCsv(s,row.document_kind);return new Response(body,{headers:{'content-type':html?'text/html; charset=utf-8':'text/csv; charset=utf-8','content-disposition':`${html?'inline':'attachment'}; filename="Nakna-${row.document_kind}-${row.id}.${html?'html':'csv'}"`,'cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'"}});}
  if(path!=='/api/payroll/document-center')return response({error:'ไม่พบเส้นทาง'},404);
+ await ensureHandoffSources(db,cid,h);await ensureThaiFiling(db);
  let input={};if(request.method==='POST'){try{input=await request.json();}catch{return response({error:'ข้อมูลไม่ถูกต้อง'},400);}}
  const pid=Number(input.period_id||url.searchParams.get('period_id')),year=Number(input.year||url.searchParams.get('year'));
  if(!Number.isInteger(pid)||pid<1||!Number.isInteger(year)||year<2000||year>2200)return response({error:'เลือกรอบเงินเดือนและปี ค.ศ. ให้ถูกต้อง'},400);
