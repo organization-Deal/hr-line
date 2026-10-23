@@ -32,6 +32,13 @@ check((await call('POST',{...config,people:[{employee_id:2}]})).status===400,'fi
 check((await call('POST',{...config,expected_config_fingerprint:'old'})).status===409,'stale config rejected');
 check((await call('POST',config)).status===200,'atomic filing config saved');
 check(JSON.stringify((await run('SELECT * FROM payroll_items')).results)===beforeMoney,'filing config does not change payroll money');
+d=await (await call()).json();
+const basic={...config,expected_config_fingerprint:d.filing.config_fingerprint,reason:'',people:[]};
+check((await call('POST',basic)).status===200,'ordinary filing settings save with blank note');d=await (await call()).json();
+const changedWage={...basic,expected_config_fingerprint:d.filing.config_fingerprint,people:[{employee_id:1,title_name:'นาย',sso_wages:2100}]};
+check((await call('POST',changedWage)).status===400,'manual wage change still requires reason');
+check((await db.prepare('SELECT wages FROM payroll_filing_wages WHERE client_id=1 AND employee_id=1').first()).wages===2000,'rejected wage change leaves saved wages intact');
+check((await call('POST',{...changedWage,people:[{employee_id:1,sso_wages:''}]})).status===400,'clearing wage override also requires reason');
 d=await (await call()).json();const sso=d.entries.find(x=>x.kind==='sso');check(sso.scope_key==='sso:2026-10'&&!sso.warnings.length,'SSO aggregates both locked October cycles independent of payment');
 const ssoPrepared=await (await call('POST',{action:'prepare',kind:'sso',expected_fingerprint:sso.fingerprint})).json();check(ssoPrepared.id>0,'SSO snapshot persisted');
 const ssoDownload=await call('GET',{},auth,ssoPrepared.download_url);const ssoText=new TextDecoder('windows-874').decode(await ssoDownload.arrayBuffer());check(ssoText.split('\r\n')[0].split(',')[10]==='100.00'&&ssoText.split('\r\n')[1].split(',')[5]==='2000.00','SSO uploaded bytes have header totals and monthly wages');
