@@ -10,6 +10,8 @@ html.nk105 :is(.nk105-reveal,.nk105-period-toggle,.nk105-person-btn):focus-visib
 html.nk105 :is(.nk105-person>summary,.nk105-leave-person>summary):focus-visible{outline:2px solid var(--nk105-brand);outline-offset:2px}
 html.nk105 .nk105-reveal{display:none;align-items:center;justify-content:center;gap:9px;border:1px solid var(--nk105-line);color:var(--nk105-ink);background:#fff;border-radius:11px;padding:10px 14px;min-height:44px;font-weight:600;font-size:13px}
 html.nk105 .nk105-reveal-icon{font-size:18px;color:var(--nk105-brand)}
+/* Status totals already appear in full on desktop. */
+html.nk105 .nk105-mini-reveal{display:none}
 html.nk105 .nk105-people-list,html.nk105 .nk105-leave-people-list{display:none}
 html.nk105 .nk105-period-toggle{display:none}
 html.nk105 .nk105-hint{display:none}
@@ -105,7 +107,10 @@ html.nk105 #view-dashboard .nk105-neutral-missing .summary-dot{background:#a1b3a
   html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary>article{display:flex!important;flex-direction:column!important;gap:1px!important;min-width:0!important;min-height:75px!important;padding:10px 7px!important;border:0!important;background:#f3f7f6!important;border-radius:9px!important;grid-column:auto!important}
   html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary>article:nth-child(n+4){display:none!important}
   html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary.nk105-all-stats>article:nth-child(n+4){display:flex!important}
-  html.nk105 #view-leave .nk105-mini-reveal{display:block;width:100%;text-align:center;border:0;background:transparent;color:#04878a;font:inherit;font-size:11px;font-weight:650;min-height:32px;padding:4px 8px;margin:0 0 8px;cursor:pointer}
+  html.nk105 #view-leave .nk105-mini-reveal{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;text-align:center;border:1px solid #cbded9;border-radius:10px;background:#fff;color:#04777b;font:inherit;font-size:13px;font-weight:600;min-height:44px;padding:9px 12px;margin:0 0 12px;cursor:pointer}
+  html.nk105 #view-leave .nk105-mini-reveal::after{content:"⌄";font-size:18px;line-height:1}
+  html.nk105 #view-leave .nk105-mini-reveal[aria-expanded="true"]::after{content:"⌃"}
+  html.nk105 #view-leave .nk105-mini-reveal:hover{background:#eef7f5;border-color:#91bdb3}
   html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary>article>small{font-size:10px!important;line-height:1.25!important;min-height:24px!important;margin:0!important;color:#6a8480}
   html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary>article>strong{font-size:23px!important;line-height:1.25!important}
   html.nk105 #view-leave #leaveUnifiedPanel .leave-report-summary>article>span{font-size:10px!important;margin:0!important;padding:0!important}
@@ -139,7 +144,7 @@ html.nk105 #view-dashboard .nk105-neutral-missing .summary-dot{background:#a1b3a
   html.nk105 #view-payroll #payrollSummary.nk105-payroll-expanded .payroll-summary-card.nk105-payroll-secondary{display:block!important}
   html.nk105 #view-payroll #payrollSummary .payroll-summary-card strong{font-size:19px!important;overflow-wrap:anywhere!important}
   html.nk105 #view-payroll #payrollSummary .payroll-summary-card small{display:none!important}
-  html.nk105 #view-payroll #nk105PayrollSummaryMore{display:flex!important;min-height:35px!important;width:100%!important;margin:5px 0 8px!important;color:#557a76!important;border:0!important;background:none!important;font-size:11px}
+  html.nk105 #view-payroll #nk105PayrollSummaryMore{display:flex!important;min-height:44px!important;width:100%!important;margin:5px 0 8px!important;color:#04777b!important;border:1px solid #cbded9!important;background:#fff!important;font-size:13px}
   html.nk105 #view-payroll .payroll-workspace{display:flex!important;flex-direction:column!important;gap:9px!important}
   html.nk105 #view-payroll.nk105-has-payroll-detail .payroll-detail-panel{order:0!important}
   html.nk105 #view-payroll.nk105-has-payroll-detail .payroll-period-panel{order:1!important}

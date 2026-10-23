@@ -215,13 +215,19 @@
     }
     const summary=$('#leaveUnifiedSummary');
     if(summary && !$('#nk105LeaveStatsToggle')){
-      const button=action('ดูสถานะใบลาเพิ่มเติม','nk105-mini-reveal');
+      const button=action('ดูสถานะใบลาทั้งหมด','nk105-mini-reveal');
       button.id='nk105LeaveStatsToggle';button.setAttribute('aria-controls','leaveUnifiedSummary');
-      button.setAttribute('aria-expanded','false');summary.after(button);
-      button.addEventListener('click',()=>{
-        const open=summary.classList.toggle('nk105-all-stats');button.setAttribute('aria-expanded',String(open));
-        button.textContent=open?'ย่อสถานะใบลา':'ดูสถานะใบลาเพิ่มเติม';
-      });
+      const sync=()=>{
+        const expanded=!small.matches||summary.classList.contains('nk105-all-stats');
+        button.hidden=summary.querySelectorAll(':scope > article').length<=3;
+        button.setAttribute('aria-expanded',String(expanded));
+        button.textContent=expanded?'แสดงเฉพาะยอดหลัก':'ดูสถานะใบลาทั้งหมด';
+      };
+      summary.after(button);
+      button.addEventListener('click',()=>{summary.classList.toggle('nk105-all-stats');sync();});
+      observe(summary,sync,{childList:true});
+      small.addEventListener('change',sync);
+      sync();
     }
     const filter=$('#nkLeaveFilterPanel');if(filter&&small.matches)filter.open=false;
     const tabs=$('#nkLeaveTabs');if(tabs) tabs.classList.add('nk105-leave-tabs');

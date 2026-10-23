@@ -631,3 +631,19 @@ html.nk-p10 #leaveUnifiedLoading .leave-unified-error{display:flex;align-items:c
  html.nk-p10 .payroll-mobile-more>summary{min-height:38px!important;padding:9px 0!important;font-size:12px!important}
 }
 @media(max-width:380px){html.nk-p10 .help-center-trigger{display:inline-flex!important;padding:5px;width:32px;min-width:32px}}
+
+/* P10.44: shared action controls, including dynamically rendered table actions. */
+html.nk-p10 :is(button.primary-btn,button.secondary-btn,button.text-btn,button.nk-detail-button,button.nk-table-mode){
+  touch-action:manipulation;
+}
+html.nk-p10 :is(button.primary-btn,button.secondary-btn){display:inline-flex;align-items:center;justify-content:center;gap:8px;max-width:100%;overflow-wrap:anywhere}
+html.nk-p10 button:disabled:hover{transform:none}
+@media(max-width:720px){
+  html.nk-p10 :is(.view,dialog) :is(button.primary-btn,button.secondary-btn,button.text-btn,button.nk-detail-button,button.nk-table-mode,button.nk-row-toggle),
+  html.nk-p10 .nk-table td button.nk-detail-button,
+  html.nk105 button.nk105-person-btn,
+  html.nk105 #view-payroll button.nk105-period-toggle{min-height:44px!important;line-height:1.5;white-space:normal}
+  html.nk-p10 .nk-table td button.nk-detail-button{padding:9px 8px;font-size:12px}
+  html.nk105 button.nk105-person-btn{font-size:13px}
+  html.nk-p10 .nk-nav-close{width:44px;height:44px}
+}
