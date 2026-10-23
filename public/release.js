@@ -1,7 +1,7 @@
 /* Change version here when publishing. Asset cache keys are separate. */
 (() => {
   'use strict';
-  const release = Object.freeze({ version: 'P10.33' });
+  const release = Object.freeze({ version: 'P10.34' });
   window.NaknaRelease = release;
   const render = () => {
     document.documentElement.dataset.naknaRelease = release.version;
