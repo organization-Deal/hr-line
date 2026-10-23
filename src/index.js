@@ -1,4 +1,5 @@
-import {payrollIssuer,drawPayrollIssuer} from './payroll-issuer.js';
+import {renderPayrollPdf} from './payroll-pdf.js';
+import {payrollIssuer} from './payroll-issuer.js';
 import {payrollDeliveryApi,sendPayslipLine} from './payroll-delivery.js';
 import {accessManagementApi} from './access-management.js';
 import {dashboardAttendance} from './dashboard-summary.js';
@@ -7,8 +8,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.31-PAYSLIP-HR-SIGNATURE';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.31-PAYSLIP-HR-SIGNATURE';
+const NAKNA_RUNTIME_RELEASE = 'P10.32-PAYSLIP-LAYOUT';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.32-PAYSLIP-LAYOUT';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -7991,22 +7992,8 @@ async function fetchNaknaPdfFont(env){
   const response=await fetch(url); if(!response.ok)throw new Error(`Payslip font fetch failed: ${response.status}`); return new Uint8Array(await response.arrayBuffer());
 }
 
-async function makePayrollPdf({client,employee,period,item,fontBytes,issuer=null,title='สลิปเงินเดือน'}){
-  const pdf=await PDFDocument.create(); pdf.registerFontkit(fontkit); const font=await pdf.embedFont(fontBytes,{subset:true}); let page=pdf.addPage([595.28,841.89]); const {width,height}=page.getSize();
-  const teal=rgb(22/255,125/255,127/255),dark=rgb(18/255,60/255,74/255),muted=rgb(107/255,120/255,122/255),border=rgb(228/255,234/255,231/255),soft=rgb(248/255,250/255,248/255);
-  page.drawRectangle({x:0,y:height-112,width,height:112,color:soft}); page.drawText('นากนะ · NAKNA HR',{x:42,y:height-45,size:11,font,color:teal}); page.drawText(title,{x:42,y:height-78,size:24,font,color:dark}); page.drawText(String(client.name||''),{x:42,y:height-100,size:10,font,color:muted});
-  const empName=`${employee.first_name||''} ${employee.last_name||''}`.trim(); page.drawText(empName,{x:42,y:height-148,size:15,font,color:dark}); page.drawText(`${employee.employee_code||''}  ·  ${period.period_key}`,{x:42,y:height-168,size:9,font,color:muted});
-  const pageFooter=()=>page.drawText('เอกสารนี้สร้างจากข้อมูล Payroll ของบริษัท กรุณาติดต่อ HR หากข้อมูลไม่ถูกต้อง',{x:42,y:38,size:7.5,font,color:muted});
-  const nextPage=()=>{pageFooter();page=pdf.addPage([width,height]);page.drawText(`${title} · ${period.period_key}`,{x:42,y:height-48,size:14,font,color:dark});page.drawText(`${empName} · ${employee.employee_code||''}`,{x:42,y:height-70,size:9,font,color:muted});y=height-112;return page;};
-  const ensureSpace=amount=>{if(y-amount<80)nextPage();};
-  const money=v=>`${Number(v||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2})} บาท`; let y=height-214;
-  const row=(label,value,{bold=false}={})=>{ensureSpace(27);page.drawText(label,{x:48,y,size:9,font,color:muted});page.drawText(value,{x:360,y,size:bold?11:9,font,color:bold?dark:dark});y-=27;page.drawLine({start:{x:48,y:y+13},end:{x:548,y:y+13},thickness:.6,color:border});};
-  let breakdown={};try{breakdown=typeof item.breakdown_json==='string'?JSON.parse(item.breakdown_json||'{}'):(item.breakdown_json||{});}catch{} const recurring=Array.isArray(breakdown.recurring_components)?breakdown.recurring_components:[]; const recurringEarn=recurring.filter(x=>x.type!=='deduction').reduce((a,x)=>a+Number(x.amount||0),0); const recurringDeduct=recurring.filter(x=>x.type==='deduction').reduce((a,x)=>a+Number(x.amount||0),0);
-  page.drawText('รายได้',{x:42,y,size:12,font,color:teal});y-=28; row('เงินเดือนตามรอบ',money(item.prorated_salary)); for(const c of recurring.filter(x=>x.type!=='deduction'))row(String(c.name||'รายได้ประจำ'),money(c.amount)); if(Number(item.overtime))row('OT',money(item.overtime)); if(Number(item.commission))row('Commission',money(item.commission)); if(Number(breakdown.kpi||0))row('KPI',money(breakdown.kpi)); if(Number(item.incentive))row('Incentive',money(item.incentive)); if(Number(item.allowance))row('Allowance',money(item.allowance)); if(Number(item.bonus))row('Bonus',money(item.bonus)); const residualOther=Math.max(0,Number(item.other_earnings||0)-recurringEarn); if(residualOther)row('รายได้อื่น',money(residualOther)); row('รายได้รวม',money(item.gross_income),{bold:true});
-  ensureSpace(68);y-=12;page.drawText('รายการหัก',{x:42,y,size:12,font,color:teal});y-=28; if(Number(item.attendance_deduction))row(`Attendance (${Number(item.absent_days||0)} วัน / สาย ${Number(item.late_minutes||0)} นาที)`,money(item.attendance_deduction)); row('ประกันสังคม',money(item.social_security)); row('ภาษีหัก ณ ที่จ่าย (ประมาณการ)',money(item.withholding_tax)); for(const c of recurring.filter(x=>x.type==='deduction'))row(String(c.name||'รายการหักประจำ'),money(c.amount)); const residualDeduct=Math.max(0,Number(item.other_deductions||0)-recurringDeduct); if(residualDeduct)row('รายการหักอื่น',money(residualDeduct)); row('หักรวม',money(item.total_deductions),{bold:true});
-  ensureSpace(110);y-=42;page.drawRectangle({x:42,y:y-12,width:506,height:58,color:soft,borderColor:border,borderWidth:1});page.drawText('รับสุทธิ',{x:58,y:y+10,size:12,font,color:dark});page.drawText(money(item.net_pay),{x:350,y:y+7,size:18,font,color:teal});
-  await drawPayrollIssuer({pdf,page,font,issuer,top:y-44,colors:{dark,muted,border},newPage:nextPage});
-  pageFooter(); return new Uint8Array(await pdf.save());
+async function makePayrollPdf(options){
+  return renderPayrollPdf({...options,PDFDocument,fontkit,rgb});
 }
 
 async function ensureDriveChildFolder(accessToken,parentId,name){
@@ -8030,13 +8017,14 @@ async function publishPayrollPeriod(env,clientId,periodId,{notify=false,employee
   const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const fontBytes=await fetchNaknaPdfFont(env); const payrollRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Payroll'); const periodFolder=await ensureDriveChildFolder(accessToken,payrollRoot,detail.period.period_key); const lineCtx=await getEffectiveLineContextForClient(env,clientId); const canEmail=String(workspace.scopes||'').includes('gmail.send');
   await ensureDocumentWorkflowReady(db);
   const issuerSettings=await db.prepare('SELECT signer_name,signer_position,signer_signature_data_url FROM company_document_settings WHERE client_id=?1').bind(Number(clientId)).first();
+  const companyBrand=await db.prepare('SELECT c.name,o.legal_name,o.tax_id,o.address,a.logo_data_url FROM clients c LEFT JOIN company_onboarding o ON o.client_id=c.id LEFT JOIN company_assets a ON a.client_id=c.id WHERE c.id=?1').bind(Number(clientId)).first();
   let issuer; // One frozen issuer/date for newly generated PDFs in this batch.
   const failures=[]; let generated=0, reused=0;
   for(const item of detail.items.filter(x=>!employeeIds||employeeIds.includes(Number(x.employee_id)))){
     try{
       const existing=await db.prepare(`SELECT * FROM payroll_documents WHERE client_id=?1 AND period_id=?2 AND employee_id=?3 AND document_type='payslip'`).bind(Number(clientId),Number(periodId),Number(item.employee_id)).first();
       if(existing?.drive_file_id && existing?.sha256 && existing?.share_token_value && Number(existing.payroll_item_id)===Number(item.id)){reused++;continue;}
-      const employee=await db.prepare('SELECT * FROM employees WHERE id=?1 AND client_id=?2').bind(Number(item.employee_id),Number(clientId)).first(); if(!employee)continue; if(issuer===undefined)issuer=payrollIssuer(issuerSettings); const pdfBytes=await makePayrollPdf({client,employee,period:detail.period,item,fontBytes,issuer}); const fileName=`Payslip-${detail.period.period_key}-${employee.employee_code}.pdf`; const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:periodFolder,fileName,contentType:'application/pdf',bytes:pdfBytes}); const digest=await crypto.subtle.digest('SHA-256',pdfBytes); const sha=[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join(''); const token=randomToken(32),tokenHash=await sha256Hex(token);
+      const employee=await db.prepare('SELECT * FROM employees WHERE id=?1 AND client_id=?2').bind(Number(item.employee_id),Number(clientId)).first(); if(!employee)continue; if(issuer===undefined)issuer=payrollIssuer(issuerSettings); const pdfBytes=await makePayrollPdf({client,employee,period:detail.period,item,fontBytes,issuer,companyBrand:companyBrand||client}); const fileName=`Payslip-${detail.period.period_key}-${employee.employee_code}.pdf`; const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:periodFolder,fileName,contentType:'application/pdf',bytes:pdfBytes}); const digest=await crypto.subtle.digest('SHA-256',pdfBytes); const sha=[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join(''); const token=randomToken(32),tokenHash=await sha256Hex(token);
       if(existing){await db.prepare(`UPDATE payroll_documents SET payroll_item_id=?1,file_name=?2,drive_file_id=?3,drive_url=?4,sha256=?5,share_token_hash=?6,share_token_value=?7,created_at=CURRENT_TIMESTAMP WHERE id=?8`).bind(Number(item.id),fileName,uploaded.id,uploaded.webViewLink||null,sha,tokenHash,token,Number(existing.id)).run();}
       else await db.prepare(`INSERT INTO payroll_documents (client_id,period_id,payroll_item_id,employee_id,file_name,drive_file_id,drive_url,sha256,share_token_hash,share_token_value) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`).bind(Number(clientId),Number(periodId),Number(item.id),Number(employee.id),fileName,uploaded.id,uploaded.webViewLink||null,sha,tokenHash,token).run();
       generated++;
