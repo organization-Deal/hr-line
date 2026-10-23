@@ -6,8 +6,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.29-PAYSLIP-RECIPIENTS';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.29-PAYSLIP-RECIPIENTS';
+const NAKNA_RUNTIME_RELEASE = 'P10.30-PAYSLIP-SEND-FIX';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.30-PAYSLIP-SEND-FIX';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -8017,7 +8017,7 @@ async function sendGmailAttachment(accessToken,{to,subject,html,fileName,content
 }
 
 function buildPayslipReadyFlex(employee,period,netPay,shareUrl){
-  return lineBubble({eyebrow:'PAYROLL',title:'สลิปเงินเดือนพร้อมแล้ว',subtitle:`รอบ ${period.period_key}`,status:'พร้อมดู',statusTone:'success',body:[lineInfoCard([lineInfoRow('พนักงาน',displayName(employee)),lineInfoRow('รับสุทธิ',`${Number(netPay||0).toLocaleString('th-TH',{minimumFractionDigits:2})} บาท`,LINE_CI.success)],'success'),lineText('เอกสารเป็นข้อมูลส่วนตัว กรุณาอย่าส่งต่อลิงก์นี้','xxs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดสลิปเงินเดือน',{type:'uri',label:'เปิดสลิปเงินเดือน',uri:shareUrl})]});
+  return {type:'flex',altText:`สลิปเงินเดือน ${period.period_key||''}`.trim().slice(0,400),contents:lineBubble({eyebrow:'PAYROLL',title:'สลิปเงินเดือนพร้อมแล้ว',subtitle:`รอบ ${period.period_key}`,status:'พร้อมดู',statusTone:'success',body:[lineInfoCard([lineInfoRow('พนักงาน',displayName(employee)),lineInfoRow('รับสุทธิ',`${Number(netPay||0).toLocaleString('th-TH',{minimumFractionDigits:2})} บาท`,LINE_CI.success)],'success'),lineText('เอกสารเป็นข้อมูลส่วนตัว กรุณาอย่าส่งต่อลิงก์นี้','xxs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดสลิปเงินเดือน',{type:'uri',label:'เปิดสลิปเงินเดือน',uri:shareUrl})]})};
 }
 
 async function publishPayrollPeriod(env,clientId,periodId,{notify=false,employeeIds=null}={}){

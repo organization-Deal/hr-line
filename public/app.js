@@ -1,4 +1,4 @@
-import {openPayslipDelivery} from './payslip-delivery.js?v=P10.29';
+import {openPayslipDelivery} from './payslip-delivery.js?v=P10.30';
 import {createReadGate,shouldPreloadPeople,resetRoutePosition} from './ux-runtime.js?v=P10.27';
 const apiReadGate=createReadGate();
 import {accessRoleLabels,accessRoleHelp,accessEsc,accessMemberRows,accessApproverRows,accessRoleComparison,accessHistoryHtml} from './access-ui.js?v=P10.26';

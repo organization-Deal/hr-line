@@ -53,9 +53,10 @@ export async function payrollDeliveryApi(request,env,auth,pid,h){
     db.prepare('UPDATE payroll_documents SET line_notified_at=COALESCE(line_notified_at,CURRENT_TIMESTAMP) WHERE client_id=?1 AND period_id=?2 AND employee_id=?3 AND id=?4').bind(cid,pid,eid,doc.id)
    ]);
    results.push({employee_id:eid,status:'accepted'});
-  }catch{
-   await db.prepare("UPDATE payroll_payslip_deliveries SET status='failed',error_code='LINE_SEND_FAILED',lease_token=NULL,lease_until=0,updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND period_id=?2 AND employee_id=?3 AND lease_token=?4").bind(cid,pid,eid,token).run();
-   results.push({employee_id:eid,status:'failed',error_code:'LINE_SEND_FAILED'});
+  }catch(error){
+   const code=PAYSLIP_ERRORS.has(error?.code)?error.code:'LINE_SEND_FAILED';
+   await db.prepare("UPDATE payroll_payslip_deliveries SET status='failed',error_code=?5,lease_token=NULL,lease_until=0,updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND period_id=?2 AND employee_id=?3 AND lease_token=?4").bind(cid,pid,eid,token,code).run();
+   results.push({employee_id:eid,status:'failed',error_code:code});
   }
  }
  const fresh=await h.getDetail(db,cid,pid),rows=payslipRecipients(fresh,(await ledger()).results||[]),complete=rows.length>0&&rows.every(x=>x.status==='accepted');
@@ -69,7 +70,24 @@ export async function payrollDeliveryApi(request,env,auth,pid,h){
  return json({ok:true,complete,results,accepted_total:rows.filter(x=>x.status==='accepted').length,total:rows.length});
 }
 
+const PAYSLIP_ERRORS=new Set(['LINE_SEND_FAILED','LINE_PAYLOAD_INVALID','LINE_TOKEN_INVALID','LINE_FORBIDDEN','LINE_RECIPIENT_INVALID','LINE_MONTHLY_LIMIT','LINE_RATE_LIMIT','LINE_UNAVAILABLE','LINE_TIMEOUT','LINE_NETWORK_ERROR','LINE_REQUEST_INVALID']);
+function deliveryError(code){const error=new Error(code);error.code=code;return error;}
 export async function sendPayslipLine(accessToken,to,messages,retryKey){
+ if(!Array.isArray(messages)||!messages.length||messages.length>5||messages.some(m=>m?.type!=='flex'||typeof m.altText!=='string'||!m.altText.trim()||m.altText.length>400||!['bubble','carousel'].includes(m.contents?.type)))throw deliveryError('LINE_PAYLOAD_INVALID');
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
- try{const response=await fetch('https://api.line.me/v2/bot/message/push',{method:'POST',signal:controller.signal,headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`,'X-Line-Retry-Key':retryKey},body:JSON.stringify({to,messages})});return response.ok||(response.status===409&&Boolean(response.headers.get('x-line-accepted-request-id')));}finally{clearTimeout(timer);}
+ try{
+  const response=await fetch('https://api.line.me/v2/bot/message/push',{method:'POST',signal:controller.signal,headers:{'content-type':'application/json',authorization:`Bearer ${accessToken}`,'X-Line-Retry-Key':retryKey},body:JSON.stringify({to,messages})});
+  if(response.ok||(response.status===409&&Boolean(response.headers.get('x-line-accepted-request-id'))))return true;
+  let body={};try{body=await response.json();}catch{}
+  if(response.status===401)throw deliveryError('LINE_TOKEN_INVALID');
+  if(response.status===403)throw deliveryError('LINE_FORBIDDEN');
+  if(response.status===429)throw deliveryError(/monthly|quota/i.test(String(body.message||''))?'LINE_MONTHLY_LIMIT':'LINE_RATE_LIMIT');
+  if(response.status>=500)throw deliveryError('LINE_UNAVAILABLE');
+  if(response.status===400){
+   const properties=(Array.isArray(body.details)?body.details:[]).map(x=>String(x.property||''));
+   if(properties.some(x=>x.startsWith('messages'))||/messages?\[|message object/i.test(String(body.message||'')))throw deliveryError('LINE_PAYLOAD_INVALID');
+   if(properties.includes('to')||/invalid.*\bto\b|\bto\b.*invalid|user.?id|recipient/i.test(String(body.message||'')))throw deliveryError('LINE_RECIPIENT_INVALID');
+  }
+  throw deliveryError('LINE_REQUEST_INVALID');
+ }catch(error){if(PAYSLIP_ERRORS.has(error?.code))throw error;throw deliveryError(controller.signal.aborted||error?.name==='AbortError'?'LINE_TIMEOUT':'LINE_NETWORK_ERROR');}finally{clearTimeout(timer);}
 }
