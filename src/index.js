@@ -1,3 +1,4 @@
+import {payrollDocumentCenterApi} from './payroll-document-center.js';
 import {renderPayrollPdf} from './payroll-pdf.js';
 import {payrollIssuer} from './payroll-issuer.js';
 import {payrollDeliveryApi,sendPayslipLine} from './payroll-delivery.js';
@@ -8,8 +9,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.32-PAYSLIP-LAYOUT';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.32-PAYSLIP-LAYOUT';
+const NAKNA_RUNTIME_RELEASE = 'P10.37-THAI-FILING';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.37-THAI-FILING';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -1753,6 +1754,7 @@ async function handleApi(request, env, url, auth, ctx) {
   const method = request.method;
   const path = url.pathname;
   const clientId = auth.clientId ? Number(auth.clientId) : null;
+  if(path==='/api/payroll/document-center'||/^\/api\/payroll\/document-center\/exports\/\d+$/.test(path))return payrollDocumentCenterApi(request,env,auth,{canManage:canManagePayroll,ensure:ensurePayrollDefaults,ensurePayments:ensurePayrollPayment,ensureDocuments:ensureDocumentWorkflowReady,getDetail:getPayrollPeriodDetail,payment:payrollPayment,audit:safeAudit,validDate:validPayrollDateKey,today:dateInBangkok,now:()=>new Date().toISOString()});
   const paymentMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/payment-confirmation$/);
   if(paymentMatch)return payrollPaymentApi(request,env,auth,Number(paymentMatch[1]),{canManagePayroll,ensurePayrollDefaults,getPayrollPeriodDetail,recordPayrollPeriodEvent,today:dateInBangkok});
 
@@ -7979,7 +7981,7 @@ async function recalculatePayrollPeriod(env,clientId,periodId){
     }
     withholding=Math.max(0,roundMoney(withholding+taxManualAdjust));
     otherDeductions=roundMoney(otherDeductions+recurringDeductions);
-    const deductions=roundMoney(attendanceDeduction+sso+withholding+otherDeductions); const netPay=roundMoney(Math.max(0,gross-deductions)); const prior=priorNet.get(Number(employee.id))||0; const variancePct=prior>0?roundMoney(((netPay-prior)/prior)*100):0; const priorYtd=ytd.get(Number(employee.id))||{}; const ytdGross=roundMoney(Number(priorYtd.ytd_gross||0)+gross),ytdTax=roundMoney(Number(priorYtd.ytd_tax||0)+withholding),ytdSso=roundMoney(Number(priorYtd.ytd_sso||0)+sso); const employerCost=roundMoney(gross+employerSso); const salaryMode=hasProratedSalaryOverride?'manual_salary':hasPayableDaysOverride?'manual_days':fullPeriod?'full':'prorated'; const breakdown={scheduled_days:scheduledDays,active_calendar_days:activeCalendarDays,payable_days:payableDays,auto_payable_days:autoPayableDays,auto_prorated_salary:autoProrated,salary_mode:salaryMode,manual_payable_days:hasPayableDaysOverride,manual_prorated_salary:hasProratedSalaryOverride,kpi,period_days:dates.length,tax_rule:rules.tax_version,sso_rule:rules.sso_version,taxable_monthly:taxableMonthly,recurring_components:recurringItems};
+    const deductions=roundMoney(attendanceDeduction+sso+withholding+otherDeductions); const netPay=roundMoney(Math.max(0,gross-deductions)); const prior=priorNet.get(Number(employee.id))||0; const variancePct=prior>0?roundMoney(((netPay-prior)/prior)*100):0; const priorYtd=ytd.get(Number(employee.id))||{}; const ytdGross=roundMoney(Number(priorYtd.ytd_gross||0)+gross),ytdTax=roundMoney(Number(priorYtd.ytd_tax||0)+withholding),ytdSso=roundMoney(Number(priorYtd.ytd_sso||0)+sso); const employerCost=roundMoney(gross+employerSso); const salaryMode=hasProratedSalaryOverride?'manual_salary':hasPayableDaysOverride?'manual_days':fullPeriod?'full':'prorated'; const breakdown={scheduled_days:scheduledDays,active_calendar_days:activeCalendarDays,payable_days:payableDays,auto_payable_days:autoPayableDays,auto_prorated_salary:autoProrated,salary_mode:salaryMode,manual_payable_days:hasPayableDaysOverride,manual_prorated_salary:hasProratedSalaryOverride,kpi,period_days:dates.length,tax_rule:rules.tax_version,sso_rule:rules.sso_version,taxable_monthly:taxableMonthly,sso_assessable_wages:roundMoney(prorated+recurringSso+ssoAdjustments),sso_employee_rate:Number(rules.sso.employee_rate),sso_wage_floor:Number(rules.sso.wage_floor),sso_wage_ceiling:Number(rules.sso.wage_ceiling),recurring_components:recurringItems};
     statements.push(db.prepare(`INSERT INTO payroll_items (client_id,period_id,employee_id,base_salary,prorated_salary,absent_days,late_minutes,attendance_deduction,overtime,commission,incentive,allowance,bonus,other_earnings,gross_income,social_security,withholding_tax,other_deductions,total_deductions,net_pay,breakdown_json,calculation_note,status,employer_social_security,employer_cost,prior_net_pay,variance_pct,ytd_gross,ytd_tax,ytd_sso) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,'preview',?23,?24,?25,?26,?27,?28,?29)`).bind(Number(clientId),Number(periodId),Number(employee.id),salary,prorated,absentDays,lateMinutes,attendanceDeduction,overtime,commission,incentive,allowance,bonus,roundMoney(otherEarnings+recurringEarnings),gross,sso,withholding,otherDeductions,deductions,netPay,JSON.stringify(breakdown),'ภาษีเป็นประมาณการรายเดือนแบบ annualized; HR/Payroll ต้องตรวจสอบก่อน Lock',employerSso,employerCost,prior,variancePct,ytdGross,ytdTax,ytdSso));
     totals.gross+=gross;totals.deductions+=deductions;totals.net+=netPay;totals.count++;
   }

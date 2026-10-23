@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {buildPndText,buildSsoCsv,encodeTis620,taxIdValid,ssoExportRows} from '../src/thai-payroll-export.js';
+const id='1000000000009';assert(taxIdValid(id));
+const person={employee_id:1,first_name:'สมชาย',last_name:'ทดสอบ',national_id:id,payment_date:'2026-10-20',taxable_income:20000,withholding_tax:120,social_security:875,employer_social_security:875,breakdown_json:JSON.stringify({sso_assessable_wages:20000})};
+const s={company:{tax_id:id,legal_name:'บริษัท ทดสอบ'},filing_settings:{rd_branch:'0000',sso_account:'1234567890',sso_branch:'000000',sso_payment_date:'2026-11-15',sso_rate:5,sso_wage_floor:1650,sso_wage_ceiling:17500},filing_people:[{employee_id:1,title_name:'นาย',address1:'1 กรุงเทพ',postal_code:'10100'}],filing_wages:[],contribution_month:'2026-10',payment_month:'2026-10',year:2026,tax_monthly_rows:[person],annual:[person],sso_source_rows:[person]};
+const clone=()=>structuredClone(s);let checks=0;function test(f){f();checks++;}
+test(()=>assert.deepEqual(buildPndText(s,'pnd1').body.trim().split('|'),['00',id,'0000000000','0000',id,'0000000000','นาย','สมชาย','ทดสอบ','1 กรุงเทพ','','10100','10','2569','1','20102569','0','20000.00','120.00','1']));
+test(()=>{const a=buildPndText(s,'pnd1kor').body.trim().split('|');assert.equal(a[12],'00');assert.equal(a[15],'31122569')});
+test(()=>{const x=clone();x.tax_monthly_rows.push({...person,payment_date:'2026-10-22'});assert.equal(buildPndText(x,'pnd1').body.trim().split('\r\n').length,2)});
+test(()=>{const x=clone();x.tax_monthly_rows.push(person);assert.equal(buildPndText(x,'pnd1').body.split('|')[17],'40000.00')});
+test(()=>{const x=clone();x.tax_monthly_rows[0].payment_date='2027-01-01';assert.throws(()=>buildPndText(x,'pnd1'),/เดือนภาษี/)});
+test(()=>{const x=clone();x.company.tax_id='0000000000000';assert.throws(()=>buildPndText(x,'pnd1'))});
+test(()=>{const x=clone();x.tax_monthly_rows[0].first_name='a|b';assert.throws(()=>buildPndText(x,'pnd1'))});
+test(()=>{const x=clone();delete x.tax_monthly_rows[0].taxable_income;x.tax_monthly_rows[0].breakdown_json='{}';assert.throws(()=>buildPndText(x,'pnd1'))});
+test(()=>assert.deepEqual(buildSsoCsv(s).body.trim().split('\r\n').map(x=>x.split(',')),[['1','1234567890','000000','151169','1069','บริษัท ทดสอบ','5.00','1','20000.00','1750.00','875.00','875.00'],['2',id,'003','สมชาย','ทดสอบ','20000.00','875.00']]));
+test(()=>{const bytes=encodeTis620(buildSsoCsv(s).body);const py=spawnSync('python3',['-c',"import sys;print(sys.stdin.buffer.read().decode('tis-620'),end='')"],{input:bytes,encoding:'utf8'});assert.equal(py.stdout,buildSsoCsv(s).body);assert.equal(bytes[0],49);assert(!bytes.includes(239))});
+test(()=>assert.throws(()=>encodeTis620('😀')));
+test(()=>{const x=clone();x.sso_source_rows[0].social_security=874.99;assert.throws(()=>buildSsoCsv(x),/เศษสตางค์/)});
+test(()=>{const x=clone();x.sso_source_rows[0].employer_social_security=800;assert.throws(()=>buildSsoCsv(x),/ไม่ตรง/)});
+test(()=>{const x=clone();x.sso_source_rows[0].breakdown_json='{}';assert.throws(()=>buildSsoCsv(x),/ยืนยันค่าจ้าง/);x.filing_wages=[{employee_id:1,wages:20000}];assert.equal(ssoExportRows(x)[0].sso_wages,20000);assert(buildSsoCsv(x))});
+test(()=>{const x=clone();x.sso_source_rows[0].first_name='ทด,สอบ';assert.throws(()=>buildSsoCsv(x))});
+test(()=>{const x=clone();x.sso_source_rows.push({...person,employee_id:2});assert.throws(()=>buildSsoCsv(x),/ซ้ำ/)});
+console.log(`PASS P10.37 ${checks} format/encoding/error cases (no live agency import)`);

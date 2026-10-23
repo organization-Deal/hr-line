@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';import fs from 'node:fs';import {createPayrollDocumentCenter} from '../public/payroll-document-center.js';
+const state={me:{active_company_id:1},payrollDetail:{period:{id:7,period_key:'2026-10',pay_date:'2026-10-28'}}};let gets=0;const requests=[],messages=[];
+const kinds=[['summary','period','สรุปเงินเดือนส่งบัญชี'],['bank','period','รายชื่อและยอดโอน'],['accounting','period','บัญชี'],['pnd1','month','ภ.ง.ด.1'],['sso','period','สปส.1-10'],['pnd1kor','year','ภ.ง.ด.1ก'],['tawi50','year','50 ทวิ']];
+const data={company:{legal_name:'บริษัท <script>ทดสอบ'},period:state.payrollDetail.period,payment_month:'2026-10',scope_note:'นับเฉพาะรายการจ่ายจริง',annual_people:[{employee_id:1,name:'พนักงานทดสอบ'}],entries:kinds.map(([kind,scope,label])=>({kind,scope,label,fingerprint:'abc',warnings:[],exports:[]}))};
+const nodes=new Map();const node=selector=>{if(!nodes.has(selector))nodes.set(selector,{value:'2026',dataset:{},addEventListener(t,fn){this[t]=fn},append(){}});return nodes.get(selector)};
+const modal={innerHTML:'',open:false,showModal(){this.open=true},close(){this.open=false},querySelector:node,querySelectorAll(selector){if(selector==='[data-tab]')return ['period','year','settings'].map(tab=>Object.assign(node('tab-'+tab),{dataset:{tab}}));return []}};
+global.document={createElement:()=>modal,body:{append(){}}};
+const ctrl=createPayrollDocumentCenter({state,escapeHtml:x=>String(x??'').replaceAll('<','&lt;').replaceAll('>','&gt;'),toast:(...x)=>messages.push(x),api:async(url,o)=>{requests.push({url,o});gets++;return structuredClone(data)}});
+await ctrl.open();assert(modal.open);assert(modal.innerHTML.includes('สรุปเงินเดือนส่งบัญชี'));assert(!modal.innerHTML.includes('data-prepare="tawi50"'));assert(!modal.innerHTML.includes('<script>'));assert(modal.innerHTML.includes('ยังไม่ใช่การยื่น'));assert(modal.innerHTML.includes('RD Prep'));assert(modal.innerHTML.includes('data-tab="settings"'));
+node('tab-year').onclick();assert(modal.innerHTML.includes('data-prepare="tawi50"'));assert(!modal.innerHTML.includes('data-prepare="summary"'));assert(modal.innerHTML.includes('โปรแกรมออก 50 ทวิ'));
+node('tab-settings').onclick();assert(modal.innerHTML.includes('data-filing-settings'));assert(modal.innerHTML.includes('sso_account'));
+state.me.active_company_id=2;await node('[data-reload]').onclick();assert(!modal.open);assert.equal(gets,1);assert(messages.length);
+const app=fs.readFileSync('public/app.js','utf8'),html=fs.readFileSync('public/index.html','utf8');assert(html.includes('window.openPayrollDocumentCenter()'));assert(app.includes("import {createPayrollDocumentCenter}"));
+console.log('PASS P10.36 UI: monthly/yearly cards, draft labels, escaped company name, source links, company-switch guard, visible entry point');

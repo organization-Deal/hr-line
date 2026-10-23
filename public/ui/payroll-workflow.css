@@ -32,3 +32,30 @@
 #view-payroll .payroll-grid-toolbar>.payroll-employee-actions{flex-direction:row}
 @media(max-width:900px){#view-payroll .payroll-detail-head-simplified{flex-wrap:wrap}#view-payroll .payroll-heading-actions{max-width:100%;width:100%;align-items:stretch}#view-payroll .payroll-top-tools{justify-content:flex-start}#view-payroll .payroll-employee-actions{width:100%}}
 @media(max-width:600px){#view-payroll .payroll-top-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}#view-payroll .payroll-top-tools button{width:100%;white-space:normal}#view-payroll .payroll-employee-actions button{flex:1 1 140px}}
+
+/* P10.35: persistent next step beside the work, including at the bottom of the sheet. */
+#view-payroll .nk-payroll-next-bar{position:sticky;bottom:12px;z-index:35;display:flex;align-items:center;justify-content:space-between;gap:16px;margin:20px 0 0;padding:14px 18px;background:#fff;border:1px solid #90c9c8;border-radius:14px;box-shadow:0 6px 28px #173e4524}
+#view-payroll .nk-payroll-next-bar .payroll-readiness-card{border:0;background:transparent;padding:0;min-width:0;flex:1}
+#view-payroll .nk-payroll-next-bar .payroll-readiness-card strong{font-size:16px;margin:4px 0}
+#view-payroll .nk-payroll-next-bar .payroll-readiness-card span,#view-payroll .nk-payroll-next-bar .payroll-readiness-card small{font-size:12px}
+#view-payroll .nk-payroll-next-bar .payroll-primary-command{border:0;padding:0;flex:0 1 auto;background:transparent}
+#view-payroll .nk-payroll-next-bar .payroll-next-action{min-height:48px;font-size:14px;padding:12px 20px}
+.nk-payroll-next-issues{width:min(700px,calc(100vw - 32px));max-height:85dvh;padding:24px;border:1px solid #c7ddde;border-radius:18px;overflow:auto;color:#234955}
+.nk-payroll-next-issues::backdrop{background:#12313870}
+.nk-payroll-next-issues p{font-size:14px;line-height:1.7}
+.nk-payroll-issue-list article{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 0;border-bottom:1px solid #e1ebeb}
+.nk-payroll-issue-list article p{margin:4px 0;color:#a34335}
+@media(max-width:760px){#view-payroll .nk-payroll-next-bar{bottom:8px;flex-direction:column;align-items:stretch;padding:12px;gap:8px}#view-payroll .nk-payroll-next-bar .payroll-primary-command{display:block}#view-payroll .nk-payroll-next-bar button{width:100%}.nk-payroll-next-issues{padding:16px}}
+
+/* P10.36 payroll document handoff. */
+.nk-payroll-document-center{width:min(1120px,calc(100vw - 32px));max-height:90dvh;overflow:auto;border:1px solid #cbdfe0;border-radius:18px;padding:24px;color:#214550;background:#fff}
+.nk-payroll-document-center::backdrop{background:#17373f80}
+.nk-handoff-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.nk-handoff-card{border:1px solid #dce7e9;border-radius:14px;padding:18px;min-width:0}
+.nk-handoff-card h3{font-size:16px;margin:0 0 6px}.nk-handoff-card p{font-size:13px;line-height:1.7;overflow-wrap:anywhere}.nk-handoff-card small{color:#647c86;font-size:12px}
+.nk-handoff-card-head{display:flex;justify-content:space-between;align-items:start;gap:12px}.nk-handoff-card .badge{white-space:normal}
+.nk-handoff-note{padding:14px;background:#eaf6f5;border-radius:12px;line-height:1.8;margin:12px 0;font-size:14px}
+.nk-handoff-tabs,.nk-handoff-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0}.nk-handoff-tabs .active{border-color:#008b8f;background:#eaf7f6}.nk-handoff-actions a{font-size:12px}
+.nk-handoff-record{border-top:1px solid #e0ebed;margin-top:14px;padding-top:12px}.nk-handoff-record summary,.nk-handoff-warnings summary{cursor:pointer;font-size:13px}.nk-handoff-warnings{background:#fff7eb;padding:10px;border-radius:8px;font-size:12px}
+.nk-handoff-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.nk-handoff-card label{display:flex;flex-direction:column;gap:5px;font-size:12px;margin:10px 0}.nk-handoff-card input,.nk-handoff-card select,.nk-handoff-card textarea{box-sizing:border-box;width:100%;border:1px solid #cbdce0;border-radius:8px;padding:9px;font:inherit;font-size:13px}.nk-handoff-card .nk-handoff-confirm{flex-direction:row;align-items:start;line-height:1.7}.nk-handoff-confirm input{width:auto;margin-top:5px}.nk-handoff-card button{min-height:42px}.nk-handoff-small{font-size:12px;color:#657c85;line-height:1.7}.nk-handoff-error{color:#a43224;font-size:14px}
+@media(max-width:760px){.nk-payroll-document-center{padding:16px}.nk-handoff-grid{grid-template-columns:1fr}.nk-handoff-fields{grid-template-columns:1fr}.nk-handoff-card-head{flex-wrap:wrap}}

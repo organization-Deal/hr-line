@@ -47,6 +47,6 @@ check(generated[0].issuer===generated[1].issuer,'one frozen issuer and date acro
 check(generated.every(x=>x.issuer.name==='HR'&&x.issuer.image.bytes.length===3),'real generation call receives saved company signature');
 check(generated.every(x=>x.item.net_pay===(x.employee.id===11?100:200)),'salary values passed through unchanged');
 check(writes.filter(x=>x.sql.startsWith('INSERT INTO payroll_documents')).length===2,'PDF and existing document integrity metadata persist normally');
-const app=readFileSync('public/app.js','utf8');check(app.includes('window.openPayrollIssuerSettings=')&&app.includes('ตั้งค่าลายเซ็นบนสลิป'),'payroll tools link existing company signature settings');
+const app=readFileSync('public/app.js','utf8');check(app.includes('window.openPayrollIssuerSettings=')&&readFileSync('public/index.html','utf8').includes('onclick="window.openPayrollIssuerSettings()">ตั้งค่าลายเซ็น'),'payroll tools link existing company signature settings');
 check(app.includes('พนักงานไม่ต้องเซ็น · สลิปที่สร้างไว้แล้วคงเดิม'),'payroll settings explain company-only signatures and old document behavior');
 console.log(`P10.31 payslip issuer: ${checks} checks PASS (issuer, layout bounds, company isolation, immutable existing PDFs, generation integration)`);

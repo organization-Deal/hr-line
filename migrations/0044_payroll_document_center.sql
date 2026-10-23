@@ -1,0 +1,4 @@
+-- P10.36: handoff statuses and immutable document snapshots
+CREATE TABLE IF NOT EXISTS payroll_handoff_records(client_id INTEGER NOT NULL,scope TEXT NOT NULL,document_kind TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',action_date TEXT,reference TEXT,evidence_url TEXT,note TEXT,source_fingerprint TEXT,updated_by INTEGER,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(client_id,scope,document_kind));
+CREATE TABLE IF NOT EXISTS payroll_handoff_exports(id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,scope TEXT NOT NULL,document_kind TEXT NOT NULL,employee_id INTEGER,snapshot_json TEXT NOT NULL,source_fingerprint TEXT NOT NULL,created_by INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_payroll_handoff_exports ON payroll_handoff_exports(client_id,scope,document_kind,id);
