@@ -1,7 +1,7 @@
 import {NOTIFICATION_TYPES as NC_TYPES,fieldsForKind,canonicalTemplate,messageDate} from '../public/notification-catalog.js';
 import {notificationFeatureData} from './notification-data.js';
 // Nakna P10.17: tenant-scoped settings, durable outbox and scheduler.
-export const NC_RELEASE='P10.28';
+export const NC_RELEASE='P10.29';
 export { NOTIFICATION_TYPES as NC_TYPES } from '../public/notification-catalog.js';
 export const NC_SCHEMA=[
  `CREATE TABLE IF NOT EXISTS notification_center_settings(client_id INTEGER NOT NULL,kind TEXT NOT NULL,enabled INTEGER NOT NULL,send_time TEXT NOT NULL,weekdays TEXT NOT NULL,message_text TEXT NOT NULL,recipient_keys TEXT NOT NULL DEFAULT 'null',updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(client_id,kind))`,

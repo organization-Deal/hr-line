@@ -1,3 +1,4 @@
+import {payrollDeliveryApi,sendPayslipLine} from './payroll-delivery.js';
 import {accessManagementApi} from './access-management.js';
 import {dashboardAttendance} from './dashboard-summary.js';
 import {payrollPaymentApi,payrollPayment,payrollPeople,ensurePayrollPayment} from './payroll-payment.js';
@@ -5,8 +6,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.28-MOBILE-DASHBOARD';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.28-MOBILE-DASHBOARD';
+const NAKNA_RUNTIME_RELEASE = 'P10.29-PAYSLIP-RECIPIENTS';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.29-PAYSLIP-RECIPIENTS';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -3999,26 +4000,16 @@ async function handleApi(request, env, url, auth, ctx) {
     return json({ok:true,queued:true,message:'กำลังสร้าง Payslip อัตโนมัติลง Google Drive'});
   }
 
+  const payrollDeliveryMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/(payslip-delivery|send-payslips)$/);
+  if(payrollDeliveryMatch){
+    const expectedMethod=payrollDeliveryMatch[2]==='payslip-delivery'?'GET':'POST';
+    if(method!==expectedMethod)return json({error:'METHOD_NOT_ALLOWED'},405);
+    return payrollDeliveryApi(request,env,auth,Number(payrollDeliveryMatch[1]),{canManagePayroll,getDetail:getPayrollPeriodDetail,lineContext:getEffectiveLineContextForClient,generate:publishPayrollPeriod,send:sendPayslipLine,card:buildPayslipReadyFlex,audit:safeAudit,event:recordPayrollPeriodEvent});
+  }
   const payrollPublishMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/publish$/);
   if(payrollPublishMatch && method==='POST'){
-    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ Publish Payroll'},403); const id=Number(payrollPublishMatch[1]);
-    const period=await env.DB.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(id,clientId).first(); if(!period)return json({error:'ไม่พบรอบเงินเดือน'},404); if(period.status!=='locked')return json({error:'ต้อง Lock Payroll ก่อน Publish'},409);
-    const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(clientId).first(); if(!workspace?.drive_folder_id)return json({error:'กรุณาเชื่อม Google ก่อน Publish Payslip'},409);
-    // Release gate: a payroll period must never become Published while a payslip is missing.
-    // Materialize every payslip first, verify coverage, then publish and notify employees.
-    const build=await publishPayrollPeriod(env,clientId,id,{notify:false});
-    const coverage=await payrollPayslipCoverage(env.DB,clientId,id);
-    if(coverage.missing>0){
-      await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.publish_blocked','payroll_period',String(id),coverage);
-      return json({error:'ยังสร้าง Payslip ไม่ครบ จึงยัง Publish ไม่ได้',coverage,failures:build.failures||[]},409);
-    }
-    await env.DB.prepare(`UPDATE payroll_periods SET status='published',published_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND client_id=?2`).bind(id,clientId).run();
-    await env.DB.prepare(`UPDATE payroll_items SET status='published',updated_at=CURRENT_TIMESTAMP WHERE period_id=?1`).bind(id).run();
-    await safeAudit(env.DB,clientId,'user',String(auth.user.id),'payroll.publish','payroll_period',String(id),coverage);
-    await recordPayrollPeriodEvent(env.DB,clientId,id,Number(auth.user.id),'published',coverage);
-    const task=notifyPublishedPayrollPeriod(env,clientId,id).catch(error=>console.error(JSON.stringify({level:'error',event:'payroll_publish_notify_failed',period_id:id,message:String(error?.message||error)})));
-    if(ctx?.waitUntil)ctx.waitUntil(task); else await task;
-    return json({ok:true,queued:true,coverage,message:'Publish สำเร็จ Payslip ครบแล้ว และกำลังแจ้งพนักงาน'});
+    if(!canManagePayroll(auth.role))return json({error:'ไม่มีสิทธิ์ส่งสลิป'},403);
+    return json({error:'กรุณาเปิดรายการส่งสลิปเพื่อเลือกผู้รับและยืนยันการส่ง',code:'SELECT_PAYSLIP_RECIPIENTS'},409);
   }
 
   const payrollBankExportMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/export\/bank\.csv$/);
@@ -7855,7 +7846,7 @@ async function getPayrollPeriodDetail(db,clientId,periodId){
   const period=await db.prepare('SELECT * FROM payroll_periods WHERE id=?1 AND client_id=?2').bind(Number(periodId),Number(clientId)).first();
   if(!period)return {period:null,items:[],adjustments:[],documents:[],exceptions:[],timeline:[],exports:[]};
   const [items,adjustments,documents,events,settings,components,exports]=await db.batch([
-    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,e.start_date,e.end_date,d.name AS department_name,pos.name AS position_name,pp.bank_name,pp.bank_account_name,pp.bank_account_no,pp.payroll_note,pp.tax_enabled AS employee_tax_enabled,pp.social_security_enabled AS employee_sso_enabled,
+    db.prepare(`SELECT pi.*,e.employee_code,e.first_name,e.last_name,e.nickname,e.email,CASE WHEN e.line_user_id IS NOT NULL AND e.line_user_id!='' THEN 1 ELSE 0 END AS line_connected,e.start_date,e.end_date,d.name AS department_name,pos.name AS position_name,pp.bank_name,pp.bank_account_name,pp.bank_account_no,pp.payroll_note,pp.tax_enabled AS employee_tax_enabled,pp.social_security_enabled AS employee_sso_enabled,
       po.payable_days_override,po.prorated_salary_override,po.updated_at AS payroll_override_updated_at
       FROM payroll_items pi JOIN employees e ON e.id=pi.employee_id LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN positions pos ON pos.id=e.position_id LEFT JOIN employee_payroll_profiles pp ON pp.employee_id=e.id
       LEFT JOIN payroll_item_overrides po ON po.period_id=pi.period_id AND po.employee_id=pi.employee_id AND po.client_id=pi.client_id
@@ -8029,14 +8020,15 @@ function buildPayslipReadyFlex(employee,period,netPay,shareUrl){
   return lineBubble({eyebrow:'PAYROLL',title:'สลิปเงินเดือนพร้อมแล้ว',subtitle:`รอบ ${period.period_key}`,status:'พร้อมดู',statusTone:'success',body:[lineInfoCard([lineInfoRow('พนักงาน',displayName(employee)),lineInfoRow('รับสุทธิ',`${Number(netPay||0).toLocaleString('th-TH',{minimumFractionDigits:2})} บาท`,LINE_CI.success)],'success'),lineText('เอกสารเป็นข้อมูลส่วนตัว กรุณาอย่าส่งต่อลิงก์นี้','xxs',LINE_CI.muted)],footer:[linePrimaryButton('เปิดสลิปเงินเดือน',{type:'uri',label:'เปิดสลิปเงินเดือน',uri:shareUrl})]});
 }
 
-async function publishPayrollPeriod(env,clientId,periodId,{notify=true}={}){
+async function publishPayrollPeriod(env,clientId,periodId,{notify=false,employeeIds=null}={}){
   await ensureV100P3Ready(env.DB); const db=env.DB; const detail=await getPayrollPeriodDetail(db,clientId,periodId); if(!detail.period)throw new Error('Payroll period not found'); const client=await getClient(db,clientId); const workspace=await db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(); if(!workspace)throw new Error('Google not connected');
   const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const fontBytes=await fetchNaknaPdfFont(env); const payrollRoot=await ensureDriveChildFolder(accessToken,workspace.drive_folder_id,'Payroll'); const periodFolder=await ensureDriveChildFolder(accessToken,payrollRoot,detail.period.period_key); const lineCtx=await getEffectiveLineContextForClient(env,clientId); const canEmail=String(workspace.scopes||'').includes('gmail.send');
   const failures=[]; let generated=0, reused=0;
-  for(const item of detail.items){
+  for(const item of detail.items.filter(x=>!employeeIds||employeeIds.includes(Number(x.employee_id)))){
     try{
-      const employee=await db.prepare('SELECT * FROM employees WHERE id=?1 AND client_id=?2').bind(Number(item.employee_id),Number(clientId)).first(); if(!employee)continue; const pdfBytes=await makePayrollPdf({client,employee,period:detail.period,item,fontBytes}); const fileName=`Payslip-${detail.period.period_key}-${employee.employee_code}.pdf`; const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:periodFolder,fileName,contentType:'application/pdf',bytes:pdfBytes}); const digest=await crypto.subtle.digest('SHA-256',pdfBytes); const sha=[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join(''); const token=randomToken(32),tokenHash=await sha256Hex(token); const existing=await db.prepare(`SELECT * FROM payroll_documents WHERE period_id=?1 AND employee_id=?2 AND document_type='payslip'`).bind(Number(periodId),Number(employee.id)).first();
-      if(existing?.drive_file_id && Number(existing.payroll_item_id)===Number(item.id)){ reused++; continue; }
+      const existing=await db.prepare(`SELECT * FROM payroll_documents WHERE client_id=?1 AND period_id=?2 AND employee_id=?3 AND document_type='payslip'`).bind(Number(clientId),Number(periodId),Number(item.employee_id)).first();
+      if(existing?.drive_file_id && existing?.sha256 && existing?.share_token_value && Number(existing.payroll_item_id)===Number(item.id)){reused++;continue;}
+      const employee=await db.prepare('SELECT * FROM employees WHERE id=?1 AND client_id=?2').bind(Number(item.employee_id),Number(clientId)).first(); if(!employee)continue; const pdfBytes=await makePayrollPdf({client,employee,period:detail.period,item,fontBytes}); const fileName=`Payslip-${detail.period.period_key}-${employee.employee_code}.pdf`; const uploaded=await uploadGoogleDriveFile(accessToken,{folderId:periodFolder,fileName,contentType:'application/pdf',bytes:pdfBytes}); const digest=await crypto.subtle.digest('SHA-256',pdfBytes); const sha=[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join(''); const token=randomToken(32),tokenHash=await sha256Hex(token);
       if(existing){await db.prepare(`UPDATE payroll_documents SET payroll_item_id=?1,file_name=?2,drive_file_id=?3,drive_url=?4,sha256=?5,share_token_hash=?6,share_token_value=?7,created_at=CURRENT_TIMESTAMP WHERE id=?8`).bind(Number(item.id),fileName,uploaded.id,uploaded.webViewLink||null,sha,tokenHash,token,Number(existing.id)).run();}
       else await db.prepare(`INSERT INTO payroll_documents (client_id,period_id,payroll_item_id,employee_id,file_name,drive_file_id,drive_url,sha256,share_token_hash,share_token_value) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`).bind(Number(clientId),Number(periodId),Number(item.id),Number(employee.id),fileName,uploaded.id,uploaded.webViewLink||null,sha,tokenHash,token).run();
       generated++;
@@ -8059,23 +8051,6 @@ async function payrollPayslipCoverage(db,clientId,periodId){
   return {total,ready,missing:Math.max(0,total-ready)};
 }
 
-async function notifyPublishedPayrollPeriod(env,clientId,periodId){
-  const db=env.DB; const detail=await getPayrollPeriodDetail(db,clientId,periodId); if(!detail.period)throw new Error('Payroll period not found');
-  const client=await getClient(db,clientId); const workspace=await db.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(clientId)).first(); if(!workspace)throw new Error('Google not connected');
-  const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const lineCtx=await getEffectiveLineContextForClient(env,clientId); const canEmail=String(workspace.scopes||'').includes('gmail.send');
-  let notified=0; const failures=[];
-  for(const item of detail.items){
-    try{
-      const employee=await db.prepare('SELECT * FROM employees WHERE id=?1 AND client_id=?2').bind(Number(item.employee_id),Number(clientId)).first(); if(!employee)continue;
-      const doc=await db.prepare(`SELECT * FROM payroll_documents WHERE client_id=?1 AND period_id=?2 AND employee_id=?3 AND document_type='payslip'`).bind(Number(clientId),Number(periodId),Number(employee.id)).first(); if(!doc?.drive_file_id||!doc?.share_token_value)throw new Error('Payslip document missing');
-      const shareUrl=`${env.APP_BASE_URL||'https://hr-line.organization-23c.workers.dev'}/payslip/${doc.share_token_value}`; let emailSent=Boolean(doc.email_sent_at), lineSent=Boolean(doc.line_notified_at);
-      if(employee.email&&canEmail&&!emailSent){ const response=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(doc.drive_file_id)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}}); if(response.ok){const bytes=new Uint8Array(await response.arrayBuffer()); await sendGmailAttachment(accessToken,{to:employee.email,subject:`สลิปเงินเดือน ${detail.period.period_key} · ${client.name}`,html:`<div style="font-family:Arial,sans-serif"><h2>สลิปเงินเดือน ${detail.period.period_key}</h2><p>สวัสดี ${employee.nickname||employee.first_name}</p><p>สลิปเงินเดือนของคุณพร้อมแล้ว</p><p><a href="${shareUrl}">ดูสลิปเงินเดือน</a></p><p>— Nakna HR</p></div>`,fileName:doc.file_name,contentType:'application/pdf',bytes}); emailSent=true;} }
-      if(employee.line_user_id&&lineCtx?.accessToken&&!lineSent){await pushLineMessages(lineCtx.accessToken,employee.line_user_id,[buildPayslipReadyFlex(employee,detail.period,item.net_pay,shareUrl)]);lineSent=true;}
-      await db.prepare(`UPDATE payroll_documents SET email_sent_at=CASE WHEN ?1=1 THEN COALESCE(email_sent_at,CURRENT_TIMESTAMP) ELSE email_sent_at END,line_notified_at=CASE WHEN ?2=1 THEN COALESCE(line_notified_at,CURRENT_TIMESTAMP) ELSE line_notified_at END WHERE id=?3`).bind(emailSent?1:0,lineSent?1:0,Number(doc.id)).run(); notified++;
-    }catch(error){failures.push({employee_id:Number(item.employee_id),message:String(error?.message||error).slice(0,240)});}
-  }
-  return {ok:failures.length===0,notified,failures};
-}
 
 async function serveSharedPayrollDocument(env,token){
   const hash=await sha256Hex(token); const row=await env.DB.prepare(`SELECT pd.*,pp.period_key,e.employee_code FROM payroll_documents pd JOIN payroll_periods pp ON pp.id=pd.period_id JOIN employees e ON e.id=pd.employee_id WHERE pd.share_token_hash=?1`).bind(hash).first(); if(!row)return new Response('Payslip not found',{status:404}); const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(row.client_id)).first(); if(!workspace)return new Response('Document storage unavailable',{status:503}); const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const response=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(row.drive_file_id)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}}); if(!response.ok)return new Response('Payslip not found',{status:404}); const headers=new Headers({'content-type':'application/pdf','cache-control':'private, no-store','content-disposition':`inline; filename="${row.file_name}"`,'x-robots-tag':'noindex,nofollow'}); return new Response(response.body,{headers});
