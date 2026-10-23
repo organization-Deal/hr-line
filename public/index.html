@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.37" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.38" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -47,7 +47,7 @@
 <link rel="stylesheet" href="/ui/nk-leave-settings.css?v=P10.26-holiday">
 <link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.26">
 <link rel="stylesheet" href="/notifications.css?v=P10.26">
-<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.37">
+<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.38">
 <link rel="stylesheet" href="/ui/loading.css?v=P10.26">
 <script defer src="/ui/loading.js?v=P10.26"></script>
 <link rel="stylesheet" href="/ui/dashboard.css?v=P10.28">
@@ -757,7 +757,12 @@
                   <div class="company-profile-inline-card">
                     <div class="modal-fields company-profile-inline-fields">
                       <div class="field full company-logo-field"><label>โลโก้บริษัท</label><div class="company-logo-editor"><div id="companyLogoPreview" class="company-logo-preview"><span>โลโก้</span></div><div class="company-logo-actions"><input id="companyLogoFile" type="file" accept="image/png,image/jpeg,image/webp"/><small>PNG, JPG หรือ WebP · ไม่เกิน 512 KB · แนะนำภาพสี่เหลี่ยม</small><button id="companyLogoRemoveBtn" class="text-btn danger-text hidden" type="button">ลบโลโก้</button></div></div></div>
-                      <div class="field full"><label>ชื่อบริษัท <em>*</em></label><input id="companyProfileName" /></div>
+                      <div class="field full"><label>ชื่อที่แสดงในระบบ <em>*</em></label><input id="companyProfileName" maxlength="240" /></div>
+                      <div class="field full"><label for="companyProfileLegalName">ชื่อบริษัทตามทะเบียน / หัวเอกสาร <em>*</em></label><input id="companyProfileLegalName" maxlength="240" autocomplete="organization" /><small>ใช้ในหัวสลิป เอกสาร HR และไฟล์นำส่งที่สร้างใหม่</small></div>
+                      <div class="field"><label for="companyProfileTaxId">เลขประจำตัวผู้เสียภาษี 13 หลัก</label><input id="companyProfileTaxId" inputmode="numeric" maxlength="13" placeholder="เช่น 01055XXXXXXXX" /></div>
+                      <div class="field"><label for="companyProfilePhone">เบอร์โทรศัพท์บริษัท</label><input id="companyProfilePhone" type="tel" maxlength="80" autocomplete="tel" /></div>
+                      <div class="field full"><label for="companyProfileAddress">ที่อยู่บริษัทสำหรับออกเอกสาร</label><textarea id="companyProfileAddress" rows="3" maxlength="2000" autocomplete="street-address" placeholder="เลขที่ อาคาร ถนน แขวง/ตำบล เขต/อำเภอ จังหวัด และรหัสไปรษณีย์"></textarea></div>
+                      <div class="field"><label for="companyProfileProvince">จังหวัด</label><input id="companyProfileProvince" maxlength="120" autocomplete="address-level1" /></div>
                       <div class="field"><label>เวลาเริ่มงาน</label><input id="companyProfileWorkStart" type="time" /></div>
                       <div class="field"><label>เวลาเลิกงาน</label><input id="companyProfileWorkEnd" type="time" /></div>
                       <div class="field"><label>Grace period สาย</label><div class="input-suffix"><input id="companyProfileLateGrace" type="number" min="0" max="180" /><span>นาที</span></div></div>
@@ -1404,7 +1409,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.37" type="module"></script>
+  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.38" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

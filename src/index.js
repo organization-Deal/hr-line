@@ -1,3 +1,4 @@
+import {companyProfileApi} from './company-profile.js';
 import {payrollDocumentCenterApi} from './payroll-document-center.js';
 import {renderPayrollPdf} from './payroll-pdf.js';
 import {payrollIssuer} from './payroll-issuer.js';
@@ -9,8 +10,8 @@ import { runNotificationCenter, notificationCenterApi, notificationCenterDiagnos
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
-const NAKNA_RUNTIME_RELEASE = 'P10.37-THAI-FILING';
-const NAKNA_RUNTIME_VERSION = '1.0-P10.37-THAI-FILING';
+const NAKNA_RUNTIME_RELEASE = 'P10.38-COMPANY-PROFILE';
+const NAKNA_RUNTIME_VERSION = '1.0-P10.38-COMPANY-PROFILE';
 const NAKNA_RUNTIME_FEATURE = 'retro-checkin-menu-retro-leave-status+leave-schema-repair+enrollment-trial-recovery+employee-document-upload-recovery';
 // Per-isolate schema readiness cache. D1 migrations are persistent; repeated DDL/PRAGMA
 // work on every API request was causing /api/bootstrap to exceed 30s.
@@ -2169,29 +2170,11 @@ async function handleApi(request, env, url, auth, ctx) {
     return response;
   }
 
-  if (path === '/api/company-profile' && method === 'GET') {
-    await ensureV100P7Ready(env.DB);
-    const client = await getClient(env.DB, clientId);
-    if (!client) return json({ error: 'ไม่พบบริษัท' }, 404);
-    const asset=await env.DB.prepare('SELECT logo_data_url FROM company_assets WHERE client_id=?1').bind(clientId).first();
-    return json({ company: {...publicCompanyProfile(client),logo_data_url:asset?.logo_data_url||''} });
-  }
-
-  if (path === '/api/company-profile' && method === 'PATCH') {
-    if (!['owner','co_owner','hr_admin','hr'].includes(String(auth.role || ''))) return json({ error: 'ไม่มีสิทธิ์แก้ข้อมูลบริษัท' }, 403);
-    const body = await safeJson(request);
-    const name = String(body.name || '').trim();
-    const timezone = String(body.timezone || 'Asia/Bangkok').trim() || 'Asia/Bangkok';
-    const workStart = normalizeTimeHM(body.work_start) || '09:00';
-    const workEnd = normalizeTimeHM(body.work_end) || '18:00';
-    const lateGrace = Math.max(0, Math.min(180, Number(body.late_grace_minutes ?? 10) || 0));
-    if (name.length < 2) return json({ error: 'กรุณาใส่ชื่อบริษัท' }, 400);
-    await env.DB.prepare(`UPDATE clients SET name=?1,timezone=?2,work_start=?3,work_end=?4,late_grace_minutes=?5 WHERE id=?6`)
-      .bind(name, timezone, workStart, workEnd, lateGrace, clientId).run();
-    await safeAudit(env.DB, clientId, 'user', String(auth.user.id), 'company.profile.update', 'client', String(clientId), { name, timezone, work_start: workStart, work_end: workEnd, late_grace_minutes: lateGrace });
-    const client = await getClient(env.DB, clientId);
-    const asset=await env.DB.prepare('SELECT logo_data_url FROM company_assets WHERE client_id=?1').bind(clientId).first();
-    return json({ ok: true, company: {...publicCompanyProfile(client),logo_data_url:asset?.logo_data_url||''} });
+  if (path === '/api/company-profile' && ['GET','PATCH'].includes(method)) {
+    return companyProfileApi(request,env.DB,auth,{
+      ensure:async db=>{await ensureV100P7Ready(db);await ensureDocumentWorkflowReady(db);},
+      getClient,publicProfile:publicCompanyProfile,normalizeTime:normalizeTimeHM,audit:safeAudit
+    });
   }
 
   if (path === '/api/company-logo' && method === 'PUT') {

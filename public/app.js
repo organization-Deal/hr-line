@@ -1,4 +1,4 @@
-import {createPayrollDocumentCenter} from './payroll-document-center.js?v=P10.37';
+import {createPayrollDocumentCenter} from './payroll-document-center.js?v=P10.38';
 import {openPayslipDelivery} from './payslip-delivery.js?v=P10.30';
 import {createReadGate,shouldPreloadPeople,resetRoutePosition} from './ux-runtime.js?v=P10.27';
 const apiReadGate=createReadGate();
@@ -1921,6 +1921,7 @@ function canManageGoogleWorkspace() { return ['owner','co_owner','hr_admin'].inc
 function fillCompanyProfileForm() {
   const profile = state.companyProfile || state.dashboard?.client || activeCompany() || {};
   if ($('#companyProfileName')) $('#companyProfileName').value = profile.name || '';
+  for(const [key,id] of Object.entries({legal_name:'companyProfileLegalName',tax_id:'companyProfileTaxId',address:'companyProfileAddress',phone:'companyProfilePhone',province:'companyProfileProvince'}))if($('#'+id))$('#'+id).value=profile[key]??(key==='legal_name'?profile.name||'':'');
   if ($('#companyProfileWorkStart')) $('#companyProfileWorkStart').value = profile.work_start || '09:00';
   if ($('#companyProfileWorkEnd')) $('#companyProfileWorkEnd').value = profile.work_end || '18:00';
   if ($('#companyProfileLateGrace')) $('#companyProfileLateGrace').value = profile.late_grace_minutes ?? 10;
@@ -1961,10 +1962,14 @@ async function removeCompanyLogo(){
 }
 
 async function saveCompanyProfile() {
+  if(Number(state.companyProfile?.id)!==Number(state.me?.active_company_id||0))return toast('กรุณารอโหลดข้อมูลบริษัทให้เสร็จก่อนบันทึก',true);
   const body={name:$('#companyProfileName').value.trim(),work_start:$('#companyProfileWorkStart').value,work_end:$('#companyProfileWorkEnd').value,late_grace_minutes:Number($('#companyProfileLateGrace').value||0),timezone:$('#companyProfileTimezone').value.trim()||'Asia/Bangkok'};
+  body.expected_company_id=Number(state.me?.active_company_id||0);
+  for(const [key,id] of Object.entries({legal_name:'companyProfileLegalName',tax_id:'companyProfileTaxId',address:'companyProfileAddress',phone:'companyProfilePhone',province:'companyProfileProvince'}))body[key]=$('#'+id).value.trim();
+  if(body.legal_name.length<2)return toast('กรุณาระบุชื่อบริษัทตามทะเบียน',true);
   if(body.name.length<2)return toast('กรุณาใส่ชื่อบริษัท',true);
   const button=$('#companyProfileSaveBtn');button.disabled=true;button.textContent='กำลังบันทึก…';
-  try{let result=await api('/api/company-profile',{method:'PATCH',body:JSON.stringify(body)});const pending=$('#companyLogoPreview')?.dataset?.pending||'';if(pending){const logoResult=await api('/api/company-logo',{method:'PUT',body:JSON.stringify({data_url:pending})});result.company.logo_data_url=logoResult.logo_data_url||pending;delete $('#companyLogoPreview').dataset.pending;}state.companyProfile=result.company;const active=activeCompany();if(active){active.name=result.company.name;active.logo_data_url=result.company.logo_data_url||active.logo_data_url||'';}renderIdentity();renderSettings();fillCompanyProfileForm();toast('บันทึกข้อมูลบริษัทแล้ว');}
+  try{let result=await api('/api/company-profile',{method:'PATCH',body:JSON.stringify(body)});if(body.expected_company_id!==Number(state.me?.active_company_id||0))return;const pending=$('#companyLogoPreview')?.dataset?.pending||'';if(pending){const logoResult=await api('/api/company-logo',{method:'PUT',body:JSON.stringify({data_url:pending})});result.company.logo_data_url=logoResult.logo_data_url||pending;delete $('#companyLogoPreview').dataset.pending;}if(body.expected_company_id!==Number(state.me?.active_company_id||0))return;state.companyProfile=result.company;state.documentSettings=null;if(state.onboardingStatus?.company)Object.assign(state.onboardingStatus.company,result.company);const active=activeCompany();if(active){active.name=result.company.name;active.logo_data_url=result.company.logo_data_url||active.logo_data_url||'';}renderIdentity();renderSettings();fillCompanyProfileForm();toast('บันทึกข้อมูลบริษัทแล้ว');}
   catch(error){toast(error.message,true);}finally{button.disabled=false;button.textContent='บันทึกข้อมูลบริษัท';}
 }
 
