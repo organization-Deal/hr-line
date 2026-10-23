@@ -1,4 +1,4 @@
-import {createPayrollDocumentCenter} from './payroll-document-center.js?v=P10.39';
+import {createPayrollDocumentCenter} from './payroll-document-center.js?v=P10.40';
 import {openPayslipDelivery} from './payslip-delivery.js?v=P10.30';
 import {createReadGate,shouldPreloadPeople,resetRoutePosition} from './ux-runtime.js?v=P10.27';
 const apiReadGate=createReadGate();

@@ -59,3 +59,110 @@
 .nk-handoff-record{border-top:1px solid #e0ebed;margin-top:14px;padding-top:12px}.nk-handoff-record summary,.nk-handoff-warnings summary{cursor:pointer;font-size:13px}.nk-handoff-warnings{background:#fff7eb;padding:10px;border-radius:8px;font-size:12px}
 .nk-handoff-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.nk-handoff-card label{display:flex;flex-direction:column;gap:5px;font-size:12px;margin:10px 0}.nk-handoff-card input,.nk-handoff-card select,.nk-handoff-card textarea{box-sizing:border-box;width:100%;border:1px solid #cbdce0;border-radius:8px;padding:9px;font:inherit;font-size:13px}.nk-handoff-card .nk-handoff-confirm{flex-direction:row;align-items:start;line-height:1.7}.nk-handoff-confirm input{width:auto;margin-top:5px}.nk-handoff-card button{min-height:42px}.nk-handoff-small{font-size:12px;color:#657c85;line-height:1.7}.nk-handoff-error{color:#a43224;font-size:14px}
 @media(max-width:760px){.nk-payroll-document-center{padding:16px}.nk-handoff-grid{grid-template-columns:1fr}.nk-handoff-fields{grid-template-columns:1fr}.nk-handoff-card-head{flex-wrap:wrap}}
+
+/* P10.40: a wide document workspace, isolated from generic dialog/form rules. */
+#nkPayrollDocumentCenter{box-sizing:border-box;width:min(1200px,calc(100vw - 48px));max-width:calc(100vw - 48px);height:min(900px,calc(100dvh - 48px));max-height:calc(100dvh - 48px);margin:auto;padding:0;overflow:hidden;border:1px solid #cbdcde;border-radius:22px;background:#f7f9fa;color:#183d49;box-shadow:0 28px 90px #102e3a30}
+#nkPayrollDocumentCenter *,#nkPayrollDocumentCenter *::before,#nkPayrollDocumentCenter *::after{box-sizing:border-box}
+#nkPayrollDocumentCenter [hidden]{display:none!important}
+#nkPayrollDocumentCenter .nk-doc-shell{height:100%;min-height:0;display:flex;flex-direction:column}
+#nkPayrollDocumentCenter .modal-head{flex:none;padding:24px 30px 20px;margin:0;display:flex;align-items:flex-start;gap:20px;background:#fff;border-bottom:1px solid #e3ebed}
+#nkPayrollDocumentCenter .modal-head h2{font-size:24px;line-height:1.45;margin:3px 0 6px;color:#173b48;letter-spacing:-.3px}
+#nkPayrollDocumentCenter .modal-head p:not(.kicker){font-size:13px;line-height:1.6;color:#617882;margin:0}
+#nkPayrollDocumentCenter .kicker{font-size:10px;letter-spacing:.14em;color:#00878c;margin:0;font-weight:600}
+#nkPayrollDocumentCenter .modal-head>[data-close]{flex:none;min-width:60px}
+#nkPayrollDocumentCenter button{font:inherit;font-size:13px;line-height:1.5;cursor:pointer}
+#nkPayrollDocumentCenter button:disabled{cursor:not-allowed;opacity:.5;box-shadow:none}
+#nkPayrollDocumentCenter button:focus-visible,#nkPayrollDocumentCenter summary:focus-visible,#nkPayrollDocumentCenter a:focus-visible{outline:3px solid #6ec9cb;outline-offset:3px}
+#nkPayrollDocumentCenter .primary-btn,#nkPayrollDocumentCenter .secondary-btn{min-height:44px;padding:11px 17px;border-radius:10px;white-space:normal}
+#nkPayrollDocumentCenter .primary-btn{background:#00888e;color:#fff;border:1px solid #00888e;box-shadow:none}
+#nkPayrollDocumentCenter .primary-btn:hover:not(:disabled){background:#006f75}
+#nkPayrollDocumentCenter .secondary-btn{background:#fff;color:#254b58;border:1px solid #cddde1;box-shadow:none}
+#nkPayrollDocumentCenter .text-btn{border:0;background:transparent;color:#007b83;padding:7px 0;box-shadow:none}
+#nkPayrollDocumentCenter .nk-handoff-tabs{flex:none;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0;padding:0 30px;background:#fff;border-bottom:1px solid #dce7e9}
+#nkPayrollDocumentCenter .nk-handoff-tabs>div{display:flex;gap:24px;min-width:0}
+#nkPayrollDocumentCenter .nk-handoff-tabs [data-tab]{border:0;border-bottom:3px solid transparent;border-radius:0;min-height:56px;padding:15px 0 12px;background:transparent;color:#6a7e86;font-weight:500}
+#nkPayrollDocumentCenter .nk-handoff-tabs [data-tab].active{border-bottom-color:#008a90;color:#00777e;font-weight:600}
+#nkPayrollDocumentCenter .nk-handoff-tabs>[data-reload]{font-size:12px;flex:none}
+#nkPayrollDocumentCenter .nk-doc-notice{flex:none;padding:11px 30px;background:#eef7f7;color:#315e66;font-size:12px;line-height:1.7;border-bottom:1px solid #deeded}
+#nkPayrollDocumentCenter .nk-doc-notice span{color:#617d82}
+#nkPayrollDocumentCenter [data-center-status]{flex:none;font-size:13px;line-height:1.7;margin:0;background:#fff}
+#nkPayrollDocumentCenter [data-center-status]:not(:empty){padding:12px 30px;border-bottom:1px solid #e0eaec}
+#nkPayrollDocumentCenter [data-center-status] .primary-btn{display:inline-flex;margin:6px 0 0}
+#nkPayrollDocumentCenter .nk-doc-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+#nkPayrollDocumentCenter .nk-doc-content{padding:28px 30px 32px;max-width:1060px;margin:auto}
+#nkPayrollDocumentCenter .nk-doc-section-title{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}
+#nkPayrollDocumentCenter .nk-doc-section-title h3{font-size:18px;line-height:1.5;margin:0;color:#214550}
+#nkPayrollDocumentCenter .nk-doc-section-title p{margin:4px 0 0;font-size:13px;color:#70828a;line-height:1.65}
+#nkPayrollDocumentCenter .nk-doc-section-divider{margin-top:32px;padding-top:26px;border-top:1px solid #dce6e9}
+#nkPayrollDocumentCenter .nk-handoff-grid{display:grid;grid-template-columns:1fr;gap:16px}
+#nkPayrollDocumentCenter .nk-handoff-card{padding:24px;border:1px solid #dce6e9;border-radius:16px;background:#fff;min-width:0}
+#nkPayrollDocumentCenter .nk-handoff-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}
+#nkPayrollDocumentCenter .nk-doc-type{display:block;font-size:11px;color:#00858b;font-weight:600;margin-bottom:7px}
+#nkPayrollDocumentCenter .nk-handoff-card h3{font-size:18px;margin:0 0 5px;line-height:1.55;color:#1c414e}
+#nkPayrollDocumentCenter .nk-handoff-card small{font-size:12px;line-height:1.65;color:#73858e}
+#nkPayrollDocumentCenter .nk-handoff-card .badge{flex:none;max-width:180px;font-size:11px;padding:5px 9px;line-height:1.6;border-radius:7px;background:#f0f4f5;color:#637c85;white-space:normal}
+#nkPayrollDocumentCenter .nk-handoff-card .badge-success{color:#267650;background:#eaf5ef}
+#nkPayrollDocumentCenter .nk-doc-description{margin:12px 0 0;font-size:13px;color:#657d87;line-height:1.8}
+#nkPayrollDocumentCenter .nk-handoff-warnings{padding:14px 16px;background:#fff8ec;border:1px solid #f0e2c7;border-radius:10px;margin-top:16px;color:#81612b;font-size:12px;line-height:1.8}
+#nkPayrollDocumentCenter .nk-handoff-warnings strong{font-weight:600}
+#nkPayrollDocumentCenter .nk-handoff-warnings ul{margin:5px 0 0;padding-left:18px}
+#nkPayrollDocumentCenter .nk-handoff-warnings .text-btn{font-size:12px;margin-top:5px}
+#nkPayrollDocumentCenter .nk-handoff-actions{display:flex;align-items:center;gap:14px;margin:20px 0 0;flex-wrap:wrap}
+#nkPayrollDocumentCenter .nk-handoff-actions a{font-size:12px;color:#007c85;text-decoration:none}
+#nkPayrollDocumentCenter .nk-doc-secondary{margin-top:20px;border-top:1px solid #e7edef;padding-top:14px;display:grid;gap:12px}
+#nkPayrollDocumentCenter .nk-doc-secondary summary{font-size:12px;color:#6c828b;cursor:pointer;line-height:1.7}
+#nkPayrollDocumentCenter .nk-doc-secondary p{font-size:12px;line-height:1.8;margin:9px 0}
+#nkPayrollDocumentCenter .nk-handoff-record{border:0;padding:0;margin:0}
+#nkPayrollDocumentCenter .nk-handoff-record form{padding:16px 0 0}
+#nkPayrollDocumentCenter .nk-doc-support-grid .nk-handoff-card{padding:20px 24px}
+#nkPayrollDocumentCenter .nk-doc-support-grid h3{font-size:16px}
+#nkPayrollDocumentCenter .nk-doc-guide{border-top:1px solid #e0e9eb;padding-top:20px;margin-top:28px;color:#6b828b;font-size:12px;line-height:1.8}
+#nkPayrollDocumentCenter .nk-doc-guide summary{cursor:pointer;color:#51747e}
+#nkPayrollDocumentCenter .nk-doc-guide p{margin:10px 0}
+#nkPayrollDocumentCenter .nk-doc-guide a{color:#007d86}
+/* Settings: labels always sit above controls, including outside document cards. */
+#nkPayrollDocumentCenter label{display:flex;flex-direction:column;align-items:stretch;gap:8px;margin:0;min-width:0;font-size:13px;color:#2d515d;line-height:1.6}
+#nkPayrollDocumentCenter label>span{font-size:13px;font-weight:500}
+#nkPayrollDocumentCenter :is(input:not([type=checkbox]),select,textarea){display:block;width:100%;max-width:100%;min-width:0;min-height:46px;border:1px solid #cbdbe0;border-radius:9px;padding:10px 12px;background:#fff;color:#214854;font:inherit;font-size:14px;line-height:1.6;box-shadow:none}
+#nkPayrollDocumentCenter :is(input,select,textarea):focus{outline:2px solid #83c9cc;outline-offset:1px;border-color:#00888e}
+#nkPayrollDocumentCenter input::placeholder{color:#91a1a7;font-size:12px}
+#nkPayrollDocumentCenter label small{font-size:11px;line-height:1.65;color:#7d9098;font-weight:400}
+#nkPayrollDocumentCenter .nk-handoff-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 24px}
+#nkPayrollDocumentCenter .nk-field-wide{grid-column:1/-1}
+#nkPayrollDocumentCenter .nk-handoff-confirm{display:flex;flex-direction:row;align-items:flex-start;gap:10px;margin:18px 0;font-size:12px;line-height:1.7}
+#nkPayrollDocumentCenter .nk-handoff-confirm input{width:18px;height:18px;flex:none;margin-top:2px;accent-color:#00888e}
+#nkPayrollDocumentCenter .nk-handoff-record label:has(textarea){margin-top:16px}
+#nkPayrollDocumentCenter .nk-person-choice{min-width:220px;flex:1;max-width:400px}
+#nkPayrollDocumentCenter .nk-doc-settings-body{overflow:hidden;scrollbar-gutter:auto}
+#nkPayrollDocumentCenter [data-filing-settings]{display:flex;flex-direction:column;height:100%;min-height:0;padding:0;margin:0}
+#nkPayrollDocumentCenter .nk-settings-layout{flex:1;min-height:0;display:grid;grid-template-columns:210px minmax(0,1fr)}
+#nkPayrollDocumentCenter .nk-settings-nav{padding:28px 18px;background:#f5f8f9;border-right:1px solid #e0e9ec;overflow:auto}
+#nkPayrollDocumentCenter .nk-settings-nav>p{font-size:11px;color:#7f9299;margin:0 12px 15px}
+#nkPayrollDocumentCenter .nk-settings-nav>button{width:100%;display:flex;align-items:center;gap:12px;border:1px solid transparent;background:transparent;text-align:left;padding:13px 12px;border-radius:10px;color:#607b85;font-size:13px;min-height:48px;margin-bottom:7px}
+#nkPayrollDocumentCenter .nk-settings-nav>button span{font-size:11px;color:#91a3a9}
+#nkPayrollDocumentCenter .nk-settings-nav>button.active{background:#fff;color:#007b82;border-color:#d2e4e5;box-shadow:0 2px 6px #143f4906;font-weight:600}
+#nkPayrollDocumentCenter .nk-settings-nav>small{display:block;margin:20px 12px;font-size:11px;color:#86989e}
+#nkPayrollDocumentCenter .nk-settings-scroll{min-height:0;overflow:auto;padding:30px 34px 28px;background:#fff;overscroll-behavior:contain;scrollbar-gutter:stable}
+#nkPayrollDocumentCenter .nk-settings-heading{margin-bottom:26px}
+#nkPayrollDocumentCenter .nk-settings-heading h3{font-size:21px;margin:6px 0 8px;color:#1b414e;font-weight:600;line-height:1.5}
+#nkPayrollDocumentCenter .nk-settings-heading p:not(.kicker){font-size:13px;line-height:1.8;color:#71858e;margin:0}
+#nkPayrollDocumentCenter fieldset{min-width:0;margin:0 0 28px;padding:22px 24px 25px;border:1px solid #e0e9eb;border-radius:13px}
+#nkPayrollDocumentCenter legend{padding:0 7px;font-size:13px;font-weight:600;color:#385c67}
+#nkPayrollDocumentCenter .nk-settings-help{font-size:12px;color:#789099;line-height:1.8;margin:0 0 20px}
+#nkPayrollDocumentCenter .nk-settings-tip{padding:17px 20px;background:#f1f7f7;border-radius:10px;font-size:13px;color:#4a6c76;line-height:1.8;margin-bottom:24px}
+#nkPayrollDocumentCenter .nk-settings-footer{flex:none;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:24px;padding:17px 28px;background:#fff;border-top:1px solid #dbe7e9;box-shadow:0 -5px 18px #183e4704}
+#nkPayrollDocumentCenter .nk-settings-footer>button{min-height:46px;align-self:end}
+#nkPayrollDocumentCenter .nk-settings-footer label{max-width:720px;font-size:12px;gap:5px}
+#nkPayrollDocumentCenter .nk-settings-footer label span{font-size:12px}
+#nkPayrollDocumentCenter .nk-people-search{margin:0 0 22px}
+#nkPayrollDocumentCenter .nk-doc-people{display:grid;gap:10px}
+#nkPayrollDocumentCenter .nk-doc-people>details{border:1px solid #e0e9eb;border-radius:12px;background:#fff;min-width:0}
+#nkPayrollDocumentCenter .nk-doc-people>details>summary{display:flex;align-items:center;justify-content:space-between;gap:16px;cursor:pointer;list-style:none;padding:17px 18px;font-size:13px}
+#nkPayrollDocumentCenter .nk-doc-people>details>summary::after{content:'+';font-size:19px;font-weight:400;color:#80969e}
+#nkPayrollDocumentCenter .nk-doc-people>details[open]>summary::after{content:'−'}
+#nkPayrollDocumentCenter .nk-doc-people>details>summary strong{font-weight:500;flex:1;overflow-wrap:anywhere}
+#nkPayrollDocumentCenter .nk-doc-people>details>summary span{font-size:10px;color:#789099;flex:none}
+#nkPayrollDocumentCenter .nk-person-fields{padding:20px;border-top:1px solid #e3ecee}
+@media(min-width:1400px){#nkPayrollDocumentCenter{width:1240px}}
+@media(max-width:850px){#nkPayrollDocumentCenter .nk-settings-layout{grid-template-columns:170px minmax(0,1fr)}#nkPayrollDocumentCenter .nk-settings-nav{padding:24px 10px}#nkPayrollDocumentCenter .nk-settings-nav>button{gap:8px;font-size:12px;padding:12px 8px}#nkPayrollDocumentCenter .nk-settings-scroll{padding:26px 24px}#nkPayrollDocumentCenter fieldset{padding:18px}#nkPayrollDocumentCenter .nk-handoff-fields{gap:20px;grid-template-columns:1fr}#nkPayrollDocumentCenter .nk-field-wide{grid-column:auto}}
+@media(max-width:600px){#nkPayrollDocumentCenter{width:calc(100vw - 16px);max-width:calc(100vw - 16px);height:calc(100dvh - 16px);max-height:calc(100dvh - 16px);border-radius:16px}#nkPayrollDocumentCenter .modal-head{padding:18px 18px 14px;gap:10px}#nkPayrollDocumentCenter .modal-head h2{font-size:19px}#nkPayrollDocumentCenter .modal-head p:not(.kicker){font-size:11px}#nkPayrollDocumentCenter .nk-handoff-tabs{padding:0 16px;display:block}#nkPayrollDocumentCenter .nk-handoff-tabs>div{gap:19px;justify-content:space-between}#nkPayrollDocumentCenter .nk-handoff-tabs [data-tab]{font-size:11px;min-height:48px;padding:13px 0 10px;white-space:nowrap}#nkPayrollDocumentCenter .nk-handoff-tabs>[data-reload]{display:none}#nkPayrollDocumentCenter .nk-doc-notice{padding:9px 18px;font-size:11px}#nkPayrollDocumentCenter .nk-doc-notice span{display:none}#nkPayrollDocumentCenter .nk-doc-content{padding:22px 16px}#nkPayrollDocumentCenter .nk-handoff-card{padding:20px 18px}#nkPayrollDocumentCenter .nk-handoff-card-head{flex-direction:column;gap:10px}#nkPayrollDocumentCenter .nk-handoff-card h3{font-size:16px}#nkPayrollDocumentCenter .nk-handoff-card .badge{max-width:none}#nkPayrollDocumentCenter .nk-handoff-actions{gap:12px}#nkPayrollDocumentCenter .nk-handoff-actions>.primary-btn,#nkPayrollDocumentCenter .nk-handoff-actions>.secondary-btn{width:100%}#nkPayrollDocumentCenter .nk-settings-layout{display:flex;flex-direction:column}#nkPayrollDocumentCenter .nk-settings-nav{overflow:visible;flex:none;display:flex;gap:6px;padding:12px 14px;border-right:0;border-bottom:1px solid #e0e9ec}#nkPayrollDocumentCenter .nk-settings-nav>p,#nkPayrollDocumentCenter .nk-settings-nav>small{display:none}#nkPayrollDocumentCenter .nk-settings-nav>button{justify-content:center;flex:1;margin:0;min-height:40px;padding:8px 5px;font-size:11px;gap:5px;white-space:nowrap}#nkPayrollDocumentCenter .nk-settings-nav>button span{display:none}#nkPayrollDocumentCenter .nk-settings-scroll{flex:1;padding:22px 17px}#nkPayrollDocumentCenter .nk-settings-heading h3{font-size:19px}#nkPayrollDocumentCenter fieldset{padding:17px 15px 20px}#nkPayrollDocumentCenter .nk-settings-footer{padding:12px 16px;gap:10px;grid-template-columns:1fr}#nkPayrollDocumentCenter .nk-settings-footer>button{width:100%}#nkPayrollDocumentCenter .nk-settings-footer label span{font-size:11px}#nkPayrollDocumentCenter .nk-doc-people>details>summary{padding:15px;gap:8px}#nkPayrollDocumentCenter .nk-doc-people>details>summary span{display:none}#nkPayrollDocumentCenter .nk-person-fields{padding:17px}#nkPayrollDocumentCenter [data-center-status]:not(:empty){padding:10px 18px}}
