@@ -10,5 +10,5 @@ await ctrl.open();assert(modal.open);assert(modal.innerHTML.includes('สรุ�
 node('tab-year').onclick();assert(modal.innerHTML.includes('data-prepare="tawi50"'));assert(!modal.innerHTML.includes('data-prepare="summary"'));assert(modal.innerHTML.includes('โปรแกรมออก 50 ทวิ'));
 node('tab-settings').onclick();assert(modal.innerHTML.includes('data-filing-settings'));assert(modal.innerHTML.includes('sso_account'));
 state.me.active_company_id=2;await node('[data-reload]').onclick();assert(!modal.open);assert.equal(gets,1);assert(messages.length);
-const app=fs.readFileSync('public/app.js','utf8'),html=fs.readFileSync('public/index.html','utf8');assert(html.includes('window.openPayrollDocumentCenter()'));assert(app.includes("import {createPayrollDocumentCenter}"));
+const app=fs.readFileSync('public/app.js','utf8'),html=fs.readFileSync('public/index.html','utf8');assert(html.includes('data-view="payroll-documents"'));assert(html.includes('id="view-payroll-documents"'));assert(app.includes("import {createPayrollDocumentCenter}"));
 console.log('PASS P10.36 UI: monthly/yearly cards, draft labels, escaped company name, source links, company-switch guard, visible entry point');

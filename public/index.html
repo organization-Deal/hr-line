@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" /><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
   <link rel="stylesheet" href="/styles.css?v=P10.0-base" />
-  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.43" />
+  <link rel="modulepreload" href="/app.js?v=NAKNA_SCOPE20261020V1-P10.45" />
   <style>
     #leaveUnifiedPanel .leave-unified-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;padding:12px 0 16px}
     #leaveUnifiedPanel .leave-unified-filters label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#637677;font-weight:600}
@@ -44,10 +44,10 @@
 <link rel="stylesheet" href="/ui/nk-multi-gmail.css?v=MGMAIL20261020A">
 <link rel="stylesheet" href="/ui/nk-recruitment-screening.css?v=20261020-scope1-P10.12">
 <link rel="stylesheet" href="/ui/nk-employee-service.css?v=P10.26-service">
-<link rel="stylesheet" href="/ui/nk-leave-settings.css?v=P10.43">
+<link rel="stylesheet" href="/ui/nk-leave-settings.css?v=P10.45">
 <link rel="stylesheet" href="/ui/nk-benefits-workspace.css?v=P10.26">
 <link rel="stylesheet" href="/notifications.css?v=P10.26">
-<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.43">
+<link rel="stylesheet" href="/ui/payroll-workflow.css?v=P10.45">
 <link rel="stylesheet" href="/ui/loading.css?v=P10.26">
 <script defer src="/ui/loading.js?v=P10.26"></script>
 <link rel="stylesheet" href="/ui/dashboard.css?v=P10.28">
@@ -262,6 +262,7 @@
         <p class="nav-label">บริหารจัดการ</p>
 <button class="nav-item system-config-item" data-view="notifications"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span>การแจ้งเตือน</span></button>
         <button class="nav-item" data-view="payroll"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M16 15h2"/></svg><span>Payroll</span><i class="soon-dot"></i></button>
+        <button class="nav-item payroll-subnav" data-view="payroll-documents" type="button"><svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg><span>เอกสารหลังเงินเดือน</span></button>
         <button class="nav-item" data-view="documents"><svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg><span>เอกสาร</span><i class="soon-dot"></i></button>
         <button class="nav-item system-config-item" type="button" data-settings-sidebar-open="company"><svg viewBox="0 0 24 24"><path d="M5 20V7l7-3 7 3v13"/><path d="M9 10h6M9 14h6M9 18h6"/></svg><span>บริษัท</span></button>
         <button class="nav-item system-config-item" type="button" data-settings-sidebar-open="attendance"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/><path d="M6.5 5.5 5 4M17.5 5.5 19 4"/></svg><span>การเช็กอิน</span></button>
@@ -640,13 +641,14 @@
       </section>
 
       <section id="view-payroll" class="view">
-        <div class="page-intro payroll-page-intro"><div><p class="kicker">THAILAND PAYROLL CONTROL CENTER</p><h1>Payroll</h1><p>ทำเงินเดือนให้จบเป็นขั้นตอน · เตรียมรอบ → ตรวจยอดและปรับรายการ → อนุมัติและเตรียมจ่าย</p></div><div class="page-actions"><button id="payrollComponentsBtn" class="secondary-btn" type="button">รายการเงิน</button><button class="secondary-btn" type="button" onclick="window.openPayrollDocumentCenter()">เอกสารหลังเงินเดือน</button><button id="payrollSettingsBtn" class="secondary-btn" type="button">ตั้งค่า Payroll</button><button class="secondary-btn" type="button" onclick="window.openPayrollIssuerSettings()">ตั้งค่าลายเซ็น</button><button type="button" class="secondary-btn" onclick="window.openNextPayrollCycle()">สร้างเดือนถัดไป</button><button id="createPayrollPeriodBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>สร้างรอบเงินเดือน</button></div></div>
+        <div class="page-intro payroll-page-intro"><div><p class="kicker">THAILAND PAYROLL CONTROL CENTER</p><h1>Payroll</h1><p>ทำเงินเดือนให้จบเป็นขั้นตอน · เตรียมรอบ → ตรวจยอดและปรับรายการ → อนุมัติและเตรียมจ่าย</p></div><div class="page-actions"><button id="payrollComponentsBtn" class="secondary-btn" type="button">รายการเงิน</button><button id="payrollSettingsBtn" class="secondary-btn" type="button">ตั้งค่า Payroll</button><button class="secondary-btn" type="button" onclick="window.openPayrollIssuerSettings()">ตั้งค่าลายเซ็น</button><button type="button" class="secondary-btn" onclick="window.openNextPayrollCycle()">สร้างเดือนถัดไป</button><button id="createPayrollPeriodBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>สร้างรอบเงินเดือน</button></div></div>
         <div id="payrollSummary" class="payroll-summary"></div>
         <div class="payroll-workspace">
           <aside class="panel payroll-period-panel"><div class="panel-head"><div><p class="kicker">PAY PERIODS</p><h3>รอบเงินเดือน</h3></div><span id="payrollReadyBadge" class="badge badge-soft">กำลังโหลด</span></div><div id="payrollPeriods" class="payroll-period-list"></div></aside>
           <article class="panel payroll-detail-panel"><div id="payrollDetail" class="payroll-detail-empty"><div class="module-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M16 15h2"/></svg></div><h3>เลือกรอบเงินเดือน</h3><p>เลือกเดือนด้านซ้ายเพื่อดูตารางปิดเงินเดือนแบบเต็ม และปรับเงินเพิ่ม/หัก/ภาษีรายคนได้</p></div></article>
         </div>
       </section>
+      <section id="view-payroll-documents" class="view" aria-label="เอกสารหลังเงินเดือน"><div id="payrollDocumentsPage"></div></section>
       <section id="view-documents" class="view">
         <div class="page-intro"><div><p class="kicker">EMPLOYEE DOCUMENTS</p><h1>เอกสาร HR</h1><p>แฟ้มเอกสารพนักงานแบบตรวจสอบย้อนหลังได้ · Version · สิทธิ์การมองเห็น · ประวัติหลักฐาน และ Payslip</p></div><button id="generateDocumentBtn" class="primary-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>ออกเอกสาร</button></div>
         <div id="documentSummary" class="document-summary"></div>
@@ -1409,7 +1411,7 @@
   </div>
 
   <div id="toast" class="toast" role="status"><span id="toastIcon">✓</span><span id="toastText"></span></div>
-  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.43" type="module"></script>
+  <script src="/app.js?v=NAKNA_SCOPE20261020V1-P10.45" type="module"></script>
 
   <dialog id="departmentAssignModal" class="modal position-assign-modal department-assign-modal">
     <div class="modal-head">

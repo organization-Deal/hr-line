@@ -1,4 +1,5 @@
-import {createPayrollDocumentCenter} from './payroll-document-center.js?v=P10.43';
+import {createPayrollDocumentsPage} from './payroll-documents-page.js?v=P10.45';
+import {createPayrollDocumentCenter} from './payroll-document-center.js?v=P10.45';
 import {openPayslipDelivery} from './payslip-delivery.js?v=P10.30';
 import {createReadGate,shouldPreloadPeople,resetRoutePosition} from './ux-runtime.js?v=P10.27';
 const apiReadGate=createReadGate();
@@ -341,6 +342,7 @@ function renderViewData(name){
   }catch(error){ console.warn('[Nakna] render view failed', name, error); }
 }
 async function loadViewData(name,{force=false}={}){
+  if(name==='payroll-documents')return payrollDocumentsPage().open();
   if(name==='notifications'){setViewLoading(name,true);try{return await notificationUi().load();}finally{setViewLoading(name,false);}}
   if(!name || name==='dashboard'){
     if(force || !isViewFresh('dashboard')){if(await loadDashboardFast({silent:true}))markViewLoaded('dashboard');}
@@ -714,6 +716,7 @@ const viewMeta = {
   requests: ['บริการพนักงาน', 'EMPLOYEE SERVICE'],
   broadcast: ['ประกาศ', 'BROADCAST'],
   payroll: ['Payroll', 'PAYROLL'],
+  'payroll-documents': ['เอกสารหลังเงินเดือน', 'PAYROLL DOCUMENTS'],
   documents: ['เอกสาร', 'DOCUMENTS'],
   performance: ['Learning & KPI', 'GROWTH OS'],
   engagement: ['แต้ม & ของรางวัล', 'ENGAGEMENT'],
@@ -1794,12 +1797,14 @@ async function switchCompany(clientId) {
   if (Number(clientId) === Number(state.me?.active_company_id)) return;
   try {
     await api('/api/session/company', { method: 'POST', body: JSON.stringify({ client_id: Number(clientId) }) });
+    nkPayrollDocumentsPage?.leave();
     state.leaveChannelSettings=null;
     const ready = await loadSessionOnly();
     if (ready) {
       const onboardingReady = await maybeRunOnboarding();
       if (onboardingReady) {
         showAppShell();
+        if(state.currentView==='payroll-documents')showView('payroll-documents');
         const hadCache=hydrateDashboardCache();
         if(!hadCache) renderLoadingState();
         loadDashboardFast({silent:true}).catch(()=>{});
@@ -4005,6 +4010,7 @@ function showView(name) {
   const target = $(`#view-${name}`);
   if (!target) return;
 
+  if(state.currentView==='payroll-documents'&&name!=='payroll-documents')nkPayrollDocumentsPage?.leave();
   state.currentView = name;
   if (name !== 'settings') state.settingsNavExpanded = false;
   else state.settingsNavExpanded = true;
@@ -7087,5 +7093,6 @@ function nkReviewAccess(kind,save){const modal=$(kind==='admin'?'#companyAccessM
  nkConfirmAccess('ตรวจสิทธิ์ก่อนบันทึก',body,async()=>{const current=kind==='admin'?JSON.stringify([$('#companyAccessEmployeeSelect').value,$('#companyAccessRoleSelect').value]):JSON.stringify([Number($('#approverEmployeeSelect').value),$$('#approverPermissionChecks input:checked').map(x=>x.value)]);if(current!==snapshot)throw Error('ข้อมูลเปลี่ยนแล้ว กรุณากลับไปตรวจอีกครั้ง');await save();});}
 window.manageAccessMember=async userId=>{const cid=Number(state.me?.active_company_id||0);try{const latest=await api('/api/company-access',{silentStatus:true});if(cid!==Number(state.me?.active_company_id||0))return;state.companyAccess=latest;renderCompanyAccess();const member=latest.members.find(x=>Number(x.user_id)===userId);if(!member)return;const locked=member.is_primary_owner||member.is_me,d=nkAccessDialog('nkAccessMemberModal','จัดการสิทธิ์ผู้ใช้งาน');d.innerHTML=`<form method="dialog"><h3>${accessEsc(member.name||'บัญชีนากนะ')}</h3><p>${accessEsc(accessRoleLabels[member.role]||member.role)}</p><p>${accessEsc(accessRoleHelp[member.role])}</p>${locked?'<p class="nk-access-note">เจ้าของหลักและบัญชีของคุณดูสิทธิ์ได้ แต่เปลี่ยนหรือถอนสิทธิ์จากหน้านี้ไม่ได้</p>':`<label>บทบาท<select id="nkAccessMemberRole">${(latest.role_catalog||[]).map(x=>`<option value="${accessEsc(x.value)}" ${member.role===x.value?'selected':''}>${accessEsc(accessRoleLabels[x.value]||x.label)}</option>`).join('')}</select></label><p id="nkAccessMemberRoleHelp"></p>`}<div class="modal-actions"><button type="button" class="secondary-btn" data-member-close>ปิด</button>${locked?'':'<button type="button" class="text-btn danger-text" data-member-revoke>ถอนสิทธิ์ผู้ดูแล</button><button type="button" class="primary-btn" data-member-save>ตรวจสิทธิ์ก่อนบันทึก</button>'}</div></form>`;d.querySelector('[data-member-close]').onclick=()=>d.close();if(!locked){const select=d.querySelector('select'),help=d.querySelector('#nkAccessMemberRoleHelp');select.onchange=()=>help.textContent=accessRoleHelp[select.value]||'';select.onchange();d.querySelector('[data-member-save]').onclick=()=>{const role=select.value;nkConfirmAccess('เปลี่ยนบทบาท',`<h4>${accessEsc(member.name)}</h4><p>${accessEsc(accessRoleLabels[member.role])} → ${accessEsc(accessRoleLabels[role])}</p><p>${accessEsc(accessRoleHelp[role])}</p>`,async()=>{if(cid!==Number(state.me?.active_company_id||0))throw Error('บริษัทเปลี่ยนแล้ว');await api(`/api/company-access/${userId}`,{method:'PATCH',body:JSON.stringify({role,expected_role:member.stored_role||member.role})});d.close();await loadCompanyAccess();});};d.querySelector('[data-member-revoke]').onclick=()=>nkConfirmAccess('ถอนสิทธิ์ผู้ดูแล',`<h4>${accessEsc(member.name)}</h4><p>จะเสียสิทธิ์เข้าจัดการบริษัทในบทบาท ${accessEsc(accessRoleLabels[member.role])} บัญชีพนักงานและสิทธิ์ผู้อนุมัติที่แยกไว้ไม่ได้ถูกลบด้วย</p>`,async()=>{if(cid!==Number(state.me?.active_company_id||0))throw Error('บริษัทเปลี่ยนแล้ว');await api(`/api/company-access/${userId}`,{method:'DELETE',body:'{}'});d.close();await loadCompanyAccess();});}d.showModal();}catch(error){toast(error.message,true);}};
 
-let nkPayrollDocumentController;
-window.openPayrollDocumentCenter=()=>{nkPayrollDocumentController ||= createPayrollDocumentCenter({api,state,escapeHtml,toast});return nkPayrollDocumentController.open();};
+let nkPayrollDocumentsPage;
+function payrollDocumentsPage(){return nkPayrollDocumentsPage ||= createPayrollDocumentsPage({api,state,escapeHtml,toast,role:activeCompanyRole,createCenter:createPayrollDocumentCenter,onBack:()=>showView('payroll')});}
+window.openPayrollDocumentCenter=()=>showView('payroll-documents');

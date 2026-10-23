@@ -198,3 +198,30 @@
 @media(max-width:600px){#nkPayrollDocumentCenter .nk-filing-progress{padding:10px 16px 12px}#nkPayrollDocumentCenter .nk-filing-task{margin-bottom:9px;gap:8px}#nkPayrollDocumentCenter .nk-filing-task>strong{font-size:11px}#nkPayrollDocumentCenter .nk-filing-task select{max-width:155px;font-size:10px;min-height:30px;height:30px}#nkPayrollDocumentCenter .nk-filing-progress ol{gap:5px}#nkPayrollDocumentCenter .nk-filing-progress li>button{display:flex;flex-direction:column;gap:5px;text-align:center;font-size:10px;padding:7px 3px;min-height:64px}#nkPayrollDocumentCenter .nk-filing-progress b{width:23px;height:23px;font-size:10px}#nkPayrollDocumentCenter .nk-flow-footer{flex-direction:column;align-items:stretch;padding:11px 16px;gap:9px}#nkPayrollDocumentCenter .nk-flow-footer strong{font-size:12px}#nkPayrollDocumentCenter .nk-flow-footer small{font-size:10px}#nkPayrollDocumentCenter .nk-flow-footer>div:last-child{display:flex}#nkPayrollDocumentCenter .nk-flow-footer .primary-btn{width:100%}#nkPayrollDocumentCenter .nk-settings-next-actions{display:flex;gap:8px}#nkPayrollDocumentCenter .nk-settings-next-actions>button{flex:1;min-height:44px;padding:10px 9px;font-size:11px}#nkPayrollDocumentCenter .nk-settings-footer label small{display:none}#nkPayrollDocumentCenter .nk-filing-page>h3{font-size:19px}}
 #nkPayrollDocumentCenter .nk-settings-problem{padding:13px 16px;border:1px solid #efdfbc;background:#fff8ec;color:#82602a;border-radius:10px;margin:0 0 22px;font-size:12px;line-height:1.8}
 #nkPayrollDocumentCenter .nk-settings-problem p{margin:4px 0 0;overflow-wrap:anywhere}
+
+/* P10.45: documents live directly beneath Payroll in the sidebar. */
+html.nk-p10 .sidebar .nav-item.payroll-subnav{margin-top:0;padding-left:30px;font-size:12px;min-height:42px}
+html.nk-p10 .sidebar .nav-item.payroll-subnav svg{width:16px;height:16px}
+.nk-doc-page-toolbar{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin:0 0 18px;padding:18px 20px;background:#fff;border:1px solid #dce7e8;border-radius:14px}
+.nk-doc-page-toolbar label{display:grid;gap:7px;min-width:240px;max-width:100%;font-size:13px;color:#315661}
+.nk-doc-page-toolbar select{font:inherit;font-size:14px;min-height:46px;padding:10px 12px;border:1px solid #cbdbe0;border-radius:10px;background:#fff;color:#214854;max-width:100%}
+#view-payroll-documents #nkPayrollDocumentCenter.nk-doc-page-center{width:100%;max-width:100%;height:auto;max-height:none;margin:0;overflow:visible;border-radius:16px;box-shadow:none}
+#view-payroll-documents #nkPayrollDocumentCenter .nk-doc-shell{height:auto}
+#view-payroll-documents #nkPayrollDocumentCenter .nk-doc-body{overflow:visible;scrollbar-gutter:auto}
+#view-payroll-documents #nkPayrollDocumentCenter [data-filing-settings]{height:auto}
+#view-payroll-documents #nkPayrollDocumentCenter .nk-doc-settings-body{overflow:visible}
+#view-payroll-documents #nkPayrollDocumentCenter .nk-settings-scroll{overflow:visible;max-height:none}
+#view-payroll-documents .nk-doc-page-loading{padding:24px 30px;color:#315661}
+@media(max-width:720px){
+ html.nk-p10 .sidebar .nav-item.payroll-subnav{min-height:44px}
+ .nk-doc-page-toolbar{display:grid;gap:12px;padding:15px}
+ .nk-doc-page-toolbar label{min-width:0}
+ .nk-doc-page-toolbar button{width:100%}
+ #view-payroll-documents #nkPayrollDocumentCenter.nk-doc-page-center{width:100%;max-width:100%;height:auto;max-height:none;border-radius:12px}
+}
+
+#view-payroll-documents #nkPayrollDocumentCenter .modal-head :is(.kicker,h2,[data-close]){display:none}
+@media(max-width:600px){
+ #view-payroll-documents #nkPayrollDocumentCenter .nk-handoff-tabs>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;width:100%}
+ #view-payroll-documents #nkPayrollDocumentCenter .nk-handoff-tabs [data-tab]{min-width:0;white-space:normal;overflow-wrap:anywhere;line-height:1.6}
+}
