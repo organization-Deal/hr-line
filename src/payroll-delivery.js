@@ -41,7 +41,7 @@ export async function payrollDeliveryApi(request,env,auth,pid,h){
   if(doc.line_notified_at){results.push({employee_id:eid,status:'accepted',skipped:true});continue;}
   await db.prepare("INSERT OR IGNORE INTO payroll_payslip_deliveries(client_id,period_id,employee_id,retry_key) VALUES (?1,?2,?3,?4)").bind(cid,pid,eid,crypto.randomUUID()).run();
   const token=crypto.randomUUID(),now=Date.now();
-  const claim=await db.prepare("UPDATE payroll_payslip_deliveries SET status='sending',lease_token=?4,lease_until=?5,error_code=NULL,updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND period_id=?2 AND employee_id=?3 AND status!='accepted' AND (status!='sending' OR lease_until<=?6)").bind(cid,pid,eid,token,now+120000,now).run();
+  const claim=await db.prepare("UPDATE payroll_payslip_deliveries SET status='sending',lease_token=?4,lease_until=?5,error_code=NULL,updated_at=CURRENT_TIMESTAMP WHERE client_id=?1 AND period_id=?2 AND employee_id=?3 AND status!='accepted' AND (status!='sending' OR lease_until<=?6) AND EXISTS(SELECT 1 FROM payroll_periods p WHERE p.client_id=?1 AND p.id=?2 AND p.status IN ('locked','published'))").bind(cid,pid,eid,token,now+120000,now).run();
   if(Number(claim.meta?.changes)!==1){const previous=await db.prepare('SELECT status FROM payroll_payslip_deliveries WHERE client_id=?1 AND period_id=?2 AND employee_id=?3').bind(cid,pid,eid).first();results.push({employee_id:eid,status:previous?.status==='accepted'?'accepted':'sending',skipped:true});continue;}
   const job=await db.prepare('SELECT retry_key FROM payroll_payslip_deliveries WHERE client_id=?1 AND period_id=?2 AND employee_id=?3').bind(cid,pid,eid).first();
   try{

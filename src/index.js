@@ -1,3 +1,4 @@
+import {cancelPayrollApi} from './payroll-cancel.js';
 import {leaveChannel,requireOnlineLeave,leaveChannelApi,HR_ONLY_LEAVE_MESSAGE} from './leave-channel.js';
 import {companyProfileApi} from './company-profile.js';
 import {payrollDocumentCenterApi,handoffPeriodDetail} from './payroll-document-center.js';
@@ -1758,6 +1759,8 @@ async function handleApi(request, env, url, auth, ctx) {
   const clientId = auth.clientId ? Number(auth.clientId) : null;
   if(path==='/api/payroll/document-center'||/^\/api\/payroll\/document-center\/exports\/\d+$/.test(path))return payrollDocumentCenterApi(request,env,auth,{canManage:canManagePayroll,ensure:ensurePayrollDefaults,ensurePayments:ensurePayrollPayment,ensureDocuments:ensureDocumentWorkflowReady,getDetail:handoffPeriodDetail,payment:payrollPayment,audit:safeAudit,validDate:validPayrollDateKey,today:dateInBangkok,now:()=>new Date().toISOString()});
   const paymentMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/payment-confirmation$/);
+  const cancelMatch=path.match(/^\/api\/payroll\/periods\/(\d+)\/cancel$/);
+  if(cancelMatch)return cancelPayrollApi(request,env,auth,Number(cancelMatch[1]),{ensure:ensurePayrollDefaults});
   if(paymentMatch)return payrollPaymentApi(request,env,auth,Number(paymentMatch[1]),{canManagePayroll,ensurePayrollDefaults,getPayrollPeriodDetail,recordPayrollPeriodEvent,today:dateInBangkok});
 
 
@@ -8025,7 +8028,7 @@ async function payrollPayslipCoverage(db,clientId,periodId){
 
 
 async function serveSharedPayrollDocument(env,token){
-  const hash=await sha256Hex(token); const row=await env.DB.prepare(`SELECT pd.*,pp.period_key,e.employee_code FROM payroll_documents pd JOIN payroll_periods pp ON pp.id=pd.period_id JOIN employees e ON e.id=pd.employee_id WHERE pd.share_token_hash=?1`).bind(hash).first(); if(!row)return new Response('Payslip not found',{status:404}); const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(row.client_id)).first(); if(!workspace)return new Response('Document storage unavailable',{status:503}); const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const response=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(row.drive_file_id)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}}); if(!response.ok)return new Response('Payslip not found',{status:404}); const headers=new Headers({'content-type':'application/pdf','cache-control':'private, no-store','content-disposition':`inline; filename="${row.file_name}"`,'x-robots-tag':'noindex,nofollow'}); return new Response(response.body,{headers});
+  const hash=await sha256Hex(token); const row=await env.DB.prepare(`SELECT pd.*,pp.period_key,pp.status AS period_status,e.employee_code FROM payroll_documents pd JOIN payroll_periods pp ON pp.id=pd.period_id JOIN employees e ON e.id=pd.employee_id WHERE pd.share_token_hash=?1`).bind(hash).first(); if(!row)return new Response('Payslip not found',{status:404}); if(row.period_status==='void')return new Response('รอบเงินเดือนนี้ถูกยกเลิกแล้ว เอกสารนี้ไม่ใช่สลิปที่ใช้งานอยู่',{status:410,headers:{'content-type':'text/plain; charset=utf-8','cache-control':'no-store'}}); const workspace=await env.DB.prepare(`SELECT * FROM google_workspace_integrations WHERE client_id=?1 AND status='connected'`).bind(Number(row.client_id)).first(); if(!workspace)return new Response('Document storage unavailable',{status:503}); const accessToken=await getWorkspaceGoogleAccessToken(env,workspace); const response=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(row.drive_file_id)}?alt=media`,{headers:{authorization:`Bearer ${accessToken}`}}); if(!response.ok)return new Response('Payslip not found',{status:404}); const headers=new Headers({'content-type':'application/pdf','cache-control':'private, no-store','content-disposition':`inline; filename="${row.file_name}"`,'x-robots-tag':'noindex,nofollow'}); return new Response(response.body,{headers});
 }
 
 function parsePdfImageDataUrl(dataUrl){

@@ -5980,6 +5980,7 @@ function payrollPrimaryAction(p,settings={}){
 }
 function renderPayrollTools(p,editable){
   const tools=[];
+  if(p.status!=='void'&&['owner','co_owner'].includes(activeCompanyRole()))tools.push(`<button class="danger" type="button" onclick="window.cancelPayrollPeriod(${p.id})">ยกเลิกรอบเงินเดือน</button>`);
   if(editable)tools.push(`<button type="button" onclick="window.editPayrollPeriod(${p.id})">แก้ไขรอบ</button>`,`<button type="button" onclick="window.recalculatePayroll(${p.id})">คำนวณใหม่</button>`,`<button class="danger" type="button" onclick="window.deletePayrollPeriod(${p.id})">ลบรอบ</button>`);
   if(p.status==='review')tools.push(`<button type="button" onclick="window.createPayrollReviewExcel(${p.id})">สร้าง Excel ล่าสุด</button>`);
   if(p.status==='locked')tools.push(`<button type="button" onclick="window.generatePayrollPayslips(${p.id})">สร้างไฟล์สลิปใหม่</button>`,`<button type="button" onclick="window.createPayrollReviewExcel(${p.id})">สร้าง Excel ล่าสุด</button>`,`<button type="button" onclick="window.exportPayroll(${p.id},'bank')">Export ธนาคาร CSV</button>`,`<button type="button" onclick="window.exportPayroll(${p.id},'accounting')">Export บัญชี</button>`,`<button class="danger" type="button" onclick="window.unlockPayroll(${p.id})">เปิดแก้ไขยอดอีกครั้ง</button>`);
@@ -5987,7 +5988,7 @@ function renderPayrollTools(p,editable){
   if(!tools.length)return '';
   return `<details class="nk-payroll-tools"><summary>เครื่องมือเพิ่มเติมของรอบ</summary><nav class="payroll-top-tools" aria-label="เครื่องมือรอบเงินเดือน">${tools.join('')}</nav></details>`;
 }
-function renderPayrollTimeline(detail){const rows=detail?.timeline||[];if(!rows.length)return '';const labels={period_created:'สร้างรอบ',submitted_for_review:'ส่งตรวจ',approved:'อนุมัติ',locked:'Lock รอบ',unlocked:'ปลด Lock',published:'ส่งสลิปแล้ว',payslips_sent_selected:'ส่งสลิปตามผู้รับที่เลือก',payment_confirmed:'ผู้ใช้ยืนยันว่าจ่ายเงินจริงแล้ว',payment_confirmation_voided:'แก้บันทึกการจ่าย',grid_cell_updated:'แก้ตาราง',salary_override_updated:'แก้วัน/เงินเดือนรอบ',bulk_adjustment:'เพิ่มรายการหลายคน',bank_exported:'Export ธนาคาร',accounting_exported:'Export บัญชี',review_excel_created:'สร้าง Excel รอบตรวจ'};return `<details class="payroll-timeline"><summary>ประวัติรอบเงินเดือน <span>${rows.length}</span></summary><div>${rows.slice(0,30).map(x=>`<article><b>${escapeHtml(labels[x.event_type]||x.event_type)}</b><span>${escapeHtml(x.actor_name||x.actor_email||'ระบบ')}${nkPayrollEventNote(x)?`<small>${escapeHtml(nkPayrollEventNote(x))}</small>`:''}</span><time>${formatDateTime(x.created_at)}</time></article>`).join('')}</div></details>`;}
+function renderPayrollTimeline(detail){const rows=detail?.timeline||[];if(!rows.length)return '';const labels={period_cancelled:'ยกเลิกรอบเงินเดือน',period_created:'สร้างรอบ',submitted_for_review:'ส่งตรวจ',approved:'อนุมัติ',locked:'Lock รอบ',unlocked:'ปลด Lock',published:'ส่งสลิปแล้ว',payslips_sent_selected:'ส่งสลิปตามผู้รับที่เลือก',payment_confirmed:'ผู้ใช้ยืนยันว่าจ่ายเงินจริงแล้ว',payment_confirmation_voided:'แก้บันทึกการจ่าย',grid_cell_updated:'แก้ตาราง',salary_override_updated:'แก้วัน/เงินเดือนรอบ',bulk_adjustment:'เพิ่มรายการหลายคน',bank_exported:'Export ธนาคาร',accounting_exported:'Export บัญชี',review_excel_created:'สร้าง Excel รอบตรวจ'};return `<details class="payroll-timeline"><summary>ประวัติรอบเงินเดือน <span>${rows.length}</span></summary><div>${rows.slice(0,30).map(x=>`<article><b>${escapeHtml(labels[x.event_type]||x.event_type)}</b><span>${escapeHtml(x.actor_name||x.actor_email||'ระบบ')}${nkPayrollEventNote(x)?`<small>${escapeHtml(nkPayrollEventNote(x))}</small>`:''}</span><time>${formatDateTime(x.created_at)}</time></article>`).join('')}</div></details>`;}
 
 function renderPayrollExports(detail){
   const rows=detail?.exports||[],p=detail?.period||{};
@@ -7134,4 +7135,19 @@ window.nkPayrollReviewSummary=periodId=>{
  modal.querySelector('[data-review-ack]').onchange=e=>modal.querySelector('[data-review-submit]').disabled=!e.target.checked;
  modal.querySelector('form').onsubmit=async e=>{e.preventDefault();if(!modal.querySelector('[data-review-ack]').checked)return;const now=state.payrollDetail?.period;if(cid!==Number(state.me?.active_company_id||0)||Number(now?.id)!==Number(periodId)||String(now?.updated_at||'')!==version||Number(now?.net_total)!==total||now?.status!=='draft'){modal.close();return toast('ยอด บริษัท หรือรอบเปลี่ยนแล้ว กรุณาตรวจสรุปใหม่',true);}modal.querySelector('[data-review-submit]').disabled=true;modal.close();await window.reviewPayroll(periodId,true);};
  modal.showModal();
+};
+
+window.cancelPayrollPeriod=id=>{
+ const p=state.payrollDetail?.period,cid=Number(state.me?.active_company_id||0);
+ if(!p||Number(p.id)!==Number(id)||p.status==='void')return;
+ const version=p.updated_at,key=p.period_key,total=Number(p.net_total);
+ openPhase5Form({eyebrow:'ยกเลิกรอบเงินเดือน',title:`ยกเลิกรอบ ${key}`,subtitle:`ยอดสุทธิ ${money(total)} · เก็บรอบและประวัติไว้ตรวจสอบ แต่ไม่นับเป็นรอบที่ใช้งาน`,saveText:'ยืนยันยกเลิกรอบเงินเดือน',html:`<div class="field full"><p>ยกเลิกบันทึกการจ่ายของรอบนี้ในระบบ และเปิดให้สร้างเดือนเดิมใหม่ได้ ไม่คืนเงินธนาคาร ไม่เรียกคืนข้อความ LINE หรือไฟล์ที่ดาวน์โหลด/ยื่นไปแล้ว หากมีรอบถัดไปที่คำนวณไว้ ให้ตรวจยอดสะสมและคำนวณใหม่ก่อนใช้งาน</p></div><div class="field full"><label>เหตุผลที่ยกเลิก</label><textarea id="nkPayrollCancelReason" minlength="5" maxlength="500" placeholder="เช่น สร้างรอบเพื่อทดสอบ ยังไม่ได้จ่ายเงินจริง"></textarea></div><div class="field full"><label>พิมพ์เดือนเพื่อยืนยัน: ${escapeHtml(key)}</label><input id="nkPayrollCancelKey" autocomplete="off"></div><div class="field full"><label class="toggle-line"><input type="checkbox" id="nkPayrollCancelConfirmed">ฉันตรวจสอบรอบและผลของการยกเลิกแล้ว</label></div>`,onSave:async()=>{
+ if(cid!==Number(state.me?.active_company_id||0)||Number(state.payrollDetail?.period?.id)!==Number(id))throw Error('บริษัทหรือรอบเปลี่ยนแล้ว กรุณาเปิดใหม่');
+ const reason=$('#nkPayrollCancelReason').value.trim();
+ if(reason.length<5)throw Error('ระบุเหตุผลอย่างน้อย 5 ตัวอักษร');
+ if($('#nkPayrollCancelKey').value.trim()!==key||!$('#nkPayrollCancelConfirmed').checked)throw Error('พิมพ์เดือนให้ตรงและยืนยันผลของการยกเลิก');
+ await api(`/api/payroll/periods/${id}/cancel`,{method:'POST',body:JSON.stringify({reason,period_key:key,expected_updated_at:version,expected_net_total:total,confirmed:true})});
+ if(cid!==Number(state.me?.active_company_id||0))return;
+ await refreshPayrollSnapshot(id);markViewStale('payroll-documents');toast('ยกเลิกรอบเงินเดือนแล้ว สร้างรอบเดือนเดิมใหม่ได้');
+ }});
 };
