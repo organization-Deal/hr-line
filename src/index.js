@@ -9859,7 +9859,19 @@ async function ensurePayrollControlCenterReady(db){
     `ALTER TABLE payroll_items ADD COLUMN ytd_tax REAL NOT NULL DEFAULT 0`,
     `ALTER TABLE payroll_items ADD COLUMN ytd_sso REAL NOT NULL DEFAULT 0`
   ];
-  for(const sql of alters)await db.prepare(sql).run().catch(()=>{});
+  // Inspect existing columns in one round trip instead of issuing 23 failing ALTERs on cold start.
+  const tables=[...new Set(alters.map(sql=>sql.match(/ALTER TABLE (\w+)/)[1]))];
+  const schemas=await db.batch(tables.map(table=>db.prepare(`PRAGMA table_info(${table})`)));
+  const columns=new Map(tables.map((table,i)=>[table,new Set((schemas[i].results||[]).map(row=>row.name))]));
+  for(const sql of alters){
+    const [,table,column]=sql.match(/ALTER TABLE (\w+) ADD COLUMN (\w+)/);
+    if(columns.get(table).has(column))continue;
+    try{await db.prepare(sql).run();}catch(error){
+      // Another cold worker may have added it concurrently; do not hide other failures.
+      const check=await db.prepare(`PRAGMA table_info(${table})`).all();
+      if(!(check.results||[]).some(row=>row.name===column))throw error;
+    }
+  }
   await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_adjustments_grid_source ON payroll_adjustments(period_id,employee_id,source_key)`).run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS payroll_component_definitions(id INTEGER PRIMARY KEY AUTOINCREMENT,client_id INTEGER NOT NULL,code TEXT NOT NULL,name TEXT NOT NULL,component_type TEXT NOT NULL CHECK(component_type IN ('earning','deduction')),category TEXT NOT NULL DEFAULT 'other',taxable INTEGER NOT NULL DEFAULT 1,sso_contributable INTEGER NOT NULL DEFAULT 0,recurring_default INTEGER NOT NULL DEFAULT 1,display_order INTEGER NOT NULL DEFAULT 100,active INTEGER NOT NULL DEFAULT 1,created_by_user_id INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(client_id,code),FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_payroll_components_client ON payroll_component_definitions(client_id,active,display_order)`).run();
@@ -9907,13 +9919,14 @@ async function ensurePayrollControlCenterReady(db){
 
 async function ensurePayrollDefaults(db, clientId){
   await ensurePayrollControlCenterReady(db);
-  await db.prepare(`INSERT OR IGNORE INTO payroll_settings (client_id) VALUES (?1)`).bind(Number(clientId)).run();
+  const statements=[db.prepare(`INSERT OR IGNORE INTO payroll_settings (client_id) VALUES (?1)`).bind(Number(clientId))];
   const taxConfig = JSON.stringify({expense_rate:0.5,expense_cap:100000,personal_allowance:60000,brackets:[{up_to:150000,rate:0},{up_to:300000,rate:0.05},{up_to:500000,rate:0.10},{up_to:750000,rate:0.15},{up_to:1000000,rate:0.20},{up_to:2000000,rate:0.25},{up_to:5000000,rate:0.30},{up_to:null,rate:0.35}]});
   const ssoConfig = JSON.stringify({employee_rate:0.05,employer_rate:0.05,wage_floor:1650,wage_ceiling:17500});
-  await db.prepare(`INSERT OR IGNORE INTO payroll_rule_versions (client_id,rule_key,version,effective_from,config_json,source_note,is_system) VALUES (?1,'thai_personal_income_tax','TH-2026','2026-01-01',?2,'กรมสรรพากร: เงินได้ ม.40(1) ค่าใช้จ่าย 50% สูงสุด 100,000 บาท; อัตราภาษี 0-35%',1)`).bind(Number(clientId),taxConfig).run();
-  await db.prepare(`INSERT OR IGNORE INTO payroll_rule_versions (client_id,rule_key,version,effective_from,effective_to,config_json,source_note,is_system) VALUES (?1,'thai_social_security','SSO-2026-2028','2026-01-01','2028-12-31',?2,'เพดานค่าจ้างประกันสังคมช่วง พ.ศ. 2569-2571 = 17,500 บาท',1)`).bind(Number(clientId),ssoConfig).run();
+  statements.push(db.prepare(`INSERT OR IGNORE INTO payroll_rule_versions (client_id,rule_key,version,effective_from,config_json,source_note,is_system) VALUES (?1,'thai_personal_income_tax','TH-2026','2026-01-01',?2,'กรมสรรพากร: เงินได้ ม.40(1) ค่าใช้จ่าย 50% สูงสุด 100,000 บาท; อัตราภาษี 0-35%',1)`).bind(Number(clientId),taxConfig));
+  statements.push(db.prepare(`INSERT OR IGNORE INTO payroll_rule_versions (client_id,rule_key,version,effective_from,effective_to,config_json,source_note,is_system) VALUES (?1,'thai_social_security','SSO-2026-2028','2026-01-01','2028-12-31',?2,'เพดานค่าจ้างประกันสังคมช่วง พ.ศ. 2569-2571 = 17,500 บาท',1)`).bind(Number(clientId),ssoConfig));
   const defaults=[['POSITION_ALLOWANCE','ค่าตำแหน่ง','earning','allowance',1,1,10],['TRAVEL_ALLOWANCE','ค่าเดินทาง','earning','allowance',1,0,20],['PHONE_ALLOWANCE','ค่าโทรศัพท์','earning','allowance',1,0,30]];
-  for(const [code,name,type,category,taxable,sso,order] of defaults) await db.prepare(`INSERT OR IGNORE INTO payroll_component_definitions(client_id,code,name,component_type,category,taxable,sso_contributable,recurring_default,display_order,active) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,1)`).bind(Number(clientId),code,name,type,category,taxable,sso,order).run();
+  for(const [code,name,type,category,taxable,sso,order] of defaults) statements.push(db.prepare(`INSERT OR IGNORE INTO payroll_component_definitions(client_id,code,name,component_type,category,taxable,sso_contributable,recurring_default,display_order,active) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,1)`).bind(Number(clientId),code,name,type,category,taxable,sso,order));
+  await db.batch(statements);
 }
 
 function lineSessionKey(providerScope,lineUserId){return `${providerScope||'default'}:${lineUserId}`;}

@@ -392,7 +392,19 @@ async function loadViewData(name,{force=false}={}){
       }else if(name==='broadcast'){
         if(canReadBroadcasts){ const broadcasts=await load('/api/broadcasts',{data:state.broadcasts}); state.broadcasts=broadcasts?.data||state.broadcasts; }
       }else if(name==='payroll'){
-        if(canPayroll){ const [payroll,employees]=await Promise.all([load('/api/payroll/overview',state.payroll),load('/api/employees',{data:state.employees})]); state.payroll=payroll||state.payroll; state.employees=employees?.data||state.employees; }
+        if(canPayroll){
+          const cid=Number(state.me?.active_company_id||0);
+          await Promise.all([
+            load('/api/payroll/overview',state.payroll).then(payroll=>{
+              if(cid!==Number(state.me?.active_company_id||0))return;
+              state.payroll=payroll||state.payroll;
+              if(state.currentView==='payroll'){setViewLoading(name,false);renderPayroll();}
+            }),
+            load('/api/employees',{data:state.employees}).then(employees=>{
+              if(cid===Number(state.me?.active_company_id||0))state.employees=employees?.data||state.employees;
+            })
+          ]);
+        }
       }else if(name==='documents'){
         if(canPayroll){ const [documents,employees,documentSystem]=await Promise.all([load('/api/documents',state.documents),load('/api/employees',{data:state.employees}),load('/api/document-system/overview',state.documentSystem)]); state.documents=documents||state.documents; state.employees=employees?.data||state.employees; state.documentSystem=documentSystem||state.documentSystem; }
       }else if(name==='performance'){
@@ -5895,7 +5907,7 @@ async function savePayrollQuickEdit(){const id=Number($('#payrollQuickEditEmploy
 
 window.openPayrollPeriod=id=>loadPayrollPeriod(Number(id));
 var nkPayrollLoadSequence=0;
-async function loadPayrollPeriod(id){const cid=Number(state.me?.active_company_id||0),ticket=++nkPayrollLoadSequence;state.activePayrollPeriodId=Number(id);nkPayrollFilter='all';nkPayrollSearch='';nkPayrollView='summary';nkPayrollGuideStage=0;state.payrollDetail=null;$('#nkPayrollReviewSummary')?.close();if($('#payrollDetail'))$('#payrollDetail').innerHTML='<p class="nk-payroll-period-loading" role="status">กำลังโหลดรอบที่เลือก…</p>';try{const detail=await api(`/api/payroll/periods/${id}`);if(ticket!==nkPayrollLoadSequence||cid!==Number(state.me?.active_company_id||0)||Number(state.activePayrollPeriodId)!==Number(id))return;state.payrollDetail=detail;renderPayroll();renderPayrollDetail();}catch(error){if(ticket===nkPayrollLoadSequence&&cid===Number(state.me?.active_company_id||0)){toast(error.message,true);if($('#payrollDetail'))$('#payrollDetail').innerHTML=`<div class="nk-payroll-period-loading"><p role="alert">โหลดรอบไม่สำเร็จ: ${escapeHtml(error.message)}</p><button type="button" class="secondary-btn" onclick="window.openPayrollPeriod(${Number(id)})">ลองโหลดรอบนี้อีกครั้ง</button></div>`;}}}
+async function loadPayrollPeriod(id){const cid=Number(state.me?.active_company_id||0),ticket=++nkPayrollLoadSequence;state.activePayrollPeriodId=Number(id);nkPayrollFilter='all';nkPayrollSearch='';nkPayrollView='summary';nkPayrollGuideStage=0;state.payrollDetail=null;$('#nkPayrollReviewSummary')?.close();if($('#payrollDetail'))$('#payrollDetail').innerHTML='<p class="nk-payroll-period-loading" role="status">กำลังโหลดรอบที่เลือก…</p>';try{const detail=await api(`/api/payroll/periods/${id}`);if(ticket!==nkPayrollLoadSequence||cid!==Number(state.me?.active_company_id||0)||Number(state.activePayrollPeriodId)!==Number(id))return;state.payrollDetail=detail;renderPayroll();}catch(error){if(ticket===nkPayrollLoadSequence&&cid===Number(state.me?.active_company_id||0)){toast(error.message,true);if($('#payrollDetail'))$('#payrollDetail').innerHTML=`<div class="nk-payroll-period-loading"><p role="alert">โหลดรอบไม่สำเร็จ: ${escapeHtml(error.message)}</p><button type="button" class="secondary-btn" onclick="window.openPayrollPeriod(${Number(id)})">ลองโหลดรอบนี้อีกครั้ง</button></div>`;}}}
 
 function payrollAdjustmentMaps(detail){
   const map=new Map();
