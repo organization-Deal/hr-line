@@ -62,6 +62,15 @@
             <label><span>วันเกิด</span><input name="birth_date" type="date" /></label>
           </div>
 
+          <div class="section-title second"><strong>ข้อมูลสำหรับเงินเดือน</strong><span>กรอกภายหลังได้ · ใช้จัดทำข้อมูลพนักงานและบัญชีรับเงินเดือน</span></div>
+          <div class="form-grid">
+            <label><span>เลขบัตรประชาชน</span><input name="national_id" inputmode="numeric" maxlength="17" autocomplete="off" placeholder="ตัวเลข 13 หลัก" /></label>
+            <label><span>ธนาคาร</span><input name="bank_name" maxlength="100" autocomplete="off" placeholder="เช่น กสิกรไทย" /></label>
+            <label><span>ชื่อบัญชี</span><input name="bank_account_name" maxlength="150" autocomplete="off" placeholder="ชื่อ–นามสกุลตามบัญชีธนาคาร" /></label>
+            <label><span>เลขบัญชีธนาคาร</span><input name="bank_account_no" inputmode="numeric" maxlength="30" autocomplete="off" placeholder="กรอกเลขบัญชี ไม่ใช่หมายเลขบัตร ATM" /></label>
+          </div>
+          <p class="lead">หากกรอกข้อมูลบัญชี กรุณากรอกธนาคาร ชื่อบัญชี และเลขบัญชีให้ครบ ตรวจเลขบัญชีอีกครั้งก่อนยืนยัน</p>
+
           <div class="section-title second"><strong>ผู้ติดต่อฉุกเฉิน</strong><span>ใส่ไว้เพื่อให้ HR ติดต่อได้เมื่อจำเป็น</span></div>
           <div class="form-grid">
             <label><span>ชื่อผู้ติดต่อ</span><input name="emergency_contact_name" /></label>
@@ -132,6 +141,6 @@
     <footer>นากนะ · HR Tech สำหรับคนไทย · Otterwork Co., Ltd.</footer>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" defer></script>
-  <script src="/invite.js?v=P9.31-ENROLLMENT" type="module"></script>
+  <script src="/invite.js?v=P10.50" type="module"></script>
 </body>
 </html>

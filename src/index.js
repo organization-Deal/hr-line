@@ -1,3 +1,4 @@
+import {invitePayrollFields} from '../public/invite-payroll-fields.js';
 import {cancelPayrollApi} from './payroll-cancel.js';
 import {leaveChannel,requireOnlineLeave,leaveChannelApi,HR_ONLY_LEAVE_MESSAGE} from './leave-channel.js';
 import {companyProfileApi} from './company-profile.js';
@@ -6066,22 +6067,30 @@ async function acceptPublicInvite(request, env, token) {
   const birthDate = body.birth_date || null;
   if (firstName.length < 1 || lastName.length < 1 || phone.length < 8) return json({ error: 'กรุณากรอกชื่อ นามสกุล และเบอร์โทรให้ครบ' }, 400);
 
+  let payrollFields;try{payrollFields=invitePayrollFields(body);}catch(error){return json({error:error.message},400);}
+  await ensureV100P3Ready(env.DB);
   const employeeCode = await generateEmployeeCode(env.DB, Number(invite.client_id));
   const startDate = invite.start_date || dateInBangkok();
   let result;
   try {
     await assertSeatCapacity(env.DB,Number(invite.client_id),1);
-    result = await env.DB.prepare(`
+    const employeeInsert = env.DB.prepare(`
       INSERT INTO employees (
         client_id,employee_code,first_name,last_name,nickname,email,phone,birth_date,start_date,
-        department_id,position_id,employment_type,status,people_status,onboarding_source,emergency_contact_name,emergency_contact_phone
-      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'full_time','active','probation','invite',?12,?13)
+        department_id,position_id,employment_type,status,people_status,onboarding_source,emergency_contact_name,emergency_contact_phone,national_id
+      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'full_time','active','probation','invite',?12,?13,?14)
     `).bind(
       Number(invite.client_id), employeeCode, firstName, lastName, nickname || null, email || null, phone,
       birthDate, startDate, invite.department_id || null, invite.position_id || null,
       String(body.emergency_contact_name || '').trim() || null,
       String(body.emergency_contact_phone || '').trim() || null,
-    ).run();
+      payrollFields.national_id,
+    );
+    const writes=[employeeInsert];
+    if(payrollFields.hasBank)writes.push(env.DB.prepare(`INSERT INTO employee_payroll_profiles(client_id,employee_id,bank_name,bank_account_name,bank_account_no,effective_from)
+      SELECT client_id,id,?3,?4,?5,?6 FROM employees WHERE client_id=?1 AND employee_code=?2`)
+      .bind(Number(invite.client_id),employeeCode,payrollFields.bank_name,payrollFields.bank_account_name,payrollFields.bank_account_no,startDate));
+    const saved=await env.DB.batch(writes);result=saved[0];
   } catch (error) {
     if(error?.enrollment){const enrollment=publicEnrollmentStatus(error.enrollment);return json({error:enrollment.message,code:enrollment.code,enrollment},error.status||409);}
     if (/UNIQUE constraint failed: employees\.email/i.test(String(error?.message || error)) && email) {

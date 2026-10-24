@@ -1,3 +1,4 @@
+import {invitePayrollFields} from './invite-payroll-fields.js?v=P10.50';
 const $ = selector => document.querySelector(selector);
 const params = new URLSearchParams(location.search);
 const token = params.get('token') || '';
@@ -88,6 +89,7 @@ $('#employeeForm').addEventListener('submit', async event => {
   if (submitBusy || enrollmentStatus?.allowed===false || !$('#confirmCheck').checked) return;
   const button = $('#submitBtn');
   const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+  try{const fields=invitePayrollFields(data);delete fields.hasBank;Object.assign(data,fields);}catch(error){alert(error.message);return;}
   submitBusy=true;updateSubmitState();
   try {
     const res = await fetch(`/api/public/invites/${encodeURIComponent(token)}`, {
